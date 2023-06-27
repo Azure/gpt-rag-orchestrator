@@ -1,14 +1,16 @@
 # gpt on your data orchestrator
 
+Part of [gpt-rag](https://github.com/Azure/gpt-rag)
+
 ## Quick start - Deploy to Azure
 
 **1) Pre-reqs**
 
 - Azure Funcion App
 - Cognitive Search Service
-- Index created by [ingestion](https://github.com/placerda/gpt-oyd-ingestion)
+- Index created by [ingestion](https://github.com/Azure/gpt-rag-ingestion)
 - CosmosDB Service
-- Python and PIP 3
+- Python 3.10 and PIP
 
 **2) Set Application Settings**
 
