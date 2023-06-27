@@ -1,0 +1,32 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AzureWebJobsStorage": "",
+
+    "AZURE_DB_KEY": "",
+    "AZURE_DB_ID": "",
+    "AZURE_DB_CONTAINER": "conversations",
+
+    "AZURE_SEARCH_SERVICE": "",
+    "AZURE_SEARCH_INDEX": "",
+    "AZURE_SEARCH_KEY": "",
+    "AZURE_SEARCH_USE_SEMANTIC_SEARCH" : "False",
+    "AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG" : "default",
+    "AZURE_SEARCH_TOP_K" : "3",
+    "AZURE_SEARCH_ENABLE_IN_DOMAIN" : "true",
+    "AZURE_SEARCH_CONTENT_COLUMNS" : "content",
+    "AZURE_SEARCH_FILENAME_COLUMN" : "filepath",
+    "AZURE_SEARCH_TITLE_COLUMN" : "title",
+    "AZURE_SEARCH_URL_COLUMN" : "url",
+
+    "AZURE_OPENAI_RESOURCE" : "",
+    "AZURE_OPENAI_KEY": "",
+    "AZURE_OPENAI_MODEL" : "",
+    "AZURE_OPENAI_TEMPERATURE" : "",
+    "AZURE_OPENAI_TOP_P" : "",
+    "AZURE_OPENAI_MAX_TOKENS" : "",
+    "AZURE_OPENAI_PREVIEW_API_VERSION" : "2023-06-01-preview",
+    "AZURE_OPENAI_STREAM" : "false"
+  }
+}
