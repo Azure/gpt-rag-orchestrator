@@ -123,10 +123,12 @@ def run(conversation_id, ask):
 
         prompt = open(QUESTION_ANSWERING_PROMPT_FILE, "r").read() 
 
-        messages=get_chat_history_as_messages(history, include_last_turn=True)
+        # Azure OpenAI On Your Data Feature
+
+        # obs: temporarily removing previous questions from the history because AOAI OYD is repeating answers from previous questions.
+        messages=get_chat_history_as_messages(history, include_previous_questions=False, include_last_turn=True)
         
         # creating body, headers and endpoint for the aoai rest api request
-
         body = {
             "messages": messages,
             "temperature": float(AZURE_OPENAI_TEMPERATURE),
@@ -189,7 +191,6 @@ def run(conversation_id, ask):
             error_message = str(e)
             answer = f'{ERROR_ANSWER}. {error_message}'
             logging.error(f"[orchestrator] {answer}")
-            conversation_data['aoai_calls'].append(get_aoai_call_data(messages, completion))
 
         response_time = time.time() - start_time
         logging.info(f"[orchestrator] called gpt model to get the answer. {response_time} seconds")

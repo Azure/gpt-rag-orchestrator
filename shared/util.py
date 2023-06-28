@@ -16,15 +16,27 @@ def get_chat_history_as_text(history, include_last_turn=True, approx_max_tokens=
             break    
     return history_text
 
-def get_chat_history_as_messages(history, include_last_turn=True, approx_max_tokens=1000):
+def get_chat_history_as_messages(history, include_previous_questions=True, include_last_turn=True, approx_max_tokens=1000):
     history_list = []
     if len(history) == 0:
         return history_list
     for h in reversed(history if include_last_turn else history[:-1]):
         history_list.insert(0, {"role": h["role"], "content": h["content"]})
         if len(history_list) > approx_max_tokens*4:
-            break    
+            break
+
+    # remove previous questions if needed
+    if not include_previous_questions:
+        new_list = []
+        for idx, item in enumerate(history_list):
+            # keep only assistant messages and the last message
+            # obs: if include_last_turn is True, the last user message is also kept 
+            if item['role'] == 'assistant' or idx == len(history_list)-1:
+                new_list.append(item)
+        history_list = new_list        
+    
     return history_list
+
 
 
 # GPT FUNCTIONS
