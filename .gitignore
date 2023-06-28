@@ -8,8 +8,8 @@ csx
 .vs
 edge
 Publish
-.vscode/
-.vscode/
+
+
 .python_packages/
 .venv/
 .env
