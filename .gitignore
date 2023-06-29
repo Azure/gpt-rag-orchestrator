@@ -1,4 +1,5 @@
 .semantic-kernel/
+.vscode/
 local/
 local.settings.json
 

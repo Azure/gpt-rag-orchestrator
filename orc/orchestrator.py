@@ -60,6 +60,7 @@ QUESTION_ANSWERING_PROMPT_FILE = f"orc/prompts/question_answering.prompt"
 # predefined answers
 THROTTLING_ANSWER = "Lo siento, nuestros servidores están demasiado ocupados, por favor inténtelo de nuevo en 10 segundos"
 ERROR_ANSWER = "Lo siento, tuvimos un problema con la solicitud"
+NOT_FOUND_ANSWER = "Lo siento, no tengo información cargada de este tema."
 
 ANSWER_FORMAT = "html" # html, markdown, none
 
@@ -178,15 +179,18 @@ def run(conversation_id, ask):
             response = requests.post(endpoint, headers=headers, json=body)
             status_code = response.status_code
             completion = response.json()
-            answer = completion['choices'][0]['messages'][1]['content']
-            search_tool_result = json.loads(completion['choices'][0]['messages'][0]['content'])
-            citations = search_tool_result["citations"]
-            answer = replace_doc_ids_with_filepath(answer, citations)
-            sources =  ""   
-            for citation in citations:
-                sources = sources + citation['filepath'] + ": "+ citation['content'].strip() + "\n"
-            search_query = search_tool_result["intent"]
-            conversation_data['aoai_calls'].append(get_aoai_call_data(messages, completion))
+            if 'choices' in completion.keys(): 
+                answer = completion['choices'][0]['messages'][1]['content']
+                search_tool_result = json.loads(completion['choices'][0]['messages'][0]['content'])
+                citations = search_tool_result["citations"]
+                answer = replace_doc_ids_with_filepath(answer, citations)
+                sources =  ""   
+                for citation in citations:
+                    sources = sources + citation['filepath'] + ": "+ citation['content'].strip() + "\n"
+                search_query = search_tool_result["intent"]
+                conversation_data['aoai_calls'].append(get_aoai_call_data(messages, completion))
+            else:
+                answer = NOT_FOUND_ANSWER
         except Exception as e:
             error_message = str(e)
             answer = f'{ERROR_ANSWER}. {error_message}'
