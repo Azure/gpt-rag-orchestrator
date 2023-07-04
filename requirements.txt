@@ -4,7 +4,6 @@
 
 azure-cosmos
 azure-functions
-python-dotenv==1.0.0
+numpy
 openai
-tiktoken
-tenacity==8.2.2
+tenacity

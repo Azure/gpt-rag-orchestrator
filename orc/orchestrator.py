@@ -20,16 +20,14 @@ AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
 AZURE_DB_CONTAINER = os.environ.get("AZURE_DB_CONTAINER") or "conversations"
 
 # AOAI Integration Settings
+AZURE_SEARCH_USE_VECTOR_SEARCH = os.environ.get("AZURE_SEARCH_USE_VECTOR_SEARCH") or "true"
+AZURE_SEARCH_USE_VECTOR_SEARCH = True if AZURE_SEARCH_USE_VECTOR_SEARCH.lower() == "true" else False
+AZURE_SEARCH_USE_OYD = os.environ.get("AZURE_SEARCH_USE_OYD") or "false"
+AZURE_SEARCH_USE_OYD = True if AZURE_SEARCH_USE_OYD.lower() == "true" else False
+AZURE_SEARCH_USE_SEMANTIC_SEARCH = os.environ.get("AZURE_SEARCH_USE_SEMANTIC_SEARCH") or "false"
+AZURE_SEARCH_USE_SEMANTIC_SEARCH = True if AZURE_SEARCH_USE_SEMANTIC_SEARCH.lower() == "true" else False
 AZURE_OPENAI_STREAM = os.environ.get("AZURE_OPENAI_STREAM") or "false"
 SHOULD_STREAM = True if AZURE_OPENAI_STREAM.lower() == "true" else False
-AZURE_SEARCH_USE_OYD = os.environ.get("AZURE_SEARCH_USE_OYD") or "true"
-AZURE_SEARCH_USE_OYD = True if AZURE_SEARCH_USE_OYD.lower() == "true" else False
-AZURE_SEARCH_USE_VECTOR_SEARCH = os.environ.get("AZURE_SEARCH_USE_VECTOR_SEARCH") or "false"
-AZURE_SEARCH_USE_VECTOR_SEARCH = True if AZURE_SEARCH_USE_VECTOR_SEARCH.lower() == "true" else False
-
-# prompt files
-QUESTION_ANSWERING_OYD_PROMPT_FILE = f"orc/prompts/question_answering.oyd.prompt"
-QUESTION_ANSWERING_PROMPT_FILE = f"orc/prompts/question_answering.prompt"
 
 ANSWER_FORMAT = "html" # html, markdown, none
 
@@ -41,7 +39,10 @@ def run(conversation_id, ask):
     # create conversation_id if not provided
     if conversation_id is None or conversation_id == "":
         conversation_id = str(uuid.uuid4())
-        logging.info(f"[orchestrator] {conversation_id} conversation_id is Empty, creating new conversation_id")
+        logging.debug(f"[orchestrator] {conversation_id} conversation_id is Empty, creating new conversation_id")
+
+
+    logging.info(f"[orchestrator] starting conversation flow. conversation_id {conversation_id}. ask: {ask[:50]}")   
 
     # initializing state mgmt (not used yet)
     previous_state = "none"
@@ -55,9 +56,9 @@ def run(conversation_id, ask):
         previous_state = conversation.get('state')
     except Exception as e:
         conversation_id = str(uuid.uuid4())
-        logging.info(f"[orchestrator] {conversation_id} customer sent an inexistent conversation_id, create new conversation_id")        
+        logging.debug(f"[orchestrator] {conversation_id} customer sent an inexistent conversation_id, create new conversation_id")        
         conversation = container.create_item(body={"id": conversation_id, "state": previous_state})
-    logging.info(f"[orchestrator] {conversation_id} previous state: {previous_state}")
+    logging.debug(f"[orchestrator] {conversation_id} previous state: {previous_state}")
 
     # history
     history = conversation.get('history', [])
@@ -82,23 +83,29 @@ def run(conversation_id, ask):
 
         # 3.1.1) Azure OpenAI On Your Data Feature
         if (AZURE_SEARCH_USE_OYD):
+            logging.debug(f"[orchestrator] executing RAG using Azure OpenAI on your data feature") 
             prompt = open(QUESTION_ANSWERING_OYD_PROMPT_FILE, "r").read() 
-            answer, sources, search_query = get_answer_oyd(prompt, history)  
+            prompt, answer, sources, search_query = get_answer_oyd(history)  
 
-        # 3.1.2) hybrid search (vector + BM25)
+        # 3.1.2) hybrid vector search (vector + BM25)
         elif (AZURE_SEARCH_USE_VECTOR_SEARCH):
-            prompt = open(QUESTION_ANSWERING_PROMPT_FILE, "r").read() 
-            answer, sources, search_query = get_answer_hybrid_search(prompt, history)
+            logging.debug(f"[orchestrator] executing RAG retrieval using hybrid vector approach")
+            prompt, answer, sources, search_query = get_answer_hybrid_search(history)
 
-        # 3.1.3) BM25 search 
+        # 3.1.3) hybrid semantic search (vector + semantic + BM25)
+        elif (AZURE_SEARCH_USE_SEMANTIC_SEARCH):
+            logging.debug(f"[orchestrator] executing RAG retrieval using hybrid semantic approach")
+            pass # TODO
+
+        # 3.1.4) BM25 search 
+            logging.debug(f"[orchestrator] executing RAG retrieval using text search with BM25")
         else:
-            pass
+            pass # TODO
 
     # 4. update and save conversation (containing history and conversation data)
 
     history.append({"role": "assistant", "content": answer})
     conversation['history'] = history
-
     conversation = container.replace_item(item=conversation, body=conversation)
 
     # 5. return answer
@@ -108,4 +115,7 @@ def run(conversation_id, ask):
               "current_state": current_state, 
               "data_points": sources, 
               "thoughts": f"Searched for:\n{search_query}\n\nPrompt:\n{prompt}"}
+
+    logging.info(f"[orchestrator] ended conversation flow. conversation_id {conversation_id}. answer: {answer[:50]}")   
+
     return result

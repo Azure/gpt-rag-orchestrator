@@ -10,14 +10,15 @@
     "AZURE_SEARCH_SERVICE": "",
     "AZURE_SEARCH_INDEX": "",
     "AZURE_SEARCH_KEY": "",
-    "AZURE_SEARCH_API_VERSION": "2023-07-01-Preview",    
-    "AZURE_SEARCH_USE_OYD" : "True",    
-    "AZURE_SEARCH_USE_VECTOR_SEARCH" : "false",
+  
+    // define retrieval method (OYD, Vector Hybrid Search, Semantic Hybrid Search)    
+    "AZURE_SEARCH_USE_VECTOR_SEARCH" : "true",
+    "AZURE_SEARCH_USE_OYD" : "false",    
     "AZURE_SEARCH_USE_SEMANTIC_SEARCH" : "false"
 
     "AZURE_OPENAI_RESOURCE" : "",
     "AZURE_OPENAI_KEY": "",
-    "AZURE_OPENAI_PREVIEW_API_VERSION" : "2023-06-01-preview",
+
     "AZURE_OPENAI_STREAM" : "false"
   }
 }

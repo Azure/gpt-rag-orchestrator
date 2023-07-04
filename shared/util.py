@@ -1,7 +1,6 @@
 # utility functions
 
 import re
-import tiktoken
 import urllib.parse
 
 # HISTORY FUNCTIONS
@@ -46,19 +45,6 @@ def get_completion_text(completion):
         return completion['choices'][0]['text'].strip()
     else:
         return completion['choices'][0]['message']['content'].strip()
-    
-def prompt_tokens(prompt, encoding_name: str) -> int:
-    num_tokens = 0
-    # convert prompt to string when it is a list
-    if isinstance(prompt, list):
-        messages = prompt
-        prompt = ""
-        for m in messages:
-            prompt += m['role']
-            prompt += m['content']
-    encoding = tiktoken.get_encoding(encoding_name)
-    num_tokens = len(encoding.encode(prompt))
-    return num_tokens
 
 # generates gpt usage data for statistics
 def get_aoai_call_data(prompt, completion):

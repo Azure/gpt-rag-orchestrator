@@ -7,16 +7,21 @@ Part of [gpt-rag](https://github.com/Azure/gpt-rag)
 **1) Pre-reqs**
 
 - Azure Funcion App
-- Cognitive Search Service
+- Azure OpenAI Service*
+- Cognitive Search Service**
 - Index created by [ingestion](https://github.com/Azure/gpt-rag-ingestion)
 - CosmosDB Service
 - Python 3.10 and PIP
 
+\* Azure OpenAI Service with the following deployments:  chat (*gpt35-turbo or gpt4 model*) and text-embedding-ada-002 (*text-embedding-ada-002 model*).<br>
+\*\* Azure Cognitive Search Service with [Vector Index](https://github.com/Azure/cognitive-search-vector-pr/) feature enabled.
+
 **2) Set Application Settings**
 
 - Rename [local.settings.json.template](local.settings.json.template) to ```local.settings.json``` and update environment variables in this file to run orchestrator locally.
- 
 - In Azure Portal > Function App > Configuration > Application Settings: add the same variables you updated in locall.settings.json.
+
+You can add additional variables to application settings if you don't want to use the default values.
 
 **3) Deploy to Azure** 
 
