@@ -129,7 +129,7 @@ def get_answer_oyd(prompt, history):
             answer = f'{ERROR_ANSWER}. {error_message}'
             logging.error(f"[orchestrator] {answer}")
         response_time = time.time() - start_time
-        logging.debug(f"[orchestrator] called gpt model to get the answer. {response_time} seconds")
+        logging.info(f"[orchestrator] called gpt model to get the answer. {response_time} seconds")
         
         return prompt, answer, sources, search_query
 
@@ -167,7 +167,7 @@ def get_answer_hybrid_search(history):
             start_time = time.time()
             embeddings_query = generate_embeddings(search_query)
             response_time = time.time() - start_time
-            logging.debug(f"[orchestrator] generated question embeddings. {response_time} seconds")
+            logging.info(f"[orchestrator] generated question embeddings. {response_time} seconds")
 
             start_time = time.time()
             body = {
@@ -196,7 +196,7 @@ def get_answer_hybrid_search(history):
                         seach_results.append(doc['filepath'] + ": "+ doc['content'].strip() + "\n")    
                     
             response_time = time.time() - start_time
-            logging.debug(f"[orchestrator] searched documents. {response_time} seconds")
+            logging.info(f"[orchestrator] searched documents. {response_time} seconds")
         except Exception as e:
             error_message = str(e)
             logging.error(f"[orchestrator] error when searching documents. {error_message}")
@@ -219,10 +219,12 @@ def get_answer_hybrid_search(history):
         try:
             answer = get_answer_from_gpt(messages)
             response_time = time.time() - start_time
-            logging.debug(f"[orchestrator] called gpt model to get the answer. {response_time} seconds")
+            logging.info(f"[orchestrator] called gpt model to get the answer. {response_time} seconds")
         except Exception as e:
             error_message = str(e)
             logging.error(f"[orchestrator] error when calling gpt to get the aswer. {error_message}")
+
+
 
         
         search_results = sources.strip() if len(sources) > 0 else ""

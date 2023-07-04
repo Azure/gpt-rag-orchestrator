@@ -39,7 +39,7 @@ def run(conversation_id, ask):
     # create conversation_id if not provided
     if conversation_id is None or conversation_id == "":
         conversation_id = str(uuid.uuid4())
-        logging.debug(f"[orchestrator] {conversation_id} conversation_id is Empty, creating new conversation_id")
+        logging.info(f"[orchestrator] {conversation_id} conversation_id is Empty, creating new conversation_id")
 
 
     logging.info(f"[orchestrator] starting conversation flow. conversation_id {conversation_id}. ask: {ask[:50]}")   
@@ -56,9 +56,9 @@ def run(conversation_id, ask):
         previous_state = conversation.get('state')
     except Exception as e:
         conversation_id = str(uuid.uuid4())
-        logging.debug(f"[orchestrator] {conversation_id} customer sent an inexistent conversation_id, create new conversation_id")        
+        logging.info(f"[orchestrator] {conversation_id} customer sent an inexistent conversation_id, create new conversation_id")        
         conversation = container.create_item(body={"id": conversation_id, "state": previous_state})
-    logging.debug(f"[orchestrator] {conversation_id} previous state: {previous_state}")
+    logging.info(f"[orchestrator] {conversation_id} previous state: {previous_state}")
 
     # history
     history = conversation.get('history', [])
@@ -83,22 +83,22 @@ def run(conversation_id, ask):
 
         # 3.1.1) Azure OpenAI On Your Data Feature
         if (AZURE_SEARCH_USE_OYD):
-            logging.debug(f"[orchestrator] executing RAG using Azure OpenAI on your data feature") 
+            logging.info(f"[orchestrator] executing RAG using Azure OpenAI on your data feature") 
             prompt = open(QUESTION_ANSWERING_OYD_PROMPT_FILE, "r").read() 
             prompt, answer, sources, search_query = get_answer_oyd(history)  
 
         # 3.1.2) hybrid vector search (vector + BM25)
         elif (AZURE_SEARCH_USE_VECTOR_SEARCH):
-            logging.debug(f"[orchestrator] executing RAG retrieval using hybrid vector approach")
+            logging.info(f"[orchestrator] executing RAG retrieval using hybrid vector approach")
             prompt, answer, sources, search_query = get_answer_hybrid_search(history)
 
         # 3.1.3) hybrid semantic search (vector + semantic + BM25)
         elif (AZURE_SEARCH_USE_SEMANTIC_SEARCH):
-            logging.debug(f"[orchestrator] executing RAG retrieval using hybrid semantic approach")
+            logging.info(f"[orchestrator] executing RAG retrieval using hybrid semantic approach")
             pass # TODO
 
         # 3.1.4) BM25 search 
-            logging.debug(f"[orchestrator] executing RAG retrieval using text search with BM25")
+            logging.info(f"[orchestrator] executing RAG retrieval using text search with BM25")
         else:
             pass # TODO
 

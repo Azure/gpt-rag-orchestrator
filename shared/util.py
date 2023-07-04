@@ -70,7 +70,7 @@ def format_answer(answer, format= 'none'):
     
     formatted_answer = answer
     
-    if format == 'markdown':
+    if format == 'html':
         
         # Convert bold syntax (**text**) to HTML
         formatted_answer = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', formatted_answer)
@@ -80,7 +80,7 @@ def format_answer(answer, format= 'none'):
         
         # Return the converted text
     
-    elif format == 'html':
+    elif format == 'markdown':
         formatted_answer = answer # TODO
     
     elif format == 'none':        
