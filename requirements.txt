@@ -4,8 +4,7 @@
 
 azure-cosmos
 azure-functions
-azure-search==1.0.0b2
-azure-search-documents==11.4.0b3
-python-dotenv==0.21.0
-openai==0.27.4
+python-dotenv==1.0.0
+openai
 tiktoken
+tenacity==8.2.2
