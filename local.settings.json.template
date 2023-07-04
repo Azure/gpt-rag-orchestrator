@@ -10,11 +10,10 @@
     "AZURE_SEARCH_SERVICE": "",
     "AZURE_SEARCH_INDEX": "",
     "AZURE_SEARCH_KEY": "",
-  
-    // define retrieval method (OYD, Vector Hybrid Search, Semantic Hybrid Search)    
+
     "AZURE_SEARCH_USE_VECTOR_SEARCH" : "true",
     "AZURE_SEARCH_USE_OYD" : "false",    
-    "AZURE_SEARCH_USE_SEMANTIC_SEARCH" : "false"
+    "AZURE_SEARCH_USE_SEMANTIC_SEARCH" : "false",
 
     "AZURE_OPENAI_RESOURCE" : "",
     "AZURE_OPENAI_KEY": "",
