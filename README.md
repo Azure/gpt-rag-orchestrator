@@ -23,7 +23,7 @@ Part of [gpt-rag](https://github.com/Azure/gpt-rag)
 
 You can add additional variables to application settings if you don't want to use the default values.
 
-**3) Deploy locally - optional** - This is to test the solution and make sure that is working fine, once is tested using Postman, you can proceed with the step #4.
+**3) Deploy locally** - This is to test the solution and make sure that is working fine, once is tested using Postman, you can proceed with the step #4.
 
 With Azure Function extension installed you just need to open ```orc/orchestrator.py``` and "Start Debugging" in VSCode. It will start the server in ```http://localhost:7071/api/orc```.
 
