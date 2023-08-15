@@ -1,0 +1,6 @@
+{
+    "ERROR_ANSWER": "Desculpe, tive um problema técnico com a solicitação. Por favor informar o erro a equipe de suporte.",
+    "ERROR_SEARCHING_DOCUMENTS": "Desculpe, tive um problema técnico na busca dos documentos. Por favor informar o erro a equipe de suporte.",
+    "ERROR_CALLING_GPT": "Desculpe, tive um problema técnico ao chamar o modelo GPT. Por favor informar o erro a equipe de suporte.",
+    "THROTTLING_ANSWER": "Desculpe, nossos servidores estão sobrecarregados, por favor tente novamente daqui a um minuto."
+}

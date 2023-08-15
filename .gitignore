@@ -1,5 +1,5 @@
 .semantic-kernel/
-.vscode/
+
 local/
 local.settings.json
 
@@ -9,7 +9,7 @@ csx
 .vs
 edge
 Publish
-
+*.prompt
 
 .python_packages/
 .venv/

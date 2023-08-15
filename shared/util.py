@@ -2,6 +2,24 @@
 
 import re
 import urllib.parse
+import logging
+import os
+from azure.keyvault.secrets import SecretClient
+from azure.identity import DefaultAzureCredential
+
+# logging level
+logging.getLogger('azure').setLevel(logging.WARNING)
+
+# KEY VAULT 
+
+def get_secret(secretName):
+    keyVaultName = os.environ["AZURE_KEY_VAULT_NAME"]
+    KVUri = f"https://{keyVaultName}.vault.azure.net"
+    credential = DefaultAzureCredential()
+    client = SecretClient(vault_url=KVUri, credential=credential)
+    logging.info(f"[orchestrator] retrieving {secretName} secret from {keyVaultName}.")   
+    retrieved_secret = client.get_secret(secretName)
+    return retrieved_secret.value
 
 # HISTORY FUNCTIONS
 
@@ -61,8 +79,7 @@ def get_aoai_call_data(prompt, completion):
         prompt_words = len(prompt.split())
 
     return {"model": completion["model"], "prompt_words": prompt_words}
-
-
+    
 # FORMATTING FUNCTIONS
 
 # enforce answer format to the desired format (html, markdown, none)

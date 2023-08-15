@@ -2,34 +2,38 @@
 
 Part of [gpt-rag](https://github.com/Azure/gpt-rag)
 
-## Quick start - Deploy to Azure
+## Deploy (quickstart)
 
-**1) Pre-reqs**
+**Pre-reqs**
 
-- Azure Funcion App
-- Azure OpenAI Service*
-- Cognitive Search Service**
-- Index created by [ingestion](https://github.com/Azure/gpt-rag-ingestion)
-- CosmosDB Service
-- Python 3.10 and PIP
+- VS Code with Azure Function App Extension 
 
-\* Azure OpenAI Service with the following deployments:  chat (*gpt35-turbo or gpt4 model*) and text-embedding-ada-002 (*text-embedding-ada-002 model*).<br>
-\*\* Azure Cognitive Search Service with [Vector Index](https://github.com/Azure/cognitive-search-vector-pr/) feature enabled.
+**1) Deploy to Azure** 
 
-**2) Set Application Settings**
+In VSCode with [Azure Function App Extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-azurefunctions) go to the *Azure* Window, reveal your Function App **(fnorc0...)** in the resource explorer, right-click it then select *Deploy*.
 
-- Rename [local.settings.json.template](local.settings.json.template) to ```local.settings.json``` and update environment variables in this file to run orchestrator locally.
-- In Azure Portal > Function App > Configuration > Application Settings: add the same variables you updated in locall.settings.json.
+**2) Important: Set function key as a secret in Key Vault**
 
-You can add additional variables to application settings if you don't want to use the default values.
+**2.1)** Get the function's **default** key in Azure Portal > Function App (fnorc0...) > App keys > Host keys > default.
 
-**3) Deploy to Azure** 
+![alt text](media/getkey.png)
 
-In VSCode with [Azure Function App Extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-azurefunctions) go to the *Azure* Window, reveal your Function App in the resource explorer, right-click it then select *Deploy*.
+**2.2)** Set the key as a secret with **orchestratorKey** name in the key vault via Azure Portal > Key Vault (kv0m...) > App keys > Secrets > Generate/Import.
 
-**3) Deploy locally - optional**
+![alt text](media/setsecret.png)
 
-With Azure Function extension installed you just need to open ```orc/orchestrator.py``` and "Start Debugging" in VSCode. It will start the server in ```http://localhost:7071/api/orc```.
+*Note: If you do not have authorization to set secrets, add a Set secret permission for your user.*
+<br>*You can do that in Secret permissions in the Access policies option of the Key vault service.*
+
+**3) Deploy locally (optional)**
+
+With Azure Function extension installed you just need to open ```orc/orchestrator.py``` and "Start Debugging" in VSCode. <br>It will start the server in ```http://localhost:7071/api/orc```.
+
+
+**References**
+
+- Cognitive search:
+[Querying a Vector Index](https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-query), [REST API Reference](https://learn.microsoft.com/en-us/rest/api/searchservice/preview-api/search-documents) and [Querying Samples](https://github.com/Azure/cognitive-search-vector-pr).
 
 ## Contributing
 

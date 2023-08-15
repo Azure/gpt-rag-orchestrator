@@ -4,6 +4,9 @@
 
 azure-cosmos
 azure-functions
+azure-identity
+azure-keyvault-secrets
 numpy
 openai
+tiktoken
 tenacity

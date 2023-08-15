@@ -4,20 +4,23 @@
     "FUNCTIONS_WORKER_RUNTIME": "python",
     "AzureWebJobsStorage": "",
 
-    "AZURE_DB_KEY": "",
+    "AZURE_KEY_VAULT_NAME": "",
     "AZURE_DB_ID": "",
 
     "AZURE_SEARCH_SERVICE": "",
-    "AZURE_SEARCH_INDEX": "",
-    "AZURE_SEARCH_KEY": "",
+    "AZURE_SEARCH_INDEX": "ragindex",
+    "AZURE_SEARCH_API_VERSION": "2023-07-01-Preview",
 
-    "AZURE_SEARCH_USE_VECTOR_SEARCH" : "true",
-    "AZURE_SEARCH_USE_OYD" : "false",    
-    "AZURE_SEARCH_USE_SEMANTIC_SEARCH" : "false",
+    "AZURE_SEARCH_APPROACH": "semantic",
 
     "AZURE_OPENAI_RESOURCE" : "",
-    "AZURE_OPENAI_KEY": "",
+    "AZURE_OPENAI_CHATGPT_DEPLOYMENT": "gpt-4",
+    "AZURE_OPENAI_CHATGPT_MODEL": "gpt-4",
+    "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": "text-embedding-ada-002",
+    "AZURE_OPENAI_STREAM" : "false",
+ 
+    "ORCHESTRATOR_MESSAGES_LANGUAGE": "en"
 
-    "AZURE_OPENAI_STREAM" : "false"
+
   }
 }

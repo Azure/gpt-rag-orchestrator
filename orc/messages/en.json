@@ -1,0 +1,6 @@
+{
+    "ERROR_ANSWER": "I'm sorry, we had a problem with the request. Please report the error to the support team.",
+    "ERROR_SEARCHING_DOCUMENTS": "I'm sorry, I had a technical problem searching the documents. Please report the error to the support team.",
+    "ERROR_CALLING_GPT": "I'm sorry, I had a technical problem when calling the GPT model. Please report the error to the support team.",
+    "THROTTLING_ANSWER": "I'm sorry, our servers are too busy, please try again in a minute."
+}

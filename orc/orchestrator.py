@@ -5,7 +5,7 @@ from azure.cosmos import CosmosClient
 from azure.cosmos.partition_key import PartitionKey 
 from datetime import datetime
 from shared.gpt_utils import get_answer_oyd, get_answer_hybrid_search
-from shared.util import format_answer
+from shared.util import format_answer, get_secret
 
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
@@ -14,18 +14,17 @@ logging.getLogger('azure.cosmos').setLevel(logging.WARNING)
 # constants set from environment variables (external services credentials and configuration)
 
 # Cosmos DB
-AZURE_DB_KEY = os.environ.get("AZURE_DB_KEY")
 AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
 AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
 AZURE_DB_CONTAINER = os.environ.get("AZURE_DB_CONTAINER") or "conversations"
 
-# AOAI Integration Settings
-AZURE_SEARCH_USE_VECTOR_SEARCH = os.environ.get("AZURE_SEARCH_USE_VECTOR_SEARCH") or "true"
-AZURE_SEARCH_USE_VECTOR_SEARCH = True if AZURE_SEARCH_USE_VECTOR_SEARCH.lower() == "true" else False
-AZURE_SEARCH_USE_OYD = os.environ.get("AZURE_SEARCH_USE_OYD") or "false"
-AZURE_SEARCH_USE_OYD = True if AZURE_SEARCH_USE_OYD.lower() == "true" else False
-AZURE_SEARCH_USE_SEMANTIC_SEARCH = os.environ.get("AZURE_SEARCH_USE_SEMANTIC_SEARCH") or "false"
-AZURE_SEARCH_USE_SEMANTIC_SEARCH = True if AZURE_SEARCH_USE_SEMANTIC_SEARCH.lower() == "true" else False
+# Search
+OYD='oyd'
+HYBRID_SEARCH='hybrid'
+HYBRID_WITH_SEMANTIC='semantic'
+AZURE_SEARCH_APPROACH = os.environ.get("AZURE_SEARCH_APPROACH") or HYBRID_SEARCH
+
+# AOAI
 AZURE_OPENAI_STREAM = os.environ.get("AZURE_OPENAI_STREAM") or "false"
 SHOULD_STREAM = True if AZURE_OPENAI_STREAM.lower() == "true" else False
 
@@ -34,15 +33,15 @@ ANSWER_FORMAT = "html" # html, markdown, none
 def run(conversation_id, ask):
 
     # 1) Get conversation stored in CosmosDB
-    db_client = CosmosClient(AZURE_DB_URI, credential=AZURE_DB_KEY, consistency_level='Session')
+    azureDBkey = get_secret('azureDBkey')  
+    db_client = CosmosClient(AZURE_DB_URI, credential=azureDBkey, consistency_level='Session')
 
     # create conversation_id if not provided
     if conversation_id is None or conversation_id == "":
         conversation_id = str(uuid.uuid4())
         logging.info(f"[orchestrator] {conversation_id} conversation_id is Empty, creating new conversation_id")
 
-
-    logging.info(f"[orchestrator] starting conversation flow. conversation_id {conversation_id}. ask: {ask[:50]}")   
+    logging.info(f"[orchestrator] starting conversation flow. conversation_id {conversation_id}. ask: {ask}")   
 
     # initializing state mgmt (not used yet)
     previous_state = "none"
@@ -82,22 +81,21 @@ def run(conversation_id, ask):
     # 3.1) Question answering
 
         # 3.1.1) Azure OpenAI On Your Data Feature
-        if (AZURE_SEARCH_USE_OYD):
+        if (AZURE_SEARCH_APPROACH == OYD):
             logging.info(f"[orchestrator] executing RAG using Azure OpenAI on your data feature") 
-            prompt = open(QUESTION_ANSWERING_OYD_PROMPT_FILE, "r").read() 
             prompt, answer, sources, search_query = get_answer_oyd(history)  
 
-        # 3.1.2) hybrid vector search (vector + BM25)
-        elif (AZURE_SEARCH_USE_VECTOR_SEARCH):
-            logging.info(f"[orchestrator] executing RAG retrieval using hybrid vector approach")
+        # 3.1.2) hybrid vector search (term + vector)
+        elif (AZURE_SEARCH_APPROACH == HYBRID_SEARCH):
+            logging.info(f"[orchestrator] executing RAG retrieval using hybrid search approach")
             prompt, answer, sources, search_query = get_answer_hybrid_search(history)
 
-        # 3.1.3) hybrid semantic search (vector + semantic + BM25)
-        elif (AZURE_SEARCH_USE_SEMANTIC_SEARCH):
-            logging.info(f"[orchestrator] executing RAG retrieval using hybrid semantic approach")
-            pass # TODO
+        # 3.1.3) hybrid semantic search (term + vector + semantic reranking)
+        elif (AZURE_SEARCH_APPROACH == HYBRID_WITH_SEMANTIC):
+            logging.info(f"[orchestrator] executing RAG retrieval using hybrid search and semantic reranking approach")
+            prompt, answer, sources, search_query = get_answer_hybrid_search(history, semantic_reranking=True)
 
-        # 3.1.4) BM25 search 
+        # 3.1.4) BM25 search (term)
             logging.info(f"[orchestrator] executing RAG retrieval using text search with BM25")
         else:
             pass # TODO
