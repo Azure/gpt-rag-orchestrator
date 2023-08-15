@@ -8,24 +8,28 @@ Part of [gpt-rag](https://github.com/Azure/gpt-rag)
 
 - VS Code with Azure Function App Extension 
 
-**1) Deploy to Azure** 
+**1) Adjust your prompt** 
+
+In VSCode rename ```question_answering.prompt.template``` located in ```orc/prompts/``` folder  to ```question_answering.prompt```. <br>You can change the prompt text if you want a custom prompt, just rembember to keep the *Sources: {sources}* text in the bottom.
+
+**2) Deploy to Azure** 
 
 In VSCode with [Azure Function App Extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-azurefunctions) go to the *Azure* Window, reveal your Function App **(fnorc0...)** in the resource explorer, right-click it then select *Deploy*.
 
-**2) Important: Set function key as a secret in Key Vault**
+**3) Important: Set function key as a secret in Key Vault**
 
-**2.1)** Get the function's **default** key in Azure Portal > Function App (fnorc0...) > App keys > Host keys > default.
+**3.1)** Get the function's **default** key in Azure Portal > Function App (fnorc0...) > App keys > Host keys > default.
 
 ![alt text](media/getkey.png)
 
-**2.2)** Set the key as a secret with **orchestratorKey** name in the key vault via Azure Portal > Key Vault (kv0m...) > App keys > Secrets > Generate/Import.
+**3.2)** Set the key as a secret with **orchestratorKey** name in the key vault via Azure Portal > Key Vault (kv0m...) > App keys > Secrets > Generate/Import.
 
 ![alt text](media/setsecret.png)
 
 *Note: If you do not have authorization to set secrets, add a Set secret permission for your user.*
 <br>*You can do that in Secret permissions in the Access policies option of the Key vault service.*
 
-**3) Deploy locally (optional)**
+**4) Deploy locally (optional)**
 
 With Azure Function extension installed you just need to open ```orc/orchestrator.py``` and "Start Debugging" in VSCode. <br>It will start the server in ```http://localhost:7071/api/orc```.
 
