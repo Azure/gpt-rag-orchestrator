@@ -10,7 +10,8 @@ Part of [gpt-rag](https://github.com/Azure/gpt-rag)
 
 **1) Adjust your prompt** 
 
-In VSCode rename ```question_answering.prompt.template``` located in ```orc/prompts/``` folder  to ```question_answering.prompt```. <br>You can change the prompt text if you want a custom prompt, just rembember to keep the *Sources: {sources}* text in the bottom.
+In VSCode you can change the prompt text if you want a custom prompt. 
+Use the  ```question_answering.prompt``` located in ```orc/prompts/``` folder, just rembember to keep the *Sources: {sources}* text in the bottom.
 
 **2) Deploy to Azure** 
 

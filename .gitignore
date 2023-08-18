@@ -9,7 +9,6 @@ csx
 .vs
 edge
 Publish
-*.prompt
 
 .python_packages/
 .venv/
