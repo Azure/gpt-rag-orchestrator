@@ -15,22 +15,9 @@ Use the  ```question_answering.prompt``` located in ```orc/prompts/``` folder, j
 
 **2) Deploy to Azure** 
 
-In VSCode with [Azure Function App Extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-azurefunctions) go to the *Azure* Window, reveal your Function App **(fnorc0...)** in the resource explorer, right-click it then select *Deploy*.
+In VSCode with [Azure Function App Extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-azurefunctions) go to the *Azure* Window, reveal your Function App in the resource explorer, right-click it then select *Deploy*.
 
-**3) Important: Set function key as a secret in Key Vault**
-
-**3.1)** Get the function's **default** key in Azure Portal > Function App (fnorc0...) > App keys > Host keys > default.
-
-![alt text](media/getkey.png)
-
-**3.2)** Set the key as a secret with **orchestratorKey** name in the key vault via Azure Portal > Key Vault (kv0m...) > App keys > Secrets > Generate/Import.
-
-![alt text](media/setsecret.png)
-
-*Note: If you do not have authorization to set secrets, add a Set secret permission for your user.*
-<br>*You can do that in Secret permissions in the Access policies option of the Key vault service.*
-
-**4) Deploy locally (optional)**
+**3) Deploy locally (optional)**
 
 With Azure Function extension installed you just need to open ```orc/orchestrator.py``` and "Start Debugging" in VSCode. <br>It will start the server in ```http://localhost:7071/api/orc```.
 
