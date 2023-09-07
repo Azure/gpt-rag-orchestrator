@@ -4,7 +4,7 @@ import uuid
 from azure.cosmos import CosmosClient
 from azure.cosmos.partition_key import PartitionKey 
 from datetime import datetime
-from shared.gpt_utils import get_answer_oyd, get_answer_hybrid_search
+from shared.gpt_utils import get_answer_with_oyd, get_rag_answer
 from shared.util import format_answer, get_secret
 
 # logging level
@@ -17,12 +17,6 @@ logging.getLogger('azure.cosmos').setLevel(logging.WARNING)
 AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
 AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
 AZURE_DB_CONTAINER = os.environ.get("AZURE_DB_CONTAINER") or "conversations"
-
-# Search
-OYD='oyd'
-HYBRID_SEARCH='hybrid'
-HYBRID_WITH_SEMANTIC='semantic'
-AZURE_SEARCH_APPROACH = os.environ.get("AZURE_SEARCH_APPROACH") or HYBRID_SEARCH
 
 # AOAI
 AZURE_OPENAI_STREAM = os.environ.get("AZURE_OPENAI_STREAM") or "false"
@@ -80,25 +74,8 @@ def run(conversation_id, ask):
     if current_state == "question_answering":
     # 3.1) Question answering
 
-        # 3.1.1) Azure OpenAI On Your Data Feature
-        if (AZURE_SEARCH_APPROACH == OYD):
-            logging.info(f"[orchestrator] executing RAG using Azure OpenAI on your data feature") 
-            prompt, answer, sources, search_query = get_answer_oyd(history)  
-
-        # 3.1.2) hybrid vector search (term + vector)
-        elif (AZURE_SEARCH_APPROACH == HYBRID_SEARCH):
-            logging.info(f"[orchestrator] executing RAG retrieval using hybrid search approach")
-            prompt, answer, sources, search_query = get_answer_hybrid_search(history)
-
-        # 3.1.3) hybrid semantic search (term + vector + semantic reranking)
-        elif (AZURE_SEARCH_APPROACH == HYBRID_WITH_SEMANTIC):
-            logging.info(f"[orchestrator] executing RAG retrieval using hybrid search and semantic reranking approach")
-            prompt, answer, sources, search_query = get_answer_hybrid_search(history, semantic_reranking=True)
-
-        # 3.1.4) BM25 search (term)
-            logging.info(f"[orchestrator] executing RAG retrieval using text search with BM25")
-        else:
-            pass # TODO
+        # get rag answer and sources
+        prompt, answer, sources, search_query = get_rag_answer(history)  
 
     # 4. update and save conversation (containing history and conversation data)
 

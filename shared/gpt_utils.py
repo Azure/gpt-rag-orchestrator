@@ -14,11 +14,18 @@ logging.getLogger('azure').setLevel(logging.WARNING)
 
 # Azure Cognitive Search Integration Settings
 
+USE_OYD='oyd'
+TERM_SEARCH_APPROACH='term'
+VECTOR_SEARCH_APPROACH='vector'
+HYBRID_SEARCH_APPROACH='hybrid'
+AZURE_SEARCH_USE_SEMANTIC=os.environ.get("AZURE_SEARCH_USE_SEMANTIC")  or "false"
+AZURE_SEARCH_APPROACH=os.environ.get("AZURE_SEARCH_APPROACH") or HYBRID_SEARCH_APPROACH
+
 AZURE_SEARCH_SERVICE = os.environ.get("AZURE_SEARCH_SERVICE")
 AZURE_SEARCH_INDEX = os.environ.get("AZURE_SEARCH_INDEX")
 AZURE_SEARCH_API_VERSION = os.environ.get("AZURE_SEARCH_API_VERSION")
 AZURE_SEARCH_TOP_K = os.environ.get("AZURE_SEARCH_TOP_K") or "3"
-AZURE_SEARCH_APPROACH = os.environ.get("AZURE_SEARCH_APPROACH") or "hybrid"
+
 AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH = os.environ.get("AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH") or "false"
 AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH = True if AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH == "true" else False
 AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG = os.environ.get("AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG") or "my-semantic-config"
@@ -74,7 +81,7 @@ def get_message(message):
 QUESTION_ANSWERING_OYD_PROMPT_FILE = f"orc/prompts/question_answering.oyd.prompt"
 QUESTION_ANSWERING_PROMPT_FILE = f"orc/prompts/question_answering.prompt"
 
-def get_answer_oyd(prompt, history):
+def get_answer_with_oyd(prompt, history):
             
         # prompt
         prompt = open(QUESTION_ANSWERING_OYD_PROMPT_FILE, "r").read() 
@@ -219,7 +226,8 @@ def call_gpt_model(messages):
         logging.error(f"[orchestrator] error when calling gpt to get the answer. {error_message}")
     return answer
 
-def get_answer_hybrid_search(history, semantic_reranking=False):
+
+def get_answer_with_cogsearch_retrieval(history):
 
     # 1) retrieving grounding documents
     search_results = []
@@ -234,28 +242,39 @@ def get_answer_hybrid_search(history, semantic_reranking=False):
         response_time = time.time() - start_time
         logging.info(f"[orchestrator] generated question embeddings. {response_time} seconds")
         azureSearchKey = get_secret('azureSearchKey') 
-        start_time = time.time()
+
+        # prepare body
         body = {
-            "vector": {
+            "select": "title, content, url, filepath, chunk_id",
+            "top": AZURE_SEARCH_TOP_K
+        }    
+        if AZURE_SEARCH_APPROACH == TERM_SEARCH_APPROACH:
+            body["search"] = search_query
+        elif AZURE_SEARCH_APPROACH == VECTOR_SEARCH_APPROACH:
+            body["vector"] = {
                 "value": embeddings_query,
                 "fields": "contentVector",
                 "k": int(AZURE_SEARCH_TOP_K)
-            },
-            "search": search_query,
-            "select": "title, content, url, filepath, chunk_id",
-            "top": AZURE_SEARCH_TOP_K
-        }
+            }
+        elif AZURE_SEARCH_APPROACH == HYBRID_SEARCH_APPROACH:
+            body["search"] = search_query
+            body["vector"] = {
+                "value": embeddings_query,
+                "fields": "contentVector",
+                "k": int(AZURE_SEARCH_TOP_K)
+            }
+        if AZURE_SEARCH_USE_SEMANTIC == "true" and AZURE_SEARCH_APPROACH != VECTOR_SEARCH_APPROACH:
+            body["queryType"] = "semantic"
+            body["semanticConfiguration"] = AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG
+            body["queryLanguage"] = AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE
+
         headers = {
             'Content-Type': 'application/json',
             'api-key': azureSearchKey
         }
         search_endpoint = f"https://{AZURE_SEARCH_SERVICE}.search.windows.net/indexes/{AZURE_SEARCH_INDEX}/docs/search?api-version={AZURE_SEARCH_API_VERSION}"
-
-        if semantic_reranking:
-            body["queryType"] = "semantic"
-            body["semanticConfiguration"] = AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG
-            body["queryLanguage"] = AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE
-
+        
+        start_time = time.time()
         response = requests.post(search_endpoint, headers=headers, json=body)
         status_code = response.status_code
         if status_code >= 400:
@@ -270,6 +289,7 @@ def get_answer_hybrid_search(history, semantic_reranking=False):
                         search_results.append(doc['filepath'] + ": "+ doc['content'].strip() + "\n")    
                 
         response_time = time.time() - start_time
+        logging.info(f"[orchestrator] search query body: {body}")        
         logging.info(f"[orchestrator] searched documents. {response_time} seconds")
     except Exception as e:
         error_on_search = True
@@ -285,3 +305,13 @@ def get_answer_hybrid_search(history, semantic_reranking=False):
 
     sources = sources.strip() if len(sources) > 0 else ""
     return prompt, answer, sources, search_query
+
+def get_rag_answer(history):
+    if AZURE_SEARCH_APPROACH == USE_OYD:
+        logging.info(f"[orchestrator] executing RAG using Azure OpenAI on your data feature") 
+        prompt, answer, sources, search_query = get_answer_with_oyd(prompt, history)
+        return prompt, answer, sources, search_query
+    else:
+        logging.info(f"[orchestrator] executing RAG retrieval using {AZURE_SEARCH_APPROACH} search with semantic reranking = {AZURE_SEARCH_USE_SEMANTIC}")
+        prompt, answer, sources, search_query = get_answer_with_cogsearch_retrieval(history)
+        return prompt, answer, sources, search_query

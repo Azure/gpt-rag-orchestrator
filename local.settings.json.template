@@ -11,7 +11,8 @@
     "AZURE_SEARCH_INDEX": "ragindex",
     "AZURE_SEARCH_API_VERSION": "2023-07-01-Preview",
 
-    "AZURE_SEARCH_APPROACH": "semantic",
+    "AZURE_SEARCH_APPROACH": "hybrid",
+    "AZURE_SEARCH_USE_SEMANTIC": "true",
 
     "AZURE_OPENAI_RESOURCE" : "",
     "AZURE_OPENAI_CHATGPT_DEPLOYMENT": "gpt-4",
