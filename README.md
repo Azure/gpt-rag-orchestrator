@@ -4,23 +4,46 @@ Part of [gpt-rag](https://github.com/Azure/gpt-rag)
 
 ## Deploy (quickstart)
 
-**Pre-reqs**
+Here are the steps to configure cognitive search and deploy ingestion code using the terminal.
 
-- VS Code with Azure Function App Extension 
+**First check your environment meets the requirements**
 
-**1) Adjust your prompt** 
+- You need **[AZ CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli)** to log and run Azure commands in the command line.
+- You need **Python 3.10** to run the setup script. [Miniconda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html) helps you creating and managing your python environments. 
+- **[Azure Functions Core Tools](https://learn.microsoft.com/en-us/azure/azure-functions/functions-run-local?tabs=windows%2Cisolated-process%2Cnode-v4%2Cpython-v2%2Chttp-trigger%2Ccontainer-apps&pivots=programming-language-python#install-the-azure-functions-core-tools)** will be needeed to deploy the chunking function.
+
+**1) Login to Azure** 
+
+run ```az login``` to log into azure. Run ```az login -i``` if using a VM with managed identity to run the setup.
+
+**2) Clone the repo** 
+
+If you plan to customize the ingestion logic, create a new repo by clicking on the **Use this template** button on top of this page.
+
+Clone the repostory locally:  ```git clone https://github.com/azure/gpt-rag-orchestrator```
+
+*If you created a new repository please update the repository URL before running the command*
+
+**3) Adjust your prompt** 
 
 In VSCode you can change the prompt text if you want a custom prompt. 
 Use the  ```question_answering.prompt``` located in ```orc/prompts/``` folder, just rembember to keep the *Sources: {sources}* text in the bottom.
 
-**2) Deploy to Azure** 
+**4) Deploy function to Azure** 
 
-In VSCode with [Azure Function App Extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-azurefunctions) go to the *Azure* Window, reveal your Function App in the resource explorer, right-click it then select *Deploy*.
+Enter in the cloned repo folder: ```cd gpt-rag-orchestrator```
 
-**3) Deploy locally (optional)**
+Use Azure Functions Core Tools to deploy the function: ```func azure functionapp publish FUNCTION_APP_NAME --python```
+
+*Replace FUNCTION_APP_NAME with your Orchestrator Function App name before running the command*
+
+After finishing the deployment run the following command to confirm the function was deployed: 
+
+```func azure functionapp list-functions FUNCTION_APP_NAME```
+
+**5) Deploy locally (optional)**
 
 With Azure Function extension installed you just need to open ```orc/orchestrator.py``` and "Start Debugging" in VSCode. <br>It will start the server in ```http://localhost:7071/api/orc```.
-
 
 **References**
 
