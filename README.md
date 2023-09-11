@@ -31,15 +31,19 @@ Use the  ```question_answering.prompt``` located in ```orc/prompts/``` folder, j
 
 **4) Deploy function to Azure** 
 
-Enter in the cloned repo folder: ```cd gpt-rag-orchestrator```
+Enter in the cloned repo folder: 
 
-Use Azure Functions Core Tools to deploy the function: ```func azure functionapp publish FUNCTION_APP_NAME --python```
+```cd gpt-rag-orchestrator```
 
-*Replace FUNCTION_APP_NAME with your Orchestrator Function App name before running the command*
+Use Azure Functions Core Tools to deploy the function: 
 
-After finishing the deployment run the following command to confirm the function was deployed: 
+```func azure functionapp publish FUNCTION_APP_NAME --python```
+
+After finishing the deployment run the following command to confirm the function was deployed:  
 
 ```func azure functionapp list-functions FUNCTION_APP_NAME```
+
+*Replace FUNCTION_APP_NAME with your Orchestrator Function App name before running the command*
 
 **5) Deploy locally (optional)**
 
