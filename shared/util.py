@@ -17,7 +17,7 @@ def get_secret(secretName):
     KVUri = f"https://{keyVaultName}.vault.azure.net"
     credential = DefaultAzureCredential()
     client = SecretClient(vault_url=KVUri, credential=credential)
-    logging.info(f"[orchestrator] retrieving {secretName} secret from {keyVaultName}.")   
+    logging.info(f"[util] retrieving {secretName} secret from {keyVaultName}.")   
     retrieved_secret = client.get_secret(secretName)
     return retrieved_secret.value
 

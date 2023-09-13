@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 import uuid
 from azure.cosmos import CosmosClient
 from azure.cosmos.partition_key import PartitionKey 
@@ -21,10 +22,14 @@ AZURE_DB_CONTAINER = os.environ.get("AZURE_DB_CONTAINER") or "conversations"
 # AOAI
 AZURE_OPENAI_STREAM = os.environ.get("AZURE_OPENAI_STREAM") or "false"
 SHOULD_STREAM = True if AZURE_OPENAI_STREAM.lower() == "true" else False
+AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL") # 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'
+AZURE_OPENAI_CHATGPT_TURBO_DEPLOYMENT= os.environ.get("AZURE_OPENAI_CHATGPT_TURBO_DEPLOYMENT") or "chat"
 
 ANSWER_FORMAT = "html" # html, markdown, none
 
 def run(conversation_id, ask):
+    
+    start_time = time.time()
 
     # 1) Get conversation stored in CosmosDB
     azureDBkey = get_secret('azureDBkey')  
@@ -53,6 +58,11 @@ def run(conversation_id, ask):
         conversation = container.create_item(body={"id": conversation_id, "state": previous_state})
     logging.info(f"[orchestrator] {conversation_id} previous state: {previous_state}")
 
+    # get conversation data
+    conversation_data = conversation.get('conversation_data', 
+                                        {'start_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 'interactions': []})
+   
+
     # history
     history = conversation.get('history', [])
     history.append({"role": "user", "content": ask})
@@ -75,16 +85,35 @@ def run(conversation_id, ask):
     # 3.1) Question answering
 
         # get rag answer and sources
-        prompt, answer, sources, search_query = get_rag_answer(history)  
+        prompt, answer, sources, search_query, completion= get_rag_answer(history)  
 
-    # 4. update and save conversation (containing history and conversation data)
+    # 4. Add conversation data
 
+    # 5. update and save conversation (containing history and conversation data)
+    
+    # history
     history.append({"role": "assistant", "content": answer})
     conversation['history'] = history
+
+    # conversation data
+    response_time = round(time.time() - start_time,2)
+    prompt_tokens = 0
+    completion_tokens = 0
+    if completion: 
+        prompt_tokens = completion.usage.prompt_tokens
+        completion_tokens = completion.usage.completion_tokens
+    interaction = {
+        'user_id': 'anonymous', 'user_message': ask, 'previous_state': previous_state, 
+        'answer': answer, 'sources': sources, 'search_query': search_query,
+        'current_state': current_state, 'response_time': response_time, 
+        'model': AZURE_OPENAI_CHATGPT_MODEL, 'prompt_tokens': prompt_tokens, 'completion_tokens': completion_tokens,
+        'processed': False  
+    }
+    conversation_data['interactions'].append(interaction)
+    conversation['conversation_data'] = conversation_data
     conversation = container.replace_item(item=conversation, body=conversation)
-
-    # 5. return answer
-
+    
+    # 6. return answer
     result = {"conversation_id": conversation_id, 
               "answer": format_answer(answer, ANSWER_FORMAT), 
               "current_state": current_state, 

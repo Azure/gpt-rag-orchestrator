@@ -42,6 +42,7 @@ AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
 AZURE_OPENAI_RESOURCE = os.environ.get("AZURE_OPENAI_RESOURCE")
 AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION") or "2023-06-01-preview"
 AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
+AZURE_OPENAI_CHATGPT_MONITORING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_MONITORING_DEPLOYMENT") or AZURE_OPENAI_CHATGPT_DEPLOYMENT
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL") # 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT") 
 AZURE_OPENAI_TEMPERATURE = os.environ.get("AZURE_OPENAI_TEMPERATURE") or "0.17"
@@ -80,6 +81,7 @@ def get_message(message):
 # prompt files
 QUESTION_ANSWERING_OYD_PROMPT_FILE = f"orc/prompts/question_answering.oyd.prompt"
 QUESTION_ANSWERING_PROMPT_FILE = f"orc/prompts/question_answering.prompt"
+EVALUATION_GROUNDNESS_PROMPT_FILE = f"orc/prompts/evaluation_groundness.prompt"
 
 def get_answer_with_oyd(prompt, history):
             
@@ -150,11 +152,11 @@ def get_answer_with_oyd(prompt, history):
         except Exception as e:
             error_message = str(e)
             answer = f'{get_message("ERROR_ANSWER")}. {error_message}'
-            logging.error(f"[orchestrator] {answer}")
+            logging.error(f"[gpt_utils] {answer}")
         response_time = time.time() - start_time
-        logging.info(f"[orchestrator] called gpt model to get the answer. {response_time} seconds")
+        logging.info(f"[gpt_utils] called gpt model. {response_time} seconds")
         
-        return prompt, answer, sources, search_query
+        return prompt, answer, sources, search_query, completion
 
 @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6), reraise=True)
 # Function to generate embeddings for title and content fields, also used for query embeddings
@@ -165,16 +167,16 @@ def generate_embeddings(text):
     return embeddings
 
 @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6), reraise=True)
-def get_answer_from_gpt(messages):
+def get_answer_from_gpt(messages, deployment=AZURE_OPENAI_CHATGPT_DEPLOYMENT):
     answer = ""
     completion = openai.ChatCompletion.create(
-        engine=AZURE_OPENAI_CHATGPT_DEPLOYMENT,
+        engine=deployment,
         messages=messages,
         temperature=0.0,
         max_tokens=int(AZURE_OPENAI_RESP_MAX_TOKENS)
     )
     answer = completion['choices'][0]['message']['content']
-    return answer
+    return answer, completion
 
 def number_of_tokens(messages):
     prompt = json.dumps(messages)
@@ -213,18 +215,19 @@ def create_rag_prompt(chat_history_messages, search_results):
 
     return messages, prompt, sources
 
-def call_gpt_model(messages):
+def call_gpt_model(messages, deployment=AZURE_OPENAI_CHATGPT_DEPLOYMENT):
         # calling gpt model to get the answer
     start_time = time.time()
+    completion = None
     try:
-        answer = get_answer_from_gpt(messages)
+        answer, completion = get_answer_from_gpt(messages, deployment)
         response_time = time.time() - start_time
-        logging.info(f"[orchestrator] called gpt model to get the answer. {response_time} seconds")
+        logging.info(f"[gpt_utils] called gpt model. {response_time} seconds")
     except Exception as e:
         error_message = str(e)
         answer = f'{get_message("ERROR_CALLING_GPT")} {error_message}'
-        logging.error(f"[orchestrator] error when calling gpt to get the answer. {error_message}")
-    return answer
+        logging.error(f"[gpt_utils] error when calling gpt. {error_message}")
+    return answer, completion
 
 
 def get_answer_with_cogsearch_retrieval(history):
@@ -240,7 +243,7 @@ def get_answer_with_cogsearch_retrieval(history):
         start_time = time.time()
         embeddings_query = generate_embeddings(search_query)
         response_time = time.time() - start_time
-        logging.info(f"[orchestrator] generated question embeddings. {response_time} seconds")
+        logging.info(f"[gpt_utils] generated question embeddings. {response_time} seconds")
         azureSearchKey = get_secret('azureSearchKey') 
 
         # prepare body
@@ -282,36 +285,47 @@ def get_answer_with_cogsearch_retrieval(history):
             error_message = f'Status code: {status_code}.'
             if response.text != "": error_message += f" Error: {response.text}."
             answer = f'{get_message("ERROR_SEARCHING_DOCUMENTS")} {error_message}'
-            logging.error(f"[orchestrator] error {status_code} when searching documents. {error_message}")
+            logging.error(f"[gpt_utils] error {status_code} when searching documents. {error_message}")
         else:
             if response.json()['value']:
                     for doc in response.json()['value']:
                         search_results.append(doc['filepath'] + ": "+ doc['content'].strip() + "\n")    
                 
         response_time = time.time() - start_time
-        logging.info(f"[orchestrator] search query body: {body}")        
-        logging.info(f"[orchestrator] searched documents. {response_time} seconds")
+        logging.info(f"[gpt_utils] search query body: {body}")        
+        logging.info(f"[gpt_utils] searched documents. {response_time} seconds")
     except Exception as e:
         error_on_search = True
         error_message = str(e)
         answer = f'{get_message("ERROR_SEARCHING_DOCUMENTS")} {error_message}'
-        logging.error(f"[orchestrator] error when searching documents {error_message}")
+        logging.error(f"[gpt_utils] error when searching documents {error_message}")
 
     # 2) generating answers
     if not error_on_search:
         chat_history_messages = get_chat_history_as_messages(history, include_last_turn=True)
         messages, prompt, sources = create_rag_prompt(chat_history_messages, search_results)    
-        answer = call_gpt_model(messages)
+        answer, completion = call_gpt_model(messages)
 
     sources = sources.strip() if len(sources) > 0 else ""
-    return prompt, answer, sources, search_query
+    return prompt, answer, sources, search_query, completion
 
 def get_rag_answer(history):
     if AZURE_SEARCH_APPROACH == USE_OYD:
-        logging.info(f"[orchestrator] executing RAG using Azure OpenAI on your data feature") 
-        prompt, answer, sources, search_query = get_answer_with_oyd(prompt, history)
-        return prompt, answer, sources, search_query
+        logging.info(f"[gpt_utils] executing RAG using Azure OpenAI on your data feature") 
+        prompt, answer, sources, search_query, completion = get_answer_with_oyd(prompt, history)
+        return prompt, answer, sources, search_query, completion
     else:
-        logging.info(f"[orchestrator] executing RAG retrieval using {AZURE_SEARCH_APPROACH} search with semantic reranking = {AZURE_SEARCH_USE_SEMANTIC}")
-        prompt, answer, sources, search_query = get_answer_with_cogsearch_retrieval(history)
-        return prompt, answer, sources, search_query
+        logging.info(f"[gpt_utils] executing RAG retrieval using {AZURE_SEARCH_APPROACH} search with semantic reranking = {AZURE_SEARCH_USE_SEMANTIC}")
+        prompt, answer, sources, search_query, completion= get_answer_with_cogsearch_retrieval(history)
+        return prompt, answer, sources, search_query, completion
+
+@retry(wait=wait_random_exponential(min=10, max=30), stop=stop_after_attempt(6), reraise=True)
+def get_groundness(sources, answer):
+    prompt = open(EVALUATION_GROUNDNESS_PROMPT_FILE, "r").read() 
+    prompt = prompt.format(context=sources, answer=answer)
+    messages = [
+        {"role": "system", "content": prompt}   
+    ]
+    groundness, completion = call_gpt_model(messages, deployment=AZURE_OPENAI_CHATGPT_MONITORING_DEPLOYMENT)
+    groundness = completion['choices'][0]['message']['content']
+    return groundness

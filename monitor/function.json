@@ -1,0 +1,12 @@
+{
+    "scriptFile": "__init__.py",
+    "bindings": [
+        {
+            "schedule": "0 30 * * * *",
+            "name": "monitor",
+            "type": "timerTrigger",
+            "direction": "in",
+            "run_on_startup": true
+        }
+    ]
+}    
