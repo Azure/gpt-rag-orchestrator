@@ -1,8 +1,11 @@
 import datetime
 import logging
+import os
 from . import monitoring
-
 import azure.functions as func
+
+LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
+logging.basicConfig(level=LOGLEVEL)
 
 def main(monitor: func.TimerRequest) -> None:
     utc_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()

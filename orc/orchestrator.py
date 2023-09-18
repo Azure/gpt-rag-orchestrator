@@ -5,14 +5,25 @@ import uuid
 from azure.cosmos import CosmosClient
 from azure.cosmos.partition_key import PartitionKey 
 from datetime import datetime
-from shared.gpt_utils import get_answer_with_oyd, get_rag_answer
 from shared.util import format_answer, get_secret
+import orc.code_orchestration as code_orchestration
+import orc.oyd_orchestration as oyd_orchestration
+import orc.promptflow_orchestration as promptflow_orchestration
+
 
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
 logging.getLogger('azure.cosmos').setLevel(logging.WARNING)
+LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
+logging.basicConfig(level=LOGLEVEL)
 
-# constants set from environment variables (external services credentials and configuration)
+# orchestration approach
+USE_OYD='oyd'
+USE_PROMPT_FLOW = 'promptflow'
+USE_CODE='code'
+ORCHESTRATION_APPROACH=os.environ.get("ORCHESTRATION_APPROACH") or USE_CODE
+
+# Constants set from environment variables (external services credentials and configuration)
 
 # Cosmos DB
 AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
@@ -27,7 +38,7 @@ AZURE_OPENAI_CHATGPT_TURBO_DEPLOYMENT= os.environ.get("AZURE_OPENAI_CHATGPT_TURB
 
 ANSWER_FORMAT = "html" # html, markdown, none
 
-def run(conversation_id, ask):
+def run(conversation_id, ask, client_principal):
     
     start_time = time.time()
 
@@ -85,7 +96,17 @@ def run(conversation_id, ask):
     # 3.1) Question answering
 
         # get rag answer and sources
-        prompt, answer, sources, search_query, completion= get_rag_answer(history)  
+        if ORCHESTRATION_APPROACH == USE_PROMPT_FLOW:
+            logging.info(f"[get_answer] executing RAG using PromptFlow orchestration") 
+            prompt, answer, sources, search_query, completion = promptflow_orchestration.get_answer(prompt, history)
+
+        elif ORCHESTRATION_APPROACH == USE_OYD:
+            logging.info(f"[get_answer] executing RAG using Azure OpenAI on your data feature orchestration") 
+            prompt, answer, sources, search_query, completion = oyd_orchestration.get_answer(prompt, history)
+
+        else: # USE_CODE
+            logging.info(f"[get_answer] executing RAG retrieval using code orchestration")
+            prompt, answer, sources, search_query, completion= code_orchestration.get_answer(history)
 
     # 4. Add conversation data
 
@@ -103,7 +124,7 @@ def run(conversation_id, ask):
         prompt_tokens = completion.usage.prompt_tokens
         completion_tokens = completion.usage.completion_tokens
     interaction = {
-        'user_id': 'anonymous', 'user_message': ask, 'previous_state': previous_state, 
+        'user_id': client_principal['id'], 'user_name': client_principal['name'], 'user_message': ask, 'previous_state': previous_state, 
         'answer': answer, 'sources': sources, 'search_query': search_query,
         'current_state': current_state, 'response_time': response_time, 
         'model': AZURE_OPENAI_CHATGPT_MODEL, 'prompt_tokens': prompt_tokens, 'completion_tokens': completion_tokens,

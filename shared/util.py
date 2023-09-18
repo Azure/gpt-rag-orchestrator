@@ -1,14 +1,27 @@
 # utility functions
 
 import re
-import urllib.parse
+import json
 import logging
+import openai
 import os
+import tiktoken
+import time
+import urllib.parse
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
+from tenacity import retry, wait_random_exponential, stop_after_attempt
 
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
+LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
+logging.basicConfig(level=LOGLEVEL)
+
+# Env variables
+AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL") # 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'
+AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
+AZURE_OPENAI_RESP_MAX_TOKENS = os.environ.get("AZURE_OPENAI_MAX_TOKENS") or "1536"
+ORCHESTRATOR_MESSAGES_LANGUAGE = os.environ.get("ORCHESTRATOR_MESSAGES_LANGUAGE") or "en"
 
 # KEY VAULT 
 
@@ -54,8 +67,6 @@ def get_chat_history_as_messages(history, include_previous_questions=True, inclu
     
     return history_list
 
-
-
 # GPT FUNCTIONS
 
 def get_completion_text(completion):
@@ -79,7 +90,41 @@ def get_aoai_call_data(prompt, completion):
         prompt_words = len(prompt.split())
 
     return {"model": completion["model"], "prompt_words": prompt_words}
-    
+
+@retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6), reraise=True)
+def get_answer_from_gpt(messages, deployment=AZURE_OPENAI_CHATGPT_DEPLOYMENT):
+    answer = ""
+    completion = openai.ChatCompletion.create(
+        engine=deployment,
+        messages=messages,
+        temperature=0.0,
+        max_tokens=int(AZURE_OPENAI_RESP_MAX_TOKENS)
+    )
+    answer = completion['choices'][0]['message']['content']
+    return answer, completion
+
+def call_gpt_model(messages, deployment=AZURE_OPENAI_CHATGPT_DEPLOYMENT):
+        # calling gpt model to get the answer
+    start_time = time.time()
+    completion = None
+    try:
+        answer, completion = get_answer_from_gpt(messages, deployment)
+        response_time = time.time() - start_time
+        logging.info(f"[util] called gpt model. {response_time} seconds")
+    except Exception as e:
+        error_message = str(e)
+        answer = f'{get_message("ERROR_CALLING_GPT")} {error_message}'
+        logging.error(f"[util] error when calling gpt. {error_message}")
+    return answer, completion
+
+def number_of_tokens(messages):
+    prompt = json.dumps(messages)
+    model = AZURE_OPENAI_CHATGPT_MODEL
+    encoding = tiktoken.encoding_for_model(model.replace('gpt-35-turbo','gpt-3.5-turbo'))
+    num_tokens = len(encoding.encode(prompt))
+    return num_tokens
+
+
 # FORMATTING FUNCTIONS
 
 # enforce answer format to the desired format (html, markdown, none)
@@ -111,3 +156,17 @@ def replace_doc_ids_with_filepath(answer, citations):
         filepath = urllib.parse.quote(citation['filepath'])
         answer = answer.replace(f"[doc{i+1}]", f"[{filepath}]")
     return answer
+
+# MESSAGES FUNCTIONS
+
+def get_message(message):
+    if ORCHESTRATOR_MESSAGES_LANGUAGE.startswith("pt"):
+        messages_file = "orc/messages/pt.json"
+    elif ORCHESTRATOR_MESSAGES_LANGUAGE.startswith("es"):
+        messages_file = "orc/messages/es.json"
+    else:
+        messages_file = "orc/messages/en.json"
+    with open(messages_file, 'r') as f:
+        json_data = f.read()
+    messages_dict = json.loads(json_data)
+    return messages_dict[message]
