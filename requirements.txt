@@ -8,5 +8,6 @@ azure-identity
 azure-keyvault-secrets
 numpy
 openai
+semantic-kernel
 tiktoken
 tenacity

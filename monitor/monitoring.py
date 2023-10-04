@@ -16,7 +16,7 @@ EVALUATION_GROUNDNESS_PROMPT_FILE = f"orc/prompts/evaluation_groundness.prompt"
 AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
 AZURE_OPENAI_CHATGPT_MONITORING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_MONITORING_DEPLOYMENT") or AZURE_OPENAI_CHATGPT_DEPLOYMENT
 
-@retry(wait=wait_random_exponential(min=10, max=30), stop=stop_after_attempt(6), reraise=True)
+@retry(wait=wait_random_exponential(min=30, max=120), stop=stop_after_attempt(10), reraise=True)
 def get_groundness(sources, answer):
     prompt = open(EVALUATION_GROUNDNESS_PROMPT_FILE, "r").read() 
     prompt = prompt.format(context=sources, answer=answer)
@@ -41,7 +41,7 @@ def run():
      db = db_client.create_database_if_not_exists(id=AZURE_DB_ID)
      container = db.create_container_if_not_exists(id=AZURE_DB_CONTAINER, partition_key=PartitionKey(path='/id', kind='Hash'))
      try:
-          conversations = container.query_items(query="SELECT * FROM c WHERE ARRAY_LENGTH(c.conversation_data.interactions) > 0 AND ARRAY_CONTAINS(c.conversation_data.interactions, {'processed': false}, true)", enable_cross_partition_query=True)
+          conversations = container.query_items(query="SELECT * FROM c WHERE c.conversation_data.interactions != null", enable_cross_partition_query=True)
           for conversation in conversations:
                # process iteractions that have not yet been processed
                it = 0
@@ -49,22 +49,18 @@ def run():
                for interaction in conversation.get('conversation_data').get('interactions'):
                     it += 1
                     logging.info(f"[monitoring] processing conversation {conversation.get('id')} iteration {it}")
-                    if 'processed' not in interaction or not interaction['processed']:
-                         if 'sources' in interaction and 'answer' in interaction:
-                              if llmMonitoring:
-                                   # groundness metric
-                                   gpt_groundness = get_groundness(interaction['sources'], interaction['answer'])
-                                   if re.match(r'^[1-5]$', str(gpt_groundness)):
-                                        interaction['gpt_groundness'] = gpt_groundness
-                                        interaction['processed'] = True
-                                        changed = True
-                                        logging.info(f"[monitoring] conversation {conversation.get('id')} iteration {it} gpt_groundness is {gpt_groundness}.")
-                                   else:
-                                        logging.warning(f"[monitoring] skipping conversation {conversation.get('id')} iteration {it}. Gpt_groundness {gpt_groundness} is not a valid integer between 1 and 5..")
+                    if 'sources' in interaction and 'answer' in interaction and 'gpt_groundness' not in interaction:
+                         if llmMonitoring:
+                              # groundness metric
+                              gpt_groundness = get_groundness(interaction['sources'], interaction['answer'])
+                              if re.match(r'^[1-5]$', str(gpt_groundness)):
+                                   interaction['gpt_groundness'] = gpt_groundness
+                                   changed = True
+                                   logging.info(f"[monitoring] conversation {conversation.get('id')} iteration {it} gpt_groundness is {gpt_groundness}.")
                               else:
-                                        logging.warning(f"[monitoring] skipping conversation {conversation.get('id')} iteration {it}. LLmMonitoring is not enabled.")
-                    else:
-                         logging.info(f"[monitoring] skipping conversation {conversation.get('id')} iteration {it}. Iteration alredy processed.")
+                                   logging.warning(f"[monitoring] skipping conversation {conversation.get('id')} iteration {it}. Gpt_groundness {gpt_groundness} is not a valid integer between 1 and 5..")
+                         else:
+                                   logging.warning(f"[monitoring] skipping conversation {conversation.get('id')} iteration {it}. LLmMonitoring is not enabled.")
                if changed: 
                     conversation = container.replace_item(item=conversation, body=conversation)
 

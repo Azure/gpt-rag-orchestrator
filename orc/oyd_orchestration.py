@@ -50,7 +50,7 @@ azureOpenAIKey = get_secret('azureOpenAIKey')
 openai.api_key = azureOpenAIKey
 
 
-def get_answer(prompt, history):
+def get_answer(history):
             
         # prompt
         prompt = open(QUESTION_ANSWERING_OYD_PROMPT_FILE, "r").read() 
@@ -122,5 +122,14 @@ def get_answer(prompt, history):
             logging.error(f"[gpt_utils] {answer}")
         response_time = time.time() - start_time
         logging.info(f"[gpt_utils] called gpt model. {response_time} seconds")
+
+        answer_dict = {
+            "prompt" : prompt,
+            "answer" : answer,
+            "search_query" : search_query,
+            "sources": sources,
+            "prompt_tokens" : completion['usage']['prompt_tokens'],
+            "completion_tokens" : completion['usage']['completion_tokens']
+        }
         
-        return prompt, answer, sources, search_query, completion
+        return answer_dict

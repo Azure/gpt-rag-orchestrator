@@ -1,0 +1,26 @@
+{
+    "schema": 1,
+    "description": "Compute the groundedness evaluation score for a question-answering task based on the provided sources and answer",
+    "type": "completion",
+    "completion": {
+      "max_tokens": 1000,
+      "temperature": 0.9,
+      "top_p": 0.0,
+      "presence_penalty": 0.0,
+      "frequency_penalty": 0.0
+    },
+    "input": {
+      "parameters": [
+        {
+          "name": "answer",
+          "description": "Answer assistant provided to the user(i.e., To execute task A you need to access system B.)",
+          "defaultValue": ""
+        },
+        {
+          "name": "context",
+          "description": "Sources used by the assistant to answer the user question (i.e., [file1.pdf] To execute task A you need to access system B. [file2.pdf] System B is used when users need to execute task A.)",
+          "defaultValue": ""
+        }
+      ]
+    }
+  }

@@ -51,7 +51,12 @@ def get_chat_history_as_messages(history, include_previous_questions=True, inclu
     if len(history) == 0:
         return history_list
     for h in reversed(history if include_last_turn else history[:-1]):
-        history_list.insert(0, {"role": h["role"], "content": h["content"]})
+        history_item = {"role": h["role"], "content": h["content"]}
+        if "function_call" in h:
+            history_item.update({"function_call": h["function_call"]})
+        if "name" in h:
+            history_item.update({"name": h["name"]}) 
+        history_list.insert(0, history_item)
         if len(history_list) > approx_max_tokens*4:
             break
 
