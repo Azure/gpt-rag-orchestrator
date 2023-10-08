@@ -11,6 +11,8 @@ import urllib.parse
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
 from tenacity import retry, wait_random_exponential, stop_after_attempt
+import semantic_kernel as sk
+from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
 
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
@@ -204,3 +206,13 @@ def get_message(message):
         json_data = f.read()
     messages_dict = json.loads(json_data)
     return messages_dict[message]
+
+# SEMANTIC KERNEL
+
+def load_sk_plugin(name, deployment=AZURE_OPENAI_CHATGPT_DEPLOYMENT, endpoint=AZURE_OPENAI_ENDPOINT, key=AZURE_OPENAI_KEY):
+    kernel = sk.Kernel()
+    kernel.add_chat_service("chat_completion", AzureChatCompletion(deployment, endpoint, key))
+    plugin = kernel.import_semantic_skill_from_directory("orc/plugins", name)
+    native_functions = kernel.import_native_skill_from_directory("orc/plugins", name)
+    plugin.update(native_functions)
+    return plugin

@@ -2,7 +2,8 @@ import json
 import logging
 import os
 import semantic_kernel as sk
-from shared.util import call_semantic_function, chat_complete, get_chat_history_as_messages, get_message, get_secret, truncate_to_max_tokens, number_of_tokens
+from shared.util import call_semantic_function, chat_complete, get_chat_history_as_messages, get_message
+from shared.util import get_secret, truncate_to_max_tokens, number_of_tokens, load_sk_plugin
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
 
 # logging level
@@ -49,9 +50,7 @@ def get_answer(history):
         functions_definitions = json.load(f)
 
     # load sk rag plugin
-    rag_plugin = kernel.import_semantic_skill_from_directory("orc/plugins", "RAG")
-    native_functions = kernel.import_native_skill_from_directory("orc/plugins", "RAG")
-    rag_plugin.update(native_functions)
+    rag_plugin = load_sk_plugin('RAG')
     
     # map functions to code
     function_dict = {
