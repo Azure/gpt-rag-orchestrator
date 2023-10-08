@@ -10,7 +10,6 @@ import orc.code_orchestration as code_orchestration
 import orc.oyd_orchestration as oyd_orchestration
 import orc.promptflow_orchestration as promptflow_orchestration
 
-
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
 logging.getLogger('azure.cosmos').setLevel(logging.WARNING)
@@ -73,7 +72,6 @@ def run(conversation_id, ask, client_principal):
     conversation_data = conversation.get('conversation_data', 
                                         {'start_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 'interactions': []})
    
-
     # history
     history = conversation.get('history', [])
     history.append({"role": "user", "content": ask})
@@ -86,61 +84,51 @@ def run(conversation_id, ask, client_principal):
     conversation = container.replace_item(item=conversation, body=conversation)
 
     # 3) Use conversation functions based on state
-
-    # Initialize iteration variables
-    answer = "none"
-    sources = "none"
-    search_query = "none"
     
     if current_state == "question_answering":
     # 3.1) Question answering
 
         # get rag answer and sources
         if ORCHESTRATION_APPROACH == USE_PROMPT_FLOW:
-            logging.info(f"[get_answer] executing RAG using PromptFlow orchestration") 
-            prompt, answer, sources, search_query, completion = promptflow_orchestration.get_answer(prompt, history)
+            logging.info(f"[orchestrator] executing RAG using PromptFlow orchestration") 
+            answer_dict = promptflow_orchestration.get_answer(history)
 
         elif ORCHESTRATION_APPROACH == USE_OYD:
-            logging.info(f"[get_answer] executing RAG using Azure OpenAI on your data feature orchestration") 
-            prompt, answer, sources, search_query, completion = oyd_orchestration.get_answer(prompt, history)
+            logging.info(f"[orchestrator] executing RAG using Azure OpenAI on your data feature orchestration") 
+            answer_dict = oyd_orchestration.get_answer(history)
 
         else: # USE_CODE
-            logging.info(f"[get_answer] executing RAG retrieval using code orchestration")
-            prompt, answer, sources, search_query, completion= code_orchestration.get_answer(history)
+            logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
+            answer_dict = code_orchestration.get_answer(history)
 
     # 4. Add conversation data
 
     # 5. update and save conversation (containing history and conversation data)
     
     # history
-    history.append({"role": "assistant", "content": answer})
+    history.append({"role": "assistant", "content": answer_dict['answer']})
     conversation['history'] = history
 
     # conversation data
     response_time = round(time.time() - start_time,2)
-    prompt_tokens = 0
-    completion_tokens = 0
-    if completion: 
-        prompt_tokens = completion.usage.prompt_tokens
-        completion_tokens = completion.usage.completion_tokens
     interaction = {
-        'user_id': client_principal['id'], 'user_name': client_principal['name'], 'user_message': ask, 'previous_state': previous_state, 
-        'answer': answer, 'sources': sources, 'search_query': search_query,
-        'current_state': current_state, 'response_time': response_time, 
-        'model': AZURE_OPENAI_CHATGPT_MODEL, 'prompt_tokens': prompt_tokens, 'completion_tokens': completion_tokens,
-        'processed': False  
+        'user_id': client_principal['id'], 
+        'user_name': client_principal['name'], 
+        'user_message': ask, 'previous_state': previous_state,         
+        'response_time': response_time, 
+        'model': AZURE_OPENAI_CHATGPT_MODEL
     }
+    interaction.update(answer_dict)
     conversation_data['interactions'].append(interaction)
     conversation['conversation_data'] = conversation_data
     conversation = container.replace_item(item=conversation, body=conversation)
     
     # 6. return answer
     result = {"conversation_id": conversation_id, 
-              "answer": format_answer(answer, ANSWER_FORMAT), 
-              "current_state": current_state, 
-              "data_points": sources, 
-              "thoughts": f"Searched for:\n{search_query}\n\nPrompt:\n{prompt}"}
+              "answer": format_answer(interaction['answer'], ANSWER_FORMAT), 
+              "data_points": interaction['sources'] if 'sources' in interaction else '', 
+              "thoughts": f"Searched for:\n{['search_query']}\n\nPrompt:\n{interaction['prompt']}"}
 
-    logging.info(f"[orchestrator] ended conversation flow. conversation_id {conversation_id}. answer: {answer[:50]}")   
+    logging.info(f"[orchestrator] ended conversation flow. conversation_id {conversation_id}. answer: {interaction['answer'][:50]}")    
 
     return result
