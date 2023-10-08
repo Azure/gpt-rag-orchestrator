@@ -3,7 +3,7 @@ import os
 import re
 from azure.cosmos import CosmosClient
 from azure.cosmos.partition_key import PartitionKey 
-from shared.util import get_secret, call_gpt_model
+from shared.util import get_secret, chat_complete, truncate_to_max_tokens, number_of_tokens
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 
 # logging level
@@ -12,20 +12,26 @@ logging.getLogger('azure.cosmos').setLevel(logging.WARNING)
 LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
 logging.basicConfig(level=LOGLEVEL)
 
-EVALUATION_GROUNDNESS_PROMPT_FILE = f"orc/prompts/evaluation_groundness.prompt"
+EVALUATION_GROUNDEDNESS_PROMPT_FILE = f"orc/prompts/evaluation_groundedness.prompt"
 AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
 AZURE_OPENAI_CHATGPT_MONITORING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_MONITORING_DEPLOYMENT") or AZURE_OPENAI_CHATGPT_DEPLOYMENT
+AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL") # 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'
+AZURE_OPENAI_CHATGPT_MONITORING_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MONITORING_MODEL") or AZURE_OPENAI_CHATGPT_MODEL
 
 @retry(wait=wait_random_exponential(min=30, max=120), stop=stop_after_attempt(10), reraise=True)
-def get_groundness(sources, answer):
-    prompt = open(EVALUATION_GROUNDNESS_PROMPT_FILE, "r").read() 
+def get_groundedness(sources, answer):
+    prompt = open(EVALUATION_GROUNDEDNESS_PROMPT_FILE, "r").read() 
+    # top tokens to the max tokens allowed by the model
+    extra_tokens = number_of_tokens(prompt) + number_of_tokens(answer) + 100 # prompt + answer + messages overhead
+    sources = truncate_to_max_tokens(sources, extra_tokens, AZURE_OPENAI_CHATGPT_MONITORING_MODEL)
     prompt = prompt.format(context=sources, answer=answer)
     messages = [
         {"role": "system", "content": prompt}   
     ]
-    groundness, completion = call_gpt_model(messages, deployment=AZURE_OPENAI_CHATGPT_MONITORING_DEPLOYMENT)
-    groundness = completion['choices'][0]['message']['content']
-    return groundness
+    completion = chat_complete(messages, [], function_call='none', deployment=AZURE_OPENAI_CHATGPT_MONITORING_DEPLOYMENT, model=AZURE_OPENAI_CHATGPT_MONITORING_MODEL)
+    groundedness = completion['choices'][0]['message']['content']
+    
+    return groundedness
 
 def run():
      logging.info(f"[monitoring] running monitoring routine")
@@ -49,16 +55,16 @@ def run():
                for interaction in conversation.get('conversation_data').get('interactions'):
                     it += 1
                     logging.info(f"[monitoring] processing conversation {conversation.get('id')} iteration {it}")
-                    if 'sources' in interaction and 'answer' in interaction and 'gpt_groundness' not in interaction:
+                    if 'sources' in interaction and 'answer' in interaction and 'gpt_groundedness' not in interaction:
                          if llmMonitoring:
-                              # groundness metric
-                              gpt_groundness = get_groundness(interaction['sources'], interaction['answer'])
-                              if re.match(r'^[1-5]$', str(gpt_groundness)):
-                                   interaction['gpt_groundness'] = gpt_groundness
+                              # groundedness metric
+                              gpt_groundedness = get_groundedness(interaction['sources'], interaction['answer'])
+                              if re.match(r'^[1-5]$', str(gpt_groundedness)):
+                                   interaction['gpt_groundedness'] = gpt_groundedness
                                    changed = True
-                                   logging.info(f"[monitoring] conversation {conversation.get('id')} iteration {it} gpt_groundness is {gpt_groundness}.")
+                                   logging.info(f"[monitoring] conversation {conversation.get('id')} iteration {it} gpt_groundedness is {gpt_groundedness}.")
                               else:
-                                   logging.warning(f"[monitoring] skipping conversation {conversation.get('id')} iteration {it}. Gpt_groundness {gpt_groundness} is not a valid integer between 1 and 5..")
+                                   logging.warning(f"[monitoring] skipping conversation {conversation.get('id')} iteration {it}. Gpt_groundedness {gpt_groundedness} is not a valid integer between 1 and 5..")
                          else:
                                    logging.warning(f"[monitoring] skipping conversation {conversation.get('id')} iteration {it}. LLmMonitoring is not enabled.")
                if changed: 
@@ -66,5 +72,5 @@ def run():
 
                     
      except Exception as e:
-          logging.error(f"[monitoring] could not get conversations from CosmosDB. Error: {e}")
+          logging.error(f"[monitoring] could not run monitoring. Error: {e}")
 

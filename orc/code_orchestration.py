@@ -1,13 +1,8 @@
 import json
 import logging
-import openai
 import os
-import requests
 import semantic_kernel as sk
-import time
-import tiktoken
-from shared.util import call_gpt_model, get_chat_history_as_messages, get_message, get_secret
-from tenacity import retry, wait_random_exponential, stop_after_attempt
+from shared.util import call_semantic_function, chat_complete, get_chat_history_as_messages, get_message, get_secret, truncate_to_max_tokens, number_of_tokens
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
 
 # logging level
@@ -20,48 +15,16 @@ logging.basicConfig(level=LOGLEVEL)
 
 FUNCTIONS_CONFIGURATION = f"orc/plugins/functions.json"
 QUESTION_ANSWERING_PROMPT_FILE = f"orc/prompts/question_answering.functions.prompt"
+QUALITY_CONTROL_STEP = os.environ.get("QUALITY_CONTROL_STEP") or "true"
+QUALITY_CONTROL_STEP = True if QUALITY_CONTROL_STEP.lower() == "true" else False
 
 # AOAI Integration Settings
 
 AZURE_OPENAI_RESOURCE = os.environ.get("AZURE_OPENAI_RESOURCE")
 AZURE_OPENAI_ENDPOINT = f"https://{AZURE_OPENAI_RESOURCE}.openai.azure.com"
-AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION") or "2023-06-01-preview"
 AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL") # 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'
-AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT") 
-AZURE_OPENAI_TEMPERATURE = os.environ.get("AZURE_OPENAI_TEMPERATURE") or "0.17"
-AZURE_OPENAI_TOP_P = os.environ.get("AZURE_OPENAI_TOP_P") or "0.27"
-AZURE_OPENAI_RESP_MAX_TOKENS = os.environ.get("AZURE_OPENAI_MAX_TOKENS") or "1536"
-AZURE_OPENAI_SYSTEM_MESSAGE = os.environ.get("AZURE_OPENAI_SYSTEM_MESSAGE")
-AZURE_OPENAI_STREAM = os.environ.get("AZURE_OPENAI_STREAM") or "false"
 AZURE_OPENAI_KEY = get_secret('azureOpenAIKey')
-SHOULD_STREAM = True if AZURE_OPENAI_STREAM.lower() == "true" else False
-
-@retry(wait=wait_random_exponential(min=20, max=60), stop=stop_after_attempt(12), reraise=True)
-def call_semantic_function(function, context):
-    semantic_response = function(context = context)
-    return semantic_response
-
-@retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(12), reraise=True)
-def chat_complete(messages, functions, function_call='auto'):
-    """  Return assistant chat response based on user query. Assumes existing list of messages """
-    
-    url = f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_CHATGPT_DEPLOYMENT}/chat/completions?api-version={AZURE_OPENAI_API_VERSION}"
-
-    headers = {
-        "Content-Type": "application/json",
-        "api-key": AZURE_OPENAI_KEY
-    }
-
-    data = {
-        "messages": messages,
-        "functions": functions,
-        "function_call": function_call,
-        "temperature" : 0,
-    }
-
-    response = requests.post(url, headers=headers, data=json.dumps(data)).json()
-    return response
 
 def get_answer(history):
 
@@ -72,7 +35,6 @@ def get_answer(history):
     #initialize variables
     prompt = ""
     answer = ""
-    search_query = ""
     prompt_tokens = 0
     completion_tokens = 0
     answer_dict = {}
@@ -110,67 +72,84 @@ def get_answer(history):
 
         # first call to the model to see if a function call is needed
         response = chat_complete(messages, functions=functions_definitions, function_call="auto")
-        response_message = response['choices'][0]['message']
-        prompt_tokens += response['usage']['prompt_tokens']
-        completion_tokens += response['usage']['completion_tokens']
 
-        if 'function_call' in response_message:
-
-            function_name = response_message["function_call"]["name"]
-            function_args = json.loads(response_message["function_call"]["arguments"])
-            function_to_call = function_dict[function_name] 
-            context_variables = sk.ContextVariables()
-            context_variables.update(function_args)
-            function_response = function_to_call(context_variables.variables)
-
-            # add the function results to the messages history giving context to the model
-            messages = messages + [
-                {
-                    "role": response_message["role"],
-                    "function_call": {
-                        "name": function_name,
-                        "arguments": response_message["function_call"]["arguments"],
-                    },
-                    "content": None
-                },
-                {
-                    "role": "function",
-                    "name": function_name,
-                    "content": function_response.result,
-                }
-            ]                    
-
-            # generates the answer after adding the function results to the context
-            response = chat_complete(messages, functions=functions_definitions, function_call="none")
+        if 'error' in response:
+            e = response['error']
+            logging.error(f"[code_orchestration] error when executing RAG flow. {e}")
+            answer = f"{get_message('ERROR_ANSWER')} RAG flow: {e}"
+            rag_processing_error = True
+        
+        else:
             response_message = response['choices'][0]['message']
             prompt_tokens += response['usage']['prompt_tokens']
             completion_tokens += response['usage']['completion_tokens']
-            
-            # add the assistant answer
-            messages.append( # adding assistant response to messages
-                {
-                    "role": response_message["role"],
-                    "content": response_message["content"]
-                }
-            )
 
-            # store answer metadata when calling get_sources function
-            if function_name == "get_sources":
-                answer_dict["search_query"] = function_args['question']                
-                answer_dict["sources"] = function_response.result
+            if 'function_call' in response_message:
 
-        else:
-            
-            # add the assistant answer
-            messages.append( # adding assistant response to messages
-                {
-                    "role": response_message["role"],
-                    "content": response_message["content"]
-                }
-            )  
+                function_name = response_message["function_call"]["name"]
+                function_args = json.loads(response_message["function_call"]["arguments"])
+                function_to_call = function_dict[function_name] 
+                context_variables = sk.ContextVariables()
+                context_variables.update(function_args)
+                function_response = function_to_call(context_variables.variables)
 
-        # answer generated by the model for the user question
-        answer = messages[-1]['content']
+                # add the function results to the messages history giving context to the model
+                messages = messages + [
+                    {
+                        "role": response_message["role"],
+                        "function_call": {
+                            "name": function_name,
+                            "arguments": response_message["function_call"]["arguments"],
+                        },
+                        "content": None
+                    },
+                    {
+                        "role": "function",
+                        "name": function_name,
+                        "content": function_response.result,
+                    }
+                ]                    
+
+                # generates the answer after adding the function results to the context
+                response = chat_complete(messages, functions=functions_definitions, function_call="none")
+
+                if 'error' in response:
+                    e = response['error']
+                    logging.error(f"[code_orchestration] error when executing RAG flow. {e}")
+                    answer = f"{get_message('ERROR_ANSWER')} RAG flow: {e}"
+                    rag_processing_error = True
+                else:
+                    response_message = response['choices'][0]['message']
+                    prompt_tokens += response['usage']['prompt_tokens']
+                    completion_tokens += response['usage']['completion_tokens']
+                    
+                    # add the assistant answer
+                    messages.append( # adding assistant response to messages
+                        {
+                            "role": response_message["role"],
+                            "content": response_message["content"]
+                        }
+                    )
+
+                    # answer generated by the model for the user question
+                    answer = messages[-1]['content']
+
+                    # store answer metadata when calling get_sources function
+                    if function_name == "get_sources":
+                        answer_dict["search_query"] = function_args['question']                
+                        answer_dict["sources"] = function_response.result
+
+            else:
+                
+                # add the assistant answer
+                messages.append( # adding assistant response to messages
+                    {
+                        "role": response_message["role"],
+                        "content": response_message["content"]
+                    }
+                )  
+                # answer generated by the model for the user question
+                answer = messages[-1]['content']
 
     except Exception as e:
         logging.error(f"[code_orchestration] error when executing RAG flow. {e}")
@@ -182,25 +161,35 @@ def get_answer(history):
     # QUALITY CONTROL STEP
     #############################
  
-    # groudedness needs to be equal or greater than 3 to be considered a good answer
-    next_to_last = messages[-2]
-    if next_to_last['role'] == 'function' and next_to_last['name'] == 'get_sources' and not rag_processing_error:
-        try:
-            # call semantic function to calculate groudedness
-            context = kernel.create_new_context()
-            context['answer'] =  answer
-            context['sources'] = next_to_last['content']
-            semantic_response = call_semantic_function(rag_plugin["groudedness"], context)
-            if semantic_response.result.isdigit():
-                gpt_groudedness = int(semantic_response.result)  
-                logging.info(f"[code_orchestration] groudedness: {gpt_groudedness}.")
-                if gpt_groudedness < 3: 
-                    answer = get_message('UNGROUNDED_ANSWER')
-                answer_dict['gpt_groudedness'] = gpt_groudedness
-            else:
-                logging.error(f"[code_orchestration] could not calculate groudedness.")
-        except Exception as e:
-            logging.error(f"[code_orchestration] could not calculate groudedness. {e}")
+    if QUALITY_CONTROL_STEP and not rag_processing_error:
+        # groundedness needs to be equal or greater than 3 to be considered a good answer
+        next_to_last = messages[-2]
+        if next_to_last['role'] == 'function' and next_to_last['name'] == 'get_sources':
+            try:
+                # call semantic function to calculate groundedness
+                context = kernel.create_new_context()
+                context['answer'] =  answer
+
+                # truncate sources to not hit model max token
+                sources = json.loads(next_to_last['content'])['sources']
+                extra_tokens = 1500 + number_of_tokens(answer)  # prompt + answer
+                sources = truncate_to_max_tokens(sources, extra_tokens, AZURE_OPENAI_CHATGPT_MODEL) 
+
+                context['sources'] = sources
+                semantic_response = call_semantic_function(rag_plugin["Groundedness"], context)
+                if not semantic_response.error_occurred:
+                    if semantic_response.result.isdigit():
+                        gpt_groundedness = int(semantic_response.result)  
+                        logging.info(f"[code_orchestration] groundedness: {gpt_groundedness}.")
+                        if gpt_groundedness < 3: 
+                            answer = get_message('UNGROUNDED_ANSWER')
+                        answer_dict['gpt_groundedness'] = gpt_groundedness
+                    else:
+                        logging.error(f"[code_orchestration] could not calculate groundedness.")
+                else:
+                    logging.error(f"[code_orchestration] could not calculate groundedness. {semantic_response.last_error_description}")
+            except Exception as e:
+                logging.error(f"[code_orchestration] could not calculate groundedness. {e}")
 
     answer_dict["prompt"] = prompt
     answer_dict["answer"] = answer

@@ -12,6 +12,7 @@ logging.basicConfig(level=LOGLEVEL)
 
 # TODO
 def get_answer(prompt, history):
+    answer = ""
     answer_dict = {
         "prompt" : "",
         "answer" : answer,

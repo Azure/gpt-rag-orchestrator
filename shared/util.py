@@ -3,8 +3,8 @@
 import re
 import json
 import logging
-import openai
 import os
+import requests
 import tiktoken
 import time
 import urllib.parse
@@ -18,10 +18,23 @@ LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
 logging.basicConfig(level=LOGLEVEL)
 
 # Env variables
+AZURE_OPENAI_RESOURCE = os.environ.get("AZURE_OPENAI_RESOURCE")
+AZURE_OPENAI_ENDPOINT = f"https://{AZURE_OPENAI_RESOURCE}.openai.azure.com"
+AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION") or "2023-06-01-preview"
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL") # 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'
 AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
-AZURE_OPENAI_RESP_MAX_TOKENS = os.environ.get("AZURE_OPENAI_MAX_TOKENS") or "1536"
+AZURE_OPENAI_TEMPERATURE = os.environ.get("AZURE_OPENAI_TEMPERATURE") or "0.17"
+AZURE_OPENAI_TOP_P = os.environ.get("AZURE_OPENAI_TOP_P") or "0.27"
+AZURE_OPENAI_RESP_MAX_TOKENS = os.environ.get("AZURE_OPENAI_MAX_TOKENS") or "1000"
+
 ORCHESTRATOR_MESSAGES_LANGUAGE = os.environ.get("ORCHESTRATOR_MESSAGES_LANGUAGE") or "en"
+
+
+model_max_tokens = {
+    'gpt-35-turbo-16k': 16384,
+    'gpt-4': 8192,
+    'gpt-4-32k': 32768
+}
 
 # KEY VAULT 
 
@@ -33,6 +46,8 @@ def get_secret(secretName):
     logging.info(f"[util] retrieving {secretName} secret from {keyVaultName}.")   
     retrieved_secret = client.get_secret(secretName)
     return retrieved_secret.value
+
+AZURE_OPENAI_KEY = get_secret('azureOpenAIKey')
 
 # HISTORY FUNCTIONS
 
@@ -74,61 +89,75 @@ def get_chat_history_as_messages(history, include_previous_questions=True, inclu
 
 # GPT FUNCTIONS
 
-def get_completion_text(completion):
-    if 'text' in completion['choices'][0]:
-        return completion['choices'][0]['text'].strip()
-    else:
-        return completion['choices'][0]['message']['content'].strip()
-
-# generates gpt usage data for statistics
-def get_aoai_call_data(prompt, completion):
-    prompt_words = 0
-    if isinstance(prompt, list):
-        messages = prompt
-        prompt = ""
-        for m in messages:
-            prompt += m['role'].replace('\n',' ')
-            prompt += m['content'].replace('\n',' ')
-        prompt_words = len(prompt.split())
-    else:
-        prompt = prompt.replace('\n',' ')
-        prompt_words = len(prompt.split())
-
-    return {"model": completion["model"], "prompt_words": prompt_words}
-
-@retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6), reraise=True)
-def get_answer_from_gpt(messages, deployment=AZURE_OPENAI_CHATGPT_DEPLOYMENT):
-    answer = ""
-    completion = openai.ChatCompletion.create(
-        engine=deployment,
-        messages=messages,
-        temperature=0.0,
-        max_tokens=int(AZURE_OPENAI_RESP_MAX_TOKENS)
-    )
-    answer = completion['choices'][0]['message']['content']
-    return answer, completion
-
-def call_gpt_model(messages, deployment=AZURE_OPENAI_CHATGPT_DEPLOYMENT):
-        # calling gpt model to get the answer
-    start_time = time.time()
-    completion = None
-    try:
-        answer, completion = get_answer_from_gpt(messages, deployment)
-        response_time = time.time() - start_time
-        logging.info(f"[util] called gpt model. {response_time} seconds")
-    except Exception as e:
-        error_message = str(e)
-        answer = f'{get_message("ERROR_CALLING_GPT")} {error_message}'
-        logging.error(f"[util] error when calling gpt. {error_message}")
-    return answer, completion
-
-def number_of_tokens(messages):
+def number_of_tokens(messages, model=AZURE_OPENAI_CHATGPT_MODEL):
     prompt = json.dumps(messages)
-    model = AZURE_OPENAI_CHATGPT_MODEL
     encoding = tiktoken.encoding_for_model(model.replace('gpt-35-turbo','gpt-3.5-turbo'))
     num_tokens = len(encoding.encode(prompt))
     return num_tokens
 
+def truncate_to_max_tokens(text, extra_tokens, model):
+    max_tokens = model_max_tokens[model] - extra_tokens
+    tokens_allowed = max_tokens - number_of_tokens(text, model=model)
+    while tokens_allowed < int(AZURE_OPENAI_RESP_MAX_TOKENS) and len(text) > 0:
+        text = text[:-1]
+        tokens_allowed = max_tokens - number_of_tokens(text, model=model)
+    return text
+
+# reduce messages to fit in the model's max tokens
+def optmize_messages(chat_history_messages, model): 
+    messages = chat_history_messages
+    # check each get_sources function message and reduce its size to fit into the model's max tokens
+    for idx, message in enumerate(messages):
+        if message['role'] == 'function' and message['name'] == 'get_sources':
+            # top tokens to the max tokens allowed by the model
+            sources = json.loads(message['content'])['sources']
+
+            tokens_allowed = model_max_tokens[model] - number_of_tokens(json.dumps(messages), model=model)
+            while tokens_allowed < int(AZURE_OPENAI_RESP_MAX_TOKENS) and len(sources) > 0:
+                sources = sources[:-1]
+                content = json.dumps({"sources": sources})
+                messages[idx]['content'] = content                
+                tokens_allowed = model_max_tokens[model] - number_of_tokens(json.dumps(messages), model=model)
+
+    return messages
+   
+@retry(wait=wait_random_exponential(min=20, max=60), stop=stop_after_attempt(12), reraise=True)
+def call_semantic_function(function, context):
+    semantic_response = function(context = context)
+    return semantic_response
+
+@retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(12), reraise=True)
+def chat_complete(messages, functions, function_call='auto', deployment=AZURE_OPENAI_CHATGPT_DEPLOYMENT, model=AZURE_OPENAI_CHATGPT_MODEL):
+    """  Return assistant chat response based on user query. Assumes existing list of messages """
+
+    messages = optmize_messages(messages, model)
+
+    url = f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{deployment}/chat/completions?api-version={AZURE_OPENAI_API_VERSION}"
+
+    headers = {
+        "Content-Type": "application/json",
+        "api-key": AZURE_OPENAI_KEY
+    }
+
+    data = {
+        "messages": messages,
+        "functions": functions,
+        "function_call": function_call,
+        "max_tokens": int(AZURE_OPENAI_RESP_MAX_TOKENS)
+    }
+
+    if function_call == 'auto':
+        data['temperature'] = 0
+    else:
+        data['temperature'] = float(AZURE_OPENAI_TEMPERATURE)
+        data['top_p'] = float(AZURE_OPENAI_TOP_P) 
+
+    start_time = time.time()
+    response = requests.post(url, headers=headers, data=json.dumps(data)).json()
+    response_time = time.time() - start_time
+    logging.info(f"[util] called chat completion api in {response_time:.6f} seconds")
+
+    return response
 
 # FORMATTING FUNCTIONS
 

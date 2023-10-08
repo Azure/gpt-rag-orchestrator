@@ -115,7 +115,6 @@ def run(conversation_id, ask, client_principal):
         'user_id': client_principal['id'], 
         'user_name': client_principal['name'], 
         'user_message': ask, 'previous_state': previous_state,         
-        'current_state': current_state, 
         'response_time': response_time, 
         'model': AZURE_OPENAI_CHATGPT_MODEL
     }
@@ -126,11 +125,10 @@ def run(conversation_id, ask, client_principal):
     
     # 6. return answer
     result = {"conversation_id": conversation_id, 
-              "answer": format_answer(answer_dict['answer'], ANSWER_FORMAT), 
-              "current_state": current_state, 
-              "data_points": answer_dict['sources'], 
-              "thoughts": f"Searched for:\n{['search_query']}\n\nPrompt:\n{answer_dict['prompt']}"}
-          
-    logging.info(f"[orchestrator] ended conversation flow. conversation_id {conversation_id}. answer: {answer_dict['answer'][:50]}")    
+              "answer": format_answer(interaction['answer'], ANSWER_FORMAT), 
+              "data_points": interaction['sources'] if 'sources' in interaction else '', 
+              "thoughts": f"Searched for:\n{['search_query']}\n\nPrompt:\n{interaction['prompt']}"}
+
+    logging.info(f"[orchestrator] ended conversation flow. conversation_id {conversation_id}. answer: {interaction['answer'][:50]}")    
 
     return result
