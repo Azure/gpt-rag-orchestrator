@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import semantic_kernel as sk
 from shared.util import call_semantic_function, chat_complete, get_chat_history_as_messages, get_message
 from shared.util import get_secret, truncate_to_max_tokens, number_of_tokens, load_sk_plugin
@@ -15,7 +16,7 @@ logging.basicConfig(level=LOGLEVEL)
 # Configurations
 
 FUNCTIONS_CONFIGURATION = f"orc/plugins/functions.json"
-QUESTION_ANSWERING_PROMPT_FILE = f"orc/prompts/question_answering.functions.prompt"
+QUESTION_ANSWERING_PROMPT_FILE = f"orc/prompts/question_answering.code.prompt"
 QUALITY_CONTROL_STEP = os.environ.get("QUALITY_CONTROL_STEP") or "true"
 QUALITY_CONTROL_STEP = True if QUALITY_CONTROL_STEP.lower() == "true" else False
 
@@ -167,7 +168,7 @@ def get_answer(history):
             try:
                 # call semantic function to calculate groundedness
                 context = kernel.create_new_context()
-                context['answer'] =  answer
+                context['answer'] = re.sub(r'\[.*?\]', '', answer)
 
                 # truncate sources to not hit model max token
                 sources = json.loads(next_to_last['content'])['sources']

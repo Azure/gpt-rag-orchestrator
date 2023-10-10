@@ -39,6 +39,7 @@ def get_groundedness(sources, answer):
           sources = truncate_to_max_tokens(sources, extra_tokens, AZURE_OPENAI_CHATGPT_MONITORING_MODEL) 
 
           context['sources'] = sources
+          context['answer'] = re.sub(r'\[.*?\]', '', answer)
           semantic_response = call_semantic_function(rag_plugin["Groundedness"], context)
 
           if not semantic_response.error_occurred:

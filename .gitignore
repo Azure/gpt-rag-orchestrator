@@ -1,8 +1,7 @@
 .semantic-kernel/
-
+.vscode/
 local/
 local.settings.json
-
 bin
 obj
 csx
