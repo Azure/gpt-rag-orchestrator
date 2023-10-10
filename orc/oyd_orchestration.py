@@ -31,7 +31,7 @@ AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
 # AOAI Integration Settings
 
 AZURE_OPENAI_RESOURCE = os.environ.get("AZURE_OPENAI_RESOURCE")
-AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION") or "2023-06-01-preview"
+AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION") or "2023-07-01-preview"
 AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
 AZURE_OPENAI_TEMPERATURE = os.environ.get("AZURE_OPENAI_TEMPERATURE") or "0.17"
 AZURE_OPENAI_TOP_P = os.environ.get("AZURE_OPENAI_TOP_P") or "0.27"
@@ -93,7 +93,7 @@ def get_answer(history):
         }
 
         chatgpt_url = f"https://{AZURE_OPENAI_RESOURCE}.openai.azure.com/openai/deployments/{AZURE_OPENAI_CHATGPT_DEPLOYMENT}"
-        chatgpt_url += "/chat/completions?api-version=2023-03-15-preview" # obs: this is the only api version that works with the chat endpoint
+        chatgpt_url += "/chat/completions?api-version=2023-07-01-preview" # obs: this is the only api version that works with the chat endpoint
 
         headers = {
             'Content-Type': 'application/json',

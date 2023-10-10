@@ -135,8 +135,8 @@ def get_answer(history):
 
                     # store answer metadata when calling get_sources function
                     if function_name == "get_sources":
-                        answer_dict["search_query"] = function_args['question']                
-                        answer_dict["sources"] = function_response.result
+                        answer_dict["search_query"] = function_args['question']     
+                        answer_dict["sources"] = json.loads(function_response.result)['sources'] 
 
             else:
                 
@@ -181,6 +181,7 @@ def get_answer(history):
                         gpt_groundedness = int(semantic_response.result)  
                         logging.info(f"[code_orchestration] groundedness: {gpt_groundedness}.")
                         if gpt_groundedness < 3: 
+                            logging.info(f"[code_orchestration] ungrounded answer: {answer}.")
                             answer = get_message('UNGROUNDED_ANSWER')
                         answer_dict['gpt_groundedness'] = gpt_groundedness
                     else:
