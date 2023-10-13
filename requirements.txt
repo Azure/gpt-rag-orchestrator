@@ -8,6 +8,8 @@ azure-identity
 azure-keyvault-secrets
 numpy
 openai
+promptflow
+promptflow-tools
 semantic-kernel
 tiktoken
 tenacity
