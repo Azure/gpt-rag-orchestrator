@@ -1,7 +1,7 @@
 {
-    "ERROR_ANSWER": "Lo siento, tuvimos un problema con la solicitud. Por favor informe el error al equipo de soporte.",
-    "ERROR_SEARCHING_DOCUMENTS": "Lo siento, tuve un problema técnico buscando los documentos. Por favor informe el error al equipo de soporte.",
-    "ERROR_CALLING_GPT": "Lo siento, tuve un problema técnico al llamar al modelo GPT. Por favor informe el error al equipo de soporte.",
+    "ERROR_ANSWER": "Lo siento, tuvimos un problema con la solicitud.",
+    "ERROR_SEARCHING_DOCUMENTS": "Lo siento, tuve un problema técnico buscando los documentos.",
+    "ERROR_CALLING_GPT": "Lo siento, tuve un problema técnico al llamar al modelo GPT.",
     "THROTTLING_ANSWER": "Lo siento, nuestros servidores están demasiado ocupados, por favor inténtelo de nuevo en un minuto.",
     "UNGROUNDED_ANSWER": "Lo siento, no pude encontrar la información para responder a tu pregunta en las fuentes disponibles."
 }

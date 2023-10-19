@@ -1,4 +1,4 @@
-from shared.util import get_secret
+from shared.util import get_secret, get_aoai_config
 from semantic_kernel.skill_definition import sk_function
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 import json
@@ -9,10 +9,7 @@ import requests
 import time
 
 # Azure OpenAI Integration Settings
-
-AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT") 
-
-# Azure Cognitive Search Integration Settings
+AZURE_OPENAI_EMBEDDING_MODEL = os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL")
 
 TERM_SEARCH_APPROACH='term'
 VECTOR_SEARCH_APPROACH='vector'
@@ -39,8 +36,16 @@ AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
 @retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(12), reraise=True)
 # Function to generate embeddings for title and content fields, also used for query embeddings
 def generate_embeddings(text):
+
+    embeddings_config = get_aoai_config(AZURE_OPENAI_EMBEDDING_MODEL)
+
+    openai.api_type = "azure"
+    openai.api_base = embeddings_config['endpoint']
+    openai.api_version = embeddings_config['api_version']
+    openai.api_key =  embeddings_config['api_key']
+
     response = openai.Embedding.create(
-        input=text, engine=AZURE_OPENAI_EMBEDDING_DEPLOYMENT)
+        input=text, engine=embeddings_config['deployment'])
     embeddings = response['data'][0]['embedding']
     return embeddings
 
