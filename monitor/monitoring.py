@@ -5,7 +5,8 @@ from azure.cosmos import CosmosClient
 from azure.cosmos.partition_key import PartitionKey 
 import semantic_kernel as sk
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
-from shared.util import get_secret, truncate_to_max_tokens, number_of_tokens, call_semantic_function, load_sk_plugin
+from shared.util import get_aoai_config, truncate_to_max_tokens, get_secret
+from shared.util import number_of_tokens, call_semantic_function, load_sk_plugin
 
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
@@ -13,33 +14,27 @@ logging.getLogger('azure.cosmos').setLevel(logging.WARNING)
 LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
 logging.basicConfig(level=LOGLEVEL)
 
-AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
-AZURE_OPENAI_CHATGPT_MONITORING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_MONITORING_DEPLOYMENT") or AZURE_OPENAI_CHATGPT_DEPLOYMENT
-AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL") # 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'
-AZURE_OPENAI_CHATGPT_MONITORING_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MONITORING_MODEL") or AZURE_OPENAI_CHATGPT_MODEL
-AZURE_OPENAI_RESOURCE = os.environ.get("AZURE_OPENAI_RESOURCE")
-AZURE_OPENAI_ENDPOINT = f"https://{AZURE_OPENAI_RESOURCE}.openai.azure.com"
-AZURE_OPENAI_KEY = get_secret('azureOpenAIKey')
-
-# initialize kernel
-kernel = sk.Kernel()
-kernel.add_chat_service("chat_completion", AzureChatCompletion(AZURE_OPENAI_CHATGPT_DEPLOYMENT, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY))
-
-# load sk rag plugin
-rag_plugin = load_sk_plugin('RAG', deployment=AZURE_OPENAI_CHATGPT_MONITORING_DEPLOYMENT)
+# Gpt Model
+AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
 
 def get_groundedness(sources, answer):
      gpt_groundedness = -1
      try:
-          # call semantic function to calculate groundedness
-          context = kernel.create_new_context()
 
           # truncate sources to not hit model max token
-          extra_tokens = 1500 + number_of_tokens(answer)  # prompt + answer
-          sources = truncate_to_max_tokens(sources, extra_tokens, AZURE_OPENAI_CHATGPT_MONITORING_MODEL) 
+          extra_tokens = 1500 + number_of_tokens(answer, AZURE_OPENAI_CHATGPT_MODEL)  # prompt + answer
+          sources = truncate_to_max_tokens(sources, extra_tokens, AZURE_OPENAI_CHATGPT_MODEL) 
 
+
+          # call semantic function to calculate groundedness
+          oai_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
+          kernel = sk.Kernel()
+          kernel.add_chat_service("chat_completion", AzureChatCompletion(oai_config['deployment'], oai_config['endpoint'], oai_config['api_key']))
+          context = kernel.create_new_context()
           context['sources'] = sources
           context['answer'] = re.sub(r'\[.*?\]', '', answer)
+          rag_plugin = load_sk_plugin('RAG', oai_config)
+
           semantic_response = call_semantic_function(rag_plugin["Groundedness"], context)
 
           if not semantic_response.error_occurred:
@@ -63,7 +58,7 @@ def run():
      AZURE_DB_CONTAINER = os.environ.get("AZURE_DB_CONTAINER") or "conversations"
      AZURE_OPENAI_CHATGPT_LLM_MONITORING = os.environ.get("AZURE_OPENAI_CHATGPT_LLM_MONITORING") or "false"
      llmMonitoring = True if AZURE_OPENAI_CHATGPT_LLM_MONITORING.lower() == "true" else False     
-     azureDBkey = get_secret('azureDBkey')  
+     azureDBkey = get_secret('azureDBkey') 
      db_client = CosmosClient(AZURE_DB_URI, credential=azureDBkey, consistency_level='Session')
 
      # get conversations
@@ -96,4 +91,3 @@ def run():
                     
      except Exception as e:
           logging.error(f"[monitoring] could not run monitoring. Error: {e}")
-

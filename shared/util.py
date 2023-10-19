@@ -8,6 +8,8 @@ import requests
 import tiktoken
 import time
 import urllib.parse
+from azure.cosmos import CosmosClient
+from azure.cosmos.partition_key import PartitionKey 
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
 from tenacity import retry, wait_random_exponential, stop_after_attempt
@@ -20,17 +22,15 @@ LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
 logging.basicConfig(level=LOGLEVEL)
 
 # Env variables
-AZURE_OPENAI_RESOURCE = os.environ.get("AZURE_OPENAI_RESOURCE")
-AZURE_OPENAI_ENDPOINT = f"https://{AZURE_OPENAI_RESOURCE}.openai.azure.com"
-AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION") or "2023-07-01-preview"
-AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL") # 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'
-AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
 AZURE_OPENAI_TEMPERATURE = os.environ.get("AZURE_OPENAI_TEMPERATURE") or "0.17"
 AZURE_OPENAI_TOP_P = os.environ.get("AZURE_OPENAI_TOP_P") or "0.27"
 AZURE_OPENAI_RESP_MAX_TOKENS = os.environ.get("AZURE_OPENAI_MAX_TOKENS") or "1000"
-
+AZURE_OPENAI_LOAD_BALANCING = os.environ.get("AZURE_OPENAI_LOAD_BALANCING") or "false"
+AZURE_OPENAI_LOAD_BALANCING = True if AZURE_OPENAI_LOAD_BALANCING.lower() == "true" else False
+AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
 ORCHESTRATOR_MESSAGES_LANGUAGE = os.environ.get("ORCHESTRATOR_MESSAGES_LANGUAGE") or "en"
-
+AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
+AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
 
 model_max_tokens = {
     'gpt-35-turbo-16k': 16384,
@@ -38,20 +38,22 @@ model_max_tokens = {
     'gpt-4-32k': 32768
 }
 
+##########################################################
 # KEY VAULT 
+##########################################################
 
 def get_secret(secretName):
     keyVaultName = os.environ["AZURE_KEY_VAULT_NAME"]
     KVUri = f"https://{keyVaultName}.vault.azure.net"
     credential = DefaultAzureCredential()
     client = SecretClient(vault_url=KVUri, credential=credential)
-    logging.info(f"[util] retrieving {secretName} secret from {keyVaultName}.")   
+    logging.info(f"[util] get_secret: retrieving {secretName} secret from {keyVaultName}.")   
     retrieved_secret = client.get_secret(secretName)
     return retrieved_secret.value
 
-AZURE_OPENAI_KEY = get_secret('azureOpenAIKey')
-
+##########################################################
 # HISTORY FUNCTIONS
+##########################################################
 
 def get_chat_history_as_text(history, include_last_turn=True, approx_max_tokens=1000):
     history_text = ""
@@ -89,9 +91,11 @@ def get_chat_history_as_messages(history, include_previous_questions=True, inclu
     
     return history_list
 
+##########################################################
 # GPT FUNCTIONS
+##########################################################
 
-def number_of_tokens(messages, model=AZURE_OPENAI_CHATGPT_MODEL):
+def number_of_tokens(messages, model):
     prompt = json.dumps(messages)
     encoding = tiktoken.encoding_for_model(model.replace('gpt-35-turbo','gpt-3.5-turbo'))
     num_tokens = len(encoding.encode(prompt))
@@ -129,16 +133,19 @@ def call_semantic_function(function, context):
     return semantic_response
 
 @retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(12), reraise=True)
-def chat_complete(messages, functions, function_call='auto', deployment=AZURE_OPENAI_CHATGPT_DEPLOYMENT, model=AZURE_OPENAI_CHATGPT_MODEL):
+def chat_complete(messages, functions, function_call='auto'):
     """  Return assistant chat response based on user query. Assumes existing list of messages """
 
-    messages = optmize_messages(messages, model)
+    oai_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
 
-    url = f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{deployment}/chat/completions?api-version={AZURE_OPENAI_API_VERSION}"
+    messages = optmize_messages(messages, AZURE_OPENAI_CHATGPT_MODEL)
+
+    url = f"{oai_config['endpoint']}/openai/deployments/{oai_config['deployment']}/chat/completions?api-version={oai_config['api_version']}"
 
     headers = {
         "Content-Type": "application/json",
-        "api-key": AZURE_OPENAI_KEY
+        # "api-key": oai_config['api_key']
+        "Authorization": "Bearer "+ oai_config['api_key'] 
     }
 
     data = {
@@ -161,7 +168,9 @@ def chat_complete(messages, functions, function_call='auto', deployment=AZURE_OP
 
     return response
 
+##########################################################
 # FORMATTING FUNCTIONS
+##########################################################
 
 # enforce answer format to the desired format (html, markdown, none)
 def format_answer(answer, format= 'none'):
@@ -193,7 +202,9 @@ def replace_doc_ids_with_filepath(answer, citations):
         answer = answer.replace(f"[doc{i+1}]", f"[{filepath}]")
     return answer
 
+##########################################################
 # MESSAGES FUNCTIONS
+##########################################################
 
 def get_message(message):
     if ORCHESTRATOR_MESSAGES_LANGUAGE.startswith("pt"):
@@ -207,12 +218,84 @@ def get_message(message):
     messages_dict = json.loads(json_data)
     return messages_dict[message]
 
+##########################################################
 # SEMANTIC KERNEL
+##########################################################
 
-def load_sk_plugin(name, deployment=AZURE_OPENAI_CHATGPT_DEPLOYMENT, endpoint=AZURE_OPENAI_ENDPOINT, key=AZURE_OPENAI_KEY):
+def load_sk_plugin(name, oai_config):
     kernel = sk.Kernel()
-    kernel.add_chat_service("chat_completion", AzureChatCompletion(deployment, endpoint, key))
+    kernel.add_chat_service("chat_completion", AzureChatCompletion(oai_config['deployment'], oai_config['endpoint'], oai_config['api_key']))
     plugin = kernel.import_semantic_skill_from_directory("orc/plugins", name)
     native_functions = kernel.import_native_skill_from_directory("orc/plugins", name)
     plugin.update(native_functions)
     return plugin
+
+
+##########################################################
+# AOAI FUNCTIONS
+##########################################################
+
+def get_list_from_string(string):
+    result = string.split(',')
+    result = [item.strip() for item in result]
+    return result
+
+
+def get_aoai_config(model):
+
+    resource = get_next_resource(model)
+    
+    credential = DefaultAzureCredential()
+    token = credential.get_token("https://cognitiveservices.azure.com/.default")
+
+    if model in ('gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'):
+        deployment = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
+    elif model == 'text-embedding-ada-002':
+        deployment = os.environ.get("AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT")
+
+    result ={
+        "resource": resource,
+        "endpoint": f"https://{resource}.openai.azure.com",
+        "deployment": deployment,
+        "model": model, # ex: 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'
+        "api_version": os.environ.get("AZURE_OPENAI_API_VERSION") or "2023-07-01-preview",
+        "api_key": token.token
+    }
+    return result
+
+def get_next_resource(model):
+    
+    # define resource
+    resources = os.environ.get("AZURE_OPENAI_RESOURCE")
+    resources = get_list_from_string(resources)
+
+    if not AZURE_OPENAI_LOAD_BALANCING:
+        return resources[0]
+    else:
+        # using cosmosDB as keyvalue store    
+        credential = DefaultAzureCredential()
+        db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
+        db = db_client.get_database_client(database=AZURE_DB_ID)
+        container = db.get_container_client('models')
+        try:
+            keyvalue = container.read_item(item=model, partition_key=model)
+        except Exception as e:
+            logging.info(f"[util] get_next_resource: keyvalue store with '{model}' id does not exist.")  
+            keyvalue = { 
+                "id": model,
+                "resources": resources              
+            }      
+            keyvalue = container.create_item(body=keyvalue)
+        
+        # get model resources list
+        list= keyvalue["resources"]
+
+        # get the first resource and move it to the end of the list
+        resource = list.pop(0)
+        list.append(resource)
+        keyvalue["resources"] = list
+        keyvalue = container.replace_item(item=model, body=keyvalue)
+
+        logging.info(f"[util] get_next_resource: model '{model}' resource {resource}.") 
+
+        return resource

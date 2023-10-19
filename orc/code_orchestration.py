@@ -4,7 +4,7 @@ import os
 import re
 import semantic_kernel as sk
 from shared.util import call_semantic_function, chat_complete, get_chat_history_as_messages, get_message
-from shared.util import get_secret, truncate_to_max_tokens, number_of_tokens, load_sk_plugin
+from shared.util import truncate_to_max_tokens, number_of_tokens, load_sk_plugin, get_aoai_config
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
 
 # logging level
@@ -19,14 +19,8 @@ FUNCTIONS_CONFIGURATION = f"orc/plugins/functions.json"
 QUESTION_ANSWERING_PROMPT_FILE = f"orc/prompts/question_answering.code.prompt"
 QUALITY_CONTROL_STEP = os.environ.get("QUALITY_CONTROL_STEP") or "true"
 QUALITY_CONTROL_STEP = True if QUALITY_CONTROL_STEP.lower() == "true" else False
+AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
 
-# AOAI Integration Settings
-
-AZURE_OPENAI_RESOURCE = os.environ.get("AZURE_OPENAI_RESOURCE")
-AZURE_OPENAI_ENDPOINT = f"https://{AZURE_OPENAI_RESOURCE}.openai.azure.com"
-AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
-AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL") # 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'
-AZURE_OPENAI_KEY = get_secret('azureOpenAIKey')
 
 def get_answer(history):
 
@@ -35,30 +29,35 @@ def get_answer(history):
     #############################
 
     #initialize variables
+    
     prompt = ""
     answer = ""
     prompt_tokens = 0
     completion_tokens = 0
     answer_dict = {}
+    answer_dict["search_query"] = ''
+    answer_dict["sources"] = ''
     rag_processing_error = False
 
-    # initialize kernel
-    kernel = sk.Kernel()
-    kernel.add_chat_service("chat_completion", AzureChatCompletion(AZURE_OPENAI_CHATGPT_DEPLOYMENT, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY))
+    # azure openai function preparation
 
-    # load openai function definitions
+    # load function descriptions
     with open(FUNCTIONS_CONFIGURATION, 'r') as f:
         functions_definitions = json.load(f)
-
-    # load sk rag plugin
-    rag_plugin = load_sk_plugin('RAG')
     
+    # define functions
+    def get_sources(): 
+        chatgpt_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
+        rag_plugin = load_sk_plugin('RAG', chatgpt_config)
+        return rag_plugin["Retrieval"]
+
     # map functions to code
     function_dict = {
-        "get_sources": rag_plugin["Retrieval"],
+        "get_sources": get_sources,
     }
 
     # prepare messages history
+
     messages = []
     chat_history_messages = get_chat_history_as_messages(history, include_last_turn=True)
     prompt  = open(QUESTION_ANSWERING_PROMPT_FILE, "r").read()             
@@ -85,7 +84,6 @@ def get_answer(history):
             completion_tokens += response['usage']['completion_tokens']
 
             if 'function_call' in response_message:
-
                 function_name = response_message["function_call"]["name"]
                 function_args = json.loads(response_message["function_call"]["arguments"])
                 function_to_call = function_dict[function_name] 
@@ -167,14 +165,17 @@ def get_answer(history):
         if next_to_last['role'] == 'function' and next_to_last['name'] == 'get_sources':
             try:
                 # call semantic function to calculate groundedness
+                kernel = sk.Kernel()
+                chatgpt_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
+                kernel.add_chat_service("chat_completion", AzureChatCompletion(chatgpt_config['deployment'], chatgpt_config['endpoint'], chatgpt_config['api_key']))
+                rag_plugin = load_sk_plugin('RAG', chatgpt_config)
                 context = kernel.create_new_context()
                 context['answer'] = re.sub(r'\[.*?\]', '', answer)
 
                 # truncate sources to not hit model max token
                 sources = json.loads(next_to_last['content'])['sources']
-                extra_tokens = 1500 + number_of_tokens(answer)  # prompt + answer
+                extra_tokens = 1500 + number_of_tokens(answer, AZURE_OPENAI_CHATGPT_MODEL)  # prompt + answer
                 sources = truncate_to_max_tokens(sources, extra_tokens, AZURE_OPENAI_CHATGPT_MODEL) 
-
                 context['sources'] = sources
                 semantic_response = call_semantic_function(rag_plugin["Groundedness"], context)
                 if not semantic_response.error_occurred:
@@ -194,6 +195,7 @@ def get_answer(history):
 
     answer_dict["prompt"] = prompt
     answer_dict["answer"] = answer
+    answer_dict["model"] = answer    
     answer_dict["prompt_tokens"] = prompt_tokens
     answer_dict["completion_tokens"] = completion_tokens
 
