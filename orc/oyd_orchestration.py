@@ -43,14 +43,14 @@ SHOULD_STREAM = True if AZURE_OPENAI_STREAM.lower() == "true" else False
 
 QUESTION_ANSWERING_OYD_PROMPT_FILE = f"orc/prompts/question_answering.oyd.prompt"
 
-openai.api_type = "azure"
-openai.api_base = f"https://{AZURE_OPENAI_RESOURCE}.openai.azure.com"
-openai.api_version = AZURE_OPENAI_API_VERSION
-azureOpenAIKey = get_secret('azureOpenAIKey')
-openai.api_key = azureOpenAIKey
-
-
 def get_answer(history):
+        
+        openai.api_type = "azure"
+        openai.api_base = f"https://{AZURE_OPENAI_RESOURCE}.openai.azure.com"
+        openai.api_version = AZURE_OPENAI_API_VERSION
+        azureOpenAIKey = get_secret('azureOpenAIKey')
+        openai.api_key = azureOpenAIKey
+
             
         # prompt
         prompt = open(QUESTION_ANSWERING_OYD_PROMPT_FILE, "r").read() 
