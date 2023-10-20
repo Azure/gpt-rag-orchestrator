@@ -30,6 +30,7 @@ AZURE_OPENAI_LOAD_BALANCING = True if AZURE_OPENAI_LOAD_BALANCING.lower() == "tr
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
 ORCHESTRATOR_MESSAGES_LANGUAGE = os.environ.get("ORCHESTRATOR_MESSAGES_LANGUAGE") or "en"
 AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
+AZURE_DB_NAME = os.environ.get("AZURE_DB_NAME")
 AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
 
 model_max_tokens = {
@@ -275,12 +276,12 @@ def get_next_resource(model):
         # using cosmosDB as keyvalue store    
         credential = DefaultAzureCredential()
         db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
-        db = db_client.get_database_client(database=AZURE_DB_ID)
+        db = db_client.get_database_client(database=AZURE_DB_NAME)
         container = db.get_container_client('models')
         try:
             keyvalue = container.read_item(item=model, partition_key=model)
         except Exception as e:
-            logging.info(f"[util] get_next_resource: keyvalue store with '{model}' id does not exist.")  
+            logging.error(f"[util] get_next_resource: keyvalue store with '{model}' id does not exist.")  
             keyvalue = { 
                 "id": model,
                 "resources": resources              

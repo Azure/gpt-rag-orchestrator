@@ -27,6 +27,7 @@ ORCHESTRATION_APPROACH=os.environ.get("ORCHESTRATION_APPROACH") or USE_CODE
 
 # Cosmos DB
 AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
+AZURE_DB_NAME = os.environ.get("AZURE_DB_NAME")
 AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
 
 # AOAI
@@ -42,8 +43,6 @@ def run(conversation_id, ask, client_principal):
     # 1) Get conversation stored in CosmosDB
     credential = DefaultAzureCredential()
     db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')    
-    # azureDBkey = get_secret('azureDBkey')  
-    # db_client = CosmosClient(AZURE_DB_URI, credential=azureDBkey, consistency_level='Session')
 
     # create conversation_id if not provided
     if conversation_id is None or conversation_id == "":
@@ -53,8 +52,10 @@ def run(conversation_id, ask, client_principal):
     logging.info(f"[orchestrator] starting conversation flow. conversation_id {conversation_id}. ask: {ask}")   
 
     # get conversation
-    db = db_client.create_database_if_not_exists(id=AZURE_DB_ID)
-    container = db.create_container_if_not_exists(id='conversations', partition_key=PartitionKey(path='/id', kind='Hash'))
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client('conversations')
     try:
         conversation = container.read_item(item=conversation_id, partition_key=conversation_id)
     except Exception as e:
