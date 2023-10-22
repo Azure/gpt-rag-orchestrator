@@ -225,7 +225,7 @@ def get_message(message):
 
 def load_sk_plugin(name, oai_config):
     kernel = sk.Kernel()
-    kernel.add_chat_service("chat_completion", AzureChatCompletion(oai_config['deployment'], oai_config['endpoint'], oai_config['api_key']))
+    kernel.add_chat_service("chat_completion", AzureChatCompletion(oai_config['deployment'], oai_config['endpoint'], oai_config['api_key'], ad_auth=True))
     plugin = kernel.import_semantic_skill_from_directory("orc/plugins", name)
     native_functions = kernel.import_native_skill_from_directory("orc/plugins", name)
     plugin.update(native_functions)
@@ -241,7 +241,6 @@ def get_list_from_string(string):
     result = [item.strip() for item in result]
     return result
 
-
 def get_aoai_config(model):
 
     resource = get_next_resource(model)
@@ -252,7 +251,7 @@ def get_aoai_config(model):
     if model in ('gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'):
         deployment = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
     elif model == 'text-embedding-ada-002':
-        deployment = os.environ.get("AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT")
+        deployment = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
 
     result ={
         "resource": resource,
@@ -273,30 +272,35 @@ def get_next_resource(model):
     if not AZURE_OPENAI_LOAD_BALANCING:
         return resources[0]
     else:
-        # using cosmosDB as keyvalue store    
+        # get current resource list from cache
+        start_time = time.time()
         credential = DefaultAzureCredential()
         db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
         db = db_client.get_database_client(database=AZURE_DB_NAME)
         container = db.get_container_client('models')
         try:
             keyvalue = container.read_item(item=model, partition_key=model)
+            # check if there's an update in the resource list and update cache
+            if set(keyvalue["resources"]) != set(resources):
+                keyvalue["resources"] = resources           
         except Exception as e:
-            logging.error(f"[util] get_next_resource: keyvalue store with '{model}' id does not exist.")  
+            logging.info(f"[util] get_next_resource: keyvalue store with '{model}' id does not exist.")  
             keyvalue = { 
                 "id": model,
                 "resources": resources              
             }      
             keyvalue = container.create_item(body=keyvalue)
-        
-        # get model resources list
-        list= keyvalue["resources"]
+        resources= keyvalue["resources"]
 
         # get the first resource and move it to the end of the list
-        resource = list.pop(0)
-        list.append(resource)
-        keyvalue["resources"] = list
+        resource = resources.pop(0)
+        resources.append(resource)
+
+        # update cache
+        keyvalue["resources"] = resources
         keyvalue = container.replace_item(item=model, body=keyvalue)
 
-        logging.info(f"[util] get_next_resource: model '{model}' resource {resource}.") 
+        response_time = round(time.time() - start_time,2)
 
+        logging.info(f"[util] get_next_resource: model '{model}' resource {resource}. {response_time} seconds") 
         return resource

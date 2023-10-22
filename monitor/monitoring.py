@@ -2,6 +2,7 @@ import logging
 import os
 import re
 from azure.cosmos import CosmosClient
+from azure.identity import DefaultAzureCredential
 from azure.cosmos.partition_key import PartitionKey 
 import semantic_kernel as sk
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
@@ -14,8 +15,12 @@ logging.getLogger('azure.cosmos').setLevel(logging.WARNING)
 LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
 logging.basicConfig(level=LOGLEVEL)
 
-# Gpt Model
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
+AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
+AZURE_DB_NAME = os.environ.get("AZURE_DB_NAME")
+AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
+AZURE_DB_CONTAINER = os.environ.get("AZURE_DB_CONTAINER") or "conversations"
+AZURE_OPENAI_CHATGPT_LLM_MONITORING = os.environ.get("AZURE_OPENAI_CHATGPT_LLM_MONITORING") or "false"
 
 def get_groundedness(sources, answer):
      gpt_groundedness = -1
@@ -29,7 +34,7 @@ def get_groundedness(sources, answer):
           # call semantic function to calculate groundedness
           oai_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
           kernel = sk.Kernel()
-          kernel.add_chat_service("chat_completion", AzureChatCompletion(oai_config['deployment'], oai_config['endpoint'], oai_config['api_key']))
+          kernel.add_chat_service("chat_completion", AzureChatCompletion(oai_config['deployment'], oai_config['endpoint'], oai_config['api_key'], ad_auth=True))
           context = kernel.create_new_context()
           context['sources'] = sources
           context['answer'] = re.sub(r'\[.*?\]', '', answer)
@@ -42,52 +47,53 @@ def get_groundedness(sources, answer):
                     gpt_groundedness = int(semantic_response.result)  
                     logging.info(f"[code_orchestration] groundedness: {gpt_groundedness}.")
                else:
-                    logging.error(f"[monitoring] could not calculate groundedness.")
+                    logging.error(f"[monitoring] could not calculate groundedness. Result is not a digit.")
           else:
-               logging.error(f"[monitoring] could not calculate groundedness. {semantic_response.last_error_description}")
+               logging.error(f"[monitoring] could not calculate groundedness. Semantic Kernel: {semantic_response.last_error_description}")
 
      except Exception as e:
-          logging.error(f"[monitoring] could not calculate groundedness. {e}")
+          logging.error(f"[monitoring] could not calculate groundedness. Error: {e}")
           
      return gpt_groundedness
 
 def run():
      logging.info(f"[monitoring] running monitoring routine")
-     AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
-     AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
-     AZURE_DB_CONTAINER = os.environ.get("AZURE_DB_CONTAINER") or "conversations"
-     AZURE_OPENAI_CHATGPT_LLM_MONITORING = os.environ.get("AZURE_OPENAI_CHATGPT_LLM_MONITORING") or "false"
-     llmMonitoring = True if AZURE_OPENAI_CHATGPT_LLM_MONITORING.lower() == "true" else False     
-     azureDBkey = get_secret('azureDBkey') 
-     db_client = CosmosClient(AZURE_DB_URI, credential=azureDBkey, consistency_level='Session')
-
-     # get conversations
-     db = db_client.create_database_if_not_exists(id=AZURE_DB_ID)
-     container = db.create_container_if_not_exists(id=AZURE_DB_CONTAINER, partition_key=PartitionKey(path='/id', kind='Hash'))
-     try:
-          conversations = container.query_items(query="SELECT * FROM c WHERE c.conversation_data.interactions != null", enable_cross_partition_query=True)
-          for conversation in conversations:
-               # process iteractions that have not yet been processed
-               it = 0
-               changed = False
-               for interaction in conversation.get('conversation_data').get('interactions'):
-                    it += 1
-                    logging.info(f"[monitoring] processing conversation {conversation.get('id')} iteration {it}")
-                    if 'sources' in interaction and 'answer' in interaction and 'gpt_groundedness' not in interaction:
-                         if llmMonitoring:
-                              # groundedness metric
-                              gpt_groundedness = get_groundedness(interaction['sources'], interaction['answer'])
-                              if re.match(r'^[1-5]$', str(gpt_groundedness)):
-                                   interaction['gpt_groundedness'] = gpt_groundedness
-                                   changed = True
-                                   logging.info(f"[monitoring] conversation {conversation.get('id')} iteration {it} gpt_groundedness is {gpt_groundedness}.")
+     llmMonitoring = True if AZURE_OPENAI_CHATGPT_LLM_MONITORING.lower() == "true" else False
+     if llmMonitoring:
+          credential = DefaultAzureCredential()
+          db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
+          # get conversations
+          db = db_client.get_database_client(database=AZURE_DB_NAME)
+          container = db.get_container_client('conversations')
+          try:
+               query = """
+                    SELECT * FROM c WHERE c.conversation_data.interactions != null
+                    AND EXISTS(
+                    SELECT true  
+                    FROM interaction IN c.conversation_data.interactions  
+                    WHERE interaction.sources != ""  and NOT IS_DEFINED (interaction.gpt_groundedness)
+                    )
+               """
+               conversations = container.query_items(query=query, enable_cross_partition_query=True)
+               for conversation in conversations:
+                    # process iteractions that have not yet been processed
+                    it = 0
+                    changed = False
+                    for interaction in conversation.get('conversation_data').get('interactions'):
+                         it += 1
+                         logging.info(f"[monitoring] processing conversation {conversation.get('id')} iteration {it}")
+                         if 'sources' in interaction and 'answer' in interaction and 'gpt_groundedness' not in interaction:
+                              if interaction['sources'] != '':
+                                   gpt_groundedness = get_groundedness(interaction['sources'], interaction['answer'])
+                                   if re.match(r'^[1-5]$', str(gpt_groundedness)):
+                                        interaction['gpt_groundedness'] = gpt_groundedness
+                                        changed = True
+                                        logging.info(f"[monitoring] conversation {conversation.get('id')} iteration {it} gpt_groundedness is {gpt_groundedness}.")
+                                   else:
+                                        logging.warning(f"[monitoring] skipping conversation {conversation.get('id')} iteration {it}. Gpt_groundedness {gpt_groundedness} is not a valid integer between 1 and 5.")
                               else:
-                                   logging.warning(f"[monitoring] skipping conversation {conversation.get('id')} iteration {it}. Gpt_groundedness {gpt_groundedness} is not a valid integer between 1 and 5.")
-                         else:
-                                   logging.warning(f"[monitoring] skipping conversation {conversation.get('id')} iteration {it}. LLM Monitoring is not enabled.")
-               if changed: 
-                    conversation = container.replace_item(item=conversation, body=conversation)
-
-                    
-     except Exception as e:
-          logging.error(f"[monitoring] could not run monitoring. Error: {e}")
+                                        logging.warning(f"[monitoring] skipping conversation {conversation.get('id')} iteration {it}. It is an answer with no sources.")
+                    if changed: 
+                         conversation = container.replace_item(item=conversation, body=conversation)
+          except Exception as e:
+               logging.error(f"[monitoring] could not run monitoring. Error: {e}")

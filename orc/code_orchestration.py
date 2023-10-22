@@ -46,10 +46,10 @@ def get_answer(history):
         functions_definitions = json.load(f)
     
     # define functions
-    def get_sources(): 
+    def get_sources(variables): 
         chatgpt_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
         rag_plugin = load_sk_plugin('RAG', chatgpt_config)
-        return rag_plugin["Retrieval"]
+        return rag_plugin["Retrieval"](variables)
 
     # map functions to code
     function_dict = {
@@ -167,7 +167,7 @@ def get_answer(history):
                 # call semantic function to calculate groundedness
                 kernel = sk.Kernel()
                 chatgpt_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
-                kernel.add_chat_service("chat_completion", AzureChatCompletion(chatgpt_config['deployment'], chatgpt_config['endpoint'], chatgpt_config['api_key']))
+                kernel.add_chat_service("chat_completion", AzureChatCompletion(chatgpt_config['deployment'], chatgpt_config['endpoint'], chatgpt_config['api_key'], ad_auth=True))
                 rag_plugin = load_sk_plugin('RAG', chatgpt_config)
                 context = kernel.create_new_context()
                 context['answer'] = re.sub(r'\[.*?\]', '', answer)
@@ -195,7 +195,7 @@ def get_answer(history):
 
     answer_dict["prompt"] = prompt
     answer_dict["answer"] = answer
-    answer_dict["model"] = answer    
+    answer_dict["model"] = AZURE_OPENAI_CHATGPT_MODEL    
     answer_dict["prompt_tokens"] = prompt_tokens
     answer_dict["completion_tokens"] = completion_tokens
 
