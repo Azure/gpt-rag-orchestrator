@@ -5,7 +5,7 @@ import uuid
 from azure.cosmos import CosmosClient
 from azure.cosmos.partition_key import PartitionKey 
 from datetime import datetime
-from shared.util import format_answer, get_secret
+from shared.util import format_answer
 from azure.identity import DefaultAzureCredential
 import orc.code_orchestration as code_orchestration
 import orc.oyd_orchestration as oyd_orchestration
@@ -41,9 +41,7 @@ def run(conversation_id, ask, client_principal):
     start_time = time.time()
 
     # 1) Get conversation stored in CosmosDB
-    credential = DefaultAzureCredential()
-    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')    
-
+ 
     # create conversation_id if not provided
     if conversation_id is None or conversation_id == "":
         conversation_id = str(uuid.uuid4())
@@ -59,7 +57,6 @@ def run(conversation_id, ask, client_principal):
     try:
         conversation = container.read_item(item=conversation_id, partition_key=conversation_id)
     except Exception as e:
-        conversation_id = str(uuid.uuid4())
         logging.info(f"[orchestrator] {conversation_id} customer sent an inexistent conversation_id, create new conversation_id")        
         conversation = container.create_item(body={"id": conversation_id})
     logging.info(f"[orchestrator] conversation {conversation_id} retrieved.")
@@ -71,9 +68,8 @@ def run(conversation_id, ask, client_principal):
     # history
     history = conversation.get('history', [])
     history.append({"role": "user", "content": ask})
-    conversation = container.replace_item(item=conversation, body=conversation)
 
-    # 3) Question answering
+    # 2) Question answering
 
     # get rag answer and sources
     if ORCHESTRATION_APPROACH == USE_PROMPT_FLOW:
@@ -87,8 +83,6 @@ def run(conversation_id, ask, client_principal):
     else: # USE_CODE
         logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
         answer_dict = code_orchestration.get_answer(history)
-
-    # 4. Add conversation data
 
     # 5. update and save conversation (containing history and conversation data)
     
@@ -114,6 +108,6 @@ def run(conversation_id, ask, client_principal):
               "data_points": interaction['sources'] if 'sources' in interaction else '', 
               "thoughts": f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"}
 
-    logging.info(f"[orchestrator] ended conversation flow. conversation_id {conversation_id}. answer: {interaction['answer'][:50]}")    
-
+    logging.info(f"[orchestrator] ended conversation flow. conversation_id {conversation_id}. answer: {interaction['answer'][:30]}")
+    logging.info(f"[orchestrator] {conversation_id} conversation flow duration: {response_time} seconds.")  
     return result

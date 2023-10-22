@@ -39,7 +39,7 @@ def generate_embeddings(text):
 
     embeddings_config = get_aoai_config(AZURE_OPENAI_EMBEDDING_MODEL)
 
-    openai.api_type = "azure"
+    openai.api_type = "azure_ad"
     openai.api_base = embeddings_config['endpoint']
     openai.api_version = embeddings_config['api_version']
     openai.api_key =  embeddings_config['api_key']
