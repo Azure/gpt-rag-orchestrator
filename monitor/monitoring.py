@@ -85,7 +85,7 @@ def run():
                          if 'sources' in interaction and 'answer' in interaction and 'gpt_groundedness' not in interaction:
                               if interaction['sources'] != '':
                                    gpt_groundedness = get_groundedness(interaction['sources'], interaction['answer'])
-                                   if re.match(r'^[1-5]$', str(gpt_groundedness)):
+                                   if re.match(r'^[0-5]$', str(gpt_groundedness)):
                                         interaction['gpt_groundedness'] = gpt_groundedness
                                         changed = True
                                         logging.info(f"[monitoring] conversation {conversation.get('id')} iteration {it} gpt_groundedness is {gpt_groundedness}.")
