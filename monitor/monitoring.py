@@ -71,7 +71,7 @@ def run():
                     AND EXISTS(
                     SELECT true  
                     FROM interaction IN c.conversation_data.interactions  
-                    WHERE interaction.sources != ""  and NOT IS_DEFINED (interaction.gpt_groundedness)
+                    WHERE NOT IS_DEFINED (interaction.gpt_groundedness)
                     )
                """
                conversations = container.query_items(query=query, enable_cross_partition_query=True)
