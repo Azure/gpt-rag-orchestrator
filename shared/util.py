@@ -45,12 +45,14 @@ model_max_tokens = {
 ##########################################################
 
 def get_secret(secretName):
+    start_time = time.time()
     keyVaultName = os.environ["AZURE_KEY_VAULT_NAME"]
     KVUri = f"https://{keyVaultName}.vault.azure.net"
     credential = DefaultAzureCredential()
     client = SecretClient(vault_url=KVUri, credential=credential)
-    logging.info(f"[util] get_secret: retrieving {secretName} secret from {keyVaultName}.")   
     retrieved_secret = client.get_secret(secretName)
+    round(time.time() - start_time,2)
+    logging.info(f"[util] get_secret: retrieving {secretName} secret from {keyVaultName}.")   
     return retrieved_secret.value
 
 ##########################################################
@@ -165,7 +167,7 @@ def chat_complete(messages, functions, function_call='auto'):
 
     start_time = time.time()
     response = requests.post(url, headers=headers, data=json.dumps(data)).json()
-    response_time = time.time() - start_time
+    response_time =  round(time.time() - start_time,2)
     logging.info(f"[util] called chat completion api in {response_time:.6f} seconds")
 
     return response

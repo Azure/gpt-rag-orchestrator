@@ -120,7 +120,7 @@ def get_answer(history):
             error_message = str(e)
             answer = f'{get_message("ERROR_ANSWER")}. {error_message}'
             logging.error(f"[gpt_utils] {answer}")
-        response_time = time.time() - start_time
+        response_time =  round(time.time() - start_time,2)
         logging.info(f"[gpt_utils] called gpt model. {response_time} seconds")
 
         answer_dict = {

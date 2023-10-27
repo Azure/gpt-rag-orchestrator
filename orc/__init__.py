@@ -2,13 +2,12 @@ import logging
 import azure.functions as func
 import json
 import os
-import logging
 from . import orchestrator
 
 LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
 logging.basicConfig(level=LOGLEVEL)
 
-def main(req: func.HttpRequest) -> func.HttpResponse:
+async def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
 
     req_body = req.get_json()
@@ -25,7 +24,9 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     }
 
     if question:
-        result = orchestrator.run(conversation_id, question, client_principal)
+
+        result = await orchestrator.run(conversation_id, question, client_principal)
+
         return func.HttpResponse(json.dumps(result), mimetype="application/json", status_code=200)
     else:
         return func.HttpResponse('{"error": "no question found in json input"}', mimetype="application/json", status_code=200)

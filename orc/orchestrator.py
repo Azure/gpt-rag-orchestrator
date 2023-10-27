@@ -11,6 +11,7 @@ import orc.code_orchestration as code_orchestration
 import orc.oyd_orchestration as oyd_orchestration
 import orc.promptflow_orchestration as promptflow_orchestration
 
+
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
 logging.getLogger('azure.cosmos').setLevel(logging.WARNING)
@@ -36,7 +37,7 @@ AZURE_OPENAI_STREAM = True if AZURE_OPENAI_STREAM.lower() == "true" else False
 
 ANSWER_FORMAT = "html" # html, markdown, none
 
-def run(conversation_id, ask, client_principal):
+async def run(conversation_id, ask, client_principal):
     
     start_time = time.time()
 
@@ -82,7 +83,8 @@ def run(conversation_id, ask, client_principal):
 
     else: # USE_CODE
         logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
-        answer_dict = code_orchestration.get_answer(history)
+
+        answer_dict = await code_orchestration.get_answer(history)
 
     # 5. update and save conversation (containing history and conversation data)
     

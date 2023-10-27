@@ -45,7 +45,7 @@ def get_groundedness(sources, answer):
           if not semantic_response.error_occurred:
                if semantic_response.result.isdigit():
                     gpt_groundedness = int(semantic_response.result)  
-                    logging.info(f"[code_orchestration] groundedness: {gpt_groundedness}.")
+                    logging.info(f"[monitoring] groundedness: {gpt_groundedness}.")
                else:
                     logging.error(f"[monitoring] could not calculate groundedness. Result is not a digit.")
           else:
