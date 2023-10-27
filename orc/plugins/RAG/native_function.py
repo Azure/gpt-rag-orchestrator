@@ -5,6 +5,7 @@ import json
 import logging
 import openai
 import os
+import re
 import requests
 import time
 
@@ -33,6 +34,11 @@ AZURE_SEARCH_FILENAME_COLUMN = os.environ.get("AZURE_SEARCH_FILENAME_COLUMN") or
 AZURE_SEARCH_TITLE_COLUMN = os.environ.get("AZURE_SEARCH_TITLE_COLUMN") or "title"
 AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
 
+
+# Set up logging
+LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
+logging.basicConfig(level=LOGLEVEL)
+
 @retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(12), reraise=True)
 # Function to generate embeddings for title and content fields, also used for query embeddings
 def generate_embeddings(text):
@@ -51,13 +57,16 @@ def generate_embeddings(text):
 
 class RAG:
     @sk_function(
-        description="Search a knowledge base for sources to ground and give context to answer a user question. Use only if the requested information is not already available in the conversation context.",
+        description=re.sub('\s+', ' ',f"""
+            Search a knowledge base for sources to ground and give context to answer a user question. 
+            Search in '{AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE}' language. 
+            Use only if the requested information is not already available in the conversation context."""),
         name="Retrieval",
         input_description="The user question",
     )
     def Retrieval(self, input: str) -> str:
         search_results = []
-        search_query = input['input']['question'] 
+        search_query = input
         try:
             start_time = time.time()
             embeddings_query = generate_embeddings(search_query)

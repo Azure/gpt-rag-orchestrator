@@ -28,6 +28,7 @@ AZURE_OPENAI_RESP_MAX_TOKENS = os.environ.get("AZURE_OPENAI_MAX_TOKENS") or "100
 AZURE_OPENAI_LOAD_BALANCING = os.environ.get("AZURE_OPENAI_LOAD_BALANCING") or "false"
 AZURE_OPENAI_LOAD_BALANCING = True if AZURE_OPENAI_LOAD_BALANCING.lower() == "true" else False
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
+AZURE_OPENAI_EMBEDDING_MODEL = os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL")
 ORCHESTRATOR_MESSAGES_LANGUAGE = os.environ.get("ORCHESTRATOR_MESSAGES_LANGUAGE") or "en"
 AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
 AZURE_DB_NAME = os.environ.get("AZURE_DB_NAME")
@@ -250,7 +251,7 @@ def get_aoai_config(model):
 
     if model in ('gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'):
         deployment = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
-    elif model == 'text-embedding-ada-002':
+    elif model == AZURE_OPENAI_EMBEDDING_MODEL:
         deployment = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
 
     result ={
@@ -269,7 +270,7 @@ def get_next_resource(model):
     resources = os.environ.get("AZURE_OPENAI_RESOURCE")
     resources = get_list_from_string(resources)
 
-    if not AZURE_OPENAI_LOAD_BALANCING:
+    if not AZURE_OPENAI_LOAD_BALANCING or model == AZURE_OPENAI_EMBEDDING_MODEL:
         return resources[0]
     else:
         # get current resource list from cache
@@ -304,3 +305,24 @@ def get_next_resource(model):
 
         logging.info(f"[util] get_next_resource: model '{model}' resource {resource}. {response_time} seconds") 
         return resource
+    
+##########################################################
+# OTHER FUNCTIONS
+##########################################################
+
+def get_blocked_list():
+    start_time = time.time()
+    blocked_list = []
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client('guardrails')
+    try:
+        key_value = container.read_item(item='blocked_list', partition_key='blocked_list')
+        blocked_list= key_value["blocked_words"]
+        blocked_list = [word.lower() for word in blocked_list]  
+    except Exception as e:
+        logging.info(f"[util] get_blocked_list: keyvalue store with 'blocked_list' id does not exist.")  
+    response_time = round(time.time() - start_time,2)
+    logging.info(f"[util] get_blocked_list in {response_time} seconds") 
+    return blocked_list

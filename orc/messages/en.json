@@ -3,5 +3,6 @@
     "ERROR_SEARCHING_DOCUMENTS": "I'm sorry, I had a technical problem searching the documents.",
     "ERROR_CALLING_GPT": "I'm sorry, I had a technical problem when calling the GPT model.",
     "THROTTLING_ANSWER": "I'm sorry, our servers are too busy, please try again in a minute.",
-    "UNGROUNDED_ANSWER": "Sorry, I couldn't find the information to answer your question in the available sources."
+    "UNGROUNDED_ANSWER": "Sorry, I couldn't find the information to answer your question in the available sources.",
+    "BLOCKED_ANSWER": "Sorry, I can't answer that question."
 }
