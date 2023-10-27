@@ -6,7 +6,6 @@ azure-cosmos
 azure-functions
 azure-identity
 azure-keyvault-secrets
-asyncio
 numpy
 openai
 promptflow

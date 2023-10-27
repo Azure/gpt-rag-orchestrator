@@ -1,8 +1,7 @@
-import asyncio
 import json
 import logging
 import os
-import re
+import time
 from shared.util import call_semantic_function, get_chat_history_as_messages, get_message
 from shared.util import truncate_to_max_tokens, number_of_tokens, get_aoai_config, get_blocked_list
 
@@ -60,6 +59,7 @@ async def get_answer_async(history):
     messages = get_chat_history_as_messages(history, include_last_turn=True)
     ask = messages[-1]['content']
 
+
     #############################
     # GUARDRAILS (QUESTION)
     #############################
@@ -83,6 +83,8 @@ async def get_answer_async(history):
 
         try:
             # initialize semantic kernel
+
+            start_time = time.time()
 
             kernel = sk.Kernel(log=myLogger)
             
@@ -138,13 +140,16 @@ async def get_answer_async(history):
 
             context = kernel.create_new_context()
             context.variables["user_input"] = ask
+
+
             context = await chat_completion_with_function_call(
-                kernel,
-                chat_skill_name="ChatBot",
-                chat_function_name="Chat",
-                context=context,
-                functions=functions,
+                    kernel,
+                    chat_skill_name="ChatBot",
+                    chat_function_name="Chat",
+                    context=context,
+                    functions=functions,
             )
+
 
             # error handling
 
@@ -167,7 +172,10 @@ async def get_answer_async(history):
                 if 'arguments' in function_call_message['function_call']:
                     arguments = json.loads(function_call_message['function_call']['arguments'])
                     search_query = arguments['input']
-        
+
+                response_time =  round(time.time() - start_time,2)              
+                logging.info(f"[code_orchestration] executed RAG flow with SK. {response_time} seconds")
+
         except Exception as e:
             logging.error(f"[code_orchestration] error when executing RAG flow. {e}")
             answer = f"{get_message('ERROR_ANSWER')} RAG flow: {e}"
@@ -181,6 +189,7 @@ async def get_answer_async(history):
     if GROUNDEDNESS_CHECK and not bypass_flow:
         if sources != "":
             try:
+                start_time = time.time()
                 groundedness_threshold = 3
                 context = kernel.create_new_context()
                 context.variables["answer"] = answer
@@ -189,10 +198,11 @@ async def get_answer_async(history):
                 sources = truncate_to_max_tokens(sources, extra_tokens, AZURE_OPENAI_CHATGPT_MODEL)        
                 context.variables["sources"] = sources
                 semantic_response = call_semantic_function(rag_plugin["Groundedness"], context)
+                response_time =  round(time.time() - start_time,2)              
                 if not semantic_response.error_occurred:
                     if semantic_response.result.isdigit():
                         gpt_groundedness = int(semantic_response.result)  
-                        logging.info(f"[code_orchestration] groundedness: {gpt_groundedness}.")
+                        logging.info(f"[code_orchestration] checked groundedness: {gpt_groundedness}. {response_time} seconds")
                         if gpt_groundedness < groundedness_threshold: 
                             logging.info(f"[code_orchestration] ungrounded answer: {answer[:30]}.")
                             answer = get_message('UNGROUNDED_ANSWER')
@@ -227,6 +237,8 @@ async def get_answer_async(history):
     
     return answer_dict
 
-def get_answer(history):
-    answer_dict = asyncio.run(get_answer_async(history))
+async def get_answer(history):
+
+    answer_dict = await get_answer_async(history) 
+
     return answer_dict

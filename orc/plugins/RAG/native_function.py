@@ -70,7 +70,7 @@ class RAG:
         try:
             start_time = time.time()
             embeddings_query = generate_embeddings(search_query)
-            response_time = time.time() - start_time
+            response_time =  round(time.time() - start_time,2)
             logging.info(f"[sk_function_retrieval] generated question embeddings. {response_time} seconds")
             azureSearchKey = get_secret('azureSearchKey') 
 
@@ -118,7 +118,7 @@ class RAG:
                         for doc in response.json()['value']:
                             search_results.append(doc['filepath'] + ": "+ doc['content'].strip() + "\n")    
                     
-            response_time = time.time() - start_time
+            response_time =  round(time.time() - start_time,2)
             # logging.info(f"[sk_function_retrieval] search query body: {body}")        
             logging.info(f"[sk_function_retrieval] searched documents. {response_time} seconds")
         except Exception as e:
