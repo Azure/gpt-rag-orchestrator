@@ -38,7 +38,7 @@ AZURE_OPENAI_RESP_MAX_TOKENS = int(AZURE_OPENAI_RESP_MAX_TOKENS)
 
 SYSTEM_MESSAGE = f"orc/prompts/system_message.prompt"
 
-async def get_answer_async(history):
+async def get_answer(history):
 
     #############################
     # INITIALIZATION
@@ -64,6 +64,7 @@ async def get_answer_async(history):
     # GUARDRAILS (QUESTION)
     #############################
     if BLOCKED_LIST_CHECK:
+        logging.info(f"[code_orchestration] guardrails - blocked list check.")
         try:
             blocked_list = get_blocked_list()
             for blocked_word in blocked_list:
@@ -83,6 +84,8 @@ async def get_answer_async(history):
 
         try:
             # initialize semantic kernel
+    
+            logging.info(f"[code_orchestration] starting RAG flow. {ask[:50]}")
 
             start_time = time.time()
 
@@ -142,6 +145,7 @@ async def get_answer_async(history):
             context.variables["user_input"] = ask
 
 
+            logging.info(f"[code_orchestration] calling Chat function.")
             context = await chat_completion_with_function_call(
                     kernel,
                     chat_skill_name="ChatBot",
@@ -204,7 +208,7 @@ async def get_answer_async(history):
                         gpt_groundedness = int(semantic_response.result)  
                         logging.info(f"[code_orchestration] checked groundedness: {gpt_groundedness}. {response_time} seconds")
                         if gpt_groundedness < groundedness_threshold: 
-                            logging.info(f"[code_orchestration] ungrounded answer: {answer[:30]}.")
+                            logging.info(f"[code_orchestration] ungrounded answer: {answer[:50]}.")
                             answer = get_message('UNGROUNDED_ANSWER')
                         answer_dict['gpt_groundedness'] = gpt_groundedness
                     else:
@@ -235,10 +239,4 @@ async def get_answer_async(history):
     # answer_dict["prompt_tokens"] = prompt_tokens
     # answer_dict["completion_tokens"] = completion_tokens    
     
-    return answer_dict
-
-async def get_answer(history):
-
-    answer_dict = await get_answer_async(history) 
-
     return answer_dict
