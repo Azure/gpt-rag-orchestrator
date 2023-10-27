@@ -92,7 +92,9 @@ def run():
                                    else:
                                         logging.warning(f"[monitoring] skipping conversation {conversation.get('id')} iteration {it}. Gpt_groundedness {gpt_groundedness} is not a valid integer between 1 and 5.")
                               else:
-                                        logging.warning(f"[monitoring] skipping conversation {conversation.get('id')} iteration {it}. It is an answer with no sources.")
+                                        interaction['gpt_groundedness'] = 0
+                                        changed = True
+                                        logging.warning(f"[monitoring] setting conversation {conversation.get('id')} iteration {it} groundedness to 0. It has no sources.")
                     if changed: 
                          conversation = container.replace_item(item=conversation, body=conversation)
           except Exception as e:

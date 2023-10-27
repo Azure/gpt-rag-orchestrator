@@ -17,7 +17,7 @@
           "defaultValue": ""
         },
         {
-          "name": "context",
+          "name": "sources",
           "description": "Sources used by the assistant to answer the user question (i.e., [file1.pdf] To execute task A you need to access system B. [file2.pdf] System B is used when users need to execute task A.)",
           "defaultValue": ""
         }

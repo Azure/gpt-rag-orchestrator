@@ -6,10 +6,11 @@ azure-cosmos
 azure-functions
 azure-identity
 azure-keyvault-secrets
+asyncio
 numpy
 openai
 promptflow
 promptflow-tools
-semantic-kernel
+semantic-kernel==0.3.14.dev0
 tiktoken
 tenacity
