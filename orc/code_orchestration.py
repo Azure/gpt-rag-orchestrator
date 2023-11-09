@@ -201,6 +201,8 @@ async def get_answer(history):
                 extra_tokens = FUNCTION_PROMPT_SIZE + number_of_tokens(answer, AZURE_OPENAI_CHATGPT_MODEL)  # prompt + answer
                 sources = truncate_to_max_tokens(sources, extra_tokens, AZURE_OPENAI_CHATGPT_MODEL)        
                 context.variables["sources"] = sources
+                logging.info(f"[code_orchestration] checking groundedness. answer: {answer}.")
+                logging.info(f"[code_orchestration] checking groundedness. sources: {sources}.")                
                 semantic_response = call_semantic_function(rag_plugin["Groundedness"], context)
                 response_time =  round(time.time() - start_time,2)              
                 if not semantic_response.error_occurred:
