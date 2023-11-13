@@ -1,0 +1,27 @@
+## Bot description
+
+{{$bot_description}}
+
+## Task Goal
+
+Based on user ASK find the user intent and an answer if applicable.
+
+## Task instructions
+- Based on user ASK choose one of the following intents:
+
+question_answering: The ASK is a factual question.
+greeting: The ASK is not a question but a greeting to the bot.
+about_bot: The ASK is just asking for information about the bot
+
+The intent is always greeting, about_bot or question_answering. 
+
+- If the intent is a greeting, provide an answer to the user.
+
+- The output value is a JSON object with intent and answer fields
+
+Do not repeat the ASK.
+
+## Task Input:
+"ASK": "{{$ask}}"
+
+## Task Output:

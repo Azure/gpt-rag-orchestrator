@@ -30,7 +30,6 @@ def get_groundedness(sources, answer):
           extra_tokens = 1500 + number_of_tokens(answer, AZURE_OPENAI_CHATGPT_MODEL)  # prompt + answer
           sources = truncate_to_max_tokens(sources, extra_tokens, AZURE_OPENAI_CHATGPT_MODEL) 
 
-
           # call semantic function to calculate groundedness
           oai_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
           kernel = sk.Kernel()
@@ -40,14 +39,14 @@ def get_groundedness(sources, answer):
           context['answer'] = re.sub(r'\[.*?\]', '', answer)
           rag_plugin = load_sk_plugin('RAG', oai_config)
 
-          semantic_response = call_semantic_function(rag_plugin["Groundedness"], context)
+          semantic_response = call_semantic_function(rag_plugin["Grounded"], context)
 
           if not semantic_response.error_occurred:
-               if semantic_response.result.isdigit():
-                    gpt_groundedness = int(semantic_response.result)  
-                    logging.info(f"[monitoring] groundedness: {gpt_groundedness}.")
+               grounded = semantic_response.result
+               if grounded.lower() == 'no':
+                    gpt_groundedness= 1
                else:
-                    logging.error(f"[monitoring] could not calculate groundedness. Result is not a digit.")
+                    gpt_groundedness = 5
           else:
                logging.error(f"[monitoring] could not calculate groundedness. Semantic Kernel: {semantic_response.last_error_description}")
 
