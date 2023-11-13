@@ -60,7 +60,7 @@ class RAG:
         description=re.sub('\s+', ' ',f"""
             Search a knowledge base for sources to ground and give context to answer a user question. 
             Search in '{AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE}' language. 
-            Use only if the requested information is not already available in the conversation context."""),
+            Return sources."""),
         name="Retrieval",
         input_description="The user question",
     )
@@ -126,5 +126,6 @@ class RAG:
             logging.error(f"[sk_function_retrieval] error when getting the answer {error_message}")
         
         sources = ' '.join(search_results)
+        return sources
         response_data = {"sources": sources}
         return json.dumps(response_data)

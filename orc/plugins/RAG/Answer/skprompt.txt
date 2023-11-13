@@ -1,0 +1,18 @@
+## Task Goal
+The task goal is to generate an answer about a specific context based on the message HISTORY, user QUESTION and the provided SOURCES.
+
+## Task instructions
+You will be given a context, and then asked a question based on that context.
+Your answer should be as precise as possible, and should only come from the context.
+Only answer questions related to the specific context. You MUST NOT answer anything unrelated to that.
+If the question is not about the specific context, say you don't know the answer.
+If the necessary information is unavailable in the sources, say you don't know.
+Always include the source name for each fact in the response, referencing it with square brackets, e.g., [info1.txt]. 
+Do not combine sources; list each source separately, e.g., [info1.txt][info2.pdf].
+
+## Task Input:
+"HISTORY": "{{$history}}"
+"QUESTION": "{{$ask}}"
+"SOURCES": "{{$sources}}"
+
+## Task Output:

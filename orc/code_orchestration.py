@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import time
 from shared.util import call_semantic_function, get_chat_history_as_messages, get_message
 from shared.util import truncate_to_max_tokens, number_of_tokens, get_aoai_config, get_blocked_list
@@ -48,6 +49,7 @@ async def get_answer(history):
 
     answer_dict = {}
     answer = ""
+    intent = "none"
     prompt = ""
     search_query = ""
     sources = ""
@@ -58,7 +60,6 @@ async def get_answer(history):
 
     messages = get_chat_history_as_messages(history, include_last_turn=True)
     ask = messages[-1]['content']
-
 
     #############################
     # GUARDRAILS (QUESTION)
@@ -83,14 +84,15 @@ async def get_answer(history):
     if not bypass_flow:
 
         try:
+            
             # initialize semantic kernel
-    
+
             logging.info(f"[code_orchestration] starting RAG flow. {ask[:50]}")
 
             start_time = time.time()
 
             kernel = sk.Kernel(log=myLogger)
-            
+
             chatgpt_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
             kernel.add_chat_service(
                 "chat-gpt",
@@ -98,87 +100,71 @@ async def get_answer(history):
                                             chatgpt_config['endpoint'], 
                                             chatgpt_config['api_key'], 
                                             api_version=chatgpt_config['api_version'],
-                                            ad_auth=True),                                        
+                                            ad_auth=True), 
             )
-
-            # load plugins that will be used
 
             rag_plugin_name = "RAG"
-            rag_plugin = kernel.import_semantic_skill_from_directory("orc/plugins", rag_plugin_name)
-            native_functions = kernel.import_native_skill_from_directory("orc/plugins", rag_plugin_name)
+            plugins_directory = "orc/plugins"
+            rag_plugin = kernel.import_semantic_skill_from_directory(plugins_directory, rag_plugin_name)
+            native_functions = kernel.import_native_skill_from_directory(plugins_directory, rag_plugin_name)
             rag_plugin.update(native_functions)
 
-            # preparare Chat semantic function
-
-            system_message  = open(SYSTEM_MESSAGE, "r").read()
-            prompt = system_message
-
-            prompt_config = sk.PromptTemplateConfig.from_completion_parameters(
-                max_tokens=AZURE_OPENAI_RESP_MAX_TOKENS,
-                temperature=AZURE_OPENAI_TEMPERATURE,
-                top_p=AZURE_OPENAI_TOP_P,
-                function_call="auto",
-                chat_system_prompt=system_message,
-            )
-
-            prompt_template = OpenAIChatPromptTemplate(
-                "{{$user_input}}", kernel.prompt_template_engine, prompt_config
-            )
-
-            # add message history to prompt template
-            for message in messages[:-1]:
-                prompt_template.add_message(message['role'], message['content'])
-
-            # register chat function
-
-            function_config = sk.SemanticFunctionConfig(prompt_config, prompt_template)
-            chat_function = kernel.register_semantic_function("ChatBot", "Chat", function_config)
-
-            # oai function definitions
-
-            filter = {"exclude_skill": ["ChatBot"]}
-            functions = get_function_calling_object(kernel, filter)
-            
-            # create context and execute chat function
+            system_message = open(SYSTEM_MESSAGE, "r").read()
 
             context = kernel.create_new_context()
-            context.variables["user_input"] = ask
+            context.variables["bot_description"] = system_message
+            context.variables["ask"] = ask
 
+            # triage
 
-            logging.info(f"[code_orchestration] calling Chat function.")
-            context = await chat_completion_with_function_call(
-                    kernel,
-                    chat_skill_name="ChatBot",
-                    chat_function_name="Chat",
-                    context=context,
-                    functions=functions,
-            )
+            logging.info(f"[code_orchestration] checking intent. ask: {ask}")            
+            sk_response = call_semantic_function(rag_plugin["Triage"], context)
+            sk_response_json = json.loads(sk_response.result)
+            if 'intent' in sk_response_json:
+                intent = sk_response_json['intent']            
+                logging.info(f"[code_orchestration] triaging with SK intent: {intent}.")  
+            response_time =  round(time.time() - start_time,2)              
+            logging.info(f"[code_orchestration] triaging with SK. {response_time} seconds.")
 
+            # greetings
 
-            # error handling
+            if intent == "greeting" or intent == "about_bot":
+                if 'answer' in sk_response_json:
+                    answer = sk_response_json['answer']
+                    logging.info(f"[code_orchestration] triaging with SK answer: {answer}.")
 
-            if context.error_occurred:
-                logging.error(f"[code_orchestration] error when executing RAG flow. {context.last_error_description}")
-                answer = f"{get_message('ERROR_ANSWER')} RAG flow: {context.last_error_description}"
-                bypass_flow = True
-            else:
-                answer = context.result
+            # qna
 
-            # when RAG-Retrieval is called we get the search query and sources  
-            next_to_last_message = prompt_template.messages[-2]
-            if next_to_last_message['role'] == "function" and next_to_last_message['name'] == "RAG-Retrieval":
-                # sources
-                function_input = json.loads(next_to_last_message['content'])
-                if 'sources' in function_input:
-                    sources = function_input['sources'] 
-                # search query
-                function_call_message = prompt_template.messages[-3]
-                if 'arguments' in function_call_message['function_call']:
-                    arguments = json.loads(function_call_message['function_call']['arguments'])
-                    search_query = arguments['input']
+            elif intent == "question_answering":
+                # get sources
+
+                sk_response = await kernel.run_async(
+                    rag_plugin["Retrieval"],
+                    input_str=ask,
+                )
+                search_query = ask
+                sources = sk_response.result
+                context.variables["sources"] = sources
+
+                # get the answer
+
+                logging.info(f"[code_orchestration] generating bot answer. ask: {ask}")
+                context.variables["history"] = json.dumps(messages[:-1], ensure_ascii=False)
+                sk_response = call_semantic_function(rag_plugin["Answer"], context)
+                answer = sk_response.result
+                logging.info(f"[code_orchestration] generating bot answer. answer: {answer}")  
+                response_time =  round(time.time() - start_time,2)              
+                logging.info(f"[code_orchestration] triaging with SK. {response_time} seconds.")
+
+                if context.error_occurred:
+                    logging.error(f"[code_orchestration] error when executing RAG flow. {context.last_error_description}")
+                    answer = f"{get_message('ERROR_ANSWER')} RAG flow: {context.last_error_description}"
+                    bypass_flow = True
 
                 response_time =  round(time.time() - start_time,2)              
-                logging.info(f"[code_orchestration] executed RAG flow with SK. {response_time} seconds")
+                logging.info(f"[code_orchestration] executed RAG flow with SK. {response_time} seconds.")
+            else:
+                logging.info(f"[code_orchestration] SK did not executed, no intent found.")
 
         except Exception as e:
             logging.error(f"[code_orchestration] error when executing RAG flow. {e}")
@@ -190,38 +176,25 @@ async def get_answer(history):
     # GUARDRAILS (ANSWER)
     #############################
 
-    if GROUNDEDNESS_CHECK and not bypass_flow:
-        if sources != "":
-            try:
-                start_time = time.time()
-                groundedness_threshold = 3
-                context = kernel.create_new_context()
-                context.variables["answer"] = answer
-                FUNCTION_PROMPT_SIZE = 1500
-                extra_tokens = FUNCTION_PROMPT_SIZE + number_of_tokens(answer, AZURE_OPENAI_CHATGPT_MODEL)  # prompt + answer
-                sources = truncate_to_max_tokens(sources, extra_tokens, AZURE_OPENAI_CHATGPT_MODEL)        
-                context.variables["sources"] = sources
-                logging.info(f"[code_orchestration] checking groundedness. answer: {answer}.")
-                logging.info(f"[code_orchestration] checking groundedness. sources: {sources}.")                
-                semantic_response = call_semantic_function(rag_plugin["Groundedness"], context)
-                response_time =  round(time.time() - start_time,2)              
-                if not semantic_response.error_occurred:
-                    if semantic_response.result.isdigit():
-                        gpt_groundedness = int(semantic_response.result)  
-                        logging.info(f"[code_orchestration] checked groundedness: {gpt_groundedness}. {response_time} seconds")
-                        if gpt_groundedness < groundedness_threshold: 
-                            logging.info(f"[code_orchestration] ungrounded answer: {answer[:50]}.")
-                            answer = get_message('UNGROUNDED_ANSWER')
-                        answer_dict['gpt_groundedness'] = gpt_groundedness
-                    else:
-                        logging.error(f"[code_orchestration] could not calculate groundedness.")
-                else:
-                    logging.error(f"[code_orchestration] could not calculate groundedness. {semantic_response.last_error_description}")
-            except Exception as e:
-                logging.error(f"[code_orchestration] could not calculate groundedness. {e}")
-        else:
-            logging.info(f"[code_orchestration] no sources found. Skipping groundedness check and setting groundedness to 0.")
-            answer_dict['gpt_groundedness'] = 0
+    if GROUNDEDNESS_CHECK and intent == 'question_answering' and not bypass_flow:
+        try:
+            logging.info(f"[code_orchestration] checking if it is grounded. answer: {answer[:50]}")  
+            logging.info(f"[code_orchestration] checking if it is grounded. sources: {sources[:100]}")
+            context.variables["answer"] = answer                      
+            sk_response = call_semantic_function(rag_plugin["Grounded"], context)
+            grounded = sk_response.result
+            logging.info(f"[code_orchestration] is it grounded? {grounded}.")  
+            if grounded.lower() == 'no':
+                logging.info(f"[code_orchestration] ungrounded answer: {answer}.")
+                answer = get_message('UNGROUNDED_ANSWER')
+                answer_dict['gpt_groundedness'] = 1
+                bypass_flow = True
+            else:
+                answer_dict['gpt_groundedness'] = 5
+            response_time =  round(time.time() - start_time,2)
+            logging.info(f"[code_orchestration] checking if it is grounded with SK. {response_time} seconds.")
+        except Exception as e:
+            logging.error(f"[code_orchestration] could not check answer is grounded. {e}")
 
     if BLOCKED_LIST_CHECK and not bypass_flow:
         try:

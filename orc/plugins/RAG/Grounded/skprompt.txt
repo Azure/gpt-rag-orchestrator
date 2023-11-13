@@ -1,0 +1,15 @@
+## Task Goal
+The task is to check if the ANSWER is based on the SOURCES.
+
+## Task instructions
+- Is the ANSWER based on the input SOURCES?
+
+Output is yes or no lower case.
+
+Do not repeat the SOURCES.
+
+## Task Input:
+"ANSWER": "{{$answer}}"
+"SOURCES": "{{$sources}}"
+
+## Task Output:
