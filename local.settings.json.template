@@ -3,9 +3,11 @@
   "Values": {
     "FUNCTIONS_WORKER_RUNTIME": "python",
     "AzureWebJobsStorage": "",
+    "LOCAL_ENV": "false",    
 
     "AZURE_KEY_VAULT_NAME": "",
     "AZURE_DB_ID": "",
+    "AZURE_DB_NAME": "",
 
     "AZURE_SEARCH_SERVICE": "",
     "AZURE_SEARCH_INDEX": "ragindex",
