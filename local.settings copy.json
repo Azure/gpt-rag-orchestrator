@@ -1,0 +1,36 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AZURE_KEY_VAULT_NAME": "kv0tpsur",
+    "AZURE_DB_ID": "dbgpt0tpsur",
+    "AZURE_DB_NAME": "db0tpsur",    
+    
+    "AZURE_SEARCH_SERVICE": "search0tpsur",
+    "AZURE_SEARCH_INDEX": "ragindex",
+    "AZURE_SEARCH_API_VERSION": "2023-07-01-Preview",
+    "AZURE_SEARCH_APPROACH": "hybrid",
+    "AZURE_SEARCH_USE_SEMANTIC": "true",
+
+    "AZURE_OPENAI_RESOURCE": "oai0tpsur,oai0vwrcp",
+    "AZURE_OPENAI_API_VERSION": "2023-07-01-preview",
+
+    "AZURE_OPENAI_CHATGPT_DEPLOYMENT": "chat",
+    "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": "text-embedding-ada-002",
+
+    "AZURE_OPENAI_CHATGPT_MODEL": "gpt-35-turbo-16k",
+    "AZURE_OPENAI_EMBEDDING_MODEL": "text-embedding-ada-002",
+
+    "AZURE_OPENAI_CHATGPT_LLM_MONITORING": "true",    
+    "AZURE_OPENAI_STREAM": "false",
+    "ORCHESTRATOR_MESSAGES_LANGUAGE": "es",
+    
+    "AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE": "es",
+
+    "AZURE_OPENAI_LOAD_BALANCING": "true",
+    
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true"
+  }
+}
+
+// "AZURE_SEARCH_SERVICE": "search101574boti",

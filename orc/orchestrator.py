@@ -51,7 +51,9 @@ async def run(conversation_id, ask, client_principal):
     logging.info(f"[orchestrator] starting conversation flow. conversation_id {conversation_id}. ask: {ask}")   
 
     # get conversation
-    credential = DefaultAzureCredential()
+    exclude_mis = False
+    if os.getenv('LOCAL_ENV') == 'true': exclude_mis = True
+    credential = DefaultAzureCredential(exclude_managed_identity_credential=exclude_mis)
     db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
     db = db_client.get_database_client(database=AZURE_DB_NAME)
     container = db.get_container_client('conversations')

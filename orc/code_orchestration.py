@@ -145,6 +145,7 @@ async def get_answer(history):
                 search_query = ask
                 sources = sk_response.result
                 context.variables["sources"] = sources
+                logging.info(f"[code_orchestration] generating bot answer. sources: {sources[:200]}")
 
                 # get the answer
 
