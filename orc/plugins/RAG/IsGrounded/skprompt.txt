@@ -1,5 +1,5 @@
 ## Task Goal
-The task is to check if the ANSWER is based on the SOURCES.
+The task is to check if the ANSWER is at least partially based on the SOURCES.
 
 ## Task instructions
 - Is the ANSWER based on the input SOURCES?

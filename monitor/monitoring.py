@@ -39,7 +39,7 @@ def get_groundedness(sources, answer):
           context['answer'] = re.sub(r'\[.*?\]', '', answer)
           rag_plugin = load_sk_plugin('RAG', oai_config)
 
-          semantic_response = call_semantic_function(rag_plugin["Grounded"], context)
+          semantic_response = call_semantic_function(rag_plugin["IsGrounded"], context)
 
           if not semantic_response.error_occurred:
                grounded = semantic_response.result
