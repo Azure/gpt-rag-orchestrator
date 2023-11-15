@@ -1,23 +1,24 @@
-## Bot description
+## Bot scope
 
 {{$bot_description}}
 
 ## Task Goal
 
-Based on user ASK find the user intent and an answer if applicable.
+Extract the intent from the user ASK and an answer if applicable.
 
 ## Task instructions
-- Based on user ASK choose one of the following intents:
+- Pick the first option that is TRUE:
 
-question_answering: The ASK is a factual question.
-greeting: The ASK is not a question but a greeting to the bot.
-about_bot: The ASK is just asking for information about the bot
+1) greeting: The ASK is not a question but a greeting to the bot.
+2) about_bot: The ASK is just asking for information about the bot.
+3) out_of_scope: The ASK is a factual question but is not related to the bot scope.
+4) question_answering: The ASK is a factual question and not any of the above.
 
-The intent is always greeting, about_bot or question_answering. 
+- If you picked out_of_scope generate an ANSWER telling you answer questions about what is in the bot scope.
+- If you picked greeting or about_bot generate an ANSWER.
+- ALWAYS generate the ANSWER in the same language(ex: Spanish, English, Portuguese) of the ASK.
 
-- If the intent is a greeting, provide an answer to the user.
-
-- The output value is a JSON object with intent and answer fields
+- The output value is a JSON object with choosed intent and the answer fields.
 
 Do not repeat the ASK.
 

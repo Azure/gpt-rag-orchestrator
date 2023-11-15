@@ -2,8 +2,8 @@
   "IsEncrypted": false,
   "Values": {
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "AzureWebJobsStorage": "",
-    "LOCAL_ENV": "false",    
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "LOCAL_ENV": "true",    
 
     "AZURE_KEY_VAULT_NAME": "",
     "AZURE_DB_ID": "",
@@ -15,6 +15,7 @@
 
     "AZURE_SEARCH_APPROACH": "hybrid",
     "AZURE_SEARCH_USE_SEMANTIC": "true",
+    "AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE": "",
 
     "AZURE_OPENAI_RESOURCE" : "",
     "AZURE_OPENAI_CHATGPT_DEPLOYMENT": "chat",

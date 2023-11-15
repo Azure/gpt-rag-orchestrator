@@ -37,7 +37,7 @@ AZURE_OPENAI_TOP_P = float(AZURE_OPENAI_TOP_P)
 AZURE_OPENAI_RESP_MAX_TOKENS = os.environ.get("AZURE_OPENAI_MAX_TOKENS") or "1000"
 AZURE_OPENAI_RESP_MAX_TOKENS = int(AZURE_OPENAI_RESP_MAX_TOKENS)
 
-SYSTEM_MESSAGE = f"orc/prompts/system_message.prompt"
+SYSTEM_MESSAGE_PATH = f"orc/prompts/system_message.prompt"
 
 async def get_answer(history):
 
@@ -109,7 +109,7 @@ async def get_answer(history):
             native_functions = kernel.import_native_skill_from_directory(plugins_directory, rag_plugin_name)
             rag_plugin.update(native_functions)
 
-            system_message = open(SYSTEM_MESSAGE, "r").read()
+            system_message = open(SYSTEM_MESSAGE_PATH, "r").read()
 
             context = kernel.create_new_context()
             context.variables["bot_description"] = system_message
@@ -128,7 +128,7 @@ async def get_answer(history):
 
             # greetings
 
-            if intent == "greeting" or intent == "about_bot":
+            if intent == "greeting" or intent == "about_bot" or intent == "out_of_scope":
                 if 'answer' in sk_response_json:
                     answer = sk_response_json['answer']
                     logging.info(f"[code_orchestration] triaging with SK answer: {answer}.")
@@ -172,7 +172,6 @@ async def get_answer(history):
             answer = f"{get_message('ERROR_ANSWER')} RAG flow: {e}"
             bypass_flow = True
 
-
     #############################
     # GUARDRAILS (ANSWER)
     #############################
@@ -182,12 +181,13 @@ async def get_answer(history):
             logging.info(f"[code_orchestration] checking if it is grounded. answer: {answer[:50]}")  
             logging.info(f"[code_orchestration] checking if it is grounded. sources: {sources[:100]}")
             context.variables["answer"] = answer                      
-            sk_response = call_semantic_function(rag_plugin["Grounded"], context)
+            sk_response = call_semantic_function(rag_plugin["IsGrounded"], context)
             grounded = sk_response.result
             logging.info(f"[code_orchestration] is it grounded? {grounded}.")  
             if grounded.lower() == 'no':
-                logging.info(f"[code_orchestration] ungrounded answer: {answer}.")
-                answer = get_message('UNGROUNDED_ANSWER')
+                logging.info(f"[code_orchestration] ungrounded answer: {answer}")
+                sk_response = call_semantic_function(rag_plugin["NotInSourcesAnswer"], context)
+                answer = sk_response.result
                 answer_dict['gpt_groundedness'] = 1
                 bypass_flow = True
             else:
@@ -209,7 +209,7 @@ async def get_answer(history):
             
     answer_dict["prompt"] = prompt
     answer_dict["answer"] = answer
-    answer_dict["sources"] = sources
+    answer_dict["sources"] = sources.replace('[', '{').replace(']', '}')
     answer_dict["search_query"] = search_query
     answer_dict["model"] = AZURE_OPENAI_CHATGPT_MODEL    
     # answer_dict["prompt_tokens"] = prompt_tokens
