@@ -22,6 +22,12 @@
           "description": "User ask(i.e., How do I execute task A?)",
           "defaultValue": "",
           "required": true	
+        },
+        {
+          "name": "history",
+          "description": "Message history in json format.",
+          "defaultValue": "",
+          "required": true	
         }
       ]
     }
