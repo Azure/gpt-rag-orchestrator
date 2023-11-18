@@ -117,6 +117,7 @@ async def get_answer(history):
 
             # triage
 
+            context.variables["history"] = json.dumps(messages[-5:-1], ensure_ascii=False) # just last two interactions
             logging.info(f"[code_orchestration] checking intent. ask: {ask}")            
             sk_response = call_semantic_function(rag_plugin["Triage"], context)
             sk_response_json = json.loads(sk_response.result)
@@ -126,7 +127,7 @@ async def get_answer(history):
             response_time =  round(time.time() - start_time,2)              
             logging.info(f"[code_orchestration] triaging with SK. {response_time} seconds.")
 
-            # greetings
+            # general intents
 
             if intent == "greeting" or intent == "about_bot" or intent == "out_of_scope":
                 if 'answer' in sk_response_json:
@@ -138,11 +139,15 @@ async def get_answer(history):
             elif intent == "question_answering":
                 # get sources
 
+                if 'query_string' in sk_response_json:
+                    search_query = sk_response_json['query_string']  
+                else:
+                    search_query = ask  
+
                 sk_response = await kernel.run_async(
                     rag_plugin["Retrieval"],
-                    input_str=ask,
+                    input_str=search_query
                 )
-                search_query = ask
                 sources = sk_response.result
                 context.variables["sources"] = sources
                 logging.info(f"[code_orchestration] generating bot answer. sources: {sources[:200]}")

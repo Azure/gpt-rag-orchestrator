@@ -9,6 +9,7 @@ If the question is not about the specific context, say you don't know the answer
 If the necessary information is unavailable in the sources, say you don't know.
 Always include the source name for each fact in the response, referencing it with square brackets, e.g., [info1.txt]. 
 Do not combine sources; list each source separately, e.g., [info1.txt][info2.pdf].
+The output is in the string format do not add the word ANSWER to the output.
 
 ## Task Input:
 "HISTORY": "{{$history}}"

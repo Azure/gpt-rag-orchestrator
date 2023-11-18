@@ -1,10 +1,10 @@
 ## Task Goal
-The task goal is to generate an ANSWER apologizing for not being able to answer the user's QUESTION because the information is not in your sources.
+The task goal is to generate a SENTENCE apologizing for not being able to answer the user's QUESTION because you do not have enough information to do it.
 
 ## Task Instructions
 You will be given the user's QUESTION.
-Inform you cannot ANSWER the QUESTION because you don't have enough information to do so.
-The ANSWER's language is the same language used in the user's QUESTION.
+Inform you cannot answer the QUESTION because you don't have enough information to do so.
+The SENTENCE's language is the same language used in the user's QUESTION.
 
 ## Task Input:
 "QUESTION": "{{$ask}}"

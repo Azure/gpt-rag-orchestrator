@@ -71,6 +71,7 @@ class RAG:
             start_time = time.time()
             embeddings_query = generate_embeddings(search_query)
             response_time =  round(time.time() - start_time,2)
+            logging.info(f"[sk_function_retrieval] querying azure ai search. search query: {search_query}")
             logging.info(f"[sk_function_retrieval] generated question embeddings. {response_time} seconds")
             azureSearchKey = get_secret('azureSearchKey') 
 
