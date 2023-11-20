@@ -59,6 +59,7 @@ Since we're now using managed identities you will have to assign the following r
 
 1. Azure CosmosDB 'Cosmos DB Built-in Data Contributor' role.
 
+*bash*
 ```
 resourceGroupName='your resource group name'
 cosmosDbaccountName='CosmosDB Service name'
@@ -67,8 +68,18 @@ principalId='Object id of your user in Microsoft Entra ID'
 az cosmosdb sql role assignment create --account-name $cosmosDbaccountName --resource-group $resourceGroupName --scope "/" --principal-id $principalId --role-definition-id $roleDefinitionId
 ```
 
+*PowerShell*
+```
+$resourceGroupName='your resource group name'
+$cosmosDbaccountName='CosmosDB Service name'
+$roleDefinitionId='00000000-0000-0000-0000-000000000002'
+$principalId='Object id of your user in Microsoft Entra ID'
+az cosmosdb sql role assignment create --account-name $cosmosDbaccountName --resource-group $resourceGroupName --scope "/" --principal-id $principalId --role-definition-id $roleDefinitionId
+```
+
 2. Azure OpenAI resource 'Cognitive Services OpenAI User' role.
 
+*bash*
 ```
 subscriptionId='your subscription id'
 resourceGroupName='your resource group name'
@@ -77,6 +88,14 @@ principalId='Object id of your user in Microsoft Entra ID'
 az role assignment create --role "Cognitive Services OpenAI User" --assignee $principalId --scope /subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.CognitiveServices/accounts/$openAIAccountName
 ```
 
+*PowerShell*
+```
+$subscriptionId='your subscription id'
+$resourceGroupName='your resource group name'
+$openAIAccountName='Azure OpenAI service name'
+$principalId='Object id of your user in Microsoft Entra ID'
+az role assignment create --role "Cognitive Services OpenAI User" --assignee $principalId --scope /subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.CognitiveServices/accounts/$openAIAccountName
+```
 
 **References**
 
