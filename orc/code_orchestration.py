@@ -109,7 +109,7 @@ async def get_answer(history):
     system_message = prompt = open(SYSTEM_MESSAGE_PATH, "r").read()
     search_query = ""
     sources = ""
-    bypass = False  # flag to bypass unnecessary steps
+    bypass_nxt_steps = False  # flag to bypass unnecessary steps
     blocked_list = []
 
     # get user question
@@ -131,7 +131,7 @@ async def get_answer(history):
                 if blocked_word in ask.lower():
                     logging.info(f"[code_orchestration] blocked word found in question: {blocked_word}.")
                     answer = get_message('BLOCKED_ANSWER')
-                    bypass = True
+                    bypass_nxt_steps = True
                     break
         except Exception as e:
             logging.error(f"[code_orchestration] could not get blocked list. {e}") 
@@ -140,7 +140,7 @@ async def get_answer(history):
     # RAG-FLOW
     #############################
 
-    if not bypass:
+    if not bypass_nxt_steps:
 
         try:
             
@@ -155,7 +155,7 @@ async def get_answer(history):
             triage_response = triage_ask(rag_plugin, context)
             response_time =  round(time.time() - start_time,2)
             intent = triage_response['intent']
-            bypass = triage_response['bypass']
+            bypass_nxt_steps = triage_response['bypass']
             logging.info(f"[code_orchestration] checked intent: {intent}. {response_time} seconds.")
 
             # Handle general intents
@@ -180,7 +180,7 @@ async def get_answer(history):
                 if context.error_occurred:
                     logging.error(f"[code_orchestration]  error when executing RAG flow (Retrieval). SK error: {context.last_error_description}")
                     answer = f"{get_message('ERROR_ANSWER')} (Retrieval) RAG flow: {context.last_error_description}"
-                    bypass = True
+                    bypass_nxt_steps = True
 
                 else:
                     # Generate the answer for the user
@@ -192,7 +192,7 @@ async def get_answer(history):
                     if context.error_occurred:
                         logging.error(f"[code_orchestration] error when executing RAG flow (get the answer). {context.last_error_description}")
                         answer = f"{get_message('ERROR_ANSWER')} (get the answer) RAG flow: {context.last_error_description}"
-                        bypass = True
+                        bypass_nxt_steps = True
                     response_time =  round(time.time() - start_time,2)              
                     logging.info(f"[code_orchestration] generated bot answer. {answer[:100]}. {response_time} seconds.")
             else:
@@ -201,13 +201,13 @@ async def get_answer(history):
         except Exception as e:
             logging.error(f"[code_orchestration] exception when executing RAG flow. {e}")
             answer = f"{get_message('ERROR_ANSWER')} RAG flow: exception: {e}"
-            bypass = True
+            bypass_nxt_steps = True
 
     #############################
     # GUARDRAILS (ANSWER)
     #############################
 
-    if GROUNDEDNESS_CHECK and intent == 'question_answering' and not bypass:
+    if GROUNDEDNESS_CHECK and intent == 'question_answering' and not bypass_nxt_steps:
         try:
             logging.info(f"[code_orchestration] checking if it is grounded. answer: {answer[:50]}")  
             logging.info(f"[code_orchestration] checking if it is grounded. sources: {sources[:100]}")
@@ -221,7 +221,7 @@ async def get_answer(history):
                 sk_response = call_semantic_function(rag_plugin["NotInSourcesAnswer"], context)
                 answer = sk_response.result
                 answer_dict['gpt_groundedness'] = 1
-                bypass = True
+                bypass_nxt_steps = True
             else:
                 answer_dict['gpt_groundedness'] = 5
             response_time =  round(time.time() - start_time,2)
@@ -229,7 +229,7 @@ async def get_answer(history):
         except Exception as e:
             logging.error(f"[code_orchestration] could not check answer is grounded. {e}")
 
-    if BLOCKED_LIST_CHECK and not bypass:
+    if BLOCKED_LIST_CHECK and not bypass_nxt_steps:
         try:
             for blocked_word in blocked_list:
                 if blocked_word in answer.lower():
