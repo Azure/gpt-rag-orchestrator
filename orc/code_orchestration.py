@@ -39,6 +39,62 @@ AZURE_OPENAI_RESP_MAX_TOKENS = int(AZURE_OPENAI_RESP_MAX_TOKENS)
 
 SYSTEM_MESSAGE_PATH = f"orc/prompts/system_message.prompt"
 
+def initialize_kernel():
+    kernel = sk.Kernel(log=myLogger)
+    chatgpt_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
+    kernel.add_chat_service(
+        "chat-gpt",
+        sk_oai.AzureChatCompletion(chatgpt_config['deployment'], 
+                                    chatgpt_config['endpoint'], 
+                                    chatgpt_config['api_key'], 
+                                    api_version=chatgpt_config['api_version'],
+                                    ad_auth=True), 
+    )
+    return kernel
+
+def import_plugins(kernel, plugins_directory, rag_plugin_name):
+    rag_plugin = kernel.import_semantic_skill_from_directory(plugins_directory, rag_plugin_name)
+    native_functions = kernel.import_native_skill_from_directory(plugins_directory, rag_plugin_name)
+    rag_plugin.update(native_functions)
+    return rag_plugin
+
+def create_context(kernel, system_message, ask, messages):
+    context = kernel.create_new_context()
+    context.variables["bot_description"] = system_message
+    context.variables["ask"] = ask
+    context.variables["history"] = json.dumps(messages[-5:-1], ensure_ascii=False) # just last two interactions
+    return context
+
+def triage_ask(rag_plugin, context):
+    """
+    This function is used to triage the user ask and determine the intent of the request. 
+    If the ask is a Q&A question, a search query is generated to search for sources.
+    If it is not a Q&A question, there's no need to retrieve sources and the answer is generated.
+   
+    Returns:
+    dict: A dictionary containing the triage response. The response includes the intent, answer, search query, and a bypass flag.
+        'intent' (str): The intent of the request. Defaults to 'none' if not found.
+        'answer' (str): The answer to the request. Defaults to an empty string if not found.
+        'search_query' (str): The search query for the request. Defaults to an empty string if not found.
+        'bypass' (bool): A flag indicating whether to bypass the the reminder flow steps (in case of an error has occurred).
+    """    
+    triage_response= {"intent":  "none", "answer": "", "search_query": "", "bypass": False}
+    sk_response = call_semantic_function(rag_plugin["Triage"], context)
+    if context.error_occurred:
+        logging.error(f"[code_orchestration] error when executing RAG flow (Triage). SK error: {context.last_error_description}")
+        triage_response["bypass"] = True
+    try:
+        sk_response_json = json.loads(sk_response.result)
+    except json.JSONDecodeError:
+        logging.error(f"[code_orchestration] error when executing RAG flow (Triage). Invalid json: {sk_response.result}")
+        sk_response_json = {}        
+    sk_response_json = json.loads(sk_response.result)
+    triage_response["intent"] = sk_response_json.get('intent', 'none')
+    triage_response["answer"] = sk_response_json.get('answer', '')
+    triage_response["search_query"] = sk_response_json.get('query_string', '')   
+    return triage_response
+
+
 async def get_answer(history):
 
     #############################
@@ -50,16 +106,19 @@ async def get_answer(history):
     answer_dict = {}
     answer = ""
     intent = "none"
-    prompt = ""
+    system_message = prompt = open(SYSTEM_MESSAGE_PATH, "r").read()
     search_query = ""
     sources = ""
-    bypass_flow = False  
+    bypass = False  # flag to bypass unnecessary steps
     blocked_list = []
 
     # get user question
 
     messages = get_chat_history_as_messages(history, include_last_turn=True)
     ask = messages[-1]['content']
+
+    logging.info(f"[code_orchestration] starting RAG flow. {ask[:50]}")
+    init_time = time.time()
 
     #############################
     # GUARDRAILS (QUESTION)
@@ -72,7 +131,7 @@ async def get_answer(history):
                 if blocked_word in ask.lower():
                     logging.info(f"[code_orchestration] blocked word found in question: {blocked_word}.")
                     answer = get_message('BLOCKED_ANSWER')
-                    bypass_flow = True
+                    bypass = True
                     break
         except Exception as e:
             logging.error(f"[code_orchestration] could not get blocked list. {e}") 
@@ -81,68 +140,33 @@ async def get_answer(history):
     # RAG-FLOW
     #############################
 
-    if not bypass_flow:
+    if not bypass:
 
         try:
             
             # initialize semantic kernel
+            kernel = initialize_kernel()
+            rag_plugin = import_plugins(kernel, "orc/plugins", "RAG")
+            context = create_context(kernel, system_message, ask, messages)
+            
+            # triage (find intent and generate answer and search query when applicable)
+            logging.info(f"[code_orchestration] checking intent. ask: {ask}")
+            start_time = time.time()                        
+            triage_response = triage_ask(rag_plugin, context)
+            response_time =  round(time.time() - start_time,2)
+            intent = triage_response['intent']
+            bypass = triage_response['bypass']
+            logging.info(f"[code_orchestration] checked intent: {intent}. {response_time} seconds.")
 
-            logging.info(f"[code_orchestration] starting RAG flow. {ask[:50]}")
+            # Handle general intents
+            if intent in ("greeting", "about_bot", "out_of_scope"):
+                answer = triage_response['answer']
+                logging.info(f"[code_orchestration] triage answer: {answer}")
 
-            start_time = time.time()
-
-            kernel = sk.Kernel(log=myLogger)
-
-            chatgpt_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
-            kernel.add_chat_service(
-                "chat-gpt",
-                sk_oai.AzureChatCompletion(chatgpt_config['deployment'], 
-                                            chatgpt_config['endpoint'], 
-                                            chatgpt_config['api_key'], 
-                                            api_version=chatgpt_config['api_version'],
-                                            ad_auth=True), 
-            )
-
-            rag_plugin_name = "RAG"
-            plugins_directory = "orc/plugins"
-            rag_plugin = kernel.import_semantic_skill_from_directory(plugins_directory, rag_plugin_name)
-            native_functions = kernel.import_native_skill_from_directory(plugins_directory, rag_plugin_name)
-            rag_plugin.update(native_functions)
-
-            system_message = open(SYSTEM_MESSAGE_PATH, "r").read()
-
-            context = kernel.create_new_context()
-            context.variables["bot_description"] = system_message
-            context.variables["ask"] = ask
-
-            # triage
-
-            context.variables["history"] = json.dumps(messages[-5:-1], ensure_ascii=False) # just last two interactions
-            logging.info(f"[code_orchestration] checking intent. ask: {ask}")            
-            sk_response = call_semantic_function(rag_plugin["Triage"], context)
-            sk_response_json = json.loads(sk_response.result)
-            if 'intent' in sk_response_json:
-                intent = sk_response_json['intent']            
-                logging.info(f"[code_orchestration] triaging with SK intent: {intent}.")  
-            response_time =  round(time.time() - start_time,2)              
-            logging.info(f"[code_orchestration] triaging with SK. {response_time} seconds.")
-
-            # general intents
-
-            if intent == "greeting" or intent == "about_bot" or intent == "out_of_scope":
-                if 'answer' in sk_response_json:
-                    answer = sk_response_json['answer']
-                    logging.info(f"[code_orchestration] triaging with SK answer: {answer}.")
-
-            # qna
-
+            # Handle question answering intent
             elif intent == "question_answering":
-                # get sources
-
-                if 'query_string' in sk_response_json:
-                    search_query = sk_response_json['query_string']  
-                else:
-                    search_query = ask  
+                
+                search_query = triage_response['search_query'] if triage_response['search_query'] != '' else ask
 
                 sk_response = await kernel.run_async(
                     rag_plugin["Retrieval"],
@@ -152,39 +176,42 @@ async def get_answer(history):
                 context.variables["sources"] = sources
                 logging.info(f"[code_orchestration] generating bot answer. sources: {sources[:200]}")
 
-                # get the answer
-
-                logging.info(f"[code_orchestration] generating bot answer. ask: {ask}")
-                context.variables["history"] = json.dumps(messages[:-1], ensure_ascii=False)
-                sk_response = call_semantic_function(rag_plugin["Answer"], context)
-                answer = sk_response.result
-                logging.info(f"[code_orchestration] generating bot answer. answer: {answer}")  
-                response_time =  round(time.time() - start_time,2)              
-                logging.info(f"[code_orchestration] triaging with SK. {response_time} seconds.")
-
+                # Handle errors
                 if context.error_occurred:
-                    logging.error(f"[code_orchestration] error when executing RAG flow. {context.last_error_description}")
-                    answer = f"{get_message('ERROR_ANSWER')} RAG flow: {context.last_error_description}"
-                    bypass_flow = True
+                    logging.error(f"[code_orchestration]  error when executing RAG flow (Retrieval). SK error: {context.last_error_description}")
+                    answer = f"{get_message('ERROR_ANSWER')} (Retrieval) RAG flow: {context.last_error_description}"
+                    bypass = True
 
-                response_time =  round(time.time() - start_time,2)              
-                logging.info(f"[code_orchestration] executed RAG flow with SK. {response_time} seconds.")
+                else:
+                    # Generate the answer for the user
+                    logging.info(f"[code_orchestration] generating bot answer. ask: {ask}")
+                    start_time = time.time()                                                          
+                    context.variables["history"] = json.dumps(messages[:-1], ensure_ascii=False) # update context with full history
+                    sk_response = call_semantic_function(rag_plugin["Answer"], context)
+                    answer = sk_response.result
+                    if context.error_occurred:
+                        logging.error(f"[code_orchestration] error when executing RAG flow (get the answer). {context.last_error_description}")
+                        answer = f"{get_message('ERROR_ANSWER')} (get the answer) RAG flow: {context.last_error_description}"
+                        bypass = True
+                    response_time =  round(time.time() - start_time,2)              
+                    logging.info(f"[code_orchestration] generated bot answer. {answer[:100]}. {response_time} seconds.")
             else:
                 logging.info(f"[code_orchestration] SK did not executed, no intent found.")
 
         except Exception as e:
-            logging.error(f"[code_orchestration] error when executing RAG flow. {e}")
-            answer = f"{get_message('ERROR_ANSWER')} RAG flow: {e}"
-            bypass_flow = True
+            logging.error(f"[code_orchestration] exception when executing RAG flow. {e}")
+            answer = f"{get_message('ERROR_ANSWER')} RAG flow: exception: {e}"
+            bypass = True
 
     #############################
     # GUARDRAILS (ANSWER)
     #############################
 
-    if GROUNDEDNESS_CHECK and intent == 'question_answering' and not bypass_flow:
+    if GROUNDEDNESS_CHECK and intent == 'question_answering' and not bypass:
         try:
             logging.info(f"[code_orchestration] checking if it is grounded. answer: {answer[:50]}")  
             logging.info(f"[code_orchestration] checking if it is grounded. sources: {sources[:100]}")
+            start_time = time.time()            
             context.variables["answer"] = answer                      
             sk_response = call_semantic_function(rag_plugin["IsGrounded"], context)
             grounded = sk_response.result
@@ -194,15 +221,15 @@ async def get_answer(history):
                 sk_response = call_semantic_function(rag_plugin["NotInSourcesAnswer"], context)
                 answer = sk_response.result
                 answer_dict['gpt_groundedness'] = 1
-                bypass_flow = True
+                bypass = True
             else:
                 answer_dict['gpt_groundedness'] = 5
             response_time =  round(time.time() - start_time,2)
-            logging.info(f"[code_orchestration] checking if it is grounded with SK. {response_time} seconds.")
+            logging.info(f"[code_orchestration] checked if it is grounded. {response_time} seconds.")
         except Exception as e:
             logging.error(f"[code_orchestration] could not check answer is grounded. {e}")
 
-    if BLOCKED_LIST_CHECK and not bypass_flow:
+    if BLOCKED_LIST_CHECK and not bypass:
         try:
             for blocked_word in blocked_list:
                 if blocked_word in answer.lower():
@@ -218,6 +245,9 @@ async def get_answer(history):
     answer_dict["search_query"] = search_query
     answer_dict["model"] = AZURE_OPENAI_CHATGPT_MODEL    
     # answer_dict["prompt_tokens"] = prompt_tokens
-    # answer_dict["completion_tokens"] = completion_tokens    
-    
+    # answer_dict["completion_tokens"] = completion_tokens
+        
+    response_time =  round(time.time() - init_time,2)
+    logging.info(f"[code_orchestration] Finished RAG Flow. {response_time} seconds.")
+
     return answer_dict

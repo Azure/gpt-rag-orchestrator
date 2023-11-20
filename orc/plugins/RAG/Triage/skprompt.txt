@@ -21,7 +21,7 @@ Based on the user ASK and the HISTORY with previous user questions and assistant
 - If you have chosen 'question_answering', generate the 'QUERY_STRING' by utilizing both the 'ASK' and 'HISTORY' parameters. This 'QUERY_STRING' will be used to search for the 'ANSWER'.
 - ALWAYS generate the ANSWER in the same language(ex: Spanish, English, Portuguese) of the ASK.
 
-- The output value is a JSON object with choosed intent, answer and query_string fields.
+- The output is a JSON object with choosed intent, answer and query_string fields.
 - The output should not include the word ANSWER.
 
 Do not repeat the ASK.
