@@ -1,0 +1,38 @@
+{
+    "name": "GPT-RAG",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "args": {
+            // You can specify build arguments here if needed
+        }
+    },
+    "settings": { 
+        // Set any VS Code settings here
+        // Example: "terminal.integrated.shell.linux": "/bin/bash"
+    },
+    "extensions": [
+        "ms-azuretools.vscode-azurefunctions",
+        "ms-azuretools.vscode-bicep",
+        "ms-python.python",
+        "esbenp.prettier-vscode"
+    ],
+    "forwardPorts": [
+        7071,  // Local Azure Functions
+        10000, // Blob Storage
+        10001, // Queue Storage
+        10002  // Table Storage
+    ],
+    //"postCreateCommand": "azurite -s -l /data --debug /data/debug.log",
+    "remoteUser": "vscode",
+    //"mounts": [
+    //    "source=/path/to/local/data,target=/data,type=bind"
+        // Adjust the source path to where you want to store Azurite data on your host machine
+    "runArgs": [
+        // Add any additional runtime arguments here if needed
+    ],
+    "hostRequirements": {
+        "memory": "2gb",
+        "cpus": "2"
+        // Adjust memory and CPUs as per your machine's capability
+    }
+}
