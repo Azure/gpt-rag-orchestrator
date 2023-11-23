@@ -255,6 +255,8 @@ def get_aoai_config(model):
         deployment = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
     elif model == AZURE_OPENAI_EMBEDDING_MODEL:
         deployment = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
+    else:
+        raise Exception(f"Model {model} not supported. Check if you have the correct env variables set.")
 
     result ={
         "resource": resource,
