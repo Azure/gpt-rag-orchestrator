@@ -35,6 +35,7 @@ AZURE_DB_NAME = os.environ.get("AZURE_DB_NAME")
 AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
 
 model_max_tokens = {
+    'gpt-35-turbo': 4096,
     'gpt-35-turbo-16k': 16384,
     'gpt-4': 8192,
     'gpt-4-32k': 32768
@@ -251,7 +252,7 @@ def get_aoai_config(model):
     credential = DefaultAzureCredential()
     token = credential.get_token("https://cognitiveservices.azure.com/.default")
 
-    if model in ('gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'):
+    if model in ('gpt-35-turbo', 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'):
         deployment = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
     elif model == AZURE_OPENAI_EMBEDDING_MODEL:
         deployment = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
