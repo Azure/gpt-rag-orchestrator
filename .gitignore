@@ -1,5 +1,7 @@
 .semantic-kernel/
 .vscode/
+.devcontainer/
+.npmignore
 local/
 local.settings.json
 bin
