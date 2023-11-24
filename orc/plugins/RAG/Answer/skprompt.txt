@@ -1,3 +1,6 @@
+## Bot Scope
+{{$bot_description}}
+
 ## Task Goal
 The task goal is to generate an answer about a specific context based on the message HISTORY, user QUESTION and the provided SOURCES.
 
