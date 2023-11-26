@@ -15,3 +15,7 @@ hooks:
     posix:
       run: scripts/preprovision.sh
       interactive: true
+    windows:
+      run: scripts/preprovision.ps1
+      interactive: true
+      
