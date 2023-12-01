@@ -195,7 +195,8 @@ async def get_answer(history):
                     response_time =  round(time.time() - start_time,2)              
                     logging.info(f"[code_orchestration] generated bot answer. {answer[:100]}. {response_time} seconds.")
             else:
-                logging.info(f"[code_orchestration] SK did not executed, no intent found.")
+                logging.info(f"[code_orchestration] SK did not executed, no intent found, review Triage function.")
+                answer = get_message('NO_INTENT_ANSWER')
                 bypass_nxt_steps = True
 
         except Exception as e:

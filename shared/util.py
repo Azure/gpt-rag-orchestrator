@@ -296,7 +296,7 @@ def get_next_resource(model):
             # check if there's an update in the resource list and update cache
             if set(keyvalue["resources"]) != set(resources):
                 keyvalue["resources"] = resources           
-        except Exception as e:
+        except Exception:
             logging.info(f"[util] get_next_resource: first time execution (keyvalue store with '{model}' id does not exist, creating a new one).")  
             keyvalue = { 
                 "id": model,
