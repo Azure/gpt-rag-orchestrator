@@ -134,7 +134,7 @@ def execute_setup(subscription_id, resource_group, function_app_name, key_vault_
 
 
 
-def main(subscription_id=None, resource_group=None, function_app_name=None, enable_managed_identities=False, enable_env_credentials=False):
+def main(subscription_id=None, resource_group=None, function_app_name=None, key_vault_name=None, enable_managed_identities=False, enable_env_credentials=False):
     """
     Sets up a chunking function app in Azure.
 
@@ -175,4 +175,4 @@ if __name__ == '__main__':
     parser.add_argument('-e', '--enable_env_credentials', action='store_true', default=False, help='Enable environment credentials')    
     args = parser.parse_args()
 
-    main(subscription_id=args.subscription_id, resource_group=args.resource_group, function_app_name=args.function_app_name, enable_managed_identities=args.enable_managed_identities, enable_env_credentials=args.enable_env_credentials)    
+    main(subscription_id=args.subscription_id, resource_group=args.resource_group, function_app_name=args.function_app_name, key_vault_name=args.key_vault_name, enable_managed_identities=args.enable_managed_identities, enable_env_credentials=args.enable_env_credentials)    
