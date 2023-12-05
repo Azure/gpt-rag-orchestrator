@@ -3,12 +3,8 @@ import time
 import requests
 import argparse
 import json
-import azure.core.exceptions
-from azure.storage.blob import BlobServiceClient
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
-from azure.mgmt.web import WebSiteManagementClient
-from azure.mgmt.storage import StorageManagementClient
 
 logging.getLogger('azure').setLevel(logging.WARNING)
 
