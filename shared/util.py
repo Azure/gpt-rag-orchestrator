@@ -135,6 +135,13 @@ def optmize_messages(chat_history_messages, model):
 @retry(wait=wait_random_exponential(min=20, max=60), stop=stop_after_attempt(12), reraise=True)
 def call_semantic_function(function, context):
     semantic_response = function(context = context)
+    if semantic_response.error_occurred:
+        error_details = f"Error code: {semantic_response.last_exception.error_code}. Error message: {semantic_response.last_error_description}"
+        logging.info(f"[call_semantic_function] error occurred when calling semantic function {function.name}. {error_details}")
+        if str(semantic_response.last_exception.error_code) == 'ErrorCodes.ServiceError':
+            # TODO: add time penalty for model when service is unavailable
+            pass
+        raise Exception(f"Semantic function {function.name} failed with error: {semantic_response.error_message}")
     return semantic_response
 
 @retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(12), reraise=True)
@@ -289,8 +296,8 @@ def get_next_resource(model):
             # check if there's an update in the resource list and update cache
             if set(keyvalue["resources"]) != set(resources):
                 keyvalue["resources"] = resources           
-        except Exception as e:
-            logging.info(f"[util] get_next_resource: keyvalue store with '{model}' id does not exist.")  
+        except Exception:
+            logging.info(f"[util] get_next_resource: first time execution (keyvalue store with '{model}' id does not exist, creating a new one).")  
             keyvalue = { 
                 "id": model,
                 "resources": resources              
@@ -327,7 +334,7 @@ def get_blocked_list():
         blocked_list= key_value["blocked_words"]
         blocked_list = [word.lower() for word in blocked_list]  
     except Exception as e:
-        logging.info(f"[util] get_blocked_list: keyvalue store with 'blocked_list' id does not exist.")  
+        logging.info(f"[util] get_blocked_list: no blocked words list (keyvalue store with 'blocked_list' id does not exist).")
     response_time = round(time.time() - start_time,2)
     logging.info(f"[util] get_blocked_list in {response_time} seconds") 
     return blocked_list

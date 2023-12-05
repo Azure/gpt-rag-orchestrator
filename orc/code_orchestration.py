@@ -82,13 +82,13 @@ def triage_ask(rag_plugin, context):
     sk_response = call_semantic_function(rag_plugin["Triage"], context)
     if context.error_occurred:
         logging.error(f"[code_orchestration] error when executing RAG flow (Triage). SK error: {context.last_error_description}")
-        triage_response["bypass"] = True
+        raise Exception(f"Triage was not successful due to an error when calling semantic function: {context.last_error_descirption}")
     try:
         sk_response_json = json.loads(sk_response.result)
     except json.JSONDecodeError:
         logging.error(f"[code_orchestration] error when executing RAG flow (Triage). Invalid json: {sk_response.result}")
-        sk_response_json = {}        
-    sk_response_json = json.loads(sk_response.result)
+        raise Exception(f"Triage was not successful due to a JSON error. Invalid json: {sk_response.result}")
+
     triage_response["intent"] = sk_response_json.get('intent', 'none')
     triage_response["answer"] = sk_response_json.get('answer', '')
     triage_response["search_query"] = sk_response_json.get('query_string', '')   
@@ -155,7 +155,6 @@ async def get_answer(history):
             triage_response = triage_ask(rag_plugin, context)
             response_time =  round(time.time() - start_time,2)
             intent = triage_response['intent']
-            bypass_nxt_steps = triage_response['bypass']
             logging.info(f"[code_orchestration] checked intent: {intent}. {response_time} seconds.")
 
             # Handle general intents
@@ -196,7 +195,9 @@ async def get_answer(history):
                     response_time =  round(time.time() - start_time,2)              
                     logging.info(f"[code_orchestration] generated bot answer. {answer[:100]}. {response_time} seconds.")
             else:
-                logging.info(f"[code_orchestration] SK did not executed, no intent found.")
+                logging.info(f"[code_orchestration] SK did not executed, no intent found, review Triage function.")
+                answer = get_message('NO_INTENT_ANSWER')
+                bypass_nxt_steps = True
 
         except Exception as e:
             logging.error(f"[code_orchestration] exception when executing RAG flow. {e}")
