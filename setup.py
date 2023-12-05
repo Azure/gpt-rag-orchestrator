@@ -94,93 +94,10 @@ def get_function_key(subscription_id, resource_group, function_app_name, credent
     return function_key
 
 
-def approve_shared_links(subscription_id, resource_group, function_app_name, storage_account_name, credential):
-    """
-    Approves private link service connections for a given storage account and function app.
-
-    Args:
-        subscription_id (str): The subscription ID.
-        resource_group (str): The resource group name.
-        function_app_name (str): The name of the function app.
-        storage_account_name (str): The name of the storage account.
-        credential (DefaultAzureCredential): The credential object used to authenticate with Azure.
-
-    Returns:
-        None: This function does not return anything.
-    """    
-    try: 
-        logging.info(f"Aproving Search private link service connection if needed.")
-        # Replace with your access token
-        accessToken = f"Bearer {credential.get_token('https://management.azure.com/.default').token}"
-
-        # First the storage private link connections
-        requestUrl = f"https://management.azure.com/subscriptions/{subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Storage/storageAccounts/{storage_account_name}/privateEndpointConnections?api-version=2023-01-01"
-        requestHeaders = {
-            "Authorization": accessToken,
-            "Content-Type": "application/json"
-        }
-        response = requests.get(requestUrl, headers=requestHeaders)
-        responseJson = json.loads(response.content)
-        for connection in responseJson["value"]:
-            logging.info(f"Checking connection {connection['name']}.")
-            status = connection['properties']['privateLinkServiceConnectionState']['status']
-            if status == "Pending":
-                requestUrl = f"https://management.azure.com/subscriptions/{subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Storage/storageAccounts/{storage_account_name}/privateEndpointConnections/{connection['name']}?api-version=2023-01-01"
-                requestBody = {
-                    "properties": {
-                        "privateLinkServiceConnectionState": {
-                            "status": "Approved",
-                            "description": "Approved by setup script"
-                        }
-                    }
-                }
-                requestBodyJson = json.dumps(requestBody)
-                requestHeaders = {
-                    "Authorization": accessToken,
-                    "Content-Type": "application/json"
-                }
-                response = requests.put(requestUrl, data=requestBodyJson, headers=requestHeaders)
-                print()
-                logging.info(f"Aproving private link service connection {connection['name']}. Code {response.status_code}. Message: {response.reason}.")
-
-
-        # Second the function app private link connections
-        requestUrl = f"https://management.azure.com/subscriptions/{subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Web/sites/{function_app_name}/privateEndpointConnections?api-version=2022-09-01"
-        requestHeaders = {
-            "Authorization": accessToken,
-            "Content-Type": "application/json"
-        }
-        response = requests.get(requestUrl, headers=requestHeaders)
-        responseJson = json.loads(response.content)
-        for connection in responseJson["value"]:
-            logging.info(f"Checking connection {connection['name']}.")
-            status = connection['properties']['privateLinkServiceConnectionState']['status']
-            if status == "Pending":
-                requestUrl = f"https://management.azure.com/subscriptions/{subscription_id}/resourceGroups/{resource_group}/providers/Microsoft.Web/sites/{storage_account_name}/privateEndpointConnections/{connection['name']}?api-version=2022-09-01"
-                requestBody = {
-                    "properties": {
-                        "privateLinkServiceConnectionState": {
-                            "status": "Approved",
-                            "description": "Approved by setup script"
-                        }
-                    }
-                }
-                requestBodyJson = json.dumps(requestBody)
-                requestHeaders = {
-                    "Authorization": accessToken,
-                    "Content-Type": "application/json"
-                }
-                response = requests.put(requestUrl, data=requestBodyJson, headers=requestHeaders)
-                print()
-                logging.info(f"Aproving private link service connection {connection['name']}. Code {response.status_code}. Message: {response.reason}.")
-    except Exception as e:
-        error_message = str(e)
-        logging.error(f"Error when approving private link service connection. Please do it manually. Error: {error_message}")
-
 
 def execute_setup(subscription_id, resource_group, function_app_name, key_vault_name, enable_managed_identities, enable_env_credentials):
     """
-    This function performs the necessary steps to set up the ingestion sub components, such as creating the required datastores and indexers.
+    This function performs the necessary steps to set up the orchestrator component.
     
     Args:
         subscription_id (str): The subscription ID of the Azure subscription to use.
@@ -249,7 +166,7 @@ def main(subscription_id=None, resource_group=None, function_app_name=None, enab
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Script to do the data ingestion setup for Azure Cognitive Search.')
+    parser = argparse.ArgumentParser(description='Script to do orchestrator component setup.')
     parser.add_argument('-s', '--subscription_id', help='Subscription ID')
     parser.add_argument('-r', '--resource_group', help='Resource group')
     parser.add_argument('-f', '--function_app_name', help='Function app name')
