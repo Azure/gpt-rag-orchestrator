@@ -5,9 +5,9 @@ import re
 import time
 from shared.util import call_semantic_function, get_chat_history_as_messages, get_message
 from shared.util import truncate_to_max_tokens, number_of_tokens, get_aoai_config, get_blocked_list
-
 import semantic_kernel as sk
 import semantic_kernel.connectors.ai.open_ai as sk_oai
+from semantic_kernel.core_skills import ConversationSummarySkill
 from semantic_kernel.connectors.ai.open_ai.semantic_functions.open_ai_chat_prompt_template import (
     OpenAIChatPromptTemplate,
 )
@@ -52,7 +52,7 @@ def initialize_kernel():
     )
     return kernel
 
-def import_plugins(kernel, plugins_directory, rag_plugin_name):
+def import_custom_plugins(kernel, plugins_directory, rag_plugin_name):
     rag_plugin = kernel.import_semantic_skill_from_directory(plugins_directory, rag_plugin_name)
     native_functions = kernel.import_native_skill_from_directory(plugins_directory, rag_plugin_name)
     rag_plugin.update(native_functions)
@@ -73,12 +73,12 @@ def triage_ask(rag_plugin, context):
    
     Returns:
     dict: A dictionary containing the triage response. The response includes the intent, answer, search query, and a bypass flag.
-        'intent' (str): The intent of the request. Defaults to 'none' if not found.
+        'intents' (str): A list of intents of the request. Defaults to ['none'] if not found.
         'answer' (str): The answer to the request. Defaults to an empty string if not found.
         'search_query' (str): The search query for the request. Defaults to an empty string if not found.
         'bypass' (bool): A flag indicating whether to bypass the the reminder flow steps (in case of an error has occurred).
     """    
-    triage_response= {"intent":  "none", "answer": "", "search_query": "", "bypass": False}
+    triage_response= {"intents":  ["none"], "answer": "", "search_query": "", "bypass": False}
     sk_response = call_semantic_function(rag_plugin["Triage"], context)
     if context.error_occurred:
         logging.error(f"[code_orchestration] error when executing RAG flow (Triage). SK error: {context.last_error_description}")
@@ -89,7 +89,7 @@ def triage_ask(rag_plugin, context):
         logging.error(f"[code_orchestration] error when executing RAG flow (Triage). Invalid json: {sk_response.result}")
         raise Exception(f"Triage was not successful due to a JSON error. Invalid json: {sk_response.result}")
 
-    triage_response["intent"] = sk_response_json.get('intent', 'none')
+    triage_response["intents"] = sk_response_json.get('intents', ['none'])
     triage_response["answer"] = sk_response_json.get('answer', '')
     triage_response["search_query"] = sk_response_json.get('query_string', '')   
     return triage_response
@@ -105,7 +105,7 @@ async def get_answer(history):
 
     answer_dict = {}
     answer = ""
-    intent = "none"
+    intents = "none"
     system_message = prompt = open(SYSTEM_MESSAGE_PATH, "r").read()
     search_query = ""
     sources = ""
@@ -128,7 +128,7 @@ async def get_answer(history):
         try:
             blocked_list = get_blocked_list()
             for blocked_word in blocked_list:
-                if blocked_word in ask.lower():
+                if blocked_word in ask.lower().split():
                     logging.info(f"[code_orchestration] blocked word found in question: {blocked_word}.")
                     answer = get_message('BLOCKED_ANSWER')
                     bypass_nxt_steps = True
@@ -146,25 +146,26 @@ async def get_answer(history):
             
             # initialize semantic kernel
             kernel = initialize_kernel()
-            rag_plugin = import_plugins(kernel, "orc/plugins", "RAG")
+            rag_plugin = import_custom_plugins(kernel, "orc/plugins", "RAG")
             context = create_context(kernel, system_message, ask, messages)
+            conversation_summary_plugin = kernel.import_skill(ConversationSummarySkill(kernel=kernel), skill_name="ConversationSummaryPlugin")
             
             # triage (find intent and generate answer and search query when applicable)
             logging.info(f"[code_orchestration] checking intent. ask: {ask}")
             start_time = time.time()                        
             triage_response = triage_ask(rag_plugin, context)
             response_time =  round(time.time() - start_time,2)
-            intent = triage_response['intent']
-            logging.info(f"[code_orchestration] checked intent: {intent}. {response_time} seconds.")
+            intents = triage_response['intents']
+            logging.info(f"[code_orchestration] checked intents: {intents}. {response_time} seconds.")
 
             # Handle general intents
-            if intent in ("greeting", "about_bot", "out_of_scope"):
+            if set(intents).intersection({"about_bot", "off_topic"}):
                 answer = triage_response['answer']
                 logging.info(f"[code_orchestration] triage answer: {answer}")
 
             # Handle question answering intent
-            elif intent == "question_answering":
-                
+            elif set(intents).intersection({"follow_up", "question_answering"}):         
+    
                 search_query = triage_response['search_query'] if triage_response['search_query'] != '' else ask
 
                 sk_response = await kernel.run_async(
@@ -194,6 +195,11 @@ async def get_answer(history):
                         bypass_nxt_steps = True
                     response_time =  round(time.time() - start_time,2)              
                     logging.info(f"[code_orchestration] generated bot answer. {answer[:100]}. {response_time} seconds.")
+
+            elif "greeting" in intents:
+                answer = triage_response['answer']
+                logging.info(f"[code_orchestration] triage answer: {answer}")
+
             else:
                 logging.info(f"[code_orchestration] SK did not executed, no intent found, review Triage function.")
                 answer = get_message('NO_INTENT_ANSWER')
@@ -208,7 +214,7 @@ async def get_answer(history):
     # GUARDRAILS (ANSWER)
     #############################
 
-    if GROUNDEDNESS_CHECK and intent == 'question_answering' and not bypass_nxt_steps:
+    if GROUNDEDNESS_CHECK and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
         try:
             logging.info(f"[code_orchestration] checking if it is grounded. answer: {answer[:50]}")  
             logging.info(f"[code_orchestration] checking if it is grounded. sources: {sources[:100]}")
@@ -233,7 +239,7 @@ async def get_answer(history):
     if BLOCKED_LIST_CHECK and not bypass_nxt_steps:
         try:
             for blocked_word in blocked_list:
-                if blocked_word in answer.lower():
+                if blocked_word in answer.lower().split():
                     logging.info(f"[code_orchestration] blocked word found in answer: {blocked_word}.")
                     answer = get_message('BLOCKED_ANSWER')
                     break
