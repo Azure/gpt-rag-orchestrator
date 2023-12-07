@@ -29,10 +29,10 @@ AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG = os.environ.get("AZURE_SEARCH_SEMANTIC_SEAR
 AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE = os.environ.get("AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE") or "en-us"
 AZURE_SEARCH_ENABLE_IN_DOMAIN = os.environ.get("AZURE_SEARCH_ENABLE_IN_DOMAIN") or "true"
 AZURE_SEARCH_ENABLE_IN_DOMAIN =  True if AZURE_SEARCH_ENABLE_IN_DOMAIN == "true" else False
-AZURE_SEARCH_CONTENT_COLUMNS = os.environ.get("AZURE_SEARCH_CONTENT_COLUMNS") or "content"
-AZURE_SEARCH_FILENAME_COLUMN = os.environ.get("AZURE_SEARCH_FILENAME_COLUMN") or "filepath"
-AZURE_SEARCH_TITLE_COLUMN = os.environ.get("AZURE_SEARCH_TITLE_COLUMN") or "title"
-AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
+content = AZURE_SEARCH_CONTENT_COLUMNS = os.environ.get("AZURE_SEARCH_CONTENT_COLUMNS") or "content"
+chunkid = filepath = AZURE_SEARCH_FILENAME_COLUMN = os.environ.get("AZURE_SEARCH_FILENAME_COLUMN") or "filepath"
+title = AZURE_SEARCH_TITLE_COLUMN = os.environ.get("AZURE_SEARCH_TITLE_COLUMN") or "title"
+url = AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
 
 
 # Set up logging
@@ -77,7 +77,8 @@ class RAG:
 
             # prepare body
             body = {
-                "select": "title, content, url, filepath, chunk_id",
+                # "select": "title, content, url, filepath, chunk_id",
+                "select": f"{title}, {content}, {url}, {filepath}, {chunkid} ",
                 "top": AZURE_SEARCH_TOP_K
             }    
             if AZURE_SEARCH_APPROACH == TERM_SEARCH_APPROACH:
@@ -117,8 +118,34 @@ class RAG:
             else:
                 if response.json()['value']:
                         for doc in response.json()['value']:
-                            search_results.append(doc['filepath'] + ": "+ doc['content'].strip() + "\n")    
-                    
+                            # search_results.append(doc['filepath'] + ": "+ doc['content'].strip() + "\n")    
+                            search_results.append("Numero de Caso: "+ doc['Numero_de_Caso']
+                            + "Costo Unitario Estimado del Artículo: "+ doc['Costo_Unitario_Estimado_de_Articulo'] + "\n"
+                            + "Fecha Recibo de Requisición: "+ doc['Fecha_Recibo_de_Requisicion'] + "\n"
+                            + "Número de Requisición: "+ doc['Numero_de_Requisicion'] + "\n"
+                            + "Título de Requisición: "+ doc['Titulo_de_Requisicion'] + "\n"
+                            + "Categoría de Requisición: "+ doc['Categoria_de_Requisicion'] + "\n"
+                            + "SubCategoría de Requisición: "+ doc['SubCategoria_de_Requisicion'] + "\n"
+                            + "Agencia: "+ doc['Agencia'] + "\n"
+                            + "Nombre de Agencia de Entrega: "+ doc['Nombre_de_Agencia_de_Entrega'] + "\n"
+                            + "Método de Adquisición: "+ doc['Metodo_de_Adquisicion'] + "\n"
+                            + "Descripción de Artículo: "+ doc['Descripcion_de_Articulo'] + "\n"
+                            + "Marca de Artículo: "+ doc['Marca_de_Articulo'] + "\n"
+                            + "Modelo de Artículo: "+ doc['Modelo_de_Articulo'] + "\n"
+                            + "Garantía de Artículo: "+ doc['Garantia_de_Articulo'] + "\n"
+                            + "Unidad de Medida: "+ doc['Unidad_de_Medida'] + "\n"
+                            + "Cantidad: "+ doc['Cantidad'] + "\n"
+                            + "Costo Estimado Total de Artículo: "+ doc['Costo_Estimado_Total_de_Orden_de_Articulo'] + "\n"
+                            + "Número de Contrato: "+ doc['Numero_de_Contrato'] + "\n"
+                            + "Costo Final del Artículo: "+ doc['Costo_Final_de_Orden_de_Articulo'] + "\n"
+                            + "Número de Orden de Compra: "+ doc['Numero_de_Orden_de_Compra'] + "\n"
+                            + "Nombre de Archivo de Orden de Compra: "+ doc['Nombre_de_Archivo_de_Orden_de_Compra'] + "\n"
+                            + "Nombre de Suplidor: "+ doc['Nombre_de_Suplidor'] + "\n"
+                            + "Teléfono de Contacto del Suplidor: "+ doc['Telefono_de_Contacto_de_Suplidor'] + "\n"
+                            + "Email del Suplidor: "+ doc['Email_de_Suplidor'] + "\n"
+                            + "Url de Archivo de Orden De Compra: "+ doc['Url_de_Archivo_de_Orden_de_Compra'] + "\n")   
+
+                        
             response_time =  round(time.time() - start_time,2)
             # logging.info(f"[sk_function_retrieval] search query body: {body}")        
             logging.info(f"[sk_function_retrieval] searched documents. {response_time} seconds")

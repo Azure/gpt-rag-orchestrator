@@ -37,6 +37,8 @@ AZURE_OPENAI_TOP_P = float(AZURE_OPENAI_TOP_P)
 AZURE_OPENAI_RESP_MAX_TOKENS = os.environ.get("AZURE_OPENAI_MAX_TOKENS") or "1000"
 AZURE_OPENAI_RESP_MAX_TOKENS = int(AZURE_OPENAI_RESP_MAX_TOKENS)
 
+
+
 SYSTEM_MESSAGE_PATH = f"orc/prompts/system_message.prompt"
 
 def initialize_kernel():
