@@ -147,7 +147,8 @@ class RAG:
 
                         
             response_time =  round(time.time() - start_time,2)
-            # logging.info(f"[sk_function_retrieval] search query body: {body}")        
+            logging.info(f"[code_orchestration] search query body: {body}")     
+            logging.info(f"[sk_function_retrieval] search query body: {body}")        
             logging.info(f"[sk_function_retrieval] searched documents. {response_time} seconds")
         except Exception as e:
             error_message = str(e)
