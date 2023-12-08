@@ -39,7 +39,7 @@ AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
 LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
 logging.basicConfig(level=LOGLEVEL)
 
-@retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(12), reraise=True)
+@retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(6), reraise=True)
 # Function to generate embeddings for title and content fields, also used for query embeddings
 def generate_embeddings(text):
 
