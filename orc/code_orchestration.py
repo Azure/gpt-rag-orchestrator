@@ -79,19 +79,20 @@ def triage_ask(rag_plugin, context):
         'bypass' (bool): A flag indicating whether to bypass the the reminder flow steps (in case of an error has occurred).
     """    
     triage_response= {"intents":  ["none"], "answer": "", "search_query": "", "bypass": False}
-    sk_response = call_semantic_function(rag_plugin["Triage"], context)
+    output_context = call_semantic_function(rag_plugin["Triage"], context)
     if context.error_occurred:
         logging.error(f"[code_orchestration] error when executing RAG flow (Triage). SK error: {context.last_error_description}")
         raise Exception(f"Triage was not successful due to an error when calling semantic function: {context.last_error_descirption}")
     try:
-        sk_response_json = json.loads(sk_response.result)
+        response = output_context.result.strip("`json\n`")
+        response_json = json.loads(response)
     except json.JSONDecodeError:
-        logging.error(f"[code_orchestration] error when executing RAG flow (Triage). Invalid json: {sk_response.result}")
-        raise Exception(f"Triage was not successful due to a JSON error. Invalid json: {sk_response.result}")
+        logging.error(f"[code_orchestration] error when executing RAG flow (Triage). Invalid json: {output_context.result}")
+        raise Exception(f"Triage was not successful due to a JSON error. Invalid json: {output_context.result}")
 
-    triage_response["intents"] = sk_response_json.get('intents', ['none'])
-    triage_response["answer"] = sk_response_json.get('answer', '')
-    triage_response["search_query"] = sk_response_json.get('query_string', '')   
+    triage_response["intents"] = response_json.get('intents', ['none'])
+    triage_response["answer"] = response_json.get('answer', '')
+    triage_response["search_query"] = response_json.get('query_string', '')   
     return triage_response
 
 
@@ -168,11 +169,11 @@ async def get_answer(history):
     
                 search_query = triage_response['search_query'] if triage_response['search_query'] != '' else ask
 
-                sk_response = await kernel.run_async(
+                output_context = await kernel.run_async(
                     rag_plugin["Retrieval"],
                     input_str=search_query
                 )
-                sources = sk_response.result
+                sources = output_context.result
                 context.variables["sources"] = sources
                 logging.info(f"[code_orchestration] generating bot answer. sources: {sources[:200]}")
 
@@ -187,8 +188,8 @@ async def get_answer(history):
                     logging.info(f"[code_orchestration] generating bot answer. ask: {ask}")
                     start_time = time.time()                                                          
                     context.variables["history"] = json.dumps(messages[:-1], ensure_ascii=False) # update context with full history
-                    sk_response = call_semantic_function(rag_plugin["Answer"], context)
-                    answer = sk_response.result
+                    output_context = call_semantic_function(rag_plugin["Answer"], context)
+                    answer = output_context.result
                     if context.error_occurred:
                         logging.error(f"[code_orchestration] error when executing RAG flow (get the answer). {context.last_error_description}")
                         answer = f"{get_message('ERROR_ANSWER')} (get the answer) RAG flow: {context.last_error_description}"
@@ -220,13 +221,13 @@ async def get_answer(history):
             logging.info(f"[code_orchestration] checking if it is grounded. sources: {sources[:100]}")
             start_time = time.time()            
             context.variables["answer"] = answer                      
-            sk_response = call_semantic_function(rag_plugin["IsGrounded"], context)
-            grounded = sk_response.result
+            output_context = call_semantic_function(rag_plugin["IsGrounded"], context)
+            grounded = output_context.result
             logging.info(f"[code_orchestration] is it grounded? {grounded}.")  
             if grounded.lower() == 'no':
                 logging.info(f"[code_orchestration] ungrounded answer: {answer}")
-                sk_response = call_semantic_function(rag_plugin["NotInSourcesAnswer"], context)
-                answer = sk_response.result
+                output_context = call_semantic_function(rag_plugin["NotInSourcesAnswer"], context)
+                answer = output_context.result
                 answer_dict['gpt_groundedness'] = 1
                 bypass_nxt_steps = True
             else:
