@@ -144,7 +144,7 @@ def call_semantic_function(function, context):
         if error_code == 'ErrorCodes.ServiceError':
             # TODO: add time penalty for model when service is unavailable
             pass
-        raise Exception(f"Semantic function {function.name} failed with error: {semantic_response.error_message}")
+        raise Exception(f"Semantic function {function.name} failed with error: {semantic_response.last_error_description}")
     return semantic_response
 
 @retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(6), reraise=True)
