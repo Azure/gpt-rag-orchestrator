@@ -26,7 +26,6 @@ AZURE_SEARCH_TOP_K = os.environ.get("AZURE_SEARCH_TOP_K") or "3"
 AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH = os.environ.get("AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH") or "false"
 AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH = True if AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH == "true" else False
 AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG = os.environ.get("AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG") or "my-semantic-config"
-AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE = os.environ.get("AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE") or "en-us"
 AZURE_SEARCH_ENABLE_IN_DOMAIN = os.environ.get("AZURE_SEARCH_ENABLE_IN_DOMAIN") or "true"
 AZURE_SEARCH_ENABLE_IN_DOMAIN =  True if AZURE_SEARCH_ENABLE_IN_DOMAIN == "true" else False
 AZURE_SEARCH_CONTENT_COLUMNS = os.environ.get("AZURE_SEARCH_CONTENT_COLUMNS") or "content"
@@ -59,7 +58,6 @@ class RAG:
     @sk_function(
         description=re.sub('\s+', ' ',f"""
             Search a knowledge base for sources to ground and give context to answer a user question. 
-            Search in '{AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE}' language. 
             Return sources."""),
         name="Retrieval",
         input_description="The user question",
@@ -98,7 +96,6 @@ class RAG:
             if AZURE_SEARCH_USE_SEMANTIC == "true" and AZURE_SEARCH_APPROACH != VECTOR_SEARCH_APPROACH:
                 body["queryType"] = "semantic"
                 body["semanticConfiguration"] = AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG
-                body["queryLanguage"] = AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE
 
             headers = {
                 'Content-Type': 'application/json',
