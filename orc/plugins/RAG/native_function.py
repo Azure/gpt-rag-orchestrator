@@ -20,7 +20,10 @@ AZURE_SEARCH_APPROACH=os.environ.get("AZURE_SEARCH_APPROACH") or HYBRID_SEARCH_A
 
 AZURE_SEARCH_SERVICE = os.environ.get("AZURE_SEARCH_SERVICE")
 AZURE_SEARCH_INDEX = os.environ.get("AZURE_SEARCH_INDEX")
-AZURE_SEARCH_API_VERSION = os.environ.get("AZURE_SEARCH_API_VERSION")
+AZURE_SEARCH_API_VERSION = os.environ.get("AZURE_SEARCH_API_VERSION", "2023-11-01")
+if AZURE_SEARCH_API_VERSION < '2023-10-01-Preview': # query is using vectorQueries that requires at least 2023-10-01-Preview'.
+    AZURE_SEARCH_API_VERSION = '2023-11-01'  
+
 AZURE_SEARCH_TOP_K = os.environ.get("AZURE_SEARCH_TOP_K") or "3"
 
 AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH = os.environ.get("AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH") or "false"
@@ -32,7 +35,6 @@ AZURE_SEARCH_CONTENT_COLUMNS = os.environ.get("AZURE_SEARCH_CONTENT_COLUMNS") or
 AZURE_SEARCH_FILENAME_COLUMN = os.environ.get("AZURE_SEARCH_FILENAME_COLUMN") or "filepath"
 AZURE_SEARCH_TITLE_COLUMN = os.environ.get("AZURE_SEARCH_TITLE_COLUMN") or "title"
 AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
-
 
 # Set up logging
 LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
@@ -81,18 +83,21 @@ class RAG:
             if AZURE_SEARCH_APPROACH == TERM_SEARCH_APPROACH:
                 body["search"] = search_query
             elif AZURE_SEARCH_APPROACH == VECTOR_SEARCH_APPROACH:
-                body["vector"] = {
-                    "value": embeddings_query,
+                body["vectorQueries"] = [{
+                    "kind": "vector",
+                    "vector": embeddings_query,
                     "fields": "contentVector",
                     "k": int(AZURE_SEARCH_TOP_K)
-                }
+                }]
             elif AZURE_SEARCH_APPROACH == HYBRID_SEARCH_APPROACH:
                 body["search"] = search_query
-                body["vector"] = {
-                    "value": embeddings_query,
+                body["vectorQueries"] = [{
+                    "kind": "vector",
+                    "vector": embeddings_query,
                     "fields": "contentVector",
                     "k": int(AZURE_SEARCH_TOP_K)
-                }
+                }]
+
             if AZURE_SEARCH_USE_SEMANTIC == "true" and AZURE_SEARCH_APPROACH != VECTOR_SEARCH_APPROACH:
                 body["queryType"] = "semantic"
                 body["semanticConfiguration"] = AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG
