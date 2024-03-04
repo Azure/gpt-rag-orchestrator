@@ -20,13 +20,15 @@ AZURE_SEARCH_APPROACH=os.environ.get("AZURE_SEARCH_APPROACH") or HYBRID_SEARCH_A
 
 AZURE_SEARCH_SERVICE = os.environ.get("AZURE_SEARCH_SERVICE")
 AZURE_SEARCH_INDEX = os.environ.get("AZURE_SEARCH_INDEX")
-AZURE_SEARCH_API_VERSION = os.environ.get("AZURE_SEARCH_API_VERSION")
+AZURE_SEARCH_API_VERSION = os.environ.get("AZURE_SEARCH_API_VERSION", "2023-11-01")
+if AZURE_SEARCH_API_VERSION < '2023-10-01-Preview': # query is using vectorQueries that requires at least 2023-10-01-Preview'.
+    AZURE_SEARCH_API_VERSION = '2023-11-01'  
+
 AZURE_SEARCH_TOP_K = os.environ.get("AZURE_SEARCH_TOP_K") or "3"
 
 AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH = os.environ.get("AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH") or "false"
 AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH = True if AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH == "true" else False
 AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG = os.environ.get("AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG") or "my-semantic-config"
-AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE = os.environ.get("AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE") or "en-us"
 AZURE_SEARCH_ENABLE_IN_DOMAIN = os.environ.get("AZURE_SEARCH_ENABLE_IN_DOMAIN") or "true"
 AZURE_SEARCH_ENABLE_IN_DOMAIN =  True if AZURE_SEARCH_ENABLE_IN_DOMAIN == "true" else False
 content = AZURE_SEARCH_CONTENT_COLUMNS = os.environ.get("AZURE_SEARCH_CONTENT_COLUMNS") or "content"
@@ -34,12 +36,11 @@ chunkid = filepath = AZURE_SEARCH_FILENAME_COLUMN = os.environ.get("AZURE_SEARCH
 title = AZURE_SEARCH_TITLE_COLUMN = os.environ.get("AZURE_SEARCH_TITLE_COLUMN") or "title"
 url = AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
 
-
 # Set up logging
 LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
 logging.basicConfig(level=LOGLEVEL)
 
-@retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(12), reraise=True)
+@retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(6), reraise=True)
 # Function to generate embeddings for title and content fields, also used for query embeddings
 def generate_embeddings(text):
 
@@ -59,7 +60,6 @@ class RAG:
     @sk_function(
         description=re.sub('\s+', ' ',f"""
             Search a knowledge base for sources to ground and give context to answer a user question. 
-            Search in '{AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE}' language. 
             Return sources."""),
         name="Retrieval",
         input_description="The user question",
@@ -84,22 +84,24 @@ class RAG:
             if AZURE_SEARCH_APPROACH == TERM_SEARCH_APPROACH:
                 body["search"] = search_query
             elif AZURE_SEARCH_APPROACH == VECTOR_SEARCH_APPROACH:
-                body["vector"] = {
-                    "value": embeddings_query,
+                body["vectorQueries"] = [{
+                    "kind": "vector",
+                    "vector": embeddings_query,
                     "fields": "contentVector",
                     "k": int(AZURE_SEARCH_TOP_K)
-                }
+                }]
             elif AZURE_SEARCH_APPROACH == HYBRID_SEARCH_APPROACH:
                 body["search"] = search_query
-                body["vector"] = {
-                    "value": embeddings_query,
+                body["vectorQueries"] = [{
+                    "kind": "vector",
+                    "vector": embeddings_query,
                     "fields": "contentVector",
                     "k": int(AZURE_SEARCH_TOP_K)
-                }
+                }]
+
             if AZURE_SEARCH_USE_SEMANTIC == "true" and AZURE_SEARCH_APPROACH != VECTOR_SEARCH_APPROACH:
                 body["queryType"] = "semantic"
                 body["semanticConfiguration"] = AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG
-                body["queryLanguage"] = AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE
 
             headers = {
                 'Content-Type': 'application/json',

@@ -132,19 +132,22 @@ def optmize_messages(chat_history_messages, model):
 
     return messages
    
-@retry(wait=wait_random_exponential(min=20, max=60), stop=stop_after_attempt(12), reraise=True)
+@retry(wait=wait_random_exponential(min=20, max=60), stop=stop_after_attempt(6), reraise=True)
 def call_semantic_function(function, context):
     semantic_response = function(context = context)
     if semantic_response.error_occurred:
-        error_details = f"Error code: {semantic_response.last_exception.error_code}. Error message: {semantic_response.last_error_description}"
+        error_code = 'none'
+        if hasattr(semantic_response.last_exception, 'error_code'):
+            error_code = str(semantic_response.last_exception.error_code)
+        error_details = f"Error code: {error_code}. Error message: {semantic_response.last_error_description}"
         logging.info(f"[call_semantic_function] error occurred when calling semantic function {function.name}. {error_details}")
-        if str(semantic_response.last_exception.error_code) == 'ErrorCodes.ServiceError':
+        if error_code == 'ErrorCodes.ServiceError':
             # TODO: add time penalty for model when service is unavailable
             pass
-        raise Exception(f"Semantic function {function.name} failed with error: {semantic_response.error_message}")
+        raise Exception(f"Semantic function {function.name} failed with error: {semantic_response.last_error_description}")
     return semantic_response
 
-@retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(12), reraise=True)
+@retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(6), reraise=True)
 def chat_complete(messages, functions, function_call='auto'):
     """  Return assistant chat response based on user query. Assumes existing list of messages """
 
@@ -271,7 +274,7 @@ def get_aoai_config(model):
         "endpoint": f"https://{resource}.openai.azure.com",
         "deployment": deployment,
         "model": model, # ex: 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'
-        "api_version": os.environ.get("AZURE_OPENAI_API_VERSION") or "2023-07-01-preview",
+        "api_version": os.environ.get("AZURE_OPENAI_API_VERSION") or "2023-08-01-preview",
         "api_key": token.token
     }
     return result

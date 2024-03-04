@@ -38,8 +38,7 @@ Query string is no longer than 10 words.
 
 ## General Instructions
 
-- The output is a JSON object with an intents, answer and query_string fields.
-- The output should not include the word ANSWER neither the json word.
+- The output is a valid JSON object with intents, answer and query_string fields.
 - The output should not repeat the ASK.
 - ALWAYS generate the ANSWER and QUERY_STRING in the same language(ex: Spanish, English, Portuguese) of the ASK. 
 

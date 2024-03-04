@@ -9,7 +9,6 @@ The task is to check if the ANSWER is based on the SOURCES.
 ## Task instructions
 - Is the ANSWER based on the input SOURCES?
 - If the ANSWER is a follow-up question, asking for more clarification, answer yes.
-- If the ANSWER is saying you don't understand, or do not know or there is not enough information, answer yes.
 
 Output is yes or no lower case.
 
