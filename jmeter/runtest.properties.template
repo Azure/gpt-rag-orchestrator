@@ -1,0 +1,5 @@
+subscription="[replace by the subscription id]"
+resourceGroup="[replace by the resource group name of the load test resource]"
+loadTestResource="[replace by the load test resource name]"
+functionApp="[replace by the orchestrator function app name]"
+testId="enterprise-rag-load-test"
