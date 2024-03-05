@@ -60,7 +60,7 @@ To redeploy only the orchestration component (after the initial deployment of th
  - Git: [Download Git](https://git-scm.com/downloads)
  - Python 3.10: [Download Python](https://www.python.org/downloads/release/python-31011/)
 
-Then just clone this repository and reproduce the following commands within the gpt-rag-ingestion directory:  
+Then just clone this repository and reproduce the following commands within the gpt-rag-orchestrator directory:  
 
 ```
 azd auth login  
