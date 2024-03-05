@@ -37,7 +37,7 @@ Use the  ```question_answering.prompt``` located in ```orc/prompts/``` folder, j
 
 **4) Deploy function to Azure** 
 
-Enter in the cloned repo folder: 
+<!-- Enter in the cloned repo folder: 
 
 ```cd gpt-rag-orchestrator```
 
@@ -49,7 +49,27 @@ After finishing the deployment run the following command to confirm the function
 
 ```func azure functionapp list-functions FUNCTION_APP_NAME```
 
-*Replace FUNCTION_APP_NAME with your Orchestrator Function App name before running the command*
+*Replace FUNCTION_APP_NAME with your Orchestrator Function App name before running the command* -->
+
+
+You provision the infrastructure and deploy the solution initially using the GPT-RAG template, as instructed at: https://aka.ms/gpt-rag.
+
+To redeploy only the orchestration component (after the initial deployment of the solution), you will need:
+
+ - Azure Developer CLI: [Download azd for Windows](https://azdrelease.azureedge.net/azd/standalone/release/1.5.0/azd-windows-amd64.msi), [Other OS's](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/install-azd).
+ - Git: [Download Git](https://git-scm.com/downloads)
+ - Python 3.10: [Download Python](https://www.python.org/downloads/release/python-31011/)
+
+Then just clone this repository and reproduce the following commands within the gpt-rag-ingestion directory:  
+
+```
+azd auth login  
+azd env refresh  
+azd deploy  
+```
+
+> Note: when running the ```azd env refresh```, use the same environment name, subscription, and region used in the initial provisioning of the infrastructure.
+
 
 **5) Deploy locally (optional)**
 
@@ -99,8 +119,12 @@ az role assignment create --role "Cognitive Services OpenAI User" --assignee $pr
 
 **References**
 
-- Cognitive search:
+- AI Search:
 [Querying a Vector Index](https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-query), [REST API Reference](https://learn.microsoft.com/en-us/rest/api/searchservice/preview-api/search-documents) and [Querying Samples](https://github.com/Azure/cognitive-search-vector-pr).
+
+## Evaluating
+
+- [How to load test the solution?](LOADTEST.md)
 
 ## Contributing
 

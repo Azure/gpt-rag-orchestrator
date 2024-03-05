@@ -18,7 +18,7 @@ from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
 
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
-LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
+LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
 logging.basicConfig(level=LOGLEVEL)
 
 # Env variables
@@ -53,7 +53,7 @@ def get_secret(secretName):
     client = SecretClient(vault_url=KVUri, credential=credential)
     retrieved_secret = client.get_secret(secretName)
     round(time.time() - start_time,2)
-    logging.info(f"[util] get_secret: retrieving {secretName} secret from {keyVaultName}.")   
+    logging.info(f"[util__module] get_secret: retrieving {secretName} secret from {keyVaultName}.")   
     return retrieved_secret.value
 
 ##########################################################
@@ -133,8 +133,11 @@ def optmize_messages(chat_history_messages, model):
     return messages
    
 @retry(wait=wait_random_exponential(min=20, max=60), stop=stop_after_attempt(6), reraise=True)
-def call_semantic_function(function, context):
-    semantic_response = function(context = context)
+async def call_semantic_function(kernel, function, context):
+    semantic_response = await kernel.run_async(
+        function,
+        input_vars=context.variables
+    )
     if semantic_response.error_occurred:
         error_code = 'none'
         if hasattr(semantic_response.last_exception, 'error_code'):
@@ -179,7 +182,7 @@ def chat_complete(messages, functions, function_call='auto'):
     start_time = time.time()
     response = requests.post(url, headers=headers, data=json.dumps(data)).json()
     response_time =  round(time.time() - start_time,2)
-    logging.info(f"[util] called chat completion api in {response_time:.6f} seconds")
+    logging.info(f"[util__module] called chat completion api in {response_time:.6f} seconds")
 
     return response
 
@@ -300,7 +303,7 @@ def get_next_resource(model):
             if set(keyvalue["resources"]) != set(resources):
                 keyvalue["resources"] = resources           
         except Exception:
-            logging.info(f"[util] get_next_resource: first time execution (keyvalue store with '{model}' id does not exist, creating a new one).")  
+            logging.info(f"[util__module] get_next_resource: first time execution (keyvalue store with '{model}' id does not exist, creating a new one).")  
             keyvalue = { 
                 "id": model,
                 "resources": resources              
@@ -318,7 +321,7 @@ def get_next_resource(model):
 
         response_time = round(time.time() - start_time,2)
 
-        logging.info(f"[util] get_next_resource: model '{model}' resource {resource}. {response_time} seconds") 
+        logging.info(f"[util__module] get_next_resource: model '{model}' resource {resource}. {response_time} seconds") 
         return resource
     
 ##########################################################
@@ -326,7 +329,6 @@ def get_next_resource(model):
 ##########################################################
 
 def get_blocked_list():
-    start_time = time.time()
     blocked_list = []
     credential = DefaultAzureCredential()
     db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
@@ -337,7 +339,5 @@ def get_blocked_list():
         blocked_list= key_value["blocked_words"]
         blocked_list = [word.lower() for word in blocked_list]  
     except Exception as e:
-        logging.info(f"[util] get_blocked_list: no blocked words list (keyvalue store with 'blocked_list' id does not exist).")
-    response_time = round(time.time() - start_time,2)
-    logging.info(f"[util] get_blocked_list in {response_time} seconds") 
+        logging.info(f"[util__module] get_blocked_list: no blocked words list (keyvalue store with 'blocked_list' id does not exist).")
     return blocked_list

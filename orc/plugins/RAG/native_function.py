@@ -37,7 +37,7 @@ AZURE_SEARCH_TITLE_COLUMN = os.environ.get("AZURE_SEARCH_TITLE_COLUMN") or "titl
 AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
 
 # Set up logging
-LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
+LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
 logging.basicConfig(level=LOGLEVEL)
 
 @retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(6), reraise=True)
@@ -69,12 +69,13 @@ class RAG:
         search_query = input
         try:
             start_time = time.time()
+            logging.info(f"[sk_retrieval] generating question embeddings. search query: {search_query}")
             embeddings_query = generate_embeddings(search_query)
-            response_time =  round(time.time() - start_time,2)
-            logging.info(f"[sk_function_retrieval] querying azure ai search. search query: {search_query}")
-            logging.info(f"[sk_function_retrieval] generated question embeddings. {response_time} seconds")
+            response_time = round(time.time() - start_time,2)
+            logging.info(f"[sk_retrieval] finished generating question embeddings. {response_time} seconds")
             azureSearchKey = get_secret('azureSearchKey') 
 
+            logging.info(f"[sk_retrieval] querying azure ai search. search query: {search_query}")
             # prepare body
             body = {
                 "select": "title, content, url, filepath, chunk_id",
@@ -115,20 +116,18 @@ class RAG:
                 error_on_search = True
                 error_message = f'Status code: {status_code}.'
                 if response.text != "": error_message += f" Error: {response.text}."
-                logging.error(f"[sk_function_retrieval] error {status_code} when searching documents. {error_message}")
+                logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
             else:
                 if response.json()['value']:
                         for doc in response.json()['value']:
                             search_results.append(doc['filepath'] + ": "+ doc['content'].strip() + "\n")    
                     
             response_time =  round(time.time() - start_time,2)
-            # logging.info(f"[sk_function_retrieval] search query body: {body}")        
-            logging.info(f"[sk_function_retrieval] searched documents. {response_time} seconds")
+            # logging.info(f"[sk_retrieval] search query body: {body}")        
+            logging.info(f"[sk_retrieval] finished querying azure ai search. {response_time} seconds")
         except Exception as e:
             error_message = str(e)
-            logging.error(f"[sk_function_retrieval] error when getting the answer {error_message}")
+            logging.error(f"[sk_retrieval] error when getting the answer {error_message}")
         
         sources = ' '.join(search_results)
         return sources
-        response_data = {"sources": sources}
-        return json.dumps(response_data)

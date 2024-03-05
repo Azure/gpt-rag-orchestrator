@@ -2,13 +2,19 @@
 .vscode/
 
 local/
-local.settings.json
 bin
 obj
 csx
 .vs
 edge
 Publish
+
+# Loadtest
+Results/
+local.settings.json
+loadtest.properties
+runtest.properties
+dataset.csv
 
 .python_packages/
 .venv/

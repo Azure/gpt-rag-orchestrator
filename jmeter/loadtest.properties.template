@@ -1,0 +1,13 @@
+# peak-load.properties
+# User properties for testing peak load
+threadCount=40
+rampUpSeconds=60
+durationSeconds=600
+delaySeconds=10
+loopCount=1
+randomDelayMillis=1000
+constantDelayMillis=5000
+functionApp=[replace by the orchestrator function app]
+
+# Override default JMeter properties
+jmeter.save.saveservice.thread_name=false

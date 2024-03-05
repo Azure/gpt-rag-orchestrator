@@ -25,8 +25,9 @@
     "AZURE_OPENAI_STREAM" : "false",
     "AZURE_OPENAI_LOAD_BALANCING": "true",
 
-    "ORCHESTRATOR_MESSAGES_LANGUAGE": "en"
+    "ORCHESTRATOR_MESSAGES_LANGUAGE": "en",
 
-
+    "AzureWebJobs.monitor.Disabled": "true"
+  
   }
 }
