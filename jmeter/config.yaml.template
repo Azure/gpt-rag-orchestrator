@@ -12,7 +12,7 @@ failureCriteria:
 - HTTP Request: p95(latency) < 10000
 secrets:
 - name: loadtestSecret
-  value: [Replace by orchestrator-host--functionKey secret value]
+  value: [Replace by orchestrator-host--functionKey secret identifier]
 properties:
   userPropertyFile: loadtest.properties
 autoStop:

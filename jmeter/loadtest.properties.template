@@ -7,7 +7,7 @@ delaySeconds=10
 loopCount=1
 randomDelayMillis=1000
 constantDelayMillis=5000
-functionApp=[replace by the orchestrator function app]
+functionApp=[replace by the orchestrator function app name]
 
 # Override default JMeter properties
 jmeter.save.saveservice.thread_name=false
