@@ -15,6 +15,7 @@ local.settings.json
 loadtest.properties
 runtest.properties
 dataset.csv
+config.yaml
 
 .python_packages/
 .venv/
