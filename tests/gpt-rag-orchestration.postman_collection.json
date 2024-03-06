@@ -1,0 +1,176 @@
+{
+	"info": {
+		"_postman_id": "bc83c986-f643-40c2-b609-324b09aa04e8",
+		"name": "gpt-rag-orchestration",
+		"description": "Ue this collection to test your orchestrator.\n\nChange collection's variables current values to match your environment.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "28097542",
+		"_collection_link": "https://lively-water-791017.postman.co/workspace/gpt-rag~36e1a022-b449-412f-8d44-932b8c3a182f/collection/28097542-bc83c986-f643-40c2-b609-324b09aa04e8?action=share&source=collection_link&creator=28097542"
+	},
+	"item": [
+		{
+			"name": "Call Local Orchestrator",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"conversation_id\": \"\",\r\n    \"question\": \"Add your question here\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:7071/api/orc",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "7071",
+					"path": [
+						"api",
+						"orc"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Call AI Search (full/semantic search)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "api-key",
+						"value": "{{search_key}}"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"select\": \"title, content, url, filepath, chunk_id\", \r\n    \"top\": \"3\", \r\n    \"search\": \"add your search query here\",\r\n    \"queryType\": \"semantic\", \r\n    \"semanticConfiguration\": \"my-semantic-config\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://{{search_service}}.search.windows.net/indexes/ragindex/docs/search?api-version=2023-11-01",
+					"protocol": "https",
+					"host": [
+						"{{search_service}}",
+						"search",
+						"windows",
+						"net"
+					],
+					"path": [
+						"indexes",
+						"ragindex",
+						"docs",
+						"search"
+					],
+					"query": [
+						{
+							"key": "api-version",
+							"value": "2023-11-01"
+						},
+						{
+							"key": "search",
+							"value": "*",
+							"disabled": true
+						}
+					]
+				},
+				"description": "Create an Azure Search index that contains searchable information about 4 hotels."
+			},
+			"response": []
+		},
+		{
+			"name": "Call Remote Orchestrator",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "x-functions-key",
+						"value": "{{orchestrator_function_key}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"conversation_id\": \"\",\r\n    \"question\": \"Add your question here\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://{{orchestrator_function_app}}.azurewebsites.net/api/orc",
+					"protocol": "https",
+					"host": [
+						"{{orchestrator_function_app}}",
+						"azurewebsites",
+						"net"
+					],
+					"path": [
+						"api",
+						"orc"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "orchestrator_function_app",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "orchestrator_function_key",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "search_service",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "search_key",
+			"value": "",
+			"type": "string"
+		}
+	]
+}

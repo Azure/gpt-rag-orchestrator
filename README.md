@@ -1,60 +1,18 @@
-# GPT on your data Orchestrator
+# Enterprise RAG Orchestrator
 
-Part of [GPT-RAG](https://github.com/Azure/gpt-rag)
+This Orchestrator is part of the **Enterprise RAG (GPT-RAG)** Solution Accelerator.
 
-## Components
+To learn more about the Enterprise RAG, please go to [https://aka.ms/gpt-rag](https://aka.ms/gpt-rag).
 
-**1** [Data ingestion](https://github.com/Azure/gpt-rag-ingestion)
+### Cloud Deployment
 
-**3** [App Front-End](https://github.com/Azure/gpt-rag-frontend)
+To deploy the orchestrator in the cloud for the first time, please follow the deployment instructions provided in the [Enterprise RAG repo](https://github.com/Azure/GPT-RAG?tab=readme-ov-file#getting-started).  
+   
+These instructions include the necessary infrastructure templates to provision the solution in the cloud.  
+   
+Once the infrastructure is provisioned, you can redeploy just the orchestrator component using the instructions below:
 
-## Deploy (quickstart)
-
-Here are the steps to configure cognitive search and deploy ingestion code using the terminal.
-
-**First check your environment meets the requirements**
-
-- You need **[AZ CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli)** to log and run Azure commands in the command line.
-- You need **Python 3.10** to run the setup script. [Miniconda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html) helps you creating and managing your python environments. 
-- **[Azure Functions Core Tools](https://learn.microsoft.com/en-us/azure/azure-functions/functions-run-local?tabs=windows%2Cisolated-process%2Cnode-v4%2Cpython-v2%2Chttp-trigger%2Ccontainer-apps&pivots=programming-language-python#install-the-azure-functions-core-tools)** will be needeed to deploy the chunking function.
-
-**1) Login to Azure** 
-
-run ```az login``` to log into azure. Run ```az login -i``` if using a VM with managed identity to run the setup.
-
-**2) Clone the repo** 
-
-If you plan to customize the ingestion logic, create a new repo by clicking on the **Use this template** button on top of this page.
-
-Clone the repostory locally:  ```git clone https://github.com/azure/gpt-rag-orchestrator```
-
-*If you created a new repository please update the repository URL before running the command*
-
-**3) Adjust your prompt** 
-
-In VSCode you can change the prompt text if you want a custom prompt. 
-Use the  ```question_answering.prompt``` located in ```orc/prompts/``` folder, just rembember to keep the *Sources: {sources}* text in the bottom.
-
-**4) Deploy function to Azure** 
-
-<!-- Enter in the cloned repo folder: 
-
-```cd gpt-rag-orchestrator```
-
-Use Azure Functions Core Tools to deploy the function: 
-
-```func azure functionapp publish FUNCTION_APP_NAME --python```
-
-After finishing the deployment run the following command to confirm the function was deployed:  
-
-```func azure functionapp list-functions FUNCTION_APP_NAME```
-
-*Replace FUNCTION_APP_NAME with your Orchestrator Function App name before running the command* -->
-
-
-You provision the infrastructure and deploy the solution initially using the GPT-RAG template, as instructed at: https://aka.ms/gpt-rag.
-
-To redeploy only the orchestration component (after the initial deployment of the solution), you will need:
+First, please confirm that you have met the prerequisites:
 
  - Azure Developer CLI: [Download azd for Windows](https://azdrelease.azureedge.net/azd/standalone/release/1.5.0/azd-windows-amd64.msi), [Other OS's](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/install-azd).
  - Git: [Download Git](https://git-scm.com/downloads)
@@ -70,61 +28,13 @@ azd deploy
 
 > Note: when running the ```azd env refresh```, use the same environment name, subscription, and region used in the initial provisioning of the infrastructure.
 
+### Running Locally with VS Code  
+   
+[How can I test the solution locally in VS Code?](docs/LOCAL_DEPLOYMENT.md)
 
-**5) Deploy locally (optional)**
+### Evaluating
 
-With Azure Function extension installed you just need to open ```orc/orchestrator.py``` and "Start Debugging" in VSCode. <br>It will start the server in ```http://localhost:7071/api/orc```.
-
-Since we're now using managed identities you will have to assign the following roles to your user in order to test orchestrator locally:
-
-1. Azure CosmosDB 'Cosmos DB Built-in Data Contributor' role.
-
-*bash*
-```
-resourceGroupName='your resource group name'
-cosmosDbaccountName='CosmosDB Service name'
-roleDefinitionId='00000000-0000-0000-0000-000000000002'
-principalId='Object id of your user in Microsoft Entra ID'
-az cosmosdb sql role assignment create --account-name $cosmosDbaccountName --resource-group $resourceGroupName --scope "/" --principal-id $principalId --role-definition-id $roleDefinitionId
-```
-
-*PowerShell*
-```
-$resourceGroupName='your resource group name'
-$cosmosDbaccountName='CosmosDB Service name'
-$roleDefinitionId='00000000-0000-0000-0000-000000000002'
-$principalId='Object id of your user in Microsoft Entra ID'
-az cosmosdb sql role assignment create --account-name $cosmosDbaccountName --resource-group $resourceGroupName --scope "/" --principal-id $principalId --role-definition-id $roleDefinitionId
-```
-
-2. Azure OpenAI resource 'Cognitive Services OpenAI User' role.
-
-*bash*
-```
-subscriptionId='your subscription id'
-resourceGroupName='your resource group name'
-openAIAccountName='Azure OpenAI service name'
-principalId='Object id of your user in Microsoft Entra ID'
-az role assignment create --role "Cognitive Services OpenAI User" --assignee $principalId --scope /subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.CognitiveServices/accounts/$openAIAccountName
-```
-
-*PowerShell*
-```
-$subscriptionId='your subscription id'
-$resourceGroupName='your resource group name'
-$openAIAccountName='Azure OpenAI service name'
-$principalId='Object id of your user in Microsoft Entra ID'
-az role assignment create --role "Cognitive Services OpenAI User" --assignee $principalId --scope /subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.CognitiveServices/accounts/$openAIAccountName
-```
-
-**References**
-
-- AI Search:
-[Querying a Vector Index](https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-query), [REST API Reference](https://learn.microsoft.com/en-us/rest/api/searchservice/preview-api/search-documents) and [Querying Samples](https://github.com/Azure/cognitive-search-vector-pr).
-
-## Evaluating
-
-- [How to load test the solution?](LOADTEST.md)
+[How to test the orchestrator performance?](docs/LOADTEST.md)
 
 ## Contributing
 
