@@ -23,7 +23,7 @@ Once the cloud resources (such as CosmosDB and KeyVault) have been provisioned a
 
 ![Creating Python Environment 02](media/06.03.2024_12.16.15_REC.png)
    
-6. Rename the file `local.settings.json.template` to `local.settings.json` and update it with your environment information.  
+6. Create a copy and then rename the file `local.settings.json.template` to `local.settings.json` and update it with your environment information.  
    
 7. Before running the function locally, start the Azurite storage emulator. You can do this by double-clicking [Azurite Blob Service], located in the bottom right corner of the status bar.
 
