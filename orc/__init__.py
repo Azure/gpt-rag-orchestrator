@@ -4,7 +4,7 @@ import json
 import os
 from . import orchestrator
 
-LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
+LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
 logging.basicConfig(level=LOGLEVEL)
 
 async def main(req: func.HttpRequest) -> func.HttpResponse:
