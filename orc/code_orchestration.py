@@ -29,7 +29,7 @@ AZURE_OPENAI_TOP_P = float(AZURE_OPENAI_TOP_P)
 AZURE_OPENAI_RESP_MAX_TOKENS = os.environ.get("AZURE_OPENAI_MAX_TOKENS") or "1000"
 AZURE_OPENAI_RESP_MAX_TOKENS = int(AZURE_OPENAI_RESP_MAX_TOKENS)
 
-SYSTEM_MESSAGE_PATH = f"orc/prompts/system_message.prompt"
+BOT_DESCRIPTION = f"orc/bot_description.prompt"
 
 
 def initialize_kernel():
@@ -51,9 +51,9 @@ def import_custom_plugins(kernel, plugins_directory, rag_plugin_name):
     rag_plugin.update(native_functions)
     return rag_plugin
 
-def create_context(kernel, system_message, ask, messages):
+def create_context(kernel, bot_description, ask, messages):
     context = kernel.create_new_context()
-    context.variables["bot_description"] = system_message
+    context.variables["bot_description"] = bot_description
     context.variables["ask"] = ask
     context.variables["history"] = json.dumps(messages[-5:-1], ensure_ascii=False) # just last two interactions
     return context
@@ -82,8 +82,8 @@ async def triage_ask(kernel, rag_plugin, context):
     except json.JSONDecodeError:
         logging.error(f"[code_orchest] error when executing RAG flow (Triage). Invalid json: {output_context.result}")
         raise Exception(f"Triage was not successful due to a JSON error. Invalid json: {output_context.result}")
-
-    triage_response["intents"] = response_json.get('intents', ['none'])
+    intents = response_json.get('intents', ['none'])
+    triage_response["intents"] = intents if intents != [] else ['none']
     triage_response["answer"] = response_json.get('answer', '')
     triage_response["search_query"] = response_json.get('query_string', '')   
     return triage_response
@@ -97,13 +97,18 @@ async def get_answer(history):
     #initialize variables    
 
     answer_dict = {}
+    prompt = "The prompt is only recorded for question-answering intents"
     answer = ""
-    intents = "none"
-    system_message = prompt = open(SYSTEM_MESSAGE_PATH, "r").read()
+    intents = []
+    bot_description = open(BOT_DESCRIPTION, "r").read()
     search_query = ""
     sources = ""
     bypass_nxt_steps = False  # flag to bypass unnecessary steps
     blocked_list = []
+
+    # debugging variables 
+    rag_plugin_answer = ""
+    answer_generated_by = "none"
 
     # get user question
 
@@ -124,6 +129,7 @@ async def get_answer(history):
                 if blocked_word in ask.lower().split():
                     logging.info(f"[code_orchest] blocked word found in question: {blocked_word}.")
                     answer = get_message('BLOCKED_ANSWER')
+                    answer_generated_by = 'blocked_list_check'
                     bypass_nxt_steps = True
                     break
         except Exception as e:
@@ -142,7 +148,7 @@ async def get_answer(history):
             # initialize semantic kernel
             kernel = initialize_kernel()
             rag_plugin = import_custom_plugins(kernel, "orc/plugins", "RAG")
-            context = create_context(kernel, system_message, ask, messages)
+            context = create_context(kernel, bot_description, ask, messages)
             # import conversation summary plugin to be used by the RAG plugin
             kernel.import_skill(ConversationSummarySkill(kernel=kernel), skill_name="ConversationSummaryPlugin")
             
@@ -157,6 +163,7 @@ async def get_answer(history):
             # Handle general intents
             if set(intents).intersection({"about_bot", "off_topic"}):
                 answer = triage_response['answer']
+                answer_generated_by = "rag_plugin_triage"
                 logging.info(f"[code_orchest] triage answer: {answer}")
 
             # Handle question answering intent
@@ -176,6 +183,7 @@ async def get_answer(history):
                 if context.error_occurred:
                     logging.error(f"[code_orchest] error when executing RAG flow (Retrieval). SK error: {context.last_error_description}")
                     answer = f"{get_message('ERROR_ANSWER')} (Retrieval) RAG flow: {context.last_error_description}"
+                    answer_generated_by = "error_retrieval"
                     bypass_nxt_steps = True
 
                 else:
@@ -184,26 +192,33 @@ async def get_answer(history):
                     start_time = time.time()                                                          
                     context.variables["history"] = json.dumps(messages[:-1], ensure_ascii=False) # update context with full history
                     output_context = await call_semantic_function(kernel, rag_plugin["Answer"], context)
-                    answer = output_context.result
+                    rag_plugin_answer = output_context.result
+                    answer = rag_plugin_answer
+                    answer_generated_by = "rag_plugin_answer"
+                    prompt = open(f"orc/plugins/RAG/Answer/skprompt.txt", "r").read() 
                     if context.error_occurred:
                         logging.error(f"[code_orchest] error when executing RAG flow (get the answer). {context.last_error_description}")
                         answer = f"{get_message('ERROR_ANSWER')} (get the answer) RAG flow: {context.last_error_description}"
+                        answer_generated_by = "error_rag_plugin_answer"
                         bypass_nxt_steps = True
                     response_time =  round(time.time() - start_time,2)              
                     logging.info(f"[code_orchest] finished generating bot answer. {response_time} seconds. {answer[:100]}.")
 
             elif "greeting" in intents:
                 answer = triage_response['answer']
+                answer_generated_by = "rag_plugin_triage"
                 logging.info(f"[code_orchest] triage answer: {answer}")
 
-            else:
-                logging.info(f"[code_orchest] SK did not executed, no intent found, review Triage function.")
+            elif intents == ["none"]:
+                logging.info(f"[code_orchest] No intent found, review Triage function.")
                 answer = get_message('NO_INTENT_ANSWER')
+                answer_generated_by = "no_intent_found_check"                
                 bypass_nxt_steps = True
 
         except Exception as e:
             logging.error(f"[code_orchest] exception when executing RAG flow. {e}")
             answer = f"{get_message('ERROR_ANSWER')} RAG flow: exception: {e}"
+            answer_generated_by = "exception_rag_flow"
             bypass_nxt_steps = True
 
     #############################
@@ -245,7 +260,14 @@ async def get_answer(history):
     answer_dict["answer"] = answer
     answer_dict["sources"] = sources.replace('[', '{').replace(']', '}')
     answer_dict["search_query"] = search_query
-    answer_dict["model"] = AZURE_OPENAI_CHATGPT_MODEL    
+
+    # additional metadata for debugging
+    answer_dict["user_ask"] = ask
+    answer_dict["intents"] = intents   
+    answer_dict["rag_plugin_answer"] = rag_plugin_answer     
+    answer_dict["model"] = AZURE_OPENAI_CHATGPT_MODEL
+    answer_dict["answer_generated_by"] = answer_generated_by
+
     # answer_dict["prompt_tokens"] = prompt_tokens
     # answer_dict["completion_tokens"] = completion_tokens
         

@@ -1,5 +1,4 @@
 .semantic-kernel/
-.vscode/
 
 local/
 bin
@@ -19,6 +18,7 @@ config.yaml
 
 .python_packages/
 .venv/
+.vscode/
 .env
 __azurite*
 .python_packages/
