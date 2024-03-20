@@ -7,10 +7,8 @@ azure-functions==1.17.0
 azure-identity==1.15.0
 azure-keyvault-secrets==4.7.0
 numpy==1.26.2
-openai==0.27.10
-promptflow==1.0.0
-promptflow-tools==0.1.0b12
-semantic-kernel==0.3.14.dev0
+openai==1.14.2
+semantic-kernel==0.9.3b1
 requests==2.31.0
 tiktoken==0.5.2
 tenacity==8.2.3

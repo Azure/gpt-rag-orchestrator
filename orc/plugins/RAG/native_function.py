@@ -1,13 +1,17 @@
 from shared.util import get_secret, get_aoai_config
-from semantic_kernel.skill_definition import sk_function
+# from semantic_kernel.skill_definition import sk_function
+from semantic_kernel.functions import kernel_function
 from tenacity import retry, wait_random_exponential, stop_after_attempt
-import json
 import logging
 import openai
 import os
-import re
 import requests
 import time
+import sys
+if sys.version_info >= (3, 9):
+    from typing import Annotated
+else:
+    from typing_extensions import Annotated
 
 # Azure OpenAI Integration Settings
 AZURE_OPENAI_EMBEDDING_MODEL = os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL")
@@ -57,14 +61,14 @@ def generate_embeddings(text):
     return embeddings
 
 class RAG:
-    @sk_function(
-        description=re.sub('\s+', ' ',f"""
-            Search a knowledge base for sources to ground and give context to answer a user question. 
-            Return sources."""),
+    @kernel_function(
+        description="Search a knowledge base for sources to ground and give context to answer a user question. Return sources.",
         name="Retrieval",
-        input_description="The user question",
     )
-    def Retrieval(self, input: str) -> str:
+    def Retrieval(
+        self,
+        input: Annotated[str, "The user question"]
+    ) -> Annotated[str, "the output is a string with the search results"]:
         search_results = []
         search_query = input
         try:
