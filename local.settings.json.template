@@ -26,6 +26,11 @@
     "AZURE_OPENAI_LOAD_BALANCING": "true",
 
     "ORCHESTRATOR_MESSAGES_LANGUAGE": "en",
-  
+
+    "BLOCKED_LIST_CHECK" : "true",
+    "GROUNDEDNESS_CHECK" : "true",
+    "RESPONSIBLE_AI_CHECK" : "true",
+    "CONVERSATION_METADATA" : "true"
+
   }
 }
