@@ -1,5 +1,6 @@
 from shared.util import get_secret, get_aoai_config
 # from semantic_kernel.skill_definition import sk_function
+from openai import AzureOpenAI
 from semantic_kernel.functions import kernel_function
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 import logging
@@ -50,22 +51,22 @@ def generate_embeddings(text):
 
     embeddings_config = get_aoai_config(AZURE_OPENAI_EMBEDDING_MODEL)
 
-    openai.api_type = "azure_ad"
-    openai.api_base = embeddings_config['endpoint']
-    openai.api_version = embeddings_config['api_version']
-    openai.api_key =  embeddings_config['api_key']
+    client = AzureOpenAI(
+        api_version = embeddings_config['api_version'],
+        azure_endpoint = embeddings_config['endpoint'],
+        azure_ad_token = embeddings_config['api_key'],
+    )
+ 
+    embeddings =  client.embeddings.create(input = [text], model= embeddings_config['deployment']).data[0].embedding
 
-    response = openai.Embedding.create(
-        input=text, engine=embeddings_config['deployment'])
-    embeddings = response['data'][0]['embedding']
     return embeddings
 
-class RAG:
+class Retrieval:
     @kernel_function(
         description="Search a knowledge base for sources to ground and give context to answer a user question. Return sources.",
-        name="Retrieval",
+        name="VectorIndexRetrieval",
     )
-    def Retrieval(
+    def VectorIndexRetrieval(
         self,
         input: Annotated[str, "The user question"]
     ) -> Annotated[str, "the output is a string with the search results"]:

@@ -9,7 +9,6 @@ import tiktoken
 import time
 import urllib.parse
 from azure.cosmos import CosmosClient
-from azure.cosmos.partition_key import PartitionKey 
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
 from tenacity import retry, wait_random_exponential, stop_after_attempt
@@ -133,22 +132,9 @@ def optmize_messages(chat_history_messages, model):
     return messages
    
 @retry(wait=wait_random_exponential(min=20, max=60), stop=stop_after_attempt(6), reraise=True)
-async def call_semantic_function(kernel, function, context):
-    semantic_response = await kernel.run_async(
-        function,
-        input_vars=context.variables
-    )
-    if semantic_response.error_occurred:
-        error_code = 'none'
-        if hasattr(semantic_response.last_exception, 'error_code'):
-            error_code = str(semantic_response.last_exception.error_code)
-        error_details = f"Error code: {error_code}. Error message: {semantic_response.last_error_description}"
-        logging.info(f"[call_semantic_function] error occurred when calling semantic function {function.name}. {error_details}")
-        if error_code == 'ErrorCodes.ServiceError':
-            # TODO: add time penalty for model when service is unavailable
-            pass
-        raise Exception(f"Semantic function {function.name} failed with error: {semantic_response.last_error_description}")
-    return semantic_response
+async def call_semantic_function(kernel, function, arguments):
+    function_result = await kernel.invoke(function, arguments)
+    return function_result
 
 @retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(6), reraise=True)
 def chat_complete(messages, functions, function_call='auto'):
@@ -220,6 +206,32 @@ def replace_doc_ids_with_filepath(answer, citations):
         answer = answer.replace(f"[doc{i+1}]", f"[{filepath}]")
     return answer
 
+
+def escape_xml_characters(input_string):
+    """
+    Escapes special characters in a string for XML.
+
+    Args:
+    input_string (str): The string to escape.
+
+    Returns:
+    str: The escaped string.
+    """
+    # Mapping of special characters to their escaped versions
+    escape_mappings = {
+        "&": "&amp;",
+        "\"": "&quot;",
+        "'": "&apos;",
+        "<": "&lt;",
+        ">": "&gt;"
+    }
+
+    # Replace each special character with its escaped version
+    for key, value in escape_mappings.items():
+        input_string = input_string.replace(key, value)
+
+    return input_string
+
 ##########################################################
 # MESSAGES FUNCTIONS
 ##########################################################
@@ -248,6 +260,30 @@ def load_sk_plugin(name, oai_config):
     plugin.update(native_functions)
     return plugin
 
+def create_kernel(service_id='aoai_chat_completion'):
+    kernel = sk.Kernel()
+    chatgpt_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
+    kernel.add_service(
+        AzureChatCompletion(
+            service_id=service_id,
+            deployment_name=chatgpt_config['deployment'],
+            endpoint=chatgpt_config['endpoint'],
+            api_version=chatgpt_config['api_version'],
+            ad_token= chatgpt_config['api_key']
+        )
+    )
+    return kernel
+
+def get_usage_tokens(function_result, token_type='total'):
+    metadata = function_result.metadata['metadata']
+    usage_tokens = 0
+    if token_type == 'completion':
+        usage_tokens = sum(item['usage'].completion_tokens for item in metadata if 'usage' in item)
+    elif token_type == 'prompt':
+        usage_tokens = sum(item['usage'].prompt_tokens for item in metadata if 'usage' in item)
+    elif token_type == 'total':
+        usage_tokens = sum(item['usage'].total_tokens for item in metadata if 'usage' in item)        
+    return usage_tokens
 
 ##########################################################
 # AOAI FUNCTIONS
@@ -277,7 +313,7 @@ def get_aoai_config(model):
         "endpoint": f"https://{resource}.openai.azure.com",
         "deployment": deployment,
         "model": model, # ex: 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'
-        "api_version": os.environ.get("AZURE_OPENAI_API_VERSION") or "2023-08-01-preview",
+        "api_version": os.environ.get("AZURE_OPENAI_API_VERSION") or "2024-03-01-preview",
         "api_key": token.token
     }
     return result

@@ -1,16 +1,14 @@
+# imports
 import json
 import logging
 import os
-import time
-from shared.util import call_semantic_function, get_chat_history_as_messages, get_message
-from shared.util import get_aoai_config, get_blocked_list
 import semantic_kernel as sk
-from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
-from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-from semantic_kernel.core_plugins import ConversationSummaryPlugin
+import time
+from orc.plugins.Conversation.Triage.wrapper import triage
+from orc.plugins.ResponsibleAI.Fairness.wrapper import fairness
 from semantic_kernel.functions.kernel_arguments import KernelArguments
-from semantic_kernel.connectors.ai.prompt_execution_settings import PromptExecutionSettings
-from semantic_kernel.prompt_template.prompt_template_config import PromptTemplateConfig
+from shared.util import call_semantic_function, get_chat_history_as_messages, get_message
+from shared.util import get_blocked_list, create_kernel, get_usage_tokens, escape_xml_characters
 
 # logging level
 
@@ -25,8 +23,11 @@ BLOCKED_LIST_CHECK = os.environ.get("BLOCKED_LIST_CHECK") or "true"
 BLOCKED_LIST_CHECK = True if BLOCKED_LIST_CHECK.lower() == "true" else False
 GROUNDEDNESS_CHECK = os.environ.get("GROUNDEDNESS_CHECK") or "true"
 GROUNDEDNESS_CHECK = True if GROUNDEDNESS_CHECK.lower() == "true" else False
-CONVERSATION_METADATA = os.environ.get("CONVERSAION_METADATA") or "true"
+RESPONSIBLE_AI_CHECK = os.environ.get("RESPONSIBLE_AI_CHECK") or "true"
+RESPONSIBLE_AI_CHECK = True if RESPONSIBLE_AI_CHECK.lower() == "true" else False
+CONVERSATION_METADATA = os.environ.get("CONVERSATION_METADATA") or "true"
 CONVERSATION_METADATA = True if CONVERSATION_METADATA.lower() == "true" else False
+
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
 AZURE_OPENAI_TEMPERATURE = os.environ.get("AZURE_OPENAI_TEMPERATURE") or "0.17"
 AZURE_OPENAI_TEMPERATURE = float(AZURE_OPENAI_TEMPERATURE)
@@ -35,72 +36,13 @@ AZURE_OPENAI_TOP_P = float(AZURE_OPENAI_TOP_P)
 AZURE_OPENAI_RESP_MAX_TOKENS = os.environ.get("AZURE_OPENAI_MAX_TOKENS") or "1000"
 AZURE_OPENAI_RESP_MAX_TOKENS = int(AZURE_OPENAI_RESP_MAX_TOKENS)
 
-BOT_DESCRIPTION = f"orc/bot_description.prompt"
+ORCHESTRATOR_FOLDER = "orc"
+PLUGINS_FOLDER = f"{ORCHESTRATOR_FOLDER}/plugins"
+BOT_DESCRIPTION_FILE = f"{ORCHESTRATOR_FOLDER}/bot_description.prompt"
 
-
-def initialize_kernel():
-    kernel = sk.Kernel(log=myLogger)
-    chatgpt_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
-    token_provider = get_bearer_token_provider(DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default")
-    kernel.add_service(
-        AzureChatCompletion(
-            service_id="default",
-            deployment_name=chatgpt_config['deployment'],
-            base_url=chatgpt_config['endpoint'],
-            api_key=chatgpt_config['api_key'],
-            api_version=chatgpt_config['api_version'],
-            ad_token_provider=token_provider
-            # ad_auth=True
-        )
-    )
-    return kernel
-
-def import_custom_plugins(kernel, plugins_directory, rag_plugin_name):
-    rag_plugin = kernel.import_plugin_from_prompt_directory(plugins_directory, rag_plugin_name)
-    rag_plugin_retrieval = kernel.import_native_plugin_from_directory(plugins_directory, rag_plugin_name)
-    # rag_plugin.update(native_functions)
-    return rag_plugin, rag_plugin_retrieval
-
-def create_arguments(kernel, bot_description, ask, messages):
-    arguments = KernelArguments()
-    arguments["bot_description"] = bot_description
-    arguments["ask"] = ask
-    arguments["history"] = json.dumps(messages[-5:-1], ensure_ascii=False) # just last two interactions
-    return arguments
-
-async def triage_ask(kernel, rag_plugin, arguments):
-    """
-    This function is used to triage the user ask and determine the intent of the request. 
-    If the ask is a Q&A question, a search query is generated to search for sources.
-    If it is not a Q&A question, there's no need to retrieve sources and the answer is generated.
-   
-    Returns:
-    dict: A dictionary containing the triage response. The response includes the intent, answer, search query, and a bypass flag.
-        'intents' (str): A list of intents of the request. Defaults to ['none'] if not found.
-        'answer' (str): The answer to the request. Defaults to an empty string if not found.
-        'search_query' (str): The search query for the request. Defaults to an empty string if not found.
-        'bypass' (bool): A flag indicating whether to bypass the the reminder flow steps (in case of an error has occurred).
-    """    
-    triage_response= {"intents":  ["none"], "answer": "", "search_query": "", "bypass": False}
-    # output_context =  await call_semantic_function(kernel, rag_plugin["Triage"], context)
-    output_context =  await kernel.invoke(rag_plugin["Triage"], arguments)
-
-    if arguments.error_occurred:
-        logging.error(f"[code_orchest] error when executing RAG flow (Triage). SK error: {arguments.last_error_description}")
-        raise Exception(f"Triage was not successful due to an error when calling semantic function: {arguments.last_error_description}")
-    try:
-        response = output_context.result.strip("`json\n`")
-        response_json = json.loads(response)
-    except json.JSONDecodeError:
-        logging.error(f"[code_orchest] error when executing RAG flow (Triage). Invalid json: {output_context.result}")
-        raise Exception(f"Triage was not successful due to a JSON error. Invalid json: {output_context.result}")
-    intents = response_json.get('intents', ['none'])
-    triage_response["intents"] = intents if intents != [] else ['none']
-    triage_response["answer"] = response_json.get('answer', '')
-    triage_response["search_query"] = response_json.get('query_string', '')   
-    return triage_response
 
 async def get_answer(history):
+
 
     #############################
     # INITIALIZATION
@@ -112,16 +54,19 @@ async def get_answer(history):
     prompt = "The prompt is only recorded for question-answering intents"
     answer = ""
     intents = []
-    bot_description = open(BOT_DESCRIPTION, "r").read()
+    bot_description = open(BOT_DESCRIPTION_FILE, "r").read()
     search_query = ""
     sources = ""
     bypass_nxt_steps = False  # flag to bypass unnecessary steps
     blocked_list = []
 
     # conversation metadata
-    rag_plugin_answer = ""
+    conversation_plugin_answer = ""
+    conversation_history_summary = ''
     answer_generated_by = "none"
-
+    prompt_tokens = 0
+    completion_tokens = 0
+    
     # get user question
 
     messages = get_chat_history_as_messages(history, include_last_turn=True)
@@ -158,77 +103,80 @@ async def get_answer(history):
 
         try:
             
-            # initialize semantic kernel
-            kernel = initialize_kernel()
-            rag_plugin, rag_plugin_retrieval = import_custom_plugins(kernel, "orc/plugins", "RAG")
-            arguments = create_arguments(kernel, bot_description, ask, messages)
+            # create kernel
+            kernel = create_kernel()
 
-            # import conversation summary plugin to be used by the RAG plugin
-            execution_settings = PromptExecutionSettings(
-                service_id="default", max_tokens=ConversationSummaryPlugin._max_tokens, temperature=0.1, top_p=0.5
-            )
-            prompt_template_config = PromptTemplateConfig(
-                template=ConversationSummaryPlugin._summarize_conversation_prompt_template,
-                description="Given a section of a conversation transcript, summarize the part of" " the conversation.",
-                execution_settings=execution_settings,
-            )
-            kernel.import_plugin_from_object(ConversationSummaryPlugin(kernel=kernel, prompt_template_config=prompt_template_config), plugin_name="ConversationSummaryPlugin")
-            
+            # create the arguments that will used by semantic functions
+            arguments = KernelArguments()
+            arguments["bot_description"] = bot_description
+            arguments["ask"] = ask
+            arguments["history"] = json.dumps(messages[-5:-1], ensure_ascii=False) # just last two interactions
+
+            # import RAG plugins
+            conversationPlugin = kernel.import_plugin_from_prompt_directory(PLUGINS_FOLDER, "Conversation")
+            retrievalPlugin = kernel.import_native_plugin_from_directory(PLUGINS_FOLDER, "Retrieval")
+
+            # conversation summary
+            logging.debug(f"[code_orchest] summarizing conversation")
+            start_time = time.time()
+            if len(arguments["history"]) > 3:
+                function_result = await call_semantic_function(kernel, conversationPlugin["ConversationSummary"], arguments)
+                prompt_tokens += get_usage_tokens(function_result, 'prompt')
+                completion_tokens += get_usage_tokens(function_result, 'completion')            
+                conversation_history_summary =  str(function_result)
+            else:
+                conversation_history_summary = ""
+                logging.info(f"[code_orchest] first time talking no need to summarize.")
+            arguments["conversation_summary"] = conversation_history_summary
+            response_time = round(time.time() - start_time,2)
+            logging.info(f"[code_orchest] finished summarizing conversation: {conversation_history_summary}. {response_time} seconds.")
+
             # triage (find intent and generate answer and search query when applicable)
             logging.debug(f"[code_orchest] checking intent. ask: {ask}")
-            start_time = time.time()                        
-            triage_response = await triage_ask(kernel, rag_plugin, arguments)
+            start_time = time.time()
+            triage_dict = await triage(kernel, conversationPlugin, arguments)
+            intents = triage_dict['intents']
+            prompt_tokens += triage_dict["prompt_tokens"]
+            completion_tokens += triage_dict["completion_tokens"]
             response_time = round(time.time() - start_time,2)
-            intents = triage_response['intents']
             logging.info(f"[code_orchest] finished checking intents: {intents}. {response_time} seconds.")
 
             # Handle general intents
             if set(intents).intersection({"about_bot", "off_topic"}):
-                answer = triage_response['answer']
-                answer_generated_by = "rag_plugin_triage"
+                answer = triage_dict['answer']
+                answer_generated_by = "conversation_plugin_triage"
                 logging.info(f"[code_orchest] triage answer: {answer}")
 
             # Handle question answering intent
             elif set(intents).intersection({"follow_up", "question_answering"}):         
     
-                search_query = triage_response['search_query'] if triage_response['search_query'] != '' else ask
-                output_context = await kernel.run_async(
-                    rag_plugin_retrieval["Retrieval"],
-                    input_str=search_query
-                )
-                sources = output_context.result
+                search_query = triage_dict['search_query'] if triage_dict['search_query'] != '' else ask
+
+                # run retrieval function
+                function_result = await kernel.invoke(retrievalPlugin["VectorIndexRetrieval"], sk.KernelArguments(input=search_query))
+                sources = function_result.value
                 formatted_sources = sources[:100].replace('\n', ' ')
-                arguments.variables["sources"] = sources
+                escaped_sources = escape_xml_characters(sources)
+                arguments["sources"] = escaped_sources
                 logging.info(f"[code_orchest] generating bot answer. sources: {formatted_sources}")
-
-                # Handle errors
-                if arguments.error_occurred:
-                    logging.error(f"[code_orchest] error when executing RAG flow (Retrieval). SK error: {arguments.last_error_description}")
-                    answer = f"{get_message('ERROR_ANSWER')} (Retrieval) RAG flow: {arguments.last_error_description}"
-                    answer_generated_by = "error_retrieval"
-                    bypass_nxt_steps = True
-
-                else:
-                    # Generate the answer for the user
-                    logging.info(f"[code_orchest] generating bot answer. ask: {ask}")
-                    start_time = time.time()                                                          
-                    arguments.variables["history"] = json.dumps(messages[:-1], ensure_ascii=False) # update context with full history
-                    output_context = await call_semantic_function(kernel, rag_plugin["Answer"], arguments)
-                    rag_plugin_answer = output_context.result
-                    answer = rag_plugin_answer
-                    answer_generated_by = "rag_plugin_answer"
-                    prompt = open(f"orc/plugins/RAG/Answer/skprompt.txt", "r").read() # temporary solution
-                    if arguments.error_occurred:
-                        logging.error(f"[code_orchest] error when executing RAG flow (get the answer). {arguments.last_error_description}")
-                        answer = f"{get_message('ERROR_ANSWER')} (get the answer) RAG flow: {arguments.last_error_description}"
-                        answer_generated_by = "error_rag_plugin_answer"
-                        bypass_nxt_steps = True
-                    response_time =  round(time.time() - start_time,2)              
-                    logging.info(f"[code_orchest] finished generating bot answer. {response_time} seconds. {answer[:100]}.")
+            
+                # Generate the answer augmented by the retrieval
+                logging.info(f"[code_orchest] generating bot answer. ask: {ask}")
+                start_time = time.time()                                                          
+                arguments["history"] = json.dumps(messages[:-1], ensure_ascii=False) # update context with full history
+                function_result = await call_semantic_function(kernel, conversationPlugin["Answer"], arguments)
+                answer =  str(function_result)
+                conversation_plugin_answer = answer
+                answer_generated_by = "conversation_plugin_answer"
+                prompt_tokens += get_usage_tokens(function_result, 'prompt')
+                completion_tokens += get_usage_tokens(function_result, 'completion')
+                prompt = str(function_result.metadata['messages'][0])
+                response_time =  round(time.time() - start_time,2)              
+                logging.info(f"[code_orchest] finished generating bot answer. {response_time} seconds. {answer[:100]}.")
 
             elif "greeting" in intents:
-                answer = triage_response['answer']
-                answer_generated_by = "rag_plugin_triage"
+                answer = triage_dict['answer']
+                answer_generated_by = "conversation_plugin_triage"
                 logging.info(f"[code_orchest] triage answer: {answer}")
 
             elif intents == ["none"]:
@@ -247,37 +195,64 @@ async def get_answer(history):
     # GUARDRAILS (ANSWER)
     #############################
 
-    if GROUNDEDNESS_CHECK and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
-        try:
-            logging.info(f"[code_orchest] checking if it is grounded. answer: {answer[:50]}")
-            start_time = time.time()            
-            arguments.variables["answer"] = answer                      
-            output_context = await call_semantic_function(kernel, rag_plugin["IsGrounded"], arguments)
-            grounded = output_context.result
-            logging.info(f"[code_orchest] is it grounded? {grounded}.")  
-            if grounded.lower() == 'no':
-                logging.info(f"[code_orchest] ungrounded answer: {answer}")
-                output_context = await call_semantic_function(kernel, rag_plugin["NotInSourcesAnswer"], arguments)
-                answer = output_context.result
-                answer_dict['gpt_groundedness'] = 1
-                bypass_nxt_steps = True
-            else:
-                answer_dict['gpt_groundedness'] = 5
-            response_time =  round(time.time() - start_time,2)
-            logging.info(f"[code_orchest] finished checking if it is grounded. {response_time} seconds.")
-        except Exception as e:
-            logging.error(f"[code_orchest] could not check answer is grounded. {e}")
-
     if BLOCKED_LIST_CHECK and not bypass_nxt_steps:
         try:
             for blocked_word in blocked_list:
                 if blocked_word in answer.lower().split():
                     logging.info(f"[code_orchest] blocked word found in answer: {blocked_word}.")
                     answer = get_message('BLOCKED_ANSWER')
+                    answer_generated_by = "blocked_word_check"
                     break
         except Exception as e:
             logging.error(f"[code_orchest] could not get blocked list. {e}")
-            
+
+    if GROUNDEDNESS_CHECK and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
+            try:
+                logging.info(f"[code_orchest] checking if it is grounded. answer: {answer[:50]}")
+                start_time = time.time()            
+                arguments["answer"] = answer                      
+                function_result = await call_semantic_function(kernel, conversationPlugin["IsGrounded"], arguments)
+                grounded =  str(function_result)
+                prompt_tokens += get_usage_tokens(function_result, 'prompt')
+                completion_tokens += get_usage_tokens(function_result, 'completion')            
+                logging.info(f"[code_orchest] is it grounded? {grounded}.")  
+                if grounded.lower() == 'no':
+                    logging.info(f"[code_orchest] ungrounded answer: {answer}")
+                    function_result = await call_semantic_function(kernel, conversationPlugin["NotInSourcesAnswer"], arguments)
+                    prompt_tokens += get_usage_tokens(function_result, 'prompt')
+                    completion_tokens += get_usage_tokens(function_result, 'completion')            
+                    answer =  str(function_result)
+                    answer_dict['gpt_groundedness'] = 1
+                    answer_generated_by = "gpt_groundedness_check"
+                    bypass_nxt_steps = True
+                else:
+                    answer_dict['gpt_groundedness'] = 5
+                response_time =  round(time.time() - start_time,2)
+                logging.info(f"[code_orchest] finished checking if it is grounded. {response_time} seconds.")
+            except Exception as e:
+                logging.error(f"[code_orchest] could not check answer is grounded. {e}")            
+
+    if RESPONSIBLE_AI_CHECK and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
+            try:
+                logging.info(f"[code_orchest] checking responsible AI (fairness). answer: {answer[:50]}")
+                start_time = time.time()            
+                arguments["answer"] = answer
+                raiPlugin = kernel.import_plugin_from_prompt_directory(PLUGINS_FOLDER, "ResponsibleAI")
+                fairness_dict = await fairness(kernel, raiPlugin, arguments)
+                fair = fairness_dict['fair']
+                fairness_answer = fairness_dict['answer']
+                prompt_tokens += fairness_dict["prompt_tokens"]
+                completion_tokens += fairness_dict["completion_tokens"]
+                logging.info(f"[code_orchest] responsible ai check. Is it fair? {fair}.")
+                if not fair:
+                    answer = fairness_answer
+                    answer_generated_by = "rai_plugin_fairness"
+                answer_dict['pass_rai_fairness_check'] = fair
+                response_time =  round(time.time() - start_time,2)
+                logging.info(f"[code_orchest] finished checking responsible AI (fairness). {response_time} seconds.")
+            except Exception as e:
+                logging.error(f"[code_orchest] could not check responsible AI (fairness). {e}")
+
     answer_dict["prompt"] = prompt
     answer_dict["answer"] = answer
     answer_dict["sources"] = sources.replace('[', '{').replace(']', '}')
@@ -286,13 +261,13 @@ async def get_answer(history):
     # additional metadata for debugging
     if CONVERSATION_METADATA:
         answer_dict["user_ask"] = ask
-        answer_dict["intents"] = intents   
-        answer_dict["rag_plugin_answer"] = rag_plugin_answer     
+        answer_dict["intents"] = intents
+        answer_dict["conversation_plugin_answer"] = conversation_plugin_answer     
         answer_dict["model"] = AZURE_OPENAI_CHATGPT_MODEL
         answer_dict["answer_generated_by"] = answer_generated_by
-
-    # answer_dict["prompt_tokens"] = prompt_tokens
-    # answer_dict["completion_tokens"] = completion_tokens
+        answer_dict["prompt_tokens"] = prompt_tokens
+        answer_dict["completion_tokens"] = completion_tokens
+        answer_dict["conversation_history_summary"] = conversation_history_summary
         
     response_time =  round(time.time() - init_time,2)
     logging.info(f"[code_orchest] finished RAG Flow. {response_time} seconds.")
