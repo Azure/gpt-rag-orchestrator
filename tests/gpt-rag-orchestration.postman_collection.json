@@ -129,6 +129,15 @@
 				}
 			},
 			"response": []
+		},
+		{
+			"name": "Call for Conversations History",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": "http://localhost:7071/api/conversations"
+			},
+			"response": []
 		}
 	],
 	"event": [

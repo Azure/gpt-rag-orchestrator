@@ -282,6 +282,23 @@ def get_aoai_config(model):
     }
     return result
 
+def get_conversations():
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client('conversations')
+    conversations = container.query_items(query='SELECT * FROM c', enable_cross_partition_query=True)
+    formatted_conversations = [ {'id': con['id'], 'start_date': con['conversation_data']['start_date'], 'content': con['history'][0]['content']} for con in conversations]
+    return formatted_conversations
+
+def get_conversation(conversation_id):
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client('conversations')
+    conversation = container.read_item(item=conversation_id, partition_key=conversation_id)
+    return conversation
+
 def get_next_resource(model):
     
     # define resource
