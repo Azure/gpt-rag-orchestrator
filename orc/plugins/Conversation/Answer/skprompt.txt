@@ -1,5 +1,5 @@
 ## Task Goal
-The task goal is to generate an ANSWER based on the message HISTORY, user QUESTION and the provided SOURCES.
+The task goal is to generate an ANSWER for the QUESTION, based on the provided SOURCES.
  
 ## Task instructions
 You will be given a list of SOURCES that you can use to ANSWER the QUESTION. 
@@ -12,7 +12,7 @@ ALWAYS generate the ANSWER in the same language(ex: Spanish, English, Portuguese
  
 ## Task Input:
 "QUESTION": "{{$ask}}"
-"HISTORY": "{{ConversationSummaryPlugin.SummarizeConversation $history}}"
+"CONVERSATION_HISTORY_SUMMARY": "{{$conversation_summary}}"
 "SOURCES": "{{$sources}}"
  
 ## Task Output:

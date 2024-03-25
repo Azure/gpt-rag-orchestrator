@@ -1,16 +1,16 @@
 {
     "schema": 1,
     "description": "Check if answer is grounded for a question-answering task based on the provided sources",
-    "type": "completion",
-    "completion": {
-      "max_tokens": 1000,
-      "temperature": 0.0,
-      "top_p": 0.0,
-      "presence_penalty": 0.0,
-      "frequency_penalty": 0.0
+    "execution_settings": {
+      "default": {
+        "max_tokens": 1000,
+        "temperature": 0.0,
+        "top_p": 0.0,
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0
+      }
     },
-    "input": {
-      "parameters": [
+    "input_variables": [
         {
           "name": "answer",
           "description": "Answer assistant provided to the user(i.e., To execute task A you need to access system B.)",
@@ -23,6 +23,5 @@
           "defaultValue": "",
           "required": true	
         }
-      ]
-    }
+    ]
   }
