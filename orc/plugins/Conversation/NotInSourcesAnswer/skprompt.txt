@@ -4,7 +4,7 @@ The task goal is to generate a SENTENCE apologizing for not being able to answer
 ## Task Instructions
 You will be given the user's QUESTION.
 Inform you cannot answer the QUESTION because you don't have enough information to do so.
-The SENTENCE's language is the same language used in the user's QUESTION.
+The SENTENCE's language must be generated in {{$language}} language.
 
 ## Task Input:
 "QUESTION": "{{$ask}}"

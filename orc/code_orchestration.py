@@ -63,6 +63,7 @@ async def get_answer(history):
     # conversation metadata
     conversation_plugin_answer = ""
     conversation_history_summary = ''
+    triage_language = ''
     answer_generated_by = "none"
     prompt_tokens = 0
     completion_tokens = 0
@@ -136,6 +137,8 @@ async def get_answer(history):
             start_time = time.time()
             triage_dict = await triage(kernel, conversationPlugin, arguments)
             intents = triage_dict['intents']
+            triage_language = triage_dict['language']
+            arguments["language"] = triage_language
             prompt_tokens += triage_dict["prompt_tokens"]
             completion_tokens += triage_dict["completion_tokens"]
             response_time = round(time.time() - start_time,2)
@@ -253,22 +256,25 @@ async def get_answer(history):
             except Exception as e:
                 logging.error(f"[code_orchest] could not check responsible AI (fairness). {e}")
 
-    answer_dict["prompt"] = prompt
+    answer_dict["user_ask"] = ask
     answer_dict["answer"] = answer
-    answer_dict["sources"] = sources.replace('[', '{').replace(']', '}')
     answer_dict["search_query"] = search_query
 
     # additional metadata for debugging
     if CONVERSATION_METADATA:
-        answer_dict["user_ask"] = ask
         answer_dict["intents"] = intents
-        answer_dict["conversation_plugin_answer"] = conversation_plugin_answer     
-        answer_dict["model"] = AZURE_OPENAI_CHATGPT_MODEL
+        answer_dict["triage_language"] = triage_language     
         answer_dict["answer_generated_by"] = answer_generated_by
+        answer_dict["conversation_history_summary"] = conversation_history_summary
+        answer_dict["conversation_plugin_answer"] = conversation_plugin_answer
+        answer_dict["model"] = AZURE_OPENAI_CHATGPT_MODEL
         answer_dict["prompt_tokens"] = prompt_tokens
         answer_dict["completion_tokens"] = completion_tokens
-        answer_dict["conversation_history_summary"] = conversation_history_summary
-        
+
+
+    answer_dict["prompt"] = prompt
+    answer_dict["sources"] = sources.replace('[', '{').replace(']', '}')
+
     response_time =  round(time.time() - init_time,2)
     logging.info(f"[code_orchest] finished RAG Flow. {response_time} seconds.")
 

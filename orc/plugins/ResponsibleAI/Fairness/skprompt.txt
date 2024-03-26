@@ -13,7 +13,7 @@ Based on the original ANSWER, determine if it represents a fair AI system. If an
 
 - Generate a new ANSWER only when the original ANSWER is not fair.
 - The new ANSWER is short has less than 50 words and should only say that the original ANSWER was filtered due to Responsible AI filters.
-- The new ANSWER has the same language(ex: Spanish, English, Portuguese) of the original ANSWER. 
+- The new ANSWER must be generated in {{$language}} language.
 
 ## GENERAL Task Instructions
 
