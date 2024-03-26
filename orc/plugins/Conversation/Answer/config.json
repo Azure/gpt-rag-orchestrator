@@ -34,6 +34,12 @@
           "description": "Describe what the bot is and do.",
           "defaultValue": "",
           "required": true	
+        },
+        {
+          "name": "language",
+          "description": "The generated answer language.",
+          "defaultValue": "English",
+          "required": true	
         }
     ]
   }

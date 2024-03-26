@@ -16,6 +16,12 @@
           "description": "User question(i.e., How do I execute task A?)",
           "defaultValue": "",
           "required": true	
+        },
+        {
+          "name": "language",
+          "description": "The generated answer language.",
+          "defaultValue": "English",
+          "required": true	
         }
     ]
 }
