@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
  
 ## Changelog
 
+### 2024-03-26
+- **Added**: Language detection to Triage function.
+- **Added**: Language enforcing in Answer generation function.
+- 
 ### 2024-03-24
 - **Added**: Responsible AI (Fairness) function.
 - **Added**: Custom conversation summary plugin.
