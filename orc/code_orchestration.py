@@ -7,7 +7,7 @@ import time
 from orc.plugins.Conversation.Triage.wrapper import triage
 from orc.plugins.ResponsibleAI.Fairness.wrapper import fairness
 from semantic_kernel.functions.kernel_arguments import KernelArguments
-from shared.util import call_semantic_function, get_chat_history_as_messages, get_message
+from shared.util import call_semantic_function, get_chat_history_as_messages, get_message, get_last_messages
 from shared.util import get_blocked_list, create_kernel, get_usage_tokens, escape_xml_characters
 
 # logging level
@@ -35,6 +35,8 @@ AZURE_OPENAI_TOP_P = os.environ.get("AZURE_OPENAI_TOP_P") or "0.27"
 AZURE_OPENAI_TOP_P = float(AZURE_OPENAI_TOP_P)
 AZURE_OPENAI_RESP_MAX_TOKENS = os.environ.get("AZURE_OPENAI_MAX_TOKENS") or "1000"
 AZURE_OPENAI_RESP_MAX_TOKENS = int(AZURE_OPENAI_RESP_MAX_TOKENS)
+CONVERSATION_MAX_HISTORY = os.environ.get("CONVERSATION_MAX_HISTORY") or "3"
+CONVERSATION_MAX_HISTORY = int(CONVERSATION_MAX_HISTORY)
 
 ORCHESTRATOR_FOLDER = "orc"
 PLUGINS_FOLDER = f"{ORCHESTRATOR_FOLDER}/plugins"
@@ -111,7 +113,8 @@ async def get_answer(history):
             arguments = KernelArguments()
             arguments["bot_description"] = bot_description
             arguments["ask"] = ask
-            arguments["history"] = json.dumps(messages[-5:-1], ensure_ascii=False) # just last two interactions
+            arguments["history"] = json.dumps(get_last_messages(messages, CONVERSATION_MAX_HISTORY), ensure_ascii=False)
+            arguments["previous_answer"] = messages[-2]['content'] if len(messages) > 1 else ""
 
             # import RAG plugins
             conversationPlugin = kernel.import_plugin_from_prompt_directory(PLUGINS_FOLDER, "Conversation")
@@ -120,7 +123,7 @@ async def get_answer(history):
             # conversation summary
             logging.debug(f"[code_orchest] summarizing conversation")
             start_time = time.time()
-            if len(arguments["history"]) > 3:
+            if arguments["history"] != '[]':
                 function_result = await call_semantic_function(kernel, conversationPlugin["ConversationSummary"], arguments)
                 prompt_tokens += get_usage_tokens(function_result, 'prompt')
                 completion_tokens += get_usage_tokens(function_result, 'completion')            
