@@ -39,6 +39,7 @@ Query string is no longer than 10 words.
 ## General Instructions
 
 - The output is a valid JSON object with intents, answer, language and query_string fields.
+- Use the language name for the language field, instead of using the language code.
 - The output should not repeat the ASK.
 - ALWAYS generate the ANSWER and QUERY_STRING in the same language of the ASK. 
 
