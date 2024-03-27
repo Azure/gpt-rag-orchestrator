@@ -248,6 +248,28 @@ def get_message(message):
     messages_dict = json.loads(json_data)
     return messages_dict[message]
 
+def get_last_messages(messages, n):
+    """
+    This function returns the last n*2 messages from the provided list, excluding the last message.
+
+    Parameters:
+    messages (list): A list of messages.
+    n (int): The number of pairs of messages to return.
+
+    Returns:
+    list: A list containing the last n*2 messages, excluding the last message. If the input list is empty or contains only one message, an empty list is returned.
+
+    Note:
+    This function assumes that a conversation consists of pairs of messages (a message and a response). Therefore, it returns n*2 messages to get n pairs of messages.
+    """    
+    # Check if messages is not empty and has more than one element
+    if messages and len(messages) > 1:
+        # Get the last N*2 messages (N pairs), excluding the last message
+        last_conversations = messages[-(n*2+1):-1]
+        return last_conversations
+    else:
+        return []
+
 ##########################################################
 # SEMANTIC KERNEL
 ##########################################################

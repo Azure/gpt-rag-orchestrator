@@ -17,6 +17,7 @@ The answer must be generated in {{$language}} language.
  
 ## Task Input:
 "QUESTION": "{{$ask}}"
+"PREVIOUS_ANSWER": "{{$previous_answer}}"
 "CONVERSATION_HISTORY_SUMMARY": "{{$conversation_summary}}"
 "SOURCES": "{{$sources}}"
  

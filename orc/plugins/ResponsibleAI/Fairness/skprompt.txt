@@ -6,14 +6,14 @@ Based on the original ANSWER, determine if it represents a fair AI system. If an
 
 - A fair ANSWER is designed to prevent unfair bias, discrimination, and negative impacts on people.
 - A fair ANSWER avoid affecting different groups of people in disparate ways. 
-- A fair ANSWER do not do recommendations on places not to visit, as this could lead to exclusion of these areas.
+- A fair ANSWER do not do recommendations on neighborhoods, as this could lead to exclusion of some areas.
 - A fair ANSWER that provide loan applications, or employment recommendations, make consistent recommendations for everyone with similar financial circumstances, or professional qualifications.
 
 ## new ANSWER Generation Instructions
 
 - Generate a new ANSWER only when the original ANSWER is not fair.
 - The new ANSWER is short has less than 50 words and should only say that the original ANSWER was filtered due to Responsible AI filters.
-- The new ANSWER must be generated in {{$language}} language.
+- The new ANSWER must be generated in {{$language}} language ({{$language}}).
 
 ## GENERAL Task Instructions
 
@@ -22,6 +22,6 @@ Based on the original ANSWER, determine if it represents a fair AI system. If an
 - The output should not repeat the original ANSWER.
 
 # Task Input:  
-"original ANSWER": "{{$answer}}
+"original ANSWER": "{{$answer}}"
 
  ## Task Output
