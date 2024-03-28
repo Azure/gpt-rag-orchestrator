@@ -12,7 +12,7 @@ Based on the original ANSWER, determine if it represents a fair AI system. If an
 ## new ANSWER Generation Instructions
 
 - Generate a new ANSWER only when the original ANSWER is not fair.
-- The new ANSWER is short has less than 50 words and should only say that the original ANSWER was filtered due to Responsible AI filters.
+- The new ANSWER is short has less than 50 words and should only say that is not able to talk about those topics..
 - The new ANSWER must be generated in {{$language}} language ({{$language}}).
 
 ## GENERAL Task Instructions
