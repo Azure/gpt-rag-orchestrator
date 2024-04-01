@@ -83,7 +83,7 @@ class Retrieval:
             logging.info(f"[sk_retrieval] querying azure ai search. search query: {search_query}")
             # prepare body
             body = {
-                "select": "title, content, url, filepath, chunk_id",
+                "select": f"{title}, {content}, {url}, {filepath}, {chunkid} ",
                 "top": AZURE_SEARCH_TOP_K
             }    
             if AZURE_SEARCH_APPROACH == TERM_SEARCH_APPROACH:
