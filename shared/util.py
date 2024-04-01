@@ -282,26 +282,28 @@ def get_aoai_config(model):
     }
     return result
 
-def get_conversations():
+def get_conversations(user_id):
     try:
         credential = DefaultAzureCredential()
         db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
         db = db_client.get_database_client(database=AZURE_DB_NAME)
         container = db.get_container_client('conversations')
-        conversations = container.query_items(query='SELECT * FROM c', enable_cross_partition_query=True)
+        conversations = container.query_items(query='SELECT * FROM c WHERE c.conversation_data.interactions[0].user_id  = @user_id', parameters=[dict(name='@user_id', value=user_id)], enable_cross_partition_query=True)
         formatted_conversations = [ {'id': con['id'], 'start_date': con['conversation_data']['start_date'], 'content': con['history'][0]['content']} for con in conversations]
         return formatted_conversations
     except Exception:
         logging.error("Error retrieving the conversations")
         return []
 
-def get_conversation(conversation_id):
+def get_conversation(conversation_id, user_id):
     try: 
         credential = DefaultAzureCredential()
         db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
         db = db_client.get_database_client(database=AZURE_DB_NAME)
         container = db.get_container_client('conversations')
         conversation = container.read_item(item=conversation_id, partition_key=conversation_id)
+        if conversation['conversation_data']['interactions'][0]['user_id'] != user_id:
+            return {}
         return conversation
     except Exception:
         logging.error(f"Error retrieving the conversation '{conversation_id}'")

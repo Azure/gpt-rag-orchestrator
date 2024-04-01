@@ -11,8 +11,11 @@ logging.basicConfig(level=LOGLEVEL)
 async def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
     id = req.params.get('id')
+
+    req_body = req.get_json()
+    user_id = req_body.get('user_id')
     if not id:
-        conversations = get_conversations()
+        conversations = get_conversations(user_id)
     else:
-        conversations = get_conversation(id)
+        conversations = get_conversation(id, user_id)
     return func.HttpResponse(json.dumps(conversations), mimetype="application/json", status_code=200)
