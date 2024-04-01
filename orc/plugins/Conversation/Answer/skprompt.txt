@@ -43,7 +43,7 @@ Do not combine sources; list each source separately.
 User: "Necesito comprar laptops con 16gb de ram "
 Assistant: 
 *Estimado de Costos Independiente (ICE)*
-Fecha: {{fecha de hoy}}
+Fecha: today's date 
 Fuente de Fondos:
 Nombre del Proyecto:
 Descripción:
