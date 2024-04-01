@@ -4,7 +4,7 @@ import time
 import uuid
 from azure.cosmos.aio import CosmosClient
 from datetime import datetime
-from shared.util import format_answer
+from shared.util import format_answer, get_setting
 from shared.cosmos_db import store_user_consumed_tokens
 from azure.identity.aio import DefaultAzureCredential
 import orc.code_orchestration as code_orchestration
@@ -40,6 +40,20 @@ def get_credentials():
     # return DefaultAzureCredential(exclude_managed_identity_credential=is_local_env, exclude_environment_credential=is_local_env)
     return DefaultAzureCredential()
 
+def get_settings(client_principal):
+    # use cosmos to get settings from the logged user
+    data = get_setting(client_principal)
+    temperature = 0.0 if 'temperature' not in data else data['temperature']
+    frequency_penalty = 0.0 if 'frequencyPenalty' not in data else data['frequencyPenalty']
+    presence_penalty = 0.0 if 'presencePenalty' not in data else data['presencePenalty']
+    settings = {
+        'temperature': temperature,
+        'frequency_penalty': frequency_penalty,
+        'presence_penalty': presence_penalty
+    }
+    logging.info(f"[orchestrator] settings: {settings}")
+    return settings
+
 async def run(conversation_id, ask, client_principal):
     
     start_time = time.time()
@@ -55,6 +69,9 @@ async def run(conversation_id, ask, client_principal):
 
     # get conversation
     credential = get_credentials()
+
+    # settings
+    settings = get_settings(client_principal)
 
     async with CosmosClient(AZURE_DB_URI, credential=credential) as db_client:
         db = db_client.get_database_client(database=AZURE_DB_NAME)
@@ -83,8 +100,7 @@ async def run(conversation_id, ask, client_principal):
 
         else: # USE_CODE
             logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
-
-            answer_dict = await code_orchestration.get_answer(history)
+            answer_dict = await code_orchestration.get_answer(history, settings)
 
         # 3) update and save conversation (containing history and conversation data)
         

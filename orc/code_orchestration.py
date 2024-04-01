@@ -7,6 +7,7 @@ from shared.util import get_aoai_config, get_blocked_list, number_of_tokens
 import semantic_kernel as sk
 import semantic_kernel.connectors.ai.open_ai as sk_oai
 from semantic_kernel.core_skills import ConversationSummarySkill
+from . import semantic_skill as sks
 
 # logging level
 
@@ -45,8 +46,12 @@ def initialize_kernel():
     )
     return kernel
 
-def import_custom_plugins(kernel, plugins_directory, rag_plugin_name):
-    rag_plugin = kernel.import_semantic_skill_from_directory(plugins_directory, rag_plugin_name)
+def import_custom_plugins(kernel, plugins_directory, rag_plugin_name, settings=None):
+    # modified to send settings into our modified function
+    if settings:
+        rag_plugin = sks.import_semantic_skill_from_directory(kernel, plugins_directory, rag_plugin_name, settings)
+    else:
+        rag_plugin = kernel.import_semantic_skill_from_directory(plugins_directory, rag_plugin_name)
     native_functions = kernel.import_native_skill_from_directory(plugins_directory, rag_plugin_name)
     rag_plugin.update(native_functions)
     return rag_plugin
@@ -88,7 +93,7 @@ async def triage_ask(kernel, rag_plugin, context):
     triage_response["search_query"] = response_json.get('query_string', '')   
     return triage_response
 
-async def get_answer(history):
+async def get_answer(history, settings = None):
 
     #############################
     # INITIALIZATION
@@ -141,7 +146,7 @@ async def get_answer(history):
             
             # initialize semantic kernel
             kernel = initialize_kernel()
-            rag_plugin = import_custom_plugins(kernel, "orc/plugins", "RAG")
+            rag_plugin = import_custom_plugins(kernel, "orc/plugins", "RAG", settings)
             context = create_context(kernel, system_message, ask, messages)
             # import conversation summary plugin to be used by the RAG plugin
             kernel.import_skill(ConversationSummarySkill(kernel=kernel), skill_name="ConversationSummaryPlugin")
