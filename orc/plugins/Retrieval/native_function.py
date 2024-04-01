@@ -125,7 +125,31 @@ class Retrieval:
             else:
                 if response.json()['value']:
                         for doc in response.json()['value']:
-                            search_results.append(doc['filepath'] + ": "+ doc['content'].strip() + "\n")    
+                            search_results.append("Numero de Caso: "+ doc['Numero_de_Caso']
+                            + "Costo Unitario Estimado del Artículo: "+ doc['Costo_Unitario_Estimado_de_Articulo'] + "\n"
+                            + "Fecha Recibo de Requisición: "+ doc['Fecha_Recibo_de_Requisicion'] + "\n"
+                            + "Número de Requisición: "+ doc['Numero_de_Requisicion'] + "\n"
+                            + "Título de Requisición: "+ doc['Titulo_de_Requisicion'] + "\n"
+                            + "Categoría de Requisición: "+ doc['Categoria_de_Requisicion'] + "\n"
+                            + "SubCategoría de Requisición: "+ doc['SubCategoria_de_Requisicion'] + "\n"
+                            + "Agencia: "+ doc['Agencia'] + "\n"
+                            + "Nombre de Agencia de Entrega: "+ doc['Nombre_de_Agencia_de_Entrega'] + "\n"
+                            + "Método de Adquisición: "+ doc['Metodo_de_Adquisicion'] + "\n"
+                            + "Descripción de Artículo: "+ doc['Descripcion_de_Articulo'] + "\n"
+                            + "Marca de Artículo: "+ doc['Marca_de_Articulo'] + "\n"
+                            + "Modelo de Artículo: "+ doc['Modelo_de_Articulo'] + "\n"
+                            + "Garantía de Artículo: "+ doc['Garantia_de_Articulo'] + "\n"
+                            + "Unidad de Medida: "+ doc['Unidad_de_Medida'] + "\n"
+                            + "Cantidad: "+ doc['Cantidad'] + "\n"
+                            + "Costo Estimado Total de Artículo: "+ doc['Costo_Estimado_Total_de_Orden_de_Articulo'] + "\n"
+                            + "Número de Contrato: "+ doc['Numero_de_Contrato'] + "\n"
+                            + "Costo Final del Artículo: "+ doc['Costo_Final_de_Orden_de_Articulo'] + "\n"
+                            + "Número de Orden de Compra: "+ doc['Numero_de_Orden_de_Compra'] + "\n"
+                            + "Nombre de Archivo de Orden de Compra: "+ doc['Nombre_de_Archivo_de_Orden_de_Compra'] + "\n"
+                            + "Nombre de Suplidor: "+ doc['Nombre_de_Suplidor'] + "\n"
+                            + "Teléfono de Contacto del Suplidor: "+ doc['Telefono_de_Contacto_de_Suplidor'] + "\n"
+                            + "Email del Suplidor: "+ doc['Email_de_Suplidor'] + "\n"
+                            + "Url de Archivo de Orden De Compra: "+ doc['Url_de_Archivo_de_Orden_de_Compra'] + "\n")      
                     
             response_time =  round(time.time() - start_time,2)
             # logging.info(f"[sk_retrieval] search query body: {body}")        
