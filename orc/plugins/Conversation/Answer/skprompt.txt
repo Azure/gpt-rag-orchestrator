@@ -40,48 +40,72 @@ Do not combine sources; list each source separately.
 
 ## Example
 
-User: "I need a refrigerator not exceeding 5 feet in height."
-Assistant: "Based on your requirement, here are 5 products found in the provided sources:
-1. Model: 
--Description,
--Brand,
--Estimated Unitary Cost of article: US($),
--Measure Unit,
--Supplier contact,
--Auction Number,
--Auction Date,
+User: "Necesito comprar laptops con 16gb de ram "
+Assistant: 
+*Estimado de Costos Independiente (ICE)*
+Fecha: {{fecha de hoy}}
+Fuente de Fondos:
+Nombre del Proyecto:
+Descripción:
+Tipo de Contrato:
+Fuente de Información para el Estimado:
+Proceso de Adquisición Requerido:
+Bien o Servicio: 
+Descripción del Servicio o Producto:
+
+Margen de Costo Razonable y Justificación:  
+Basado en la información proporcionada, aquí están 5 opciones: 
+1. Modelo:
+-Descripción,
+-Marca,
+-Costo Unitario del Artículo: US($),
+-Unidad de Medida,
+-Contacto del Proveedor,
+-Número de Subasta,
+-Fecha de Subasta,
 -etc. 
 -Source:[721592.pdf] 
-2. Model: 
--Description,
--Brand,
--Estimated Unitary Cost of article: US($),
--Measure Unit,
--Supplier contact,
--Auction Number,
--Auction Date,
+2. Modelo: 
+-Descripción,
+-Marca,
+-Costo Unitario del Artículo: US($),
+-Unidad de Medida,
+-Contacto del Proveedor,
+-Número de Subasta,
+-Fecha de Subasta,
 -etc. 
--Source:[721592.pdf] 
-...
-
-Based on your requirement, here are 5 products found in general knowledge:
-1. Model:
--Description,
--Brand,
--Estimated Price in US($),
--Measure Unit,
--Supplier contact,
+-Source:[494032.pdf]
+…
+Basado en conocimiento general, aquí están 5 opciones :
+1. Modelo:
+-Descripción,
+-Marca,
+-Costo Unitario del Artículo: US($),
+-Unidad de Medida,
+-Contacto del Proveedor,
+-Número de Subasta,
+-Fecha de Subasta,
 -etc. 
--Source:"GPT General Knowledge"
-
-2. Model:
--Description,
--Brand,
--Estimated Price in US($),
--Measure Unit,
--Supplier contact,
+-Source: “Conocimiento General GPT”
+2. Modelo: 
+-Descripción,
+-Marca,
+-Costo Unitario del Artículo: US($),
+-Unidad de Medida,
+-Contacto del Proveedor,
+-Número de Subasta,
+-Fecha de Subasta,
 -etc. 
--Source:"GPT General Knowledge"
-...
+-Source: “Conocimiento General GPT”
+…
+Basado en este análisis brindado por ASGGPT podemos determinar que para estos servicios los precios razonables están entre $0.00 a $0.00.
 
-Do you have any specific features or brands in mind to further refine these options?"
+Basado en esto se determina que esta es la mejor opción: 
+2. Modelo: 
+-Descripción,
+ 
+Representante Autorizado:
+ 
+
+_________________________                   _________________________                
+Nombre                                      Firma
