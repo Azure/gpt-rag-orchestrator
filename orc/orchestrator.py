@@ -5,6 +5,7 @@ import uuid
 from azure.cosmos.aio import CosmosClient
 from datetime import datetime
 from shared.util import format_answer
+from shared.cosmos_db import store_user_consumed_tokens
 from azure.identity.aio import DefaultAzureCredential
 import orc.code_orchestration as code_orchestration
 import orc.promptflow_orchestration as promptflow_orchestration
@@ -102,8 +103,12 @@ async def run(conversation_id, ask, client_principal):
         conversation_data['interactions'].append(interaction)
         conversation['conversation_data'] = conversation_data
         conversation = await container.replace_item(item=conversation, body=conversation)
-        
-        # 4) return answer
+
+        # 4) store user consumed tokens
+
+        store_user_consumed_tokens(client_principal['id'], answer_dict['total_tokens'])
+
+        # 5) return answer
         result = {"conversation_id": conversation_id, 
                 "answer": format_answer(interaction['answer'], ANSWER_FORMAT), 
                 "data_points": interaction['sources'] if 'sources' in interaction else '', 

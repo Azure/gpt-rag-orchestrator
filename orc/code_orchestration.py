@@ -3,7 +3,7 @@ import logging
 import os
 import time
 from shared.util import call_semantic_function, get_chat_history_as_messages, get_message
-from shared.util import get_aoai_config, get_blocked_list
+from shared.util import get_aoai_config, get_blocked_list, number_of_tokens
 import semantic_kernel as sk
 import semantic_kernel.connectors.ai.open_ai as sk_oai
 from semantic_kernel.core_skills import ConversationSummarySkill
@@ -248,7 +248,10 @@ async def get_answer(history):
     answer_dict["model"] = AZURE_OPENAI_CHATGPT_MODEL    
     # answer_dict["prompt_tokens"] = prompt_tokens
     # answer_dict["completion_tokens"] = completion_tokens
-        
+
+    total_tokens = number_of_tokens(ask, AZURE_OPENAI_CHATGPT_MODEL) + number_of_tokens(answer, AZURE_OPENAI_CHATGPT_MODEL)
+    answer_dict["total_tokens"] = total_tokens
+    
     response_time =  round(time.time() - init_time,2)
     logging.info(f"[code_orchest] finished RAG Flow. {response_time} seconds.")
 
