@@ -6,7 +6,7 @@ from shared.util import call_semantic_function, get_chat_history_as_messages, ge
 from shared.util import get_aoai_config, get_blocked_list, number_of_tokens
 import semantic_kernel as sk
 import semantic_kernel.connectors.ai.open_ai as sk_oai
-from semantic_kernel.core_skills import ConversationSummarySkill
+from orc.plugins.Summarize.ConversationSummarySkill import ConversationSummarySkill
 from . import semantic_skill as sks
 import re
 
@@ -150,7 +150,14 @@ async def get_answer(history, settings = None):
             rag_plugin = import_custom_plugins(kernel, "orc/plugins", "RAG", settings)
             context = create_context(kernel, system_message, ask, messages)
             # import conversation summary plugin to be used by the RAG plugin
-            kernel.import_skill(ConversationSummarySkill(kernel=kernel), skill_name="ConversationSummaryPlugin")
+            kernel.import_skill(ConversationSummarySkill(
+                kernel=kernel,
+                temperature=settings['temperature'], 
+                presence_penalty=settings['frequency_penalty'], 
+                frequency_penalty=settings['presence_penalty'],
+                top_p=0.5,
+                max_tokens=650, 
+            ), skill_name="ConversationSummaryPlugin")
             
             # triage (find intent and generate answer and search query when applicable)
             logging.debug(f"[code_orchest] checking intent. ask: {ask}")
