@@ -131,5 +131,6 @@ async def run(conversation_id, ask, client_principal):
                 "thoughts": f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"}
 
         logging.info(f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {interaction['answer'][:30]}")
+        await db_client.close()
 
     return result

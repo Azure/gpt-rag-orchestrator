@@ -170,7 +170,7 @@ async def get_answer(history, settings = None):
             # Handle general intents
             if set(intents).intersection({"about_bot", "off_topic"}):
                 answer = triage_response['answer']
-                logging.info(f"[code_orchest] triage answer: {answer}")
+                logging.info(f"[code_orchest] triage answer about bot, off topic: {answer}")
 
             # Handle question answering intent
             elif set(intents).intersection({"follow_up", "question_answering"}):
@@ -207,7 +207,7 @@ async def get_answer(history, settings = None):
 
             elif "greeting" in intents:
                 answer = triage_response['answer']
-                logging.info(f"[code_orchest] triage answer: {answer}")
+                logging.info(f"[code_orchest] triage answer greetings: {answer}")
 
             else:
                 logging.info(f"[code_orchest] SK did not executed, no intent found, review Triage function.")
@@ -268,8 +268,8 @@ async def get_answer(history, settings = None):
 
     total_tokens = number_of_tokens(ask, AZURE_OPENAI_CHATGPT_MODEL) + number_of_tokens(answer, AZURE_OPENAI_CHATGPT_MODEL)
 
+    answer_dict.setdefault('gpt_groundedness', 0)
     # The answer is not grounded enough so the sources and the search_query are not valid
-    
     if(answer_dict['gpt_groundedness'] == 1):
         answer = re.sub(r'\[.*?\]', '', answer) #remove sources manually
         # WE NEED TO FIX THIS, THE MODEL IS FINDING THE SOURCES EVEN IF THE ANSWER IS NOT GROUNDED
