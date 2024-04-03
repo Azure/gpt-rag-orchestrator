@@ -8,6 +8,7 @@ import semantic_kernel as sk
 import semantic_kernel.connectors.ai.open_ai as sk_oai
 from semantic_kernel.core_skills import ConversationSummarySkill
 from . import semantic_skill as sks
+import re
 
 # logging level
 
@@ -23,7 +24,7 @@ BLOCKED_LIST_CHECK = True if BLOCKED_LIST_CHECK.lower() == "true" else False
 GROUNDEDNESS_CHECK = os.environ.get("GROUNDEDNESS_CHECK") or "true"
 GROUNDEDNESS_CHECK = True if GROUNDEDNESS_CHECK.lower() == "true" else False
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
-AZURE_OPENAI_TEMPERATURE = os.environ.get("AZURE_OPENAI_TEMPERATURE") or "0.17"
+AZURE_OPENAI_TEMPERATURE = os.environ.get("AZURE_OPENAI_TEMPERATURE") or "0.0"
 AZURE_OPENAI_TEMPERATURE = float(AZURE_OPENAI_TEMPERATURE)
 AZURE_OPENAI_TOP_P = os.environ.get("AZURE_OPENAI_TOP_P") or "0.27"
 AZURE_OPENAI_TOP_P = float(AZURE_OPENAI_TOP_P)
@@ -90,7 +91,7 @@ async def triage_ask(kernel, rag_plugin, context):
 
     triage_response["intents"] = response_json.get('intents', ['none'])
     triage_response["answer"] = response_json.get('answer', '')
-    triage_response["search_query"] = response_json.get('query_string', '')   
+    triage_response["search_query"] = response_json.get('query_string', '')
     return triage_response
 
 async def get_answer(history, settings = None):
@@ -139,7 +140,7 @@ async def get_answer(history, settings = None):
     #############################
     # RAG-FLOW
     #############################
-
+        
     if not bypass_nxt_steps:
 
         try:
@@ -153,7 +154,7 @@ async def get_answer(history, settings = None):
             
             # triage (find intent and generate answer and search query when applicable)
             logging.debug(f"[code_orchest] checking intent. ask: {ask}")
-            start_time = time.time()                        
+            start_time = time.time()
             triage_response = await triage_ask(kernel, rag_plugin, context)
             response_time = round(time.time() - start_time,2)
             intents = triage_response['intents']
@@ -165,7 +166,7 @@ async def get_answer(history, settings = None):
                 logging.info(f"[code_orchest] triage answer: {answer}")
 
             # Handle question answering intent
-            elif set(intents).intersection({"follow_up", "question_answering"}):         
+            elif set(intents).intersection({"follow_up", "question_answering"}):
     
                 search_query = triage_response['search_query'] if triage_response['search_query'] != '' else ask
                 output_context = await kernel.run_async(
@@ -186,7 +187,7 @@ async def get_answer(history, settings = None):
                 else:
                     # Generate the answer for the user
                     logging.info(f"[code_orchest] generating bot answer. ask: {ask}")
-                    start_time = time.time()                                                          
+                    start_time = time.time()
                     context.variables["history"] = json.dumps(messages[:-1], ensure_ascii=False) # update context with full history
                     output_context = await call_semantic_function(kernel, rag_plugin["Answer"], context)
                     answer = output_context.result
@@ -217,15 +218,19 @@ async def get_answer(history, settings = None):
 
     if GROUNDEDNESS_CHECK and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
         try:
-            logging.info(f"[code_orchest] checking if it is grounded. answer: {answer[:50]}")
-            start_time = time.time()            
-            context.variables["answer"] = answer                      
+            logging.info(f"[code_orchest] checking if it is grounded. answer: {answer[:100]}")
+            start_time = time.time()
+            context.variables["answer"] = answer
             output_context = await call_semantic_function(kernel, rag_plugin["IsGrounded"], context)
             grounded = output_context.result
-            logging.info(f"[code_orchest] is it grounded? {grounded}.")  
+            logging.error(f"[code_orchest] is it GROUNDED? {grounded}.")  
             if grounded.lower() == 'no':
                 logging.info(f"[code_orchest] ungrounded answer: {answer}")
-                output_context = await call_semantic_function(kernel, rag_plugin["NotInSourcesAnswer"], context)
+                context.variables["sources"] = ''
+                context.variables["search_query"] = ''
+                context.variables["answer"] = ''
+                output_context = await call_semantic_function(kernel, rag_plugin["Answer"], context)
+                #output_context = await call_semantic_function(kernel, rag_plugin["NotInSourcesAnswer"], context)
                 answer = output_context.result
                 answer_dict['gpt_groundedness'] = 1
                 bypass_nxt_steps = True
@@ -245,16 +250,25 @@ async def get_answer(history, settings = None):
                     break
         except Exception as e:
             logging.error(f"[code_orchest] could not get blocked list. {e}")
-            
+
     answer_dict["prompt"] = prompt
     answer_dict["answer"] = answer
     answer_dict["sources"] = sources.replace('[', '{').replace(']', '}')
     answer_dict["search_query"] = search_query
-    answer_dict["model"] = AZURE_OPENAI_CHATGPT_MODEL    
+    answer_dict["model"] = AZURE_OPENAI_CHATGPT_MODEL
     # answer_dict["prompt_tokens"] = prompt_tokens
     # answer_dict["completion_tokens"] = completion_tokens
 
     total_tokens = number_of_tokens(ask, AZURE_OPENAI_CHATGPT_MODEL) + number_of_tokens(answer, AZURE_OPENAI_CHATGPT_MODEL)
+
+    # The answer is not grounded enough so the sources and the search_query are not valid
+    
+    if(answer_dict['gpt_groundedness'] == 1):
+        answer = re.sub(r'\[.*?\]', '', answer) #remove sources manually
+        # WE NEED TO FIX THIS, THE MODEL IS FINDING THE SOURCES EVEN IF THE ANSWER IS NOT GROUNDED
+        answer_dict["answer"] = answer + " This answer, derived from our language learning model's (LLM) pre-trained knowledge, may lack specific accuracy."
+        logging.info(f"[code_orchest] ungrounded answer: {answer}")
+        
     answer_dict["total_tokens"] = total_tokens
     
     response_time =  round(time.time() - init_time,2)
