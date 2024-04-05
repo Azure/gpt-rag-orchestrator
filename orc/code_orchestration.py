@@ -103,6 +103,7 @@ async def get_answer(history, settings = None):
     #initialize variables    
 
     answer_dict = {}
+    prompt_dict = {}
     answer = ""
     intents = "none"
     system_message = prompt = open(SYSTEM_MESSAGE_PATH, "r").read()
@@ -165,11 +166,13 @@ async def get_answer(history, settings = None):
             triage_response = await triage_ask(kernel, rag_plugin, context)
             response_time = round(time.time() - start_time,2)
             intents = triage_response['intents']
+            prompt_dict['intents'] = intents
             logging.info(f"[code_orchest] finished checking intents: {intents}. {response_time} seconds.")
 
             # Handle general intents
             if set(intents).intersection({"about_bot", "off_topic"}):
                 answer = triage_response['answer']
+                prompt_dict['answer'] = answer
                 logging.info(f"[code_orchest] triage answer about bot, off topic: {answer}")
 
             # Handle question answering intent
@@ -183,6 +186,8 @@ async def get_answer(history, settings = None):
                 sources = output_context.result
                 formatted_sources = sources[:100].replace('\n', ' ')
                 context.variables["sources"] = sources
+                prompt_dict['search_query'] = search_query
+                prompt_dict['sources'] = formatted_sources
                 logging.info(f"[code_orchest] generating bot answer. sources: {formatted_sources}")
 
                 # Handle errors
@@ -198,6 +203,7 @@ async def get_answer(history, settings = None):
                     context.variables["history"] = json.dumps(messages[:-1], ensure_ascii=False) # update context with full history
                     output_context = await call_semantic_function(kernel, rag_plugin["Answer"], context)
                     answer = output_context.result
+                    prompt_dict['answer'] = answer
                     if context.error_occurred:
                         logging.error(f"[code_orchest] error when executing RAG flow (get the answer). {context.last_error_description}")
                         answer = f"{get_message('ERROR_ANSWER')} (get the answer) RAG flow: {context.last_error_description}"
@@ -207,6 +213,7 @@ async def get_answer(history, settings = None):
 
             elif "greeting" in intents:
                 answer = triage_response['answer']
+                prompt_dict['answer'] = answer
                 logging.info(f"[code_orchest] triage answer greetings: {answer}")
 
             else:
@@ -230,6 +237,7 @@ async def get_answer(history, settings = None):
             context.variables["answer"] = answer
             output_context = await call_semantic_function(kernel, rag_plugin["IsGrounded"], context)
             grounded = output_context.result
+            prompt_dict['is_grounded'] = output_context.result
             logging.error(f"[code_orchest] is it GROUNDED? {grounded}.")  
             if grounded.lower() == 'no':
                 logging.info(f"[code_orchest] ungrounded answer: {answer}")
@@ -239,6 +247,9 @@ async def get_answer(history, settings = None):
                 output_context = await call_semantic_function(kernel, rag_plugin["Answer"], context)
                 #output_context = await call_semantic_function(kernel, rag_plugin["NotInSourcesAnswer"], context)
                 answer = output_context.result
+                prompt_dict['answer'] = answer
+                prompt_dict['sources'] = context.variables["sources"]
+                prompt_dict['search_query'] = context.variables["search_query"]
                 answer_dict['gpt_groundedness'] = 1
                 bypass_nxt_steps = True
             else:
@@ -277,7 +288,12 @@ async def get_answer(history, settings = None):
         logging.info(f"[code_orchest] ungrounded answer: {answer}")
         
     answer_dict["total_tokens"] = total_tokens
-    
+
+    prompt_dict['gpt_groundedness'] = answer_dict['gpt_groundedness']
+    prompt_dict['prompt'] = prompt + " " + ask
+
+    answer_dict['prompt_dict'] = prompt_dict
+
     response_time =  round(time.time() - init_time,2)
     logging.info(f"[code_orchest] finished RAG Flow. {response_time} seconds.")
 
