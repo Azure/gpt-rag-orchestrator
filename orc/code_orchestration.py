@@ -94,13 +94,15 @@ async def triage_ask(kernel, rag_plugin, context):
     triage_response["search_query"] = response_json.get('query_string', '')
     return triage_response
 
-def handle_off_topic(triage_response):
-    answer = triage_response['answer']
-    logging.info(f"[code_orchest] triage answer off topic: {answer}")
+async def handle_off_topic(kernel,rag_plugin,context):
+    output_context = await call_semantic_function(kernel, rag_plugin["GeneralAnswer"], context)
+    answer = output_context.result
+    logging.info(f"[code_orchest] answer off topic: {answer}")
     return answer
-def handle_about_bot(triage_response):
-    answer = triage_response['answer']
-    logging.info(f"[code_orchest] triage answer about bot, off topic: {answer}")
+async def handle_about_bot(kernel,rag_plugin, context):
+    output_context = await call_semantic_function(kernel, rag_plugin["GeneralAnswer"], context)
+    answer = output_context.result
+    logging.info(f"[code_orchest] answer about bot: {answer}")
     return answer
 
 def handle_greeting(triage_response):
@@ -228,13 +230,16 @@ async def get_answer(history, settings = None):
             logging.info(f"[code_orchest] finished checking intents: {intents}. {response_time} seconds.")
             # Handle general intents
             if "greeting" in intents:
-                answer = handle_greeting(triage_response)
+                answer = handle_greeting()
+                bypass_nxt_steps = True
             # Handle about bot intents
             elif set(intents).intersection({"about_bot"}):
-                answer = handle_about_bot(triage_response)
+                answer = await handle_about_bot(kernel,rag_plugin,context)
+                bypass_nxt_steps = True
             # Handle off topic intents
             elif set(intents).intersection({"off_topic"}):
-                answer = handle_off_topic(triage_response)
+                answer = await handle_off_topic(kernel,rag_plugin,context)
+                bypass_nxt_steps = True
             # Handle creative brief intents
             elif set(intents).intersection({"creative_brief"}):
                 answer = handle_creative_brief()
