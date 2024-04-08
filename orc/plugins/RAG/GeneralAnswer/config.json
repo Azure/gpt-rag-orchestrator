@@ -1,0 +1,34 @@
+{
+    "schema": 1,
+    "description": "Generate and answer based on the model training",
+    "type": "completion",
+    "completion": {
+      "max_tokens": 1000,
+      "temperature": 0.0,
+      "top_p": 0.0,
+      "presence_penalty": 0.0,
+      "frequency_penalty": 0.0
+    },
+    "input": {
+      "parameters": [
+        {
+          "name": "question",
+          "description": "User question(i.e., How do I execute task A?)",
+          "defaultValue": "",
+          "required": true
+        },
+        {
+          "name": "history",
+          "description": "Message history in json format.",
+          "defaultValue": "",
+          "required": true
+        },
+        {
+          "name": "bot_description",
+          "description": "Describe what the bot is and do.",
+          "defaultValue": "",
+          "required": true
+        }
+      ]
+    }
+  }
