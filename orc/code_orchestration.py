@@ -161,14 +161,13 @@ async def get_answer(history, settings = None):
             ), skill_name="ConversationSummaryPlugin")
             
             # triage (find intent and generate answer and search query when applicable)
-            logging.debug(f"[code_orchest] checking intent. ask: {ask}")
+            logging.info(f"[code_orchest] checking intent. ask: {ask}")
             start_time = time.time()
             triage_response = await triage_ask(kernel, rag_plugin, context)
             response_time = round(time.time() - start_time,2)
             intents = triage_response['intents']
             prompt_dict['intents'] = intents
             logging.info(f"[code_orchest] finished checking intents: {intents}. {response_time} seconds.")
-
             # Handle general intents
             if set(intents).intersection({"about_bot", "off_topic"}):
                 answer = triage_response['answer']
