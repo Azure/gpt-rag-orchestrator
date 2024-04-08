@@ -94,6 +94,64 @@ async def triage_ask(kernel, rag_plugin, context):
     triage_response["search_query"] = response_json.get('query_string', '')
     return triage_response
 
+def handle_off_topic(triage_response):
+    answer = triage_response['answer']
+    logging.info(f"[code_orchest] triage answer off topic: {answer}")
+    return answer
+def handle_about_bot(triage_response):
+    answer = triage_response['answer']
+    logging.info(f"[code_orchest] triage answer about bot, off topic: {answer}")
+    return answer
+
+def handle_greeting(triage_response):
+    answer = triage_response['answer']
+    logging.info(f"[code_orchest] triage answer greetings: {answer}")
+    return answer
+
+def handle_creative_brief():
+    return "Not implemented yet."
+
+def handle_marketing_plans():
+    return "Not implemented yet."
+
+def handle_analyze_csv():
+    return "Not implemented yet."
+
+async def handle_question_answering(triage_response, ask, kernel, rag_plugin, prompt_dict, context, messages):
+    bypass_nxt_steps = False
+    search_query = triage_response['search_query'] if triage_response['search_query'] != '' else ask
+    output_context = await kernel.run_async(
+        rag_plugin["Retrieval"],
+        input_str=search_query
+    )
+    sources = output_context.result
+    formatted_sources = sources[:100].replace('\n', ' ')
+    context.variables["sources"] = sources
+    prompt_dict['search_query'] = search_query
+    prompt_dict['sources'] = formatted_sources
+    logging.info(f"[code_orchest] generating bot answer. sources: {formatted_sources}")
+
+    # Handle errors
+    if context.error_occurred:
+        logging.error(f"[code_orchest] error when executing RAG flow (Retrieval). SK error: {context.last_error_description}")
+        answer = f"{get_message('ERROR_ANSWER')} (Retrieval) RAG flow: {context.last_error_description}"
+        bypass_nxt_steps = True
+
+    else:
+        # Generate the answer for the user
+        logging.info(f"[code_orchest] generating bot answer. ask: {ask}")
+        start_time = time.time()
+        context.variables["history"] = json.dumps(messages[:-1], ensure_ascii=False) # update context with full history
+        output_context = await call_semantic_function(kernel, rag_plugin["Answer"], context)
+        answer = output_context.result
+        prompt_dict['answer'] = answer
+        if context.error_occurred:
+            logging.error(f"[code_orchest] error when executing RAG flow (get the answer). {context.last_error_description}")
+            answer = f"{get_message('ERROR_ANSWER')} (get the answer) RAG flow: {context.last_error_description}"
+            bypass_nxt_steps = True
+        response_time =  round(time.time() - start_time,2)              
+        logging.info(f"[code_orchest] finished generating bot answer. {response_time} seconds. {answer[:100]}.")
+    return answer, search_query, sources,  bypass_nxt_steps
 async def get_answer(history, settings = None):
 
     #############################
@@ -169,52 +227,26 @@ async def get_answer(history, settings = None):
             prompt_dict['intents'] = intents
             logging.info(f"[code_orchest] finished checking intents: {intents}. {response_time} seconds.")
             # Handle general intents
-            if set(intents).intersection({"about_bot", "off_topic"}):
-                answer = triage_response['answer']
-                prompt_dict['answer'] = answer
-                logging.info(f"[code_orchest] triage answer about bot, off topic: {answer}")
-
+            if "greeting" in intents:
+                answer = handle_greeting(triage_response)
+            # Handle about bot intents
+            elif set(intents).intersection({"about_bot"}):
+                answer = handle_about_bot(triage_response)
+            # Handle off topic intents
+            elif set(intents).intersection({"off_topic"}):
+                answer = handle_off_topic(triage_response)
+            # Handle creative brief intents
+            elif set(intents).intersection({"creative_brief"}):
+                answer = handle_creative_brief()
+            # Handle marketing plans request intents
+            elif set(intents).intersection({"marketing_plans"}):
+                answer = handle_marketing_plans()
+            # Handle analize csv requests intents
+            elif set(intents).intersection({"analize_csv"}):
+                answer = handle_analyze_csv()
             # Handle question answering intent
             elif set(intents).intersection({"follow_up", "question_answering"}):
-    
-                search_query = triage_response['search_query'] if triage_response['search_query'] != '' else ask
-                output_context = await kernel.run_async(
-                    rag_plugin["Retrieval"],
-                    input_str=search_query
-                )
-                sources = output_context.result
-                formatted_sources = sources[:100].replace('\n', ' ')
-                context.variables["sources"] = sources
-                prompt_dict['search_query'] = search_query
-                prompt_dict['sources'] = formatted_sources
-                logging.info(f"[code_orchest] generating bot answer. sources: {formatted_sources}")
-
-                # Handle errors
-                if context.error_occurred:
-                    logging.error(f"[code_orchest] error when executing RAG flow (Retrieval). SK error: {context.last_error_description}")
-                    answer = f"{get_message('ERROR_ANSWER')} (Retrieval) RAG flow: {context.last_error_description}"
-                    bypass_nxt_steps = True
-
-                else:
-                    # Generate the answer for the user
-                    logging.info(f"[code_orchest] generating bot answer. ask: {ask}")
-                    start_time = time.time()
-                    context.variables["history"] = json.dumps(messages[:-1], ensure_ascii=False) # update context with full history
-                    output_context = await call_semantic_function(kernel, rag_plugin["Answer"], context)
-                    answer = output_context.result
-                    prompt_dict['answer'] = answer
-                    if context.error_occurred:
-                        logging.error(f"[code_orchest] error when executing RAG flow (get the answer). {context.last_error_description}")
-                        answer = f"{get_message('ERROR_ANSWER')} (get the answer) RAG flow: {context.last_error_description}"
-                        bypass_nxt_steps = True
-                    response_time =  round(time.time() - start_time,2)              
-                    logging.info(f"[code_orchest] finished generating bot answer. {response_time} seconds. {answer[:100]}.")
-
-            elif "greeting" in intents:
-                answer = triage_response['answer']
-                prompt_dict['answer'] = answer
-                logging.info(f"[code_orchest] triage answer greetings: {answer}")
-
+                answer, search_query, sources, bypass_nxt_steps = await handle_question_answering(triage_response, ask, kernel, rag_plugin, prompt_dict, context, messages)
             else:
                 logging.info(f"[code_orchest] SK did not executed, no intent found, review Triage function.")
                 answer = get_message('NO_INTENT_ANSWER')
