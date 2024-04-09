@@ -4,7 +4,7 @@
  
 ## Task Goal
  
-Based on the user ASK and the CONVERSATION_HISTORY_SUMMARY, extract ALL intents present in the user ASK, detect the ASK language and generate an ANSWER and a QUERY_STRING depending on the extracted intents. 
+Based on the user ASK and the CONVERSATION_HISTORY_SUMMARY, extract ALL intents present in the user ASK and generate an ANSWER and a QUERY_STRING depending on the extracted intents. 
 
 ## Instructions for Intent Extraction
 
@@ -28,7 +28,7 @@ ANSWER and QUERY_STRING will be generated only when the following conditions are
 4) follow_up: Generate a QUERY_STRING.
 5) question_answering: Generate a QUERY_STRING.
 
-ALWAYS generate the ANSWER and QUERY_STRING in the same language of the ASK. 
+ALWAYS generate the ANSWER and QUERY_STRING in {{$language}} language.
 Generate the query_string combining what is in the ASK with the context in the CONVERSATION_HISTORY_SUMMARY.
 Query string is no longer than 10 words.
 

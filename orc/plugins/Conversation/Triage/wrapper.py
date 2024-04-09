@@ -38,7 +38,6 @@ async def triage(kernel, conversation_plugin, arguments):
     intents = response_json.get('intents', ['none'])
     triage_dict["intents"] = intents if intents != [] else ['none']
     triage_dict["answer"] = response_json.get('answer', '')
-    triage_dict["language"] = response_json.get('language', 'english')
     triage_dict["search_query"] = response_json.get('query_string', '') 
     triage_dict["prompt_tokens"] = get_usage_tokens(function_result, 'prompt')
     triage_dict["completion_tokens"] = get_usage_tokens(function_result, 'completion')

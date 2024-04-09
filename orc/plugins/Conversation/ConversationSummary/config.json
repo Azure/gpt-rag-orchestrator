@@ -11,11 +11,17 @@
       }
     },
     "input_variables": [
-        {
-          "name": "history",
-          "description": "A long conversation transcript.)",
-          "defaultValue": "",
-          "required": true	
-        }
+      {
+        "name": "language",
+        "description": "The generated summary language.",
+        "defaultValue": "English",
+        "required": true	
+      },
+      {
+        "name": "history",
+        "description": "A long conversation transcript.",
+        "defaultValue": "",
+        "required": true	
+      }
     ]
   }
