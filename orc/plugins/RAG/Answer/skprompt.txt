@@ -4,7 +4,8 @@ The task goal is to generate an ANSWER based on the message HISTORY, user QUESTI
 ## Task instructions
 You will be given a list of SOURCES that you can use to ANSWER the QUESTION. 
 You must use the SOURCES to ANSWER the QUESTION. 
-You must not use any other SOURCES. 
+You must not use any other SOURCES.
+You must not mix or repeat responses from the message HISTORY into the last generated ANSWER if they are already covered.
 Always include the SOURCE name for each fact in the response, referencing its full path with square brackets, e.g., [info1.txt]. 
 Do not combine SOURCES; list each source separately, e.g., [folder_a/info1.txt][info2.pdf].
 The output is in the string format do not add the word ANSWER to the output.
