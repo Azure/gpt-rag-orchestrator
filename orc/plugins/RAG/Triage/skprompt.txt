@@ -41,6 +41,8 @@ ANSWER and QUERY_STRING will be generated only when the following conditions are
 ALWAYS generate the ANSWER and QUERY_STRING in the same language(ex: Spanish, English, Portuguese) of the ASK. 
 Generate the query_string combining what is in the ASK with the context in the HISTORY.
 Query string is no longer than 10 words.
+Query string should prioritize names and specific resources.
+You MUST handle requested specific names to ACHIEVE your goal
 
 # Task Input:  
 "HISTORY": "{{ConversationSummaryPlugin.SummarizeConversation $history}}"

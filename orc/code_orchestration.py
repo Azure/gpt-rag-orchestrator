@@ -130,6 +130,7 @@ async def handle_question_answering(triage_response, ask, kernel, rag_plugin, pr
     formatted_sources = sources[:100].replace('\n', ' ')
     context.variables["sources"] = sources
     prompt_dict['search_query'] = search_query
+    logging.info(f"[code_orchest] search_query: {search_query}")
     prompt_dict['sources'] = formatted_sources
     logging.info(f"[code_orchest] generating bot answer. sources: {formatted_sources}")
 
