@@ -1,13 +1,13 @@
 ## TASK GOAL
-Summarize the conversation in 'CONTENT TO SUMMARIZE', identifying main points of discussion and any conclusions that were reached.
+Summarize the conversation provided in 'CONVERSATION_HISTORY' section, identify its main points of discussion and any conclusions that were reached.
 
 ## TASK INSTRUCTIONS
 - Do not incorporate other general knowledge.
 - Summary is in plain text, in complete sentences, with no markup or tags.
-- The Summary is generate in the same language of the 'CONTENT TO SUMMARIZE'. 
+- The answer must be generated in {{$language}} language.
 
-## BEGIN CONTENT TO SUMMARIZE:
+## BEGIN CONVERSATION_HISTORY:
 {{$history}}
-## END CONTENT TO SUMMARIZE.
+## END CONVERSATION_HISTORY.
 
 ## SUMMARY:

@@ -1,0 +1,23 @@
+## TASK GOAL
+ Detect the ASK language.
+
+## TASK INSTRUCTIONS
+- The output contains the language.
+- The output should not repeat the ASK.
+
+## TASK EXAMPLE 01
+- Task Input: 
+"ASK": "Oi tudo bem?"
+- Task Output:
+Portuguese
+
+## TASK EXAMPLE 02
+- Task Input: 
+"ASK": "How are you?"
+- Task Output:
+English
+
+## Task Input:  
+"ASK": "{{$ask}}"
+
+ ## Task Output:

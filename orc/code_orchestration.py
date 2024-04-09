@@ -120,6 +120,17 @@ async def get_answer(history):
             conversationPlugin = kernel.import_plugin_from_prompt_directory(PLUGINS_FOLDER, "Conversation")
             retrievalPlugin = kernel.import_native_plugin_from_directory(PLUGINS_FOLDER, "Retrieval")
 
+            # detect language
+            logging.debug(f"[code_orchest] detecting language")
+            start_time = time.time()
+            function_result = await call_semantic_function(kernel, conversationPlugin["DetectLanguage"], arguments)
+            prompt_tokens += get_usage_tokens(function_result, 'prompt')
+            completion_tokens += get_usage_tokens(function_result, 'completion')            
+            detected_language = str(function_result)
+            arguments["language"] = detected_language
+            response_time = round(time.time() - start_time,2)
+            logging.info(f"[code_orchest] finished detecting language: {detected_language}. {response_time} seconds.")
+
             # conversation summary
             logging.debug(f"[code_orchest] summarizing conversation")
             start_time = time.time()
@@ -140,8 +151,6 @@ async def get_answer(history):
             start_time = time.time()
             triage_dict = await triage(kernel, conversationPlugin, arguments)
             intents = triage_dict['intents']
-            triage_language = triage_dict['language']
-            arguments["language"] = triage_language
             prompt_tokens += triage_dict["prompt_tokens"]
             completion_tokens += triage_dict["completion_tokens"]
             response_time = round(time.time() - start_time,2)
@@ -266,7 +275,7 @@ async def get_answer(history):
     # additional metadata for debugging
     if CONVERSATION_METADATA:
         answer_dict["intents"] = intents
-        answer_dict["triage_language"] = triage_language     
+        answer_dict["detected_language"] = detected_language     
         answer_dict["answer_generated_by"] = answer_generated_by
         answer_dict["conversation_history_summary"] = conversation_history_summary
         answer_dict["conversation_plugin_answer"] = conversation_plugin_answer
