@@ -151,7 +151,7 @@ async def handle_question_answering(triage_response, ask, kernel, rag_plugin, pr
             logging.error(f"[code_orchest] error when executing RAG flow (get the answer). {context.last_error_description}")
             answer = f"{get_message('ERROR_ANSWER')} (get the answer) RAG flow: {context.last_error_description}"
             bypass_nxt_steps = True
-        response_time =  round(time.time() - start_time,2)              
+        response_time =  round(time.time() - start_time,2)       
         logging.info(f"[code_orchest] finished generating bot answer. {response_time} seconds. {answer[:100]}.")
     return answer, search_query, sources,  bypass_nxt_steps
 async def get_answer(history, settings = None):
@@ -230,7 +230,7 @@ async def get_answer(history, settings = None):
             logging.info(f"[code_orchest] finished checking intents: {intents}. {response_time} seconds.")
             # Handle general intents
             if "greeting" in intents:
-                answer = handle_greeting()
+                answer = handle_greeting(triage_response)
                 bypass_nxt_steps = True
             # Handle about bot intents
             elif set(intents).intersection({"about_bot"}):
