@@ -8,19 +8,12 @@ from shared.util import format_answer, get_setting
 from shared.cosmos_db import store_user_consumed_tokens, store_prompt_information
 from azure.identity.aio import DefaultAzureCredential
 import orc.code_orchestration as code_orchestration
-import orc.promptflow_orchestration as promptflow_orchestration
-
 
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
 logging.getLogger('azure.cosmos').setLevel(logging.WARNING)
 LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
 logging.basicConfig(level=LOGLEVEL)
-
-# orchestration approach
-USE_PROMPT_FLOW = 'promptflow'
-USE_CODE='code'
-ORCHESTRATION_APPROACH=os.environ.get("ORCHESTRATION_APPROACH") or USE_CODE
 
 # Constants set from environment variables (external services credentials and configuration)
 
@@ -94,13 +87,8 @@ async def run(conversation_id, ask, client_principal):
         # 2) get answer and sources
 
         # get rag answer and sources
-        if ORCHESTRATION_APPROACH == USE_PROMPT_FLOW:
-            logging.info(f"[orchestrator] executing RAG using PromptFlow orchestration") 
-            answer_dict = await promptflow_orchestration.get_answer(history)
-
-        else: # USE_CODE
-            logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
-            answer_dict = await code_orchestration.get_answer(history, settings)
+        logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
+        answer_dict = await code_orchestration.get_answer(history)
 
         # 3) update and save conversation (containing history and conversation data)
         

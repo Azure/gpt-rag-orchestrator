@@ -1,0 +1,27 @@
+{
+    "schema": 1,
+    "description": "Check if answer is grounded for a question-answering task based on the provided sources",
+    "execution_settings": {
+      "default": {
+        "max_tokens": 1000,
+        "temperature": 0.0,
+        "top_p": 0.0,
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0
+      }
+    },
+    "input_variables": [
+        {
+          "name": "answer",
+          "description": "Answer assistant provided to the user(i.e., To execute task A you need to access system B.)",
+          "defaultValue": "",
+          "required": true	
+        },
+        {
+          "name": "sources",
+          "description": "Sources retrieved to answer the user question (i.e., file1.pdf: To execute task A you need to access system B. file2.pdf: System B is used when users need to execute task A.)",
+          "defaultValue": "",
+          "required": true	
+        }
+    ]
+  }

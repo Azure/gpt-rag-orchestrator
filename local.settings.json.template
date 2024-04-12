@@ -12,7 +12,7 @@
 
     "AZURE_SEARCH_SERVICE": "[example: search0-abcd123456789]",
     "AZURE_SEARCH_INDEX": "ragindex",
-    "AZURE_SEARCH_API_VERSION": "2023-11-01",
+    "AZURE_SEARCH_API_VERSION": "2023-10-01-Preview",
     "AZURE_SEARCH_APPROACH": "hybrid",
     "AZURE_SEARCH_USE_SEMANTIC": "true",
 
@@ -26,6 +26,11 @@
     "AZURE_OPENAI_LOAD_BALANCING": "true",
 
     "ORCHESTRATOR_MESSAGES_LANGUAGE": "en",
-  
+
+    "BLOCKED_LIST_CHECK" : "true",
+    "GROUNDEDNESS_CHECK" : "true",
+    "RESPONSIBLE_AI_CHECK" : "true",
+    "CONVERSATION_METADATA" : "true"
+
   }
 }
