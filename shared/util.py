@@ -309,6 +309,27 @@ def get_conversation(conversation_id, user_id):
     except Exception:
         logging.error(f"Error retrieving the conversation '{conversation_id}'")
         return {}
+    
+def delete_conversation(conversation_id, user_id):
+    try: 
+        credential = DefaultAzureCredential()
+        db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
+        db = db_client.get_database_client(database=AZURE_DB_NAME)
+        container = db.get_container_client('conversations')
+        conversation = container.read_item(item=conversation_id, partition_key=conversation_id)
+        
+        # Verificar si el usuario tiene permiso para eliminar la conversación
+        if conversation['conversation_data']['interactions'][0]['user_id'] != user_id:
+            raise Exception("User does not have permission to delete this conversation")
+
+        # Eliminar la conversación
+        container.delete_item(item=conversation_id, partition_key=conversation_id)
+        
+        return True
+    except Exception as e:
+        logging.error(f"Error deleting conversation '{conversation_id}': {str(e)}")
+        return False
+
 
 def get_next_resource(model):
     

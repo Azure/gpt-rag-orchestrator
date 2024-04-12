@@ -1,20 +1,18 @@
 {
-    "scriptFile": "__init__.py",
-    "bindings": [
-      {
-        "authLevel": "function",
-        "type": "httpTrigger",
-        "direction": "in",
-        "name": "req",
-        "methods": [
-          "get"
-        ],
-        "route": "conversations/{id?}"
-      },
-      {
-        "type": "http",
-        "direction": "out",
-        "name": "$return"
-      }
-    ]
-  }
+  "scriptFile": "__init__.py",
+  "bindings": [
+    {
+      "authLevel": "function",
+      "type": "httpTrigger",
+      "direction": "in",
+      "name": "req",
+      "methods": ["get", "delete"],
+      "route": "conversations/{id?}"
+    },
+    {
+      "type": "http",
+      "direction": "out",
+      "name": "$return"
+    }
+  ]
+}
