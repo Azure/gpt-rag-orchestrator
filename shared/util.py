@@ -318,11 +318,9 @@ def delete_conversation(conversation_id, user_id):
         container = db.get_container_client('conversations')
         conversation = container.read_item(item=conversation_id, partition_key=conversation_id)
         
-        # Verificar si el usuario tiene permiso para eliminar la conversación
         if conversation['conversation_data']['interactions'][0]['user_id'] != user_id:
             raise Exception("User does not have permission to delete this conversation")
 
-        # Eliminar la conversación
         container.delete_item(item=conversation_id, partition_key=conversation_id)
         
         return True
