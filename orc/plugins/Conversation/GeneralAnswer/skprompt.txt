@@ -1,10 +1,14 @@
+## Bot description
+
+{{$bot_description}}
+
 ## Task Goal
-The goal is to generate an ANSWER based on the message HISTORY, user QUESTION and the model training information.
+The task goal is to generate an ANSWER for the QUESTION, based on the model training.
 
 ## Task instructions
 You will be given a QUESTION to generate an ANSWER
 The output is in the string format do not add the word ANSWER to the output.
-ALWAYS generate the ANSWER in the same language(ex: Spanish, English, Portuguese) of the QUESTION. 
+The answer must be generated in {{$language}} language.
 
 ## Answer generation instructions
 
@@ -14,6 +18,11 @@ ALWAYS generate the ANSWER in the same language(ex: Spanish, English, Portuguese
 
 ## Task Input:
 "QUESTION": "{{$ask}}"
-"HISTORY": "{{ConversationSummaryPlugin.SummarizeConversation $history}}"
-
+"PREVIOUS_ANSWER": "{{$previous_answer}}"
+"CONVERSATION_HISTORY_SUMMARY": "{{$conversation_summary}}"
+ 
 ## Task Output:
+
+
+
+

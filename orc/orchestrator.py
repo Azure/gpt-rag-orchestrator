@@ -114,7 +114,7 @@ async def run(conversation_id, ask, client_principal):
 
         # 5) store prompt information in CosmosDB
 
-        store_prompt_information(client_principal['id'], answer_dict['prompt_dict'])
+        store_prompt_information(client_principal['id'], answer_dict)
 
         # 6) return answer
         result = {"conversation_id": conversation_id, 

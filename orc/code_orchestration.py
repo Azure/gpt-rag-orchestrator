@@ -155,11 +155,11 @@ async def get_answer(history):
             completion_tokens += triage_dict["completion_tokens"]
             response_time = round(time.time() - start_time,2)
             logging.info(f"[code_orchest] finished checking intents: {intents}. {response_time} seconds.")
-            # Handle general intents
+            # Handle general intents            
             if set(intents).intersection({"about_bot", "off_topic"}):
-                answer = triage_dict['answer']
-                answer_generated_by = "conversation_plugin_triage"
-                logging.info(f"[code_orchest] triage answer: {answer}")
+                function_result = await call_semantic_function(kernel, conversationPlugin["GeneralAnswer"], arguments)
+                answer =  str(function_result)
+                logging.info(f"[code_orchest] answer about bot: {answer}")
 
             # Handle question answering intent
             elif set(intents).intersection({"follow_up", "question_answering"}):         
@@ -232,7 +232,7 @@ async def get_answer(history):
                 logging.info(f"[code_orchest] is it grounded? {grounded}.")  
                 if grounded.lower() == 'no':
                     logging.info(f"[code_orchest] ungrounded answer: {answer}")
-                    function_result = await call_semantic_function(kernel, conversationPlugin["NotInSourcesAnswer"], arguments)
+                    function_result = await call_semantic_function(kernel, conversationPlugin["GeneralAnswer"], arguments)
                     prompt_tokens += get_usage_tokens(function_result, 'prompt')
                     completion_tokens += get_usage_tokens(function_result, 'completion')            
                     answer =  str(function_result)
@@ -281,8 +281,8 @@ async def get_answer(history):
         answer_dict["model"] = AZURE_OPENAI_CHATGPT_MODEL
         answer_dict["prompt_tokens"] = prompt_tokens
         answer_dict["completion_tokens"] = completion_tokens
-
-
+        answer_dict['total_tokens'] = prompt_tokens + completion_tokens
+        
     answer_dict["prompt"] = prompt
     answer_dict["sources"] = sources.replace('[', '{').replace(']', '}')
 
