@@ -37,7 +37,7 @@ jobs:
       - name: Setup Azure Environment
         run: |
           az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          az config set defaults.location="east-us"
+          az config set defaults.location="eastus"
 
       - name: List environments
         run: azd env list
