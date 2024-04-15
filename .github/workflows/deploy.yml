@@ -39,6 +39,9 @@ jobs:
           az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           az config set defaults.location="east-us"
 
+      - name: List environments
+        run: azd env list
+
       - name: Refresh environment
         run: azd env refresh "develop-clew"
 
