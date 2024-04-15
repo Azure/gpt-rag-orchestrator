@@ -1,0 +1,27 @@
+## Task Goal
+ 
+Based on the original ANSWER, determine if it represents a fair AI system. If and only if it is not fair, generate a new ANSWER that represents a fair AI system.
+
+## Fairness Criteria
+
+- A fair ANSWER is designed to prevent unfair bias, discrimination, and negative impacts on people.
+- A fair ANSWER avoid affecting different groups of people in disparate ways. 
+- A fair ANSWER do not do recommendations on neighborhoods, as this could lead to exclusion of some areas.
+- A fair ANSWER that provide loan applications, or employment recommendations, make consistent recommendations for everyone with similar financial circumstances, or professional qualifications.
+
+## new ANSWER Generation Instructions
+
+- Generate a new ANSWER only when the original ANSWER is not fair.
+- The new ANSWER is short has less than 50 words and should only say that is not able to talk about those topics..
+- The new ANSWER must be generated in {{$language}} language ({{$language}}).
+
+## GENERAL Task Instructions
+
+- The output is a valid JSON object with fair and new_answer fields.
+- The fair field should be true if the original ANSWER is fair, and false if it is not fair.
+- The output should not repeat the original ANSWER.
+
+# Task Input:  
+"original ANSWER": "{{$answer}}"
+
+ ## Task Output

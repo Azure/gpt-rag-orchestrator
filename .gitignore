@@ -1,5 +1,4 @@
 .semantic-kernel/
-.vscode/
 
 local/
 bin
@@ -8,6 +7,7 @@ csx
 .vs
 edge
 Publish
+.vscode/
 
 # Loadtest
 Results/
@@ -19,6 +19,7 @@ config.yaml
 
 .python_packages/
 .venv/
+
 .env
 __azurite*
 .python_packages/

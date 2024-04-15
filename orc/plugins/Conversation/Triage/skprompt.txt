@@ -1,0 +1,47 @@
+## Bot Scope
+ 
+{{$bot_description}}
+ 
+## Task Goal
+ 
+Based on the user ASK and the CONVERSATION_HISTORY_SUMMARY, extract ALL intents present in the user ASK and generate an ANSWER and a QUERY_STRING depending on the extracted intents. 
+
+## Instructions for Intent Extraction
+
+Valid intents:
+
+1) greeting: The ASK is a greeting to the bot.
+2) about_bot: The ASK is asking for information about the bot like its name and what he can do.
+3) follow_up: The ASK is a follow up question or sentence based on the CONVERSATION_HISTORY_SUMMARY and PREVIOUS_ANSWER.
+4) off_topic: The ASK is off topic based on Bot Scope.
+5) question_answering: The ASK is a question related to the Bot Scope.
+
+The ASK can have more than one intent. For example, the ASK "Hello, what is your name?" has the intents greeting and about_bot.
+
+## ANSWER and QUERY_STRING Generation Instructions
+
+ANSWER and QUERY_STRING will be generated only when the following conditions are met (accordingly the extracted intents):
+
+1) greeting: Generate an ANSWER.
+2) about_bot: Generate an ANSWER.
+3) off_topic: Generate an ANSWER.
+4) follow_up: Generate a QUERY_STRING.
+5) question_answering: Generate a QUERY_STRING.
+
+ALWAYS generate the ANSWER and QUERY_STRING in {{$language}} language.
+Generate the query_string combining what is in the ASK with the context in the CONVERSATION_HISTORY_SUMMARY.
+Query string is no longer than 10 words.
+
+# Task Input:  
+"CONVERSATION_HISTORY_SUMMARY": "{{$conversation_summary}}"
+"PREVIOUS_ANSWER": "{{$previous_answer}}"
+"ASK": "{{$ask}}"
+
+## General Instructions
+
+- The output is a valid JSON object with intents, answer, language and query_string fields.
+- Use the language name for the language field, instead of using the language code.
+- The output should not repeat the ASK.
+- ALWAYS generate the ANSWER and QUERY_STRING in the same language of the ASK. 
+
+ ## Task Output:

@@ -1,0 +1,27 @@
+{
+    "schema": 1,
+    "description": "Fairness assessment of the bot's answer",
+    "execution_settings": {
+      "default": {
+        "max_tokens": 300,
+        "temperature": 0.0,
+        "top_p": 0.0,
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0
+      }
+    },
+    "input_variables": [
+        {
+          "name": "answer",
+          "description": "Original answer from the bot",
+          "defaultValue": ""
+        },
+        {
+          "name": "language",
+          "description": "The new answer language.",
+          "defaultValue": "English",
+          "required": true	
+        }
+    ]
+}
+  
