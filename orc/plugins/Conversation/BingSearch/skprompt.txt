@@ -1,0 +1,26 @@
+## Bot description
+
+{{$bot_description}}
+
+## Task Goal
+ 
+The task goal is to generate an ANSWER for the QUESTION, based on a websearch .
+ 
+## Task instructions
+You will be given a list of SOURCES that you can use to ANSWER the QUESTION. 
+You must use the SOURCES to ANSWER the QUESTION. 
+You must not use any other SOURCES. 
+Always include the SOURCE name for each fact in the response, referencing its full path with square brackets, e.g., [info1.txt]. 
+Do not combine SOURCES; list each source separately, e.g., [folder_a/info1.txt][info2.pdf].
+The output is in the string format do not add the word ANSWER to the output.
+The answer must be generated in {{$language}} language.
+ 
+## Task Input:
+"QUESTION": "{{$ask}}"
+"PREVIOUS_ANSWER": "{{$previous_answer}}"
+"CONVERSATION_HISTORY_SUMMARY": "{{$conversation_summary}}"
+"SOURCES": "{{$sources}}"
+ 
+## Task Output:
+
+

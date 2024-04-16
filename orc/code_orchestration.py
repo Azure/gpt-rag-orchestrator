@@ -4,6 +4,7 @@ import logging
 import os
 import semantic_kernel as sk
 import time
+from orc.plugins.Conversation.BingSearch import BingConnector
 from orc.plugins.Conversation.Triage.wrapper import triage
 from orc.plugins.ResponsibleAI.Fairness.wrapper import fairness
 from semantic_kernel.functions.kernel_arguments import KernelArguments
@@ -185,6 +186,36 @@ async def get_answer(history):
                 answer_generated_by = "conversation_plugin_triage"
                 logging.info(f"[code_orchest] triage answer: {answer}")
             
+            elif "websearch" in intents:
+                logging.info(f"[code_orchest] it entered on websearch")
+                search_query = triage_dict['search_query'] if triage_dict['search_query'] != '' else ask
+                # Replace 'your_api_key' with your actual Bing API key
+                bing_connector = BingConnector(api_key="7176f74b401b42d5b72190132ec531ba")
+                
+                try:
+                    # Perform a search for the query "your_query_here"
+                    search_results = await bing_connector.search(query=ask, num_results=5, offset=0)
+                    
+                    # Print the search results
+                    print("Search Results:")
+                    for result in search_results:
+                        print(result)
+                    
+                    logging.info(f"[code_orchest] generating bot answer. ask: {ask}")
+                    start_time = time.time()                                                          
+                    arguments["history"] = json.dumps(messages[:-1], ensure_ascii=False) # update context with full history
+                    function_result = await call_semantic_function(kernel, conversationPlugin["BingSearch"], arguments)
+                    answer =  str(function_result)
+                    conversation_plugin_answer = answer
+                    answer_generated_by = "conversation_plugin_answer"
+                    prompt_tokens += get_usage_tokens(function_result, 'prompt')
+                    completion_tokens += get_usage_tokens(function_result, 'completion')
+                    prompt = str(function_result.metadata['messages'][0])
+                    response_time =  round(time.time() - start_time,2)              
+                    logging.info(f"[code_orchest] finished generating bot answer. {response_time} seconds. {answer[:100]}.")
+                except Exception as e:
+                    print(f"An error occurred: {e}")
+
             elif "ice_document_generation" in intents:
                 search_query = triage_dict['search_query'] if triage_dict['search_query'] != '' else ask
 
