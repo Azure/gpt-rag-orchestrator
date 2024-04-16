@@ -58,8 +58,8 @@ jobs:
         env:
           AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Provision Infrastructure
-        run: azd provision --no-prompt
+      - name: Refresh Enviroment
+        run: azd env refresh --no-prompt
         env:
           AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
           AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
