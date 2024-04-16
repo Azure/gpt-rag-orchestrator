@@ -266,7 +266,9 @@ async def get_answer(history):
                 logging.info(f"[code_orchest] finished checking responsible AI (fairness). {response_time} seconds.")
             except Exception as e:
                 logging.error(f"[code_orchest] could not check responsible AI (fairness). {e}")
-
+    answer = answer.replace('[CONVERSATION_HISTORY_SUMMARY]', '').replace('[info1.txt]', '')
+    answer = answer.replace('[PREVIOUS_ANSWER]', '').replace('[SOURCES]', '')
+    
     answer_dict["user_ask"] = ask
     answer_dict["answer"] = answer
     answer_dict["search_query"] = search_query
