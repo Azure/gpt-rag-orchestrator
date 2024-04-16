@@ -15,7 +15,10 @@ Valid intents:
 3) follow_up: The ASK is a follow up question or sentence based on the CONVERSATION_HISTORY_SUMMARY and PREVIOUS_ANSWER.
 4) off_topic: The ASK is off topic based on Bot Scope.
 5) question_answering: The ASK is a question related to the Bot Scope.
-6) ice_document_generation: The ASK is a asking for a document generation.
+6) ice_document_generation: The ASK is asking for a document generation.
+7) price_range: The ASK is asking for a price range.
+8) specifications: The ASK is asking for specifications or a product/service description.
+9) purchase_order: The ASK is a asking for purchase_order from sources.  
 
 The ASK can have more than one intent. For example, the ASK "Hello, what is your name?" has the intents greeting and about_bot.
 
@@ -28,7 +31,10 @@ ANSWER and QUERY_STRING will be generated only when the following conditions are
 3) off_topic: Generate an ANSWER.
 4) follow_up: Generate a QUERY_STRING.
 5) question_answering: Generate a QUERY_STRING.
-6) ice_document_generation: Generate an ANSWER.
+6) ice_document_generation: Generate a QUERY_STRING.
+7) price_range: Generate a QUERY_STRING.
+8) specifications: Generate a QUERY_STRING.
+9) purchase_order: Generate a QUERY_STRING.
 
 
 ALWAYS generate the ANSWER and QUERY_STRING in the same language of the ASK. 
