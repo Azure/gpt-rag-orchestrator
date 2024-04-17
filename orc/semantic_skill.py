@@ -2,68 +2,76 @@ import os
 import glob
 import json
 from typing import Any, Dict
-from semantic_kernel.orchestration.sk_function_base import SKFunctionBase
-from semantic_kernel.utils.validation import validate_skill_name
-from semantic_kernel.semantic_functions.prompt_template import PromptTemplate
-from semantic_kernel.semantic_functions.prompt_template_config import (
-    PromptTemplateConfig,
-)
-from semantic_kernel.semantic_functions.semantic_function_config import (
-    SemanticFunctionConfig,
-)
+from semantic_kernel.functions.kernel_function import TEMPLATE_FORMAT_MAP
+from semantic_kernel.prompt_template.prompt_template_config import PromptTemplateConfig
+from semantic_kernel.functions.kernel_plugin import KernelPlugin
 
-'''
-    This function is a modified version of the import_semantic_skill_from_directory function from the semantic_kernel package.
+
+def import_plugin_from_prompt_directory(
+    kernel: Any,
+    parent_directory: str,
+    plugin_directory_name: str,
+    settings: Dict[str, Any],
+    item_name_override: list[str] | None = None,
+) -> KernelPlugin:
+    """
+    This function is a modified version of the import_plugin_from_prompt_directory function from the semantic_kernel package.
     it will allow us to modify the file from the rag plugin to be able to dynamically load the parameters
     like temperature, frequency_penalty, and presence_penalty from the settings file in the azure function.
-'''
-def import_semantic_skill_from_directory(
-    kernel: Any, parent_directory: str, skill_directory_name: str,
-    settings: Dict[str, Any]
-) -> Dict[str, SKFunctionBase]:
-    CONFIG_FILE = "config.json"
-    PROMPT_FILE = "skprompt.txt"
+    """
 
-    validate_skill_name(skill_directory_name)
+    plugin_directory = kernel._validate_plugin_directory(
+        parent_directory=parent_directory, plugin_directory_name=plugin_directory_name
+    )
 
-    skill_directory = os.path.join(parent_directory, skill_directory_name)
-    skill_directory = os.path.abspath(skill_directory)
+    functions = []
 
-    if not os.path.exists(skill_directory):
-        raise ValueError(f"Skill directory does not exist: {skill_directory_name}")
-
-    skill = {}
-
-    directories = glob.glob(skill_directory + "/*/")
-    for directory in directories:
-        dir_name = os.path.dirname(directory)
-        function_name = os.path.basename(dir_name)
-        prompt_path = os.path.join(directory, PROMPT_FILE)
-
-        # Continue only if the prompt template exists
-        if not os.path.exists(prompt_path):
-            continue
-
-        config = PromptTemplateConfig()
-        config_path = os.path.join(directory, CONFIG_FILE)
-        with open(config_path, "r") as config_file:
-            # replace settings into config
-            temp_config = json.loads(config_file.read())
-            temp_config['completion'].update(settings)
-            # load config
-            config = config.from_json(json.dumps(temp_config))
-
-        # Load Prompt Template
-        with open(prompt_path, "r") as prompt_file:
-            template = PromptTemplate(
-                prompt_file.read(), kernel.prompt_template_engine, config
+    # Handle YAML files at the root
+    yaml_files = glob.glob(os.path.join(plugin_directory, "*.yaml"))
+    for yaml_file in yaml_files:
+        with open(yaml_file, "r") as file:
+            yaml_content = file.read()
+            functions.append(
+                kernel.create_function_from_yaml(
+                    yaml_content, plugin_name=plugin_directory_name
+                )
             )
 
-        # Prepare lambda wrapping AI logic
-        function_config = SemanticFunctionConfig(config, template)
+    # Handle directories containing skprompt.txt and config.json
+    for item in os.listdir(plugin_directory):
+        item_path = os.path.join(plugin_directory, item)
+        if os.path.isdir(item_path):
+            prompt_path = os.path.join(item_path, "skprompt.txt")
+            config_path = os.path.join(item_path, "config.json")
 
-        skill[function_name] = kernel.register_semantic_function(
-            skill_directory_name, function_name, function_config
-        )
+            if os.path.exists(prompt_path) and os.path.exists(config_path):
+                with open(config_path, "r") as config_file:
+                    temp_config = config_file.read()
+                    if item_name_override and item in item_name_override:
+                        # Update the default settings with the settings from the orchestrator dynamically
+                        temp_config = json.loads(temp_config)
+                        temp_config["execution_settings"]["default"].update(settings)
+                        temp_config = json.dumps(temp_config)
+                    prompt_template_config = PromptTemplateConfig.from_json(temp_config)
+                prompt_template_config.name = item
 
-    return skill
+                with open(prompt_path, "r") as prompt_file:
+                    prompt = prompt_file.read()
+                    prompt_template_config.template = prompt
+
+                prompt_template = TEMPLATE_FORMAT_MAP[
+                    prompt_template_config.template_format
+                ](prompt_template_config=prompt_template_config)
+
+                functions.append(
+                    kernel.create_function_from_prompt(
+                        plugin_name=plugin_directory_name,
+                        prompt_template=prompt_template,
+                        prompt_template_config=prompt_template_config,
+                        template_format=prompt_template_config.template_format,
+                        function_name=item,
+                        description=prompt_template_config.description,
+                    )
+                )
+
+    return KernelPlugin(name=plugin_directory_name, functions=functions)

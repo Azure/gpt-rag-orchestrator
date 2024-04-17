@@ -2,8 +2,8 @@
 import json
 import logging
 import os
-import semantic_kernel as sk
 import time
+import orc.semantic_skill as sk
 from orc.plugins.Conversation.Triage.wrapper import triage
 from orc.plugins.ResponsibleAI.Fairness.wrapper import fairness
 from semantic_kernel.functions.kernel_arguments import KernelArguments
@@ -43,7 +43,7 @@ PLUGINS_FOLDER = f"{ORCHESTRATOR_FOLDER}/plugins"
 BOT_DESCRIPTION_FILE = f"{ORCHESTRATOR_FOLDER}/bot_description.prompt"
 
 
-async def get_answer(history):
+async def get_answer(history, settings):
 
 
     #############################
@@ -117,7 +117,15 @@ async def get_answer(history):
             arguments["previous_answer"] = messages[-2]['content'] if len(messages) > 1 else ""
 
             # import RAG plugins
-            conversationPlugin = kernel.import_plugin_from_prompt_directory(PLUGINS_FOLDER, "Conversation")
+            # changed the import_plugin_from_prompt_directory function to allow for dynamic settings
+            # item_name_override
+            conversationPlugin = sk.import_plugin_from_prompt_directory(
+                kernel=kernel, 
+                parent_directory=PLUGINS_FOLDER, 
+                plugin_directory_name="Conversation", 
+                settings=settings,
+                item_name_override=["Answer"]
+            )
             retrievalPlugin = kernel.import_native_plugin_from_directory(PLUGINS_FOLDER, "Retrieval")
 
             # detect language
