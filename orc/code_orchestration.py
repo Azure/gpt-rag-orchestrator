@@ -3,7 +3,8 @@ import json
 import logging
 import os
 import time
-import orc.semantic_skill as sk
+import semantic_kernel as sk
+import orc.semantic_skill as ss
 from orc.plugins.Conversation.Triage.wrapper import triage
 from orc.plugins.ResponsibleAI.Fairness.wrapper import fairness
 from semantic_kernel.functions.kernel_arguments import KernelArguments
@@ -119,7 +120,7 @@ async def get_answer(history, settings):
             # import RAG plugins
             # changed the import_plugin_from_prompt_directory function to allow for dynamic settings
             # item_name_override
-            conversationPlugin = sk.import_plugin_from_prompt_directory(
+            conversationPlugin = ss.import_plugin_from_prompt_directory(
                 kernel=kernel, 
                 parent_directory=PLUGINS_FOLDER, 
                 plugin_directory_name="Conversation", 
