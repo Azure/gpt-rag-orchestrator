@@ -1,0 +1,197 @@
+[
+  {
+    "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+    "value": "c79bd5be-45aa-4e65-ac83-91fb3e991a58",
+    "slotSetting": false
+  },
+  {
+    "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+    "value": "InstrumentationKey=c79bd5be-45aa-4e65-ac83-91fb3e991a58;IngestionEndpoint=https://eastus-2.in.applicationinsights.azure.com/;LiveEndpoint=https://eastus.livediagnostics.monitor.azure.com/",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_DB_ID",
+    "value": "dbgpt0jdjja",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_DB_NAME",
+    "value": "db0jdjja",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_KEY_VAULT_ENDPOINT",
+    "value": "https://kv0jdjja.vault.azure.net/",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_KEY_VAULT_NAME",
+    "value": "kv0jdjja",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_OPENAI_CHATGPT_DEPLOYMENT",
+    "value": "chat-35",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_OPENAI_CHATGPT_LLM_MONITORING",
+    "value": "true",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_OPENAI_CHATGPT_MODEL",
+    "value": "gpt-35-turbo-16k",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_OPENAI_EMBEDDING_DEPLOYMENT",
+    "value": "text-embedding-ada-002",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_OPENAI_EMBEDDING_MODEL",
+    "value": "text-embedding-ada-002",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_OPENAI_LOAD_BALANCING",
+    "value": "false",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_OPENAI_RESOURCE",
+    "value": "oai0jdjja",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_OPENAI_STREAM",
+    "value": "false",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_SEARCH_API_VERSION",
+    "value": "2023-07-01-Preview",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_SEARCH_APPROACH",
+    "value": "term",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_SEARCH_CONTENT_COLUMNS",
+    "value": "Numero_de_Caso,Costo_Unitario_Estimado_de_Articulo,Fecha_Recibo_de_Requisicion,Numero_de_Requisicion,Titulo_de_Requisicion,Categoria_de_Requisicion,SubCategoria_de_Requisicion,Agencia,Nombre_de_Agencia_de_Entrega,Metodo_de_Adquisicion,Descripcion_de_Articulo,Marca_de_Articulo,Modelo_de_Articulo,Garantia_de_Articulo,Unidad_de_Medida,Cantidad,Costo_Estimado_Total_de_Orden_de_Articulo,Numero_de_Contrato,Costo_Final_de_Orden_de_Articulo,Numero_de_Orden_de_Compra,Nombre_de_Archivo_de_Orden_de_Compra,Nombre_de_Suplidor,Telefono_de_Contacto_de_Suplidor,Email_de_Suplidor,Url_de_Archivo_de_Orden_de_Compra",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_SEARCH_FILENAME_COLUMN",
+    "value": "Nombre_de_Archivo_de_Orden_de_Compra",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_SEARCH_INDEX",
+    "value": "purchase-orders",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_SEARCH_SEMANTIC_SEARCH_LANGUAGE",
+    "value": "es",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_SEARCH_SERVICE",
+    "value": "search0jdjja",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_SEARCH_TITLE_COLUMN",
+    "value": "Numero_de_Caso",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_SEARCH_TOP_K",
+    "value": "20",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_SEARCH_URL_COLUMN",
+    "value": "Url_de_Archivo_de_Orden_de_Compra",
+    "slotSetting": false
+  },
+  {
+    "name": "AZURE_SEARCH_USE_SEMANTIC",
+    "value": "true",
+    "slotSetting": false
+  },
+  {
+    "name": "AzureWebJobsSecretStorageKeyVaultUri",
+    "value": "https://kv0jdjja.vault.azure.net/",
+    "slotSetting": false
+  },
+  {
+    "name": "AzureWebJobsSecretStorageType",
+    "value": "keyvault",
+    "slotSetting": false
+  },
+  {
+    "name": "AzureWebJobsStorage",
+    "value": "DefaultEndpointsProtocol=https;AccountName=strag0jdjjaorc;EndpointSuffix=core.windows.net;AccountKey=TtROL88aYQ7wT22QA+B+hCgsiTG5bttKVhNMcNy12CZR6ZDxmK/VqwCmg3kyCRrw1Vqv6nFQKsW++ASt/aBIpQ==",
+    "slotSetting": false
+  },
+  {
+    "name": "BUILD_FLAGS",
+    "value": "UseExpressBuild",
+    "slotSetting": false
+  },
+  {
+    "name": "ENABLE_ORYX_BUILD",
+    "value": "true",
+    "slotSetting": false
+  },
+  {
+    "name": "FUNCTIONS_EXTENSION_VERSION",
+    "value": "~4",
+    "slotSetting": false
+  },
+  {
+    "name": "FUNCTIONS_WORKER_RUNTIME",
+    "value": "python",
+    "slotSetting": false
+  },
+  {
+    "name": "LOGLEVEL",
+    "value": "INFO",
+    "slotSetting": false
+  },
+  {
+    "name": "ORCHESTRATION_APPROACH",
+    "value": "oyd",
+    "slotSetting": false
+  },
+  {
+    "name": "ORCHESTRATOR_MESSAGES_LANGUAGE",
+    "value": "es",
+    "slotSetting": false
+  },
+  {
+    "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
+    "value": "1",
+    "slotSetting": false
+  },
+  {
+    "name": "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING",
+    "value": "DefaultEndpointsProtocol=https;AccountName=strag0jdjjaorc;EndpointSuffix=core.windows.net;AccountKey=TtROL88aYQ7wT22QA+B+hCgsiTG5bttKVhNMcNy12CZR6ZDxmK/VqwCmg3kyCRrw1Vqv6nFQKsW++ASt/aBIpQ==",
+    "slotSetting": false
+  },
+  {
+    "name": "WEBSITE_CONTENTSHARE",
+    "value": "fnorch0jdjja",
+    "slotSetting": false
+  },
+  {
+    "name": "XDG_CACHE_HOME",
+    "value": "/tmp/.cache",
+    "slotSetting": false
+  }
+]
