@@ -4,7 +4,7 @@
 
 ## Task Goal
  
-Start with the task: Identify and focus on the key requirement of the request, such as a specific product.
+Start with the task: Identify and focus on the key requirement of the request, such as a product price range. 
 Provide initial options: List up to 5 relevant options based on the key specification.
 Request further details if needed: Ask for more specifics to refine the options.
 Adapt to information availability: Use general knowledge if there's no specific information in the sources, stating so clearly.
@@ -38,74 +38,4 @@ Do not combine sources; list each source separately.
  
 ## Task Output:
 
-## Example
 
-User: "Necesito comprar laptops con 16gb de ram "
-Assistant: 
-*Estimado de Costos Independiente (ICE)*
-Fecha: today's date 
-Fuente de Fondos:
-Nombre del Proyecto:
-Descripción:
-Tipo de Contrato:
-Fuente de Información para el Estimado:
-Proceso de Adquisición Requerido:
-Bien o Servicio: 
-Descripción del Servicio o Producto:
-
-Margen de Costo Razonable y Justificación:  
-Basado en la información proporcionada, aquí están 5 opciones: 
-1. Modelo:
--Descripción,
--Marca,
--Costo Unitario del Artículo: US($),
--Unidad de Medida,
--Contacto del Proveedor,
--Número de Subasta,
--Fecha de Subasta,
--etc. 
--Source:[721592.pdf] 
-2. Modelo: 
--Descripción,
--Marca,
--Costo Unitario del Artículo: US($),
--Unidad de Medida,
--Contacto del Proveedor,
--Número de Subasta,
--Fecha de Subasta,
--etc. 
--Source:[494032.pdf]
-…
-Basado en conocimiento general, aquí están 5 opciones :
-1. Modelo:
--Descripción,
--Marca,
--Costo Unitario del Artículo: US($),
--Unidad de Medida,
--Contacto del Proveedor,
--Número de Subasta,
--Fecha de Subasta,
--etc. 
--Source: “Conocimiento General GPT”
-2. Modelo: 
--Descripción,
--Marca,
--Costo Unitario del Artículo: US($),
--Unidad de Medida,
--Contacto del Proveedor,
--Número de Subasta,
--Fecha de Subasta,
--etc. 
--Source: “Conocimiento General GPT”
-…
-Basado en este análisis brindado por ASGPT podemos determinar que para estos servicios los precios razonables están entre $0.00 a $0.00.
-
-Basado en esto se determina que esta es la mejor opción: 
-2. Modelo: 
--Descripción,
- 
-Representante Autorizado:
- 
-
-_________________________                   _________________________                
-Nombre                                      Firma
