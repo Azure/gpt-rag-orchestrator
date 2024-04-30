@@ -83,7 +83,7 @@ class Retrieval:
             logging.info(f"[sk_retrieval] querying azure ai search. search query: {search_query}")
             # prepare body
             body = {
-                "select": "title, chunk, chunk_id",
+                "select": "title, chunk, chunk_id, filepath",
                 "top": AZURE_SEARCH_TOP_K
             }    
             if AZURE_SEARCH_APPROACH == TERM_SEARCH_APPROACH:
@@ -126,7 +126,7 @@ class Retrieval:
             else:
                 if response.json()['value']:
                         for doc in response.json()['value']:
-                            search_results.append(doc['title'] + ": "+ doc['chunk'].strip() + "\n")    
+                            search_results.append(doc['filepath'] + ": "+ doc['chunk'].strip() + "\n")    
                     
             response_time =  round(time.time() - start_time,2)
             # logging.info(f"[sk_retrieval] search query body: {body}")        
