@@ -33,7 +33,7 @@ AZURE_SEARCH_TOP_K = os.environ.get("AZURE_SEARCH_TOP_K") or "3"
 
 AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH = os.environ.get("AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH") or "false"
 AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH = True if AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH == "true" else False
-AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG = os.environ.get("AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG") or "my-semantic-config"
+AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG = os.environ.get("AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG") or "semantic-config"
 AZURE_SEARCH_ENABLE_IN_DOMAIN = os.environ.get("AZURE_SEARCH_ENABLE_IN_DOMAIN") or "true"
 AZURE_SEARCH_ENABLE_IN_DOMAIN =  True if AZURE_SEARCH_ENABLE_IN_DOMAIN == "true" else False
 AZURE_SEARCH_CONTENT_COLUMNS = os.environ.get("AZURE_SEARCH_CONTENT_COLUMNS") or "content"
@@ -83,7 +83,7 @@ class Retrieval:
             logging.info(f"[sk_retrieval] querying azure ai search. search query: {search_query}")
             # prepare body
             body = {
-                "select": "title, content, url, filepath, chunk_id",
+                "select": "title, chunk, chunk_id",
                 "top": AZURE_SEARCH_TOP_K
             }    
             if AZURE_SEARCH_APPROACH == TERM_SEARCH_APPROACH:
@@ -92,7 +92,7 @@ class Retrieval:
                 body["vectorQueries"] = [{
                     "kind": "vector",
                     "vector": embeddings_query,
-                    "fields": "contentVector",
+                    "fields": "vector",
                     "k": int(AZURE_SEARCH_TOP_K)
                 }]
             elif AZURE_SEARCH_APPROACH == HYBRID_SEARCH_APPROACH:
@@ -100,7 +100,7 @@ class Retrieval:
                 body["vectorQueries"] = [{
                     "kind": "vector",
                     "vector": embeddings_query,
-                    "fields": "contentVector",
+                    "fields": "vector",
                     "k": int(AZURE_SEARCH_TOP_K)
                 }]
 
@@ -117,6 +117,7 @@ class Retrieval:
             start_time = time.time()
             response = requests.post(search_endpoint, headers=headers, json=body)
             status_code = response.status_code
+            logging.info(f"[sk_retrieval] status CODE: {status_code}")
             if status_code >= 400:
                 error_on_search = True
                 error_message = f'Status code: {status_code}.'
@@ -125,7 +126,7 @@ class Retrieval:
             else:
                 if response.json()['value']:
                         for doc in response.json()['value']:
-                            search_results.append(doc['filepath'] + ": "+ doc['content'].strip() + "\n")    
+                            search_results.append(doc['title'] + ": "+ doc['chunk'].strip() + "\n")    
                     
             response_time =  round(time.time() - start_time,2)
             # logging.info(f"[sk_retrieval] search query body: {body}")        
