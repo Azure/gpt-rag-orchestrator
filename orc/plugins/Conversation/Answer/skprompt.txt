@@ -15,8 +15,9 @@ Always include the SOURCE name for each fact in the response, referencing its fu
 Use the following format to cite relevant SOURCES ({["SOURCE"]})
 
 ## Task Input:
-"QUESTION": "{{$ask}}"
+
 "CONVERSATION_HISTORY_SUMMARY": "{{$conversation_summary}}"
 "SOURCES": "{{$sources}}"
+"QUESTION": "{{$ask}}"
 
 ## Task Output:
