@@ -296,7 +296,6 @@ async def get_answer(history, settings):
         
     answer_dict["prompt"] = prompt
     answer_dict["sources"] = sources.replace('[', '{').replace(']', '}')
-
     response_time =  round(time.time() - init_time,2)
     logging.info(f"[code_orchest] finished RAG Flow. {response_time} seconds.")
 
