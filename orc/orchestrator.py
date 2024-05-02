@@ -4,7 +4,7 @@ import time
 import uuid
 from azure.cosmos.aio import CosmosClient
 from datetime import datetime
-from shared.util import format_answer, get_setting
+from shared.util import get_setting
 from shared.cosmos_db import store_user_consumed_tokens, store_prompt_information
 from azure.identity.aio import DefaultAzureCredential
 import orc.code_orchestration as code_orchestration
@@ -79,22 +79,31 @@ async def run(conversation_id, ask, client_principal):
         # get conversation data
         conversation_data = conversation.get('conversation_data', 
                                             {'start_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 'interactions': []})
-    
+        messages = conversation_data.get('messages', [])
         # history
         history = conversation.get('history', [])
         history.append({"role": "user", "content": ask})
 
         # 2) get answer and sources
+        
+        #TODO: apply settings
+        #TODO: store and get messages history
+        #TODO: calculate consumend tokens
+        #TODO: generate search query
+        #TODO: store prompt information
 
         # get rag answer and sources
         logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
-        answer_dict = await code_orchestration.get_answer(history, settings)
+        answer_dict = await code_orchestration.get_answer(ask, messages, settings)
 
         # 3) update and save conversation (containing history and conversation data)
         
         # history
         history.append({"role": "assistant", "content": answer_dict['answer']})
+        #messages.append(dict(answer_dict['human_message']))
+        #messages.append(dict(answer_dict['ai_message']))
         conversation['history'] = history
+        #conversation_data['messages'] = messages
 
         # conversation data
         response_time = round(time.time() - start_time,2)
@@ -106,21 +115,22 @@ async def run(conversation_id, ask, client_principal):
         interaction.update(answer_dict)
         conversation_data['interactions'].append(interaction)
         conversation['conversation_data'] = conversation_data
-        conversation = await container.replace_item(item=conversation, body=conversation)
+        #conversation = await container.replace_item(item=conversation, body=conversation)
 
         # 4) store user consumed tokens
 
-        store_user_consumed_tokens(client_principal['id'], answer_dict['total_tokens'])
+        #store_user_consumed_tokens(client_principal['id'], answer_dict['total_tokens'])
 
         # 5) store prompt information in CosmosDB
 
-        store_prompt_information(client_principal['id'], answer_dict)
+        #store_prompt_information(client_principal['id'], answer_dict)
 
         # 6) return answer
         result = {"conversation_id": conversation_id, 
-                "answer": format_answer(interaction['answer'], ANSWER_FORMAT), 
+                "answer": answer_dict['answer'], #format_answer(interaction['answer'], ANSWER_FORMAT), 
                 "data_points": interaction['sources'] if 'sources' in interaction else '', 
-                "thoughts": f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"}
+                "thoughts": ask #f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"
+                }
 
         logging.info(f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {interaction['answer'][:30]}")
         await db_client.close()

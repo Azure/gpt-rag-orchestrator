@@ -12,3 +12,6 @@ semantic-kernel==0.9.4b1
 requests==2.31.0
 tiktoken==0.5.2
 tenacity==8.2.3
+langchain-openai
+langchain-core
+langchain
