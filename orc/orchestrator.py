@@ -9,6 +9,8 @@ from shared.cosmos_db import store_user_consumed_tokens, store_prompt_informatio
 from azure.identity.aio import DefaultAzureCredential
 import orc.code_orchestration as code_orchestration
 
+from langchain_community.callbacks import get_openai_callback
+from langchain_openai import OpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 # logging level
@@ -119,7 +121,8 @@ async def run(conversation_id, ask, client_principal):
 
         # get rag answer and sources
         logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
-        answer_dict = await code_orchestration.get_answer(ask, messages, settings)
+        with get_openai_callback() as cb:
+            answer_dict = await code_orchestration.get_answer(ask, messages, settings)
 
         # 3) update and save conversation (containing history and conversation data)
         
@@ -145,7 +148,7 @@ async def run(conversation_id, ask, client_principal):
 
         # 4) store user consumed tokens
 
-        #store_user_consumed_tokens(client_principal['id'], answer_dict['total_tokens'])
+        store_user_consumed_tokens(client_principal['id'], cb)
 
         # 5) store prompt information in CosmosDB
 
