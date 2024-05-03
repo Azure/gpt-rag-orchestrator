@@ -9,6 +9,8 @@ from shared.cosmos_db import store_user_consumed_tokens, store_prompt_informatio
 from azure.identity.aio import DefaultAzureCredential
 import orc.code_orchestration as code_orchestration
 
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
 logging.getLogger('azure.cosmos').setLevel(logging.WARNING)
@@ -47,6 +49,25 @@ def get_settings(client_principal):
     logging.info(f"[orchestrator] settings: {settings}")
     return settings
 
+def instanciate_messages(messages_data):
+    messages = []
+    try:
+        for message_data in messages_data:
+            if message_data['type'] == 'human':
+                message = HumanMessage(**message_data)
+            elif message_data['type'] == 'system':
+                message = SystemMessage(**message_data)
+            elif message_data['type'] == 'ai':
+                message = AIMessage(**message_data)
+            else:
+                Exception(f"Message type {message_data['type']} not recognized.")
+                message.from_dict(message_data)
+            messages.append(message)
+        return messages
+    except Exception as e:
+        logging.error(f"[orchestrator] error instanciating messages: {e}")
+        return []
+
 async def run(conversation_id, ask, client_principal):
     
     start_time = time.time()
@@ -77,17 +98,21 @@ async def run(conversation_id, ask, client_principal):
             conversation = await container.create_item(body={"id": conversation_id})
 
         # get conversation data
-        conversation_data = conversation.get('conversation_data', 
-                                            {'start_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 'interactions': []})
-        messages = conversation_data.get('messages', [])
-        # history
-        history = conversation.get('history', [])
+        conversation_data = conversation.get('conversation_data',
+                {'start_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 'history': [
+                    {'role': 'assistant', 'content': 'You are an AI assistant that helps people find information.'}],
+                    'messages_data': [{ 'type': 'system', 'content': 'You are an AI assistant that helps people find information.',}], 'interaction': {}
+                })
+        # load messages data and instanciate them
+        history = conversation_data['history']
         history.append({"role": "user", "content": ask})
 
+        messages_data = conversation_data['messages_data']
+        messages = instanciate_messages(messages_data)
+        
         # 2) get answer and sources
         
         #TODO: apply settings
-        #TODO: store and get messages history
         #TODO: calculate consumend tokens
         #TODO: generate search query
         #TODO: store prompt information
@@ -98,12 +123,13 @@ async def run(conversation_id, ask, client_principal):
 
         # 3) update and save conversation (containing history and conversation data)
         
+        #messages data
+        messages_data.append(answer_dict['human_message'].dict())
+        messages_data.append(answer_dict['ai_message'].dict())
         # history
         history.append({"role": "assistant", "content": answer_dict['answer']})
-        #messages.append(dict(answer_dict['human_message']))
-        #messages.append(dict(answer_dict['ai_message']))
-        conversation['history'] = history
-        #conversation_data['messages'] = messages
+        conversation_data['history'] = history
+        conversation_data['messages_data'] = messages_data
 
         # conversation data
         response_time = round(time.time() - start_time,2)
@@ -112,10 +138,10 @@ async def run(conversation_id, ask, client_principal):
             'user_name': client_principal['name'], 
             'response_time': response_time
         }
-        interaction.update(answer_dict)
-        conversation_data['interactions'].append(interaction)
+        conversation_data["interaction"] = interaction
+        
         conversation['conversation_data'] = conversation_data
-        #conversation = await container.replace_item(item=conversation, body=conversation)
+        conversation = await container.replace_item(item=conversation, body=conversation)
 
         # 4) store user consumed tokens
 
@@ -132,7 +158,7 @@ async def run(conversation_id, ask, client_principal):
                 "thoughts": ask #f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"
                 }
 
-        logging.info(f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {interaction['answer'][:30]}")
+        logging.info(f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {answer_dict['answer'][:30]}")
         await db_client.close()
 
     return result

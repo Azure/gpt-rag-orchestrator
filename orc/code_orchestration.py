@@ -85,7 +85,7 @@ async def get_answer(question, messages, settings):
     
     answer_dict["answer"] = res.content
     answer_dict["ai_message"] = res
-    answer_dict["human_message"] = messages
+    answer_dict["human_message"] = prompt
     answer_dict["total_tokens"] = total_tokens
     
     
