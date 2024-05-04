@@ -127,8 +127,10 @@ async def run(conversation_id, ask, client_principal):
         # 3) update and save conversation (containing history and conversation data)
         
         #messages data
-        messages_data.append(answer_dict['human_message'].dict())
-        messages_data.append(answer_dict['ai_message'].dict())
+        if 'human_message' in answer_dict:
+            messages_data.append(answer_dict['human_message'].dict())
+        if 'ai_message' in answer_dict:
+            messages_data.append(answer_dict['ai_message'].dict())
         # history
         history.append({"role": "assistant", "content": answer_dict['answer']})
         conversation_data['history'] = history
