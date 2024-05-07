@@ -8,6 +8,8 @@ from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain.prompts import HumanMessagePromptTemplate
 from langchain.chains import LLMChain
 from shared.tools import LineListOutputParser, retrieval_transform
+from langchain_core.prompts import PromptTemplate
+from langchain.chains.summarize import load_summarize_chain
 from langchain_community.retrievers import AzureAISearchRetriever
 
 # logging level
@@ -101,10 +103,71 @@ async def get_answer(question, messages, settings):
 
         # get document retriever and create retrieval chain
         retriever = get_document_retriever(model)
-        retrieval_chain = retriever | retrieval_transform
+
+        # do not parse into a string yet ↓
+        # retrieval_chain = retriever | retrieval_transform
+        retrieval_chain = retriever
 
         # get source knowledge from retrieval chain documents
-        source_knowledge = retrieval_chain.invoke(question)
+        docs = retrieval_chain.invoke(question)
+
+        # document summarization happens here
+        map_prompt_template = """
+        Write a summary of this chunk of text that includes the main points and any important details.
+        {text}
+        """
+
+        map_prompt = PromptTemplate(
+            template=map_prompt_template, input_variables=["text"]
+        )
+
+        combine_prompt_template = """
+        Write a concise summary of the following text delimited by triple backquotes.
+        Return your response in bullet points which covers the key points of the text.
+        ```{text}```
+        BULLET POINT SUMMARY:
+        """
+
+        combine_prompt = PromptTemplate(
+            template=combine_prompt_template, input_variables=["text"]
+        )
+
+        map_reduce_chain = load_summarize_chain(
+            llm=model,
+            chain_type="map_reduce",
+            map_prompt=map_prompt,
+            combine_prompt=combine_prompt,
+            return_intermediate_steps=True,
+        )
+
+        map_reduce_outputs = map_reduce_chain.invoke(
+            {"input_documents": docs}
+        )
+
+        # parsing the output
+        final_mp_data = []
+        for doc, out in zip(
+            map_reduce_outputs["input_documents"],
+            map_reduce_outputs["intermediate_steps"],
+        ):
+            output = {}
+            output["filepath"] = doc.metadata["filepath"]
+            # output["file_type"] = doc.metadata["filepath"]
+            # output["page_number"] = doc.metadata["page"]
+            output["content"] = doc.page_content
+            output["summary"] = out
+            final_mp_data.append(output)
+
+        summaries = [x['summary'] for x in final_mp_data]
+
+        # We can use the non-summarized text here to get a better answer
+        # but we have to keep in mind, the text we need to save is the summarized one
+        # to prevent the model to consume more tokens than needed, but having the key concepts
+        # in the summarized text
+        source_knowledge = "\n---\n".join(summaries) 
+        # end of document summarization
+
+        # source_knowledge = retrieval_transform(docs)
 
         humanMessage = HumanMessagePromptTemplate.from_template(
             """Answer the following question based on this context:\n{context}\nQuestion: {question}"""
