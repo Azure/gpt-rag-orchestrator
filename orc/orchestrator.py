@@ -78,6 +78,7 @@ def replace_numbers_with_paths(text, paths):
         for c in citation:
             c = int(c)
             text = text.replace(f"[{c}]", "["+paths[c-1]+"]")
+    logging.info(f"[orchestrator] response with citations {text}")
     return text
 
 async def run(conversation_id, ask, client_principal):
