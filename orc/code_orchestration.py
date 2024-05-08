@@ -60,6 +60,15 @@ BOT_DESCRIPTION_FILE = f"{ORCHESTRATOR_FOLDER}/bot_description.prompt"
 #   Query: {query}"""
 #     return augmented_prompt
 
+def replace_numbers_with_paths(text, paths):
+    citations = re.findall(r"\[([0-9]+(?:,[0-9]+)*)\]", text)
+    for citation in citations:
+        citation = citation.split(',')
+        for c in citation:
+            c = int(c)
+            text = text.replace(f"[{c}]", "["+paths[c-1]+"]")
+    logging.info(f"[orchestrator] response with citations {text}")
+    return text
 
 def get_document_retriever(model):
     template = """You are an AI language model assistant. You have the capability to perform advanced vector-based queries.
@@ -119,7 +128,7 @@ async def get_answer(question, messages, settings):
         res = model.invoke(messages)
         messages.append(res)
 
-        answer_dict["answer"] = res.content
+        answer_dict["answer"] = replace_numbers_with_paths(res.content, sources)
         answer_dict["ai_message"] = res
         answer_dict["human_message"] = humanMessage[0]
         answer_dict["total_tokens"] = total_tokens
