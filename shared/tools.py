@@ -1,6 +1,7 @@
 import re
 from langchain_core.output_parsers import StrOutputParser
-
+from langchain_core.documents import Document
+import logging
 
 class LineListOutputParser(StrOutputParser):
     def parse(self, text: str):
@@ -14,6 +15,7 @@ class LineListOutputParser(StrOutputParser):
 
 
 def retrieval_transform(docs):
-    docs = [x.page_content for x in docs]
+    sources = [x.metadata.get("filepath", "") for x in docs]
+    docs = [f"Source {i}: {x.metadata.get('filepath', '')} \n{x.page_content}" for i, x in enumerate(docs, start=1)]
     source_knowledge = "\n---\n".join(docs)
-    return source_knowledge
+    return source_knowledge, sources

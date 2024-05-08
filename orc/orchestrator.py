@@ -1,3 +1,4 @@
+import re
 import logging
 import os
 import time
@@ -70,6 +71,15 @@ def instanciate_messages(messages_data):
         logging.error(f"[orchestrator] error instanciating messages: {e}")
         return []
 
+def replace_numbers_with_paths(text, paths):
+    citations = re.findall(r"\[([0-9]+(?:,[0-9]+)*)\]", text)
+    for citation in citations:
+        citation = citation.split(',')
+        for c in citation:
+            c = int(c)
+            text = text.replace(f"[{c}]", "["+paths[c-1]+"]")
+    return text
+
 async def run(conversation_id, ask, client_principal):
     
     start_time = time.time()
@@ -102,8 +112,8 @@ async def run(conversation_id, ask, client_principal):
         # get conversation data
         conversation_data = conversation.get('conversation_data',
                 {'start_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 'history': [
-                    {'role': 'assistant', 'content': 'You are an AI assistant that helps people find information.'}],
-                    'messages_data': [{ 'type': 'system', 'content': 'You are an AI assistant that helps people find information.',}], 'interaction': {}
+                    {'role': 'assistant', 'content': 'You are FreddAid, a friendly marketing assistant dedicated to uncovering insights and developing effective strategies.'}],
+                    'messages_data': [{ 'type': 'system', 'content': 'You are FreddAid, a friendly marketing assistant dedicated to uncovering insights and developing effective strategies.',}], 'interaction': {}
                 })
         # load messages data and instanciate them
         history = conversation_data['history']
@@ -155,11 +165,12 @@ async def run(conversation_id, ask, client_principal):
         # 5) store prompt information in CosmosDB
 
         #store_prompt_information(client_principal['id'], answer_dict)
-
+        answer_dict['answer'] = replace_numbers_with_paths(answer_dict['answer'], answer_dict['sources'])
         # 6) return answer
-        result = {"conversation_id": conversation_id, 
-                "answer": answer_dict['answer'], #format_answer(interaction['answer'], ANSWER_FORMAT), 
-                "data_points": interaction['sources'] if 'sources' in interaction else '', 
+        result = {"conversation_id": conversation_id,
+                "answer": answer_dict['answer'],
+                "sources": answer_dict['sources'],
+                "data_points": interaction['sources'] if 'sources' in interaction else '',
                 "thoughts": ask #f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"
                 }
 

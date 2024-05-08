@@ -85,17 +85,17 @@ Original question: {question}"""
 async def get_answer(question, messages, settings):
     answer_dict = {}
     total_tokens = 0
-
     try:
         model = AzureChatOpenAI(
+            temperature=settings['temperature'],
             openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
             azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"],
         )
-
+        
         if len(messages) == 0:
             messages = [
                 SystemMessage(
-                    content="You are an AI assistant that helps people find information."
+                    content="You are FreddAid, a friendly marketing assistant dedicated to uncovering insights and developing effective strategies."
                 ),
             ]
 
@@ -104,10 +104,9 @@ async def get_answer(question, messages, settings):
         retrieval_chain = retriever | retrieval_transform
 
         # get source knowledge from retrieval chain documents
-        source_knowledge = retrieval_chain.invoke(question)
-
+        source_knowledge, sources = retrieval_chain.invoke(question)
         humanMessage = HumanMessagePromptTemplate.from_template(
-            """Answer the following question based on this context:\n{context}\nQuestion: {question}"""
+            """Answer the following question based on this context:\n{context}\nQuestion: {question}\n Make sure you cite the source number as [x]. Do not add the word Source before the number."""
         )
 
         # format the message into a human message and append to messages
@@ -124,6 +123,7 @@ async def get_answer(question, messages, settings):
         answer_dict["ai_message"] = res
         answer_dict["human_message"] = humanMessage[0]
         answer_dict["total_tokens"] = total_tokens
+        answer_dict["sources"] = sources
 
     except Exception as e:
         logging.error(f"[code_orchest] exception when executing RAG flow. {e}")
