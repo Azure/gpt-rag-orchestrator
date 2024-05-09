@@ -143,10 +143,6 @@ async def run(conversation_id, ask, client_principal):
         if 'ai_message' in answer_dict:
             messages_data.append(answer_dict['ai_message'].dict())
 
-        #add sources to tthe answer 
-        answer_dict['answer'] = replace_numbers_with_paths(answer_dict['answer'], answer_dict['sources'])
-
-
         # 4) store user consumed tokens
 
         store_user_consumed_tokens(client_principal['id'], cb)
