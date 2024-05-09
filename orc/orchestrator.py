@@ -71,6 +71,16 @@ def instanciate_messages(messages_data):
         logging.error(f"[orchestrator] error instanciating messages: {e}")
         return []
 
+def replace_numbers_with_paths(text, paths):
+    citations = re.findall(r"\[([0-9]+(?:,[0-9]+)*)\]", text)
+    for citation in citations:
+        citation = citation.split(',')
+        for c in citation:
+            c = int(c)
+            text = text.replace(f"[{c}]", "["+paths[c-1]+"]")
+    logging.info(f"[orchestrator] response with citations {text}")
+    return text
+
 async def run(conversation_id, ask, client_principal):
     
     start_time = time.time()
@@ -159,16 +169,8 @@ async def run(conversation_id, ask, client_principal):
         
         conversation['conversation_data'] = conversation_data
         conversation = await container.replace_item(item=conversation, body=conversation)
-
-        # 4) store user consumed tokens
-
-        store_user_consumed_tokens(client_principal['id'], cb)
-
-        # 5) store prompt information in CosmosDB
-
-        #store_prompt_information(client_principal['id'], answer_dict)
-        
-
+     
+       
         # 6) return answer
         result = {"conversation_id": conversation_id,
                 "answer": answer_dict['answer'],
