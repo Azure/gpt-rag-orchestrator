@@ -3,12 +3,11 @@ import logging
 import os
 import time
 import uuid
-from azure.cosmos.aio import CosmosClient
-from datetime import datetime
 from shared.util import get_setting
 from shared.cosmos_db import store_user_consumed_tokens, store_prompt_information
 from azure.identity.aio import DefaultAzureCredential
 import orc.code_orchestration as code_orchestration
+from shared.cosmos_db import get_conversation_data, update_conversation_data
 
 from langchain_community.callbacks import get_openai_callback
 from langchain_openai import OpenAI
@@ -100,82 +99,71 @@ async def run(conversation_id, ask, client_principal):
     # settings
     settings = get_settings(client_principal)
 
-    async with CosmosClient(AZURE_DB_URI, credential=credential) as db_client:
-        db = db_client.get_database_client(database=AZURE_DB_NAME)
-        container = db.get_container_client('conversations')
-        try:
-            conversation = await container.read_item(item=conversation_id, partition_key=conversation_id)
-            logging.info(f"[orchestrator] conversation {conversation_id} retrieved.")
-        except Exception as e:
-            logging.info(f"[orchestrator] customer sent an inexistent conversation_id, saving new conversation_id")        
-            conversation = await container.create_item(body={"id": conversation_id})
+    # get conversation data from CosmosDB
+    conversation_data = get_conversation_data(conversation_id)
 
-        # get conversation data
-        conversation_data = conversation.get('conversation_data',
-                {'start_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 'history': [
-                    {'role': 'assistant', 'content': 'You are FreddAid, a friendly marketing assistant dedicated to uncovering insights and developing effective strategies.'}],
-                    'messages_data': [{ 'type': 'system', 'content': 'You are FreddAid, a friendly marketing assistant dedicated to uncovering insights and developing effective strategies.',}], 'interaction': {}
-                })
-        # load messages data and instanciate them
-        history = conversation_data['history']
-        history.append({"role": "user", "content": ask})
+    # load messages data and instanciate them
+    history = conversation_data['history']
+    history.append({"role": "user", "content": ask})
 
-        messages_data = conversation_data['messages_data']
-        messages = instanciate_messages(messages_data)
-        
-        # 2) get answer and sources
-        
-        #TODO: apply settings
-        #TODO: calculate consumend tokens
-        #TODO: generate search query
-        #TODO: store prompt information
+    messages_data = conversation_data['messages_data']
+    messages = instanciate_messages(messages_data)
+    
+    # 2) get answer and sources
+    
+    #TODO: apply settings
+    #TODO: calculate consumend tokens
+    #TODO: generate search query
+    #TODO: store prompt information
 
-        # get rag answer and sources
-        logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
-        with get_openai_callback() as cb:
-            answer_dict = await code_orchestration.get_answer(ask, messages, settings)
+    # get rag answer and sources
+    logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
+    with get_openai_callback() as cb:
+        answer_dict = await code_orchestration.get_answer(ask, messages, settings)
 
-        # 3) update and save conversation (containing history and conversation data)
-        
-        #messages data
-        if 'human_message' in answer_dict:
-            messages_data.append(answer_dict['human_message'].dict())
-        if 'ai_message' in answer_dict:
-            messages_data.append(answer_dict['ai_message'].dict())
+    # 3) update and save conversation (containing history and conversation data)
+    
+    #messages data
+    if 'human_message' in answer_dict:
+        messages_data.append(answer_dict['human_message'].dict())
+    if 'ai_message' in answer_dict:
+        messages_data.append(answer_dict['ai_message'].dict())
 
-        # 4) store user consumed tokens
+    # 4) store user consumed tokens
 
-        store_user_consumed_tokens(client_principal['id'], cb)
+    store_user_consumed_tokens(client_principal['id'], cb)
 
-        # 5) store prompt information in CosmosDB
+    # 5) store prompt information in CosmosDB
 
-        # history
-        history.append({"role": "assistant", "content": answer_dict['answer']})
-        conversation_data['history'] = history
-        conversation_data['messages_data'] = messages_data
+    # history
+    history.append({"role": "assistant", "content": answer_dict['answer']})
+    conversation_data['history'] = history
+    conversation_data['messages_data'] = messages_data
 
-        # conversation data
-        response_time = round(time.time() - start_time,2)
-        interaction = {
-            'user_id': client_principal['id'], 
-            'user_name': client_principal['name'], 
-            'response_time': response_time
-        }
-        conversation_data["interaction"] = interaction
-        
-        conversation['conversation_data'] = conversation_data
-        conversation = await container.replace_item(item=conversation, body=conversation)
-     
-       
-        # 6) return answer
-        result = {"conversation_id": conversation_id,
-                "answer": answer_dict['answer'],
-                "sources": answer_dict['sources'],
-                "data_points": interaction['sources'] if 'sources' in interaction else '',
-                "thoughts": ask #f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"
-                }
+    # conversation data
+    response_time = round(time.time() - start_time,2)
+    interaction = {
+        'user_id': client_principal['id'], 
+        'user_name': client_principal['name'], 
+        'response_time': response_time
+    }
+    conversation_data["interaction"] = interaction
+    
+    # store updated conversation data
+    update_conversation_data(conversation_id, conversation_data)
+    # conversation['conversation_data'] = conversation_data
+    # conversation = await container.replace_item(item=conversation, body=conversation)
+    
+    
+    # 6) return answer
+    result = {"conversation_id": conversation_id,
+            "answer": answer_dict['answer'],
+            "sources": answer_dict['sources'],
+            "data_points": interaction['sources'] if 'sources' in interaction else '',
+            "thoughts": ask #f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"
+            }
 
-        logging.info(f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {answer_dict['answer'][:30]}")
-        await db_client.close()
+    logging.info(f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {answer_dict['answer'][:30]}")
+    # await db_client.close()
 
     return result
