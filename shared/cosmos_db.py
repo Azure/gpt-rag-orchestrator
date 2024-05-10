@@ -10,6 +10,23 @@ AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
 AZURE_DB_NAME = os.environ.get("AZURE_DB_NAME")
 AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
 
+DEFAULT_CONVERSATION_DATA = {
+    "start_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    "history": [
+        {
+            "role": "assistant",
+            "content": "You are FreddAid, a friendly marketing assistant dedicated to uncovering insights and developing effective strategies.",
+        }
+    ],
+    "messages_data": [
+        {
+            "type": "system",
+            "content": "You are FreddAid, a friendly marketing assistant dedicated to uncovering insights and developing effective strategies.",
+        }
+    ],
+    "interaction": {},
+}
+
 
 def store_user_consumed_tokens(user_id, consumed_tokens):
     try:
@@ -63,41 +80,23 @@ def store_prompt_information(user_id, prompt_information):
 
 
 def get_conversation_data(conversation_id):
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential=credential)
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client("conversations")
+
     try:
-        credential = DefaultAzureCredential()
-        db_client = CosmosClient(AZURE_DB_URI, credential=credential)
-        db = db_client.get_database_client(database=AZURE_DB_NAME)
-        container = db.get_container_client("conversations")
         conversation = container.read_item(
             item=conversation_id, partition_key=conversation_id
         )
     except Exception as e:
         logging.info(
-            f"[CosmosDB] customer sent an inexistent conversation_id, saving new conversation_id"
+            f"[CosmosDB] customer sent an inexistent conversation_id, saving new {conversation_id}"
         )
         conversation = container.create_item(body={"id": conversation_id})
-        # logging.error(f"Error retrieving the conversations: {e}")
 
     # get conversation data
-    conversation_data = conversation.get(
-        "conversation_data",
-        {
-            "start_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "history": [
-                {
-                    "role": "assistant",
-                    "content": "You are FreddAid, a friendly marketing assistant dedicated to uncovering insights and developing effective strategies.",
-                }
-            ],
-            "messages_data": [
-                {
-                    "type": "system",
-                    "content": "You are FreddAid, a friendly marketing assistant dedicated to uncovering insights and developing effective strategies.",
-                }
-            ],
-            "interaction": {},
-        },
-    )
+    conversation_data = conversation.get("conversation_data", DEFAULT_CONVERSATION_DATA)
 
     return conversation_data
 
