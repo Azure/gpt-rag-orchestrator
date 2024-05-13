@@ -16,3 +16,4 @@ langchain==0.1.16
 langchain-community==0.0.36
 langchain-core==0.1.49
 langchain-openai==0.1.5
+numexpr==2.10.0

@@ -27,6 +27,10 @@
 
     "ORCHESTRATOR_MESSAGES_LANGUAGE": "en",
 
+    "BING_SEARCH_API_KEY": "bing_search_api_key",
+    "BING_SEARCH_URL": "bing_search_url",
+    "BING_SUBSCRIPTION_KEY": "bing_search_suscription_key",
+
     "BLOCKED_LIST_CHECK" : "true",
     "GROUNDEDNESS_CHECK" : "true",
     "RESPONSIBLE_AI_CHECK" : "true",

@@ -116,16 +116,9 @@ def get_conversation_chain(model, messages, context):
     return conversation_chain
 
 
-async def get_answer(question, messages, settings):
-    answer_dict = {}
-    total_tokens = 0
+def get_answer(model, question, messages):
+    answer = ""
     try:
-        model = AzureChatOpenAI(
-            temperature=settings["temperature"],
-            openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
-            azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"],
-        )
-
         # get document retriever and create retrieval chain
         retriever = get_document_retriever(model)
         retrieval_chain = retriever | retrieval_transform
@@ -144,27 +137,10 @@ async def get_answer(question, messages, settings):
 
         # logging.info(f"response: {res}")
 
-        # human question
-        human_hessage = HumanMessage(content=question)
-        messages.append(human_hessage)
-        # ai response
-        ai_message = AIMessage(content=res["response"])
-        messages.append(ai_message)
-
-
-        answer_dict["answer"] = replace_numbers_with_paths(res["response"], sources)
-        answer_dict["ai_message"] = ai_message
-        answer_dict["human_message"] = human_hessage
-
-        answer_dict["total_tokens"] = total_tokens
-        answer_dict["sources"] = sources
+        answer = replace_numbers_with_paths(res["response"], sources)
 
     except Exception as e:
         logging.error(f"[code_orchest] exception when executing RAG flow. {e}")
-        answer_dict["answer"] = f"RAG flow: exception: {e}"
-        answer_dict["sources"] = []
+        answer = f"RAG flow: exception: {e}"
 
-    answer_dict["total_tokens"] = total_tokens
-    answer_dict["user_ask"] = question
-
-    return answer_dict
+    return answer

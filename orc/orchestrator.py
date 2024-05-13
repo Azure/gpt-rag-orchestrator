@@ -10,8 +10,21 @@ import orc.code_orchestration as code_orchestration
 from shared.cosmos_db import get_conversation_data, update_conversation_data
 
 from langchain_community.callbacks import get_openai_callback
-from langchain_openai import OpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+
+from langchain_openai import AzureChatOpenAI
+
+from langchain.chains import LLMMathChain
+from langchain.chains import LLMChain
+
+from langchain.prompts import PromptTemplate
+
+from langchain.agents import create_react_agent
+from langchain.agents import Tool
+from langchain.agents import AgentExecutor
+from langchain.chains.conversation.memory import ConversationBufferWindowMemory
+from langchain_community.utilities import BingSearchAPIWrapper
+from datetime import date
 
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
@@ -29,6 +42,15 @@ AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
 # AOAI
 AZURE_OPENAI_STREAM = os.environ.get("AZURE_OPENAI_STREAM") or "false"
 AZURE_OPENAI_STREAM = True if AZURE_OPENAI_STREAM.lower() == "true" else False
+
+# Langchain
+CONVERSATION_MAX_HISTORY = os.environ.get("CONVERSATION_MAX_HISTORY") or "12"
+CONVERSATION_MAX_HISTORY = int(CONVERSATION_MAX_HISTORY)
+
+#BING
+
+BING_SEARCH_API_KEY = os.environ.get("BING_SEARCH_API_KEY")
+BING_SEARCH_URL = os.environ.get("BING_SEARCH_URL") 
 
 ANSWER_FORMAT = "html" # html, markdown, none
 
@@ -80,11 +102,20 @@ def replace_numbers_with_paths(text, paths):
     logging.info(f"[orchestrator] response with citations {text}")
     return text
 
+def sort_string(string):
+  return " ".join(sorted(string))
+
+def current_time():
+  return f"Today's date: {date.today()}"
+
 async def run(conversation_id, ask, client_principal):
     
     start_time = time.time()
-
-    # 1) Get conversation stored in CosmosDB
+    
+    # settings
+    settings = get_settings(client_principal)
+    
+     # Get conversation stored in CosmosDB
  
     # create conversation_id if not provided
     if conversation_id is None or conversation_id == "":
@@ -92,12 +123,6 @@ async def run(conversation_id, ask, client_principal):
         logging.info(f"[orchestrator] {conversation_id} conversation_id is Empty, creating new conversation_id.")
 
     logging.info(f"[orchestrator] {conversation_id} starting conversation flow.")
-
-    # get conversation
-    credential = get_credentials()
-
-    # settings
-    settings = get_settings(client_principal)
 
     # get conversation data from CosmosDB
     conversation_data = get_conversation_data(conversation_id)
@@ -109,34 +134,135 @@ async def run(conversation_id, ask, client_principal):
     messages_data = conversation_data['messages_data']
     messages = instanciate_messages(messages_data)
     
-    # 2) get answer and sources
+    # Initialize model
+    model = AzureChatOpenAI(
+            temperature=settings["temperature"],
+            openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
+            azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"],
+    )
     
-    #TODO: apply settings
-    #TODO: calculate consumend tokens
-    #TODO: generate search query
-    #TODO: store prompt information
+    # Initialize memory
+    memory = ConversationBufferWindowMemory(k=CONVERSATION_MAX_HISTORY,memory_key="chat_history")
 
-    # get rag answer and sources
-    logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
+    input, output = {}, {}
+    for message in messages:
+        if message.type == "human":
+            input["input"] = message.content
+        if message.type == "ai":
+            output["output"] = message.content
+        if "input" in input and "output" in output:
+            memory.save_context(input, output)
+            input, output = {}, {}
+    
+    # Define built-in tools
+    
+    llm_math = LLMMathChain(llm=model)
+    bing_search = BingSearchAPIWrapper(k=3)
+    
+    # Create agent tools
+    tools = [
+        Tool(
+            name="Calculator",
+            func=llm_math.run,
+            description="Useful for when you need to answer questions about math.",
+        ),
+        Tool(
+            name="HomeDepot_library",
+            func=lambda question: code_orchestration.get_answer(model, question, messages),
+            description="Useful for when you need to answer questions about Home Depot.",
+            verbose=True,
+        ),
+        Tool(
+            name="ConsumerPulse_library",
+            func=lambda question: code_orchestration.get_answer(model, question, messages),
+            description="Useful for when you need to answer questions about consumer behavior, consumer pulse, segments and segmentation.",
+            verbose=True,
+        ),
+        Tool(
+            name="Economy_library",
+            func=lambda question: code_orchestration.get_answer(model, question, messages),
+            description="Useful for understanding how the economy affects consumer behavior and how is the economy.",
+            verbose=True,
+        ),
+        Tool(
+            name="MarketingFrameworks_library",
+            func=lambda question: code_orchestration.get_answer(model, question, messages),
+            description="Useful for when you need to use marketing frameworks.",
+            verbose=True,
+        ),
+        Tool(
+          name="Bing_Search",
+          description="A tool that uses the Bing search engine to search the web. Useful when you need to find information that is not available in the RAG tools.",
+          func=bing_search.run
+        ),
+        Tool(
+           name="Current_Time",
+           description="Returns current time.",
+           func=current_time
+        ),
+        Tool(
+            name="Sort_String",
+            func=lambda string: sort_string(string),
+            description="Useful for when you need to sort a string",
+            verbose=True,
+        ),
+    ]
+    
+    # Define agent prompt template
+    prompt_react = PromptTemplate(
+        input_variables=['agent_scratchpad', 'chat_history', 'input', 'tool_names', 'tools'],
+        name="FreddAid",
+        input_types={},
+        partial_variables={},
+        output_parser=None,
+        metadata={'lc_hub_owner': 'hwchase17', 'lc_hub_repo': 'react-chat', 'lc_hub_commit_hash': '3ecd5f710db438a9cf3773c57d6ac8951eefd2cd9a9b2a0026a65a0893b86a6e'},
+        tags=None,
+        template_format='f-string',
+        template='''Your name is FreddAid.
+        Answer the following questions as best you can. You have access to the following tools:
+        {tools}
+        Use the following format:
+        Question: the input question you must answer
+        Thought: you should always think about what to do
+        Action: the action to take, should be one of [{tool_names}]
+        Action Input: the input to the action
+        Observation: the result of the action
+        ... (this Thought/Action/Action Input/Observation can repeat N times)
+        Thought: I now know the final answer
+        Final Answer: the final answer to the original input question. Make sure include the cite in the response.
+        Begin!
+        Question: {input}
+        Thought:{agent_scratchpad}''',
+        validate_template=False
+    )
+    
+    # Create agent
+    agent = create_react_agent(model, tools, prompt_react)
+    agent_executor = AgentExecutor(agent=agent, tools=tools, name="FreddAid", verbose=True, memory=memory,handle_parsing_errors=True)
+
+    # 1) get answer from agent
     with get_openai_callback() as cb:
-        answer_dict = await code_orchestration.get_answer(ask, messages, settings)
+        result = agent_executor.invoke({"input": ask})
+    
+    # logging.info(f"MEMORY ORC: {memory}") <--- USE TO SAVE CONVERSATION DATA
+    
+    #TODO: SAVE CONVERSATION DATA IN COSMOS DB
 
-    # 3) update and save conversation (containing history and conversation data)
+    # 2) update and save conversation (containing history and conversation data)
     
     #messages data
-    if 'human_message' in answer_dict:
-        messages_data.append(answer_dict['human_message'].dict())
-    if 'ai_message' in answer_dict:
-        messages_data.append(answer_dict['ai_message'].dict())
+    #if 'human_message' in answer_dict:
+    #    messages_data.append(answer_dict['human_message'].dict())
+    #if 'ai_message' in answer_dict:
+    #    messages_data.append(answer_dict['ai_message'].dict())
 
-    # 4) store user consumed tokens
-
+    # 3) store user consumed tokens
     store_user_consumed_tokens(client_principal['id'], cb)
 
-    # 5) store prompt information in CosmosDB
+    # 4) store prompt information in CosmosDB
 
     # history
-    history.append({"role": "assistant", "content": answer_dict['answer']})
+    #history.append({"role": "assistant", "content": answer_dict['answer']})
     conversation_data['history'] = history
     conversation_data['messages_data'] = messages_data
 
@@ -151,19 +277,14 @@ async def run(conversation_id, ask, client_principal):
     
     # store updated conversation data
     update_conversation_data(conversation_id, conversation_data)
-    # conversation['conversation_data'] = conversation_data
-    # conversation = await container.replace_item(item=conversation, body=conversation)
     
-    
-    # 6) return answer
-    result = {"conversation_id": conversation_id,
-            "answer": answer_dict['answer'],
-            "sources": answer_dict['sources'],
+    # 5) return answer
+    response = {"conversation_id": conversation_id,
+            "answer": result['output'],
             "data_points": interaction['sources'] if 'sources' in interaction else '',
-            "thoughts": ask #f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"
+            "thoughts": result['input'] #f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"
             }
 
-    logging.info(f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {answer_dict['answer'][:30]}")
-    # await db_client.close()
+    logging.info(f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {result['output'][:30]}")
 
-    return result
+    return response
