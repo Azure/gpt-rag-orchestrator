@@ -128,9 +128,7 @@ async def run(conversation_id, ask, client_principal):
     conversation_data = get_conversation_data(conversation_id)
 
     # load messages data and instanciate them
-    history = conversation_data['history']
-    history.append({"role": "user", "content": ask})
-
+    
     messages_data = conversation_data['messages_data']
     messages = instanciate_messages(messages_data)
     
@@ -244,25 +242,22 @@ async def run(conversation_id, ask, client_principal):
     with get_openai_callback() as cb:
         result = agent_executor.invoke({"input": ask})
     
-    # logging.info(f"MEMORY ORC: {memory}") <--- USE TO SAVE CONVERSATION DATA
-    
-    #TODO: SAVE CONVERSATION DATA IN COSMOS DB
-
     # 2) update and save conversation (containing history and conversation data)
     
+    message_list = memory.buffer_as_messages
+    
     #messages data
-    #if 'human_message' in answer_dict:
-    #    messages_data.append(answer_dict['human_message'].dict())
-    #if 'ai_message' in answer_dict:
-    #    messages_data.append(answer_dict['ai_message'].dict())
-
-    # 3) store user consumed tokens
-    store_user_consumed_tokens(client_principal['id'], cb)
-
-    # 4) store prompt information in CosmosDB
+    
+    #user message
+    messages_data.append(message_list[-2].dict())
+    #ai message
+    messages_data.append(message_list[-1].dict())
 
     # history
-    #history.append({"role": "assistant", "content": answer_dict['answer']})
+    history = conversation_data['history']
+    history.append({"role": "user", "content": ask})
+    history.append({"role": "assistant", "content": result['output']})
+    
     conversation_data['history'] = history
     conversation_data['messages_data'] = messages_data
 
@@ -277,6 +272,13 @@ async def run(conversation_id, ask, client_principal):
     
     # store updated conversation data
     update_conversation_data(conversation_id, conversation_data)
+    
+     # 3) store user consumed tokens
+    store_user_consumed_tokens(client_principal['id'], cb)
+
+    # 4) store prompt information in CosmosDB
+    
+    #TODO: store prompt information
     
     # 5) return answer
     response = {"conversation_id": conversation_id,
