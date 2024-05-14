@@ -164,35 +164,40 @@ async def run(conversation_id, ask, client_principal):
             func=llm_math.run,
             description="Useful for when you need to answer questions about math.",
         ),
+        # Tool(
+        #     name="HomeDepot_library",
+        #     func=lambda question: code_orchestration.get_answer(model, question, messages),
+        #     description="Useful for when you need to answer questions about Home Depot.",
+        #     verbose=True,
+        # ),
+        # Tool(
+        #     name="ConsumerPulse_library",
+        #     func=lambda question: code_orchestration.get_answer(model, question, messages),
+        #     description="Useful for when you need to answer questions about consumer behavior, consumer pulse, segments and segmentation.",
+        #     verbose=True,
+        # ),
+        # Tool(
+        #     name="Economy_library",
+        #     func=lambda question: code_orchestration.get_answer(model, question, messages),
+        #     description="Useful for understanding how the economy affects consumer behavior and how is the economy.",
+        #     verbose=True,
+        # ),
+        # Tool(
+        #     name="MarketingFrameworks_library",
+        #     func=lambda question: code_orchestration.get_answer(model, question, messages),
+        #     description="Useful for when you need to use marketing frameworks.",
+        #     verbose=True,
+        # ),
         Tool(
-            name="HomeDepot_library",
+            name="General answer",
+            description="Useful for when you need to answer questions about different topics.",
             func=lambda question: code_orchestration.get_answer(model, question, messages),
-            description="Useful for when you need to answer questions about Home Depot.",
-            verbose=True,
         ),
-        Tool(
-            name="ConsumerPulse_library",
-            func=lambda question: code_orchestration.get_answer(model, question, messages),
-            description="Useful for when you need to answer questions about consumer behavior, consumer pulse, segments and segmentation.",
-            verbose=True,
-        ),
-        Tool(
-            name="Economy_library",
-            func=lambda question: code_orchestration.get_answer(model, question, messages),
-            description="Useful for understanding how the economy affects consumer behavior and how is the economy.",
-            verbose=True,
-        ),
-        Tool(
-            name="MarketingFrameworks_library",
-            func=lambda question: code_orchestration.get_answer(model, question, messages),
-            description="Useful for when you need to use marketing frameworks.",
-            verbose=True,
-        ),
-        Tool(
-          name="Bing_Search",
-          description="A tool that uses the Bing search engine to search the web. Useful when you need to find information that is not available in the RAG tools.",
-          func=bing_search.run
-        ),
+        # Tool(
+        #   name="Bing_Search",
+        #   description="A tool to search the web. Use it when you need to find current information that is not available in the library tools.",
+        #   func=bing_search.run
+        # ),
         Tool(
            name="Current_Time",
            description="Returns current time.",
@@ -227,7 +232,12 @@ async def run(conversation_id, ask, client_principal):
         Observation: the result of the action
         ... (this Thought/Action/Action Input/Observation can repeat N times)
         Thought: I now know the final answer
-        Final Answer: the final answer to the original input question. Make sure include the cite in the response.
+        Final Answer: the final answer to the original input question. Make sure include the cite in the response. Do not add the word source before the citation.
+        These keywords must never be translated and transformed:
+        - Action:
+        - Thought:
+        - Action Input:
+        because they are part of the thinking process instead of the output.
         Begin!
         Question: {input}
         Thought:{agent_scratchpad}''',
