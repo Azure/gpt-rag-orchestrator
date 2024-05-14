@@ -203,7 +203,6 @@ async def run(conversation_id, ask, client_principal):
             name="General answer",
             func=lambda question: code_orchestration.get_answer(model, question, messages),
             description="Useful for when you need to find general information.",
-            return_direct=True
         ),
         # Tool(
         #   name="Bing_Search",
