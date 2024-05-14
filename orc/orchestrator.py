@@ -232,7 +232,7 @@ async def run(conversation_id, ask, client_principal):
         Observation: the result of the action
         ... (this Thought/Action/Action Input/Observation can repeat N times)
         Thought: I now know the final answer
-        Final Answer: the final answer to the original input question. Make sure include the cite in the response.
+        Final Answer: the final answer to the original input question. Make sure include the cite in the response. Do not add the word source before the citation.
         These keywords must never be translated and transformed:
         - Action:
         - Thought:
