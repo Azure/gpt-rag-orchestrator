@@ -234,7 +234,9 @@ async def run(conversation_id, ask, client_principal):
         tags=None,
         template_format='f-string',
         template='''Your name is FreddAid.
-        Answer the following questions as best you can. You have access to the following tools:
+        Your name is FreddAid.
+        You are designed to assist with a wide range of tasks, from answering simple questions to providing in-depth explanations and discussions on a wide range of topics.
+        You have access to the following tools:
         {tools}
         Use the following format:
         Question: the input question you must answer
