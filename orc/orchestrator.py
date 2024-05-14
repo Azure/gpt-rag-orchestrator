@@ -164,40 +164,46 @@ async def run(conversation_id, ask, client_principal):
             func=llm_math.run,
             description="Useful for when you need to answer questions about math.",
         ),
-        # Tool(
-        #     name="HomeDepot_library",
-        #     func=lambda question: code_orchestration.get_answer(model, question, messages),
-        #     description="Useful for when you need to answer questions about Home Depot.",
-        #     verbose=True,
-        # ),
-        # Tool(
-        #     name="ConsumerPulse_library",
-        #     func=lambda question: code_orchestration.get_answer(model, question, messages),
-        #     description="Useful for when you need to answer questions about consumer behavior, consumer pulse, segments and segmentation.",
-        #     verbose=True,
-        # ),
-        # Tool(
-        #     name="Economy_library",
-        #     func=lambda question: code_orchestration.get_answer(model, question, messages),
-        #     description="Useful for understanding how the economy affects consumer behavior and how is the economy.",
-        #     verbose=True,
-        # ),
-        # Tool(
-        #     name="MarketingFrameworks_library",
-        #     func=lambda question: code_orchestration.get_answer(model, question, messages),
-        #     description="Useful for when you need to use marketing frameworks.",
-        #     verbose=True,
-        # ),
         Tool(
-            name="General answer",
-            description="Useful for when you need to answer questions about different topics.",
+            name="Home_Depot_library",
             func=lambda question: code_orchestration.get_answer(model, question, messages),
+            description="Useful for when you need to answer questions about Home Depot.",
+            verbose=True,
+            return_direct=True
         ),
-        # Tool(
-        #   name="Bing_Search",
-        #   description="A tool to search the web. Use it when you need to find current information that is not available in the library tools.",
-        #   func=bing_search.run
-        # ),
+        Tool(
+            name="Lowe's_Home_Improvement_library",
+            func=lambda question: code_orchestration.get_answer(model, question, messages),
+            description="Useful for when you need to answer questions about Lowe's Home Improvement.",
+            verbose=True,
+            return_direct=True
+        ),
+        Tool(
+            name="ConsumerPulse_library",
+            func=lambda question: code_orchestration.get_answer(model, question, messages),
+            description="Useful for when you need to answer questions about consumer behavior, consumer pulse, segments and segmentation.",
+            verbose=True,
+            return_direct=True
+        ),
+        Tool(
+            name="Economy_library",
+            func=lambda question: code_orchestration.get_answer(model, question, messages),
+            description="Useful for understanding how the economy affects consumer behavior and how is the economy.",
+            verbose=True,
+            return_direct=True
+        ),
+        Tool(
+            name="MarketingFrameworks_library",
+            func=lambda question: code_orchestration.get_answer(model, question, messages),
+            description="Useful for when you need to use marketing frameworks.",
+            verbose=True,
+            return_direct=True
+        ),
+        Tool(
+          name="Bing_Search",
+          description="A tool to search the web. Use it when you need to find current information that is not available in the library tools.",
+          func=bing_search.run
+        ),
         Tool(
            name="Current_Time",
            description="Returns current time.",
@@ -232,7 +238,7 @@ async def run(conversation_id, ask, client_principal):
         Observation: the result of the action
         ... (this Thought/Action/Action Input/Observation can repeat N times)
         Thought: I now know the final answer
-        Final Answer: the final answer to the original input question. Make sure include the cite in the response. Do not add the word source before the citation.
+        Final Answer: the final answer to the original input question. Make sure include any citation in the response.
         These keywords must never be translated and transformed:
         - Action:
         - Thought:
