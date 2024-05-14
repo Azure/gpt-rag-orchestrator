@@ -234,7 +234,6 @@ async def run(conversation_id, ask, client_principal):
         tags=None,
         template_format='f-string',
         template='''Your name is FreddAid.
-        Your name is FreddAid.
         You are designed to assist with a wide range of tasks, from answering simple questions to providing in-depth explanations and discussions on a wide range of topics.
         You have access to the following tools:
         {tools}
