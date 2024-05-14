@@ -142,5 +142,7 @@ def get_answer(model, question, messages):
     except Exception as e:
         logging.error(f"[code_orchest] exception when executing RAG flow. {e}")
         answer = f"RAG flow: exception: {e}"
-
+        
+    logging.info("[code_orchest] response: " + answer[:50])
+    
     return answer
