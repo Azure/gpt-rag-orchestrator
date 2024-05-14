@@ -164,57 +164,63 @@ async def run(conversation_id, ask, client_principal):
             func=llm_math.run,
             description="Useful for when you need to answer questions about math.",
         ),
+        # Tool(
+        #     name="Home_Depot_library",
+        #     func=lambda question: code_orchestration.get_answer(model, question, messages),
+        #     description="Useful for when you need to answer questions about Home Depot.",
+        #     verbose=True,
+        #     return_direct=True
+        # ),
+        # Tool(
+        #     name="Lowe's_Home_Improvement_library",
+        #     func=lambda question: code_orchestration.get_answer(model, question, messages),
+        #     description="Useful for when you need to answer questions about Lowe's Home Improvement.",
+        #     verbose=True,
+        #     return_direct=True
+        # ),
+        # Tool(
+        #     name="ConsumerPulse_library",
+        #     func=lambda question: code_orchestration.get_answer(model, question, messages),
+        #     description="Useful for when you need to answer questions about consumer behavior, consumer pulse, segments and segmentation.",
+        #     verbose=True,
+        #     return_direct=True
+        # ),
+        # Tool(
+        #     name="Economy_library",
+        #     func=lambda question: code_orchestration.get_answer(model, question, messages),
+        #     description="Useful for understanding how the economy affects consumer behavior and how is the economy.",
+        #     verbose=True,
+        #     return_direct=True
+        # ),
+        # Tool(
+        #     name="MarketingFrameworks_library",
+        #     func=lambda question: code_orchestration.get_answer(model, question, messages),
+        #     description="Useful for when you need to use marketing frameworks.",
+        #     verbose=True,
+        #     return_direct=True
+        # ),
         Tool(
-            name="Home_Depot_library",
+            name="General answer",
             func=lambda question: code_orchestration.get_answer(model, question, messages),
-            description="Useful for when you need to answer questions about Home Depot.",
-            verbose=True,
+            description="Useful for when you need to find general information.",
             return_direct=True
         ),
-        Tool(
-            name="Lowe's_Home_Improvement_library",
-            func=lambda question: code_orchestration.get_answer(model, question, messages),
-            description="Useful for when you need to answer questions about Lowe's Home Improvement.",
-            verbose=True,
-            return_direct=True
-        ),
-        Tool(
-            name="ConsumerPulse_library",
-            func=lambda question: code_orchestration.get_answer(model, question, messages),
-            description="Useful for when you need to answer questions about consumer behavior, consumer pulse, segments and segmentation.",
-            verbose=True,
-            return_direct=True
-        ),
-        Tool(
-            name="Economy_library",
-            func=lambda question: code_orchestration.get_answer(model, question, messages),
-            description="Useful for understanding how the economy affects consumer behavior and how is the economy.",
-            verbose=True,
-            return_direct=True
-        ),
-        Tool(
-            name="MarketingFrameworks_library",
-            func=lambda question: code_orchestration.get_answer(model, question, messages),
-            description="Useful for when you need to use marketing frameworks.",
-            verbose=True,
-            return_direct=True
-        ),
-        Tool(
-          name="Bing_Search",
-          description="A tool to search the web. Use it when you need to find current information that is not available in the library tools.",
-          func=bing_search.run
-        ),
+        # Tool(
+        #   name="Bing_Search",
+        #   description="A tool to search the web. Use it when you need to find current information that is not available in the library tools.",
+        #   func=bing_search.run
+        # ),
         Tool(
            name="Current_Time",
            description="Returns current time.",
            func=current_time
         ),
-        Tool(
-            name="Sort_String",
-            func=lambda string: sort_string(string),
-            description="Useful for when you need to sort a string",
-            verbose=True,
-        ),
+        # Tool(
+        #     name="Sort_String",
+        #     func=lambda string: sort_string(string),
+        #     description="Useful for when you need to sort a string",
+        #     verbose=True,
+        # ),
     ]
     
     # Define agent prompt template
@@ -247,7 +253,7 @@ async def run(conversation_id, ask, client_principal):
     
     # Create agent
     agent = create_react_agent(model, tools, prompt_react)
-    agent_executor = AgentExecutor(agent=agent, tools=tools, name="FreddAid", verbose=True, memory=memory,handle_parsing_errors=True)
+    agent_executor = AgentExecutor(agent=agent, tools=tools, name="FreddAid", verbose=True, memory=memory, handle_parsing_errors=True)
 
     # 1) get answer from agent
     with get_openai_callback() as cb:
