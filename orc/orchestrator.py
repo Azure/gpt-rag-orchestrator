@@ -238,12 +238,7 @@ async def run(conversation_id, ask, client_principal):
         Observation: the result of the action
         ... (this Thought/Action/Action Input/Observation can repeat N times)
         Thought: I now know the final answer
-        Final Answer: the final answer to the original input question. Make sure include any citation in the response.
-        These keywords must never be translated and transformed:
-        - Action:
-        - Thought:
-        - Action Input:
-        because they are part of the thinking process instead of the output.
+        Final Answer: the final answer to the original input question. Make sure include the cite in the response.
         Begin!
         Question: {input}
         Thought:{agent_scratchpad}''',
