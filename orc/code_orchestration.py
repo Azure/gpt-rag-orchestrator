@@ -61,10 +61,8 @@ def replace_numbers_with_paths(text, paths):
     return text
 
 def get_document_retriever(model):
-    template = """You are an AI language model assistant. You have the capability to perform advanced vector-based queries.
-Your task is to construct one search query using only nouns, to retrieve relevant documents from a vector database.
-Identify key concepts from the question. Combine these concepts into a relevant noun phrase.
-Do not use the 'Search query' at the beginning of the query.
+    template = """Your task is to construct one clear and concise Query string to retrieve relevant documents from a vector database.
+Identify key concepts from the question. Query string is no longer than 10 words. No need to include the word "Query" in the query.
 Original question: {question}"""
 
     sq_prompt = ChatPromptTemplate.from_template(template)
@@ -143,6 +141,5 @@ def get_answer(model, question, messages):
         logging.error(f"[code_orchest] exception when executing RAG flow. {e}")
         answer = f"RAG flow: exception: {e}"
         
-    logging.info("[code_orchest] response: " + answer[:50])
-    
+    logging.info("[code_orchest] response: " + answer[:500])
     return answer
