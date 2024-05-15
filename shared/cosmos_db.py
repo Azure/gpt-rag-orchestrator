@@ -10,24 +10,6 @@ AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
 AZURE_DB_NAME = os.environ.get("AZURE_DB_NAME")
 AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
 
-DEFAULT_CONVERSATION_DATA = {
-    "start_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    "history": [
-        {
-            "role": "assistant",
-            "content": "You are FreddAid, a friendly marketing assistant dedicated to uncovering insights and developing effective strategies.",
-        }
-    ],
-    "messages_data": [
-        {
-            "type": "system",
-            "content": "You are FreddAid, a friendly marketing assistant dedicated to uncovering insights and developing effective strategies.",
-        }
-    ],
-    "interaction": {},
-}
-
-
 def store_user_consumed_tokens(user_id, consumed_tokens):
     try:
         credential = DefaultAzureCredential()
@@ -96,7 +78,15 @@ def get_conversation_data(conversation_id):
         conversation = container.create_item(body={"id": conversation_id})
 
     # get conversation data
-    conversation_data = conversation.get("conversation_data", DEFAULT_CONVERSATION_DATA)
+    conversation_data = conversation.get(
+        "conversation_data",
+        {
+            "start_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "history": [],
+            "messages_data": [],
+            "interaction": {},
+        },
+    )
 
     return conversation_data
 
