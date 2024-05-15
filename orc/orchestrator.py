@@ -207,7 +207,7 @@ async def run(conversation_id, ask, client_principal):
         Tool(
            name="Current_Time",
            description="Returns current time.",
-           func=current_time
+           func=lambda _: current_time()
         ),
         # Tool(
         #     name="Sort_String",
