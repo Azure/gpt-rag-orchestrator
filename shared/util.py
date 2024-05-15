@@ -377,7 +377,7 @@ def get_conversation(conversation_id, user_id):
             'messages': [{
                 'role': message['role'],
                 'content': message['content']
-            } for message in conversation['conversation_data']['history'][1:]]
+            } for message in conversation['conversation_data']['history']]
         }
         return formatted_conversation
     except Exception:
