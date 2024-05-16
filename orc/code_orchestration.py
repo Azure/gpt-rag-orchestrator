@@ -53,12 +53,13 @@ BOT_DESCRIPTION_FILE = f"{ORCHESTRATOR_FOLDER}/bot_description.prompt"
 def replace_numbers_with_paths(text, paths):
     citations = re.findall(r"\[([0-9]+(?:,[0-9]+)*)\]", text)
     for citation in citations:
-        citation = citation.split(',')
+        citation = citation.split(",")
         for c in citation:
             c = int(c)
-            text = text.replace(f"[{c}]", "["+paths[c-1]+"]")
+            text = text.replace(f"[{c}]", "[" + paths[c - 1] + "]")
     # logging.info(f"[orchestrator] response with citations {text}")
     return text
+
 
 def get_document_retriever(model):
     template = """Your task is to construct one clear and concise Query string to retrieve relevant documents from a vector database.
@@ -114,7 +115,7 @@ def get_conversation_chain(model, messages, context):
     return conversation_chain
 
 
-def get_answer(model, question, messages):
+def get_answer(model, question, messages, documents):
     answer = ""
     try:
         # get document retriever and create retrieval chain
@@ -135,11 +136,15 @@ def get_answer(model, question, messages):
 
         # logging.info(f"response: {res}")
 
+        if isinstance(documents, list):
+            for source in sources:
+                documents.append(source)
+
         answer = replace_numbers_with_paths(res["response"], sources)
 
     except Exception as e:
         logging.error(f"[code_orchest] exception when executing RAG flow. {e}")
         answer = f"RAG flow: exception: {e}"
-        
+
     logging.info("[code_orchest] response: " + answer[:500])
     return answer

@@ -18,4 +18,5 @@ def retrieval_transform(docs):
     sources = [x.metadata.get("filepath", "") for x in docs]
     docs = [f"Source {i}: {x.metadata.get('filepath', '')} \n{x.page_content}" for i, x in enumerate(docs, start=1)]
     source_knowledge = "\n---\n".join(docs)
+    # logging.info(f"SOURCES {sources}")
     return source_knowledge, sources
