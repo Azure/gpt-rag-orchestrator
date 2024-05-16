@@ -353,7 +353,7 @@ def get_conversations(user_id):
         
         conversations = container.query_items(query=query, parameters=parameters, enable_cross_partition_query=True)
         
-        formatted_conversations = [{'id': con['id'], 'start_date': con['conversation_data']['start_date'], 'content': con['conversation_data']['history'][1]['content']} for con in conversations]
+        formatted_conversations = [{'id': con['id'], 'start_date': con['conversation_data']['start_date'], 'content': con['conversation_data']['history'][0]['content']} for con in conversations]
         
         return formatted_conversations
     except Exception:
