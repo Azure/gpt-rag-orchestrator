@@ -17,12 +17,13 @@ from langchain_openai import AzureChatOpenAI
 from langchain.chains import LLMMathChain
 from langchain.chains import LLMChain
 
-from langchain.prompts import PromptTemplate
+# from langchain.prompts import PromptTemplate
+from langchain_core.prompts.chat import ChatPromptTemplate, MessagesPlaceholder
 
-from langchain.agents import create_react_agent
+from langchain.agents import create_openai_functions_agent
 from langchain.agents import Tool
 from langchain.agents import AgentExecutor
-from langchain.chains.conversation.memory import ConversationBufferWindowMemory
+from langchain.memory import ConversationBufferWindowMemory
 from langchain_community.utilities import BingSearchAPIWrapper
 from datetime import date
 
@@ -158,7 +159,7 @@ async def run(conversation_id, ask, client_principal):
 
     # Initialize memory
     memory = ConversationBufferWindowMemory(
-        k=CONVERSATION_MAX_HISTORY, memory_key="chat_history"
+        k=CONVERSATION_MAX_HISTORY, memory_key="chat_history",return_messages=True
     )
 
     input, output = {}, {}
@@ -246,47 +247,27 @@ async def run(conversation_id, ask, client_principal):
         # ),
     ]
 
-    # Define agent prompt template
-    prompt_react = PromptTemplate(
-        input_variables=[
-            "agent_scratchpad",
-            "chat_history",
-            "input",
-            "tool_names",
-            "tools",
-        ],
-        name="FreddAid",
-        input_types={},
-        partial_variables={},
-        output_parser=None,
-        metadata={
-            "lc_hub_owner": "hwchase17",
-            "lc_hub_repo": "react-chat",
-            "lc_hub_commit_hash": "3ecd5f710db438a9cf3773c57d6ac8951eefd2cd9a9b2a0026a65a0893b86a6e",
-        },
-        tags=None,
-        template_format="f-string",
-        template="""Your name is FreddAid.
-        You are designed to assist with a wide range of tasks, from answering simple questions to providing in-depth explanations and discussions on a wide range of topics.
-        You have access to the following tools:
-        {tools}
-        Use the following format:
-        Question: the input question you must answer
-        Thought: you should always think about what to do
-        Action: the action to take, should be one of [{tool_names}]
-        Action Input: the input to the action
-        Observation: the result of the action
-        ... (this Thought/Action/Action Input/Observation can repeat N times)
-        Thought: I now know the final answer
-        Final Answer: the final answer to the original input question. Make sure include the cite in the response.
-        Begin!
-        Question: {input}
-        Thought:{agent_scratchpad}""",
-        validate_template=False,
+    # Define agent prompt template    
+    system = '''Your name is FreddAid. Respond to the human as helpfully and accurately as possible. Always generate a citation for the information you retrieve inside brackets'''
+
+    human = '''
+
+    {input}
+
+    {agent_scratchpad}
+
+    '''
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system),
+            MessagesPlaceholder("chat_history", optional=True),
+            ("human", human),
+        ]
     )
 
     # Create agent
-    agent = create_react_agent(model, tools, prompt_react)
+    agent = create_openai_functions_agent(model, tools, prompt)
     agent_executor = AgentExecutor(
         agent=agent,
         tools=tools,
@@ -295,26 +276,43 @@ async def run(conversation_id, ask, client_principal):
         memory=memory,
         handle_parsing_errors=True,
     )
+    chat_history = memory.buffer_as_messages
 
     # 1) get answer from agent
-    with get_openai_callback() as cb:
-        result = agent_executor.invoke({"input": ask})
+    # with get_openai_callback() as cb:
+    response = agent_executor.invoke(
+        {
+            "input": ask,
+            "chat_history": chat_history,
+        }
+    )
+
+    agent_dict = agent_executor.dict()
+
+    for value in agent_dict:
+        print(f"{value}: {agent_dict[value]}")
 
     # 2) update and save conversation (containing history and conversation data)
 
-    message_list = memory.buffer_as_messages
+    # message_list = memory.buffer_as_messages
 
     # messages data
 
     # user message
-    messages_data.append(message_list[-2].dict())
+    # messages_data.append(message_list[-2].dict())
+    messages_data.append(response["input"])
     # ai message
-    messages_data.append(message_list[-1].dict())
+    # messages_data.append(message_list[-1].dict())
+    messages_data.append(response["output"])
+
+
+    print("QUESTION",response['input'])
+    print("RESPONSE: ",response['output'])
 
     # history
     history = conversation_data["history"]
     history.append({"role": "user", "content": ask})
-    history.append({"role": "assistant", "content": result["output"]})
+    history.append({"role": "assistant", "content": response["output"]})
 
     conversation_data["history"] = history
     conversation_data["messages_data"] = messages_data
@@ -340,7 +338,7 @@ async def run(conversation_id, ask, client_principal):
     update_conversation_data(conversation_id, conversation_data)
 
     # 3) store user consumed tokens
-    store_user_consumed_tokens(client_principal["id"], cb)
+    # store_user_consumed_tokens(client_principal["id"], cb)
 
     # 4) store prompt information in CosmosDB
 
@@ -349,15 +347,15 @@ async def run(conversation_id, ask, client_principal):
     # 5) return answer
     response = {
         "conversation_id": conversation_id,
-        "answer": result["output"],
+        "answer": response["output"],
         "data_points": interaction["sources"] if "sources" in interaction else "",
-        "thoughts": result[
+        "thoughts": response[
             "input"
         ],  # f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}",
     }
 
     logging.info(
-        f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {result['output'][:30]}"
+        f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {response['output'][:30]}"
     )
 
     return response
