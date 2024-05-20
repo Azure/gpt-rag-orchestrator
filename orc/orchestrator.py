@@ -25,6 +25,8 @@ from langchain.agents import Tool
 from langchain.agents import AgentExecutor
 from langchain.memory import ConversationBufferWindowMemory
 from langchain_community.utilities import BingSearchAPIWrapper
+from langchain_community.retrievers import AzureAISearchRetriever
+from langchain.tools.retriever import create_retriever_tool
 from datetime import date
 
 # logging level
@@ -177,7 +179,6 @@ async def run(conversation_id, ask, client_principal):
     llm_math = LLMMathChain(llm=model)
     # bing_search = BingSearchAPIWrapper(k=3)
     documents = []
-    logging.error(f"List of sources BEFORE: {documents}")
 
     # arguments for code orchestration
     args = {
@@ -186,66 +187,37 @@ async def run(conversation_id, ask, client_principal):
         "messages": messages,
         "documents": documents,
     }
-
+    retriever=AzureAISearchRetriever(content_key="chunk", top_k=3,api_version="2024-03-01-preview")
     # Create agent tools
-    tools = [
-        Tool(
-            name="Calculator",
-            func=llm_math.run,
-            description="Useful for when you need to answer questions about math.",
-        ),
-        Tool(
-            name="Home_Depot_library",
-            func=lambda _: code_orchestration.get_answer(**args),
-            description="Useful for when you need to answer questions about Home Depot.",
-            verbose=True,
-            return_direct=True,
-        ),
-        Tool(
-            name="Lowe's_Home_Improvement_library",
-            func=lambda _: code_orchestration.get_answer(**args),
-            description="Useful for when you need to answer questions about Lowe's Home Improvement.",
-            verbose=True,
-            return_direct=True,
-        ),
-        Tool(
-            name="ConsumerPulse_library",
-            func=lambda _: code_orchestration.get_answer(**args),
-            description="Useful for when you need to answer questions about consumer behavior, consumer pulse, segments and segmentation.",
-            verbose=True,
-            return_direct=True,
-        ),
-        Tool(
-            name="Economy_library",
-            func=lambda _: code_orchestration.get_answer(**args),
-            description="Useful for understanding how the economy affects consumer behavior and how is the economy.",
-            verbose=True,
-            return_direct=True,
-        ),
-        Tool(
-            name="MarketingFrameworks_library",
-            func=lambda _: code_orchestration.get_answer(**args),
-            description="Useful for when you need to use marketing frameworks.",
-            verbose=True,
-            return_direct=True,
-        ),
-        # Tool(
-        #   name="Bing_Search",
-        #   description="A tool to search the web. Use it when you need to find current information that is not available in the library tools.",
-        #   func=bing_search.run
-        # ),
-        Tool(
-            name="Current_Time",
-            description="Returns current time.",
-            func=lambda _: current_time(),
-        ),
-        # Tool(
-        #     name="Sort_String",
-        #     func=lambda string: sort_string(string),
-        #     description="Useful for when you need to sort a string",
-        #     verbose=True,
-        # ),
-    ]
+    tool = create_retriever_tool(
+      retriever,
+      "Retrieval",
+      "Useful for when you need to answer questions about consumer behavior, consumer pulse, segments and segmentation.",
+    )
+    tools = [tool]
+    # tools = [
+    #     Tool(
+    #         name="Calculator",
+    #         func=llm_math.run,
+    #         description="Useful for when you need to answer questions about math.",
+    #     ),
+    #     # Tool(
+    #     #   name="Bing_Search",
+    #     #   description="A tool to search the web. Use it when you need to find current information that is not available in the library tools.",
+    #     #   func=bing_search.run
+    #     # ),
+    #     Tool(
+    #         name="Current_Time",
+    #         description="Returns current time.",
+    #         func=lambda _: current_time(),
+    #     ),
+    #     # Tool(
+    #     #     name="Sort_String",
+    #     #     func=lambda string: sort_string(string),
+    #     #     description="Useful for when you need to sort a string",
+    #     #     verbose=True,
+    #     # ),
+    # ]
 
     # Define agent prompt template    
     system = '''Your name is FreddAid. Respond to the human as helpfully and accurately as possible. Always generate a citation for the information you retrieve inside brackets'''
@@ -268,14 +240,7 @@ async def run(conversation_id, ask, client_principal):
 
     # Create agent
     agent = create_openai_functions_agent(model, tools, prompt)
-    agent_executor = AgentExecutor(
-        agent=agent,
-        tools=tools,
-        name="FreddAid",
-        verbose=True,
-        memory=memory,
-        handle_parsing_errors=True,
-    )
+    agent_executor =  AgentExecutor(agent=agent, tools=tools, verbose=True, memory=memory)
     chat_history = memory.buffer_as_messages
 
     # 1) get answer from agent
@@ -286,11 +251,12 @@ async def run(conversation_id, ask, client_principal):
             "chat_history": chat_history,
         }
     )
+    logging.info(f"[orchestrator] {conversation_id} agent response: {response}")
 
     agent_dict = agent_executor.dict()
 
     for value in agent_dict:
-        print(f"{value}: {agent_dict[value]}")
+        logging.error(f"{value}: {agent_dict[value]}")
 
     # 2) update and save conversation (containing history and conversation data)
 
@@ -304,10 +270,6 @@ async def run(conversation_id, ask, client_principal):
     # ai message
     # messages_data.append(message_list[-1].dict())
     messages_data.append(response["output"])
-
-
-    print("QUESTION",response['input'])
-    print("RESPONSE: ",response['output'])
 
     # history
     history = conversation_data["history"]
@@ -330,9 +292,7 @@ async def run(conversation_id, ask, client_principal):
         interaction["sources"] = documents
 
     # Clear documents to prevent memory garbage
-    logging.error(f"List of sources AFTER: {documents}")
     documents.clear()
-    logging.error(f"List of sources AFTER clear: {documents}")
 
     # store updated conversation data
     update_conversation_data(conversation_id, conversation_data)
@@ -354,8 +314,8 @@ async def run(conversation_id, ask, client_principal):
         ],  # f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}",
     }
 
-    logging.info(
-        f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {response['output'][:30]}"
-    )
+    # logging.info(
+    #     f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {response['output'][:30]}"
+    # )
 
     return response
