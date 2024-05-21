@@ -13,8 +13,7 @@ from azure.cosmos import CosmosClient
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
 from tenacity import retry, wait_random_exponential, stop_after_attempt
-import semantic_kernel as sk
-from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
+
 
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
@@ -276,25 +275,11 @@ def get_last_messages(messages, n):
 ##########################################################
 
 def load_sk_plugin(name, oai_config):
-    kernel = sk.Kernel()
-    kernel.add_chat_service("chat_completion", AzureChatCompletion(oai_config['deployment'], oai_config['endpoint'], oai_config['api_key'], ad_auth=True))
-    plugin = kernel.import_semantic_skill_from_directory("orc/plugins", name)
-    native_functions = kernel.import_native_skill_from_directory("orc/plugins", name)
-    plugin.update(native_functions)
+    plugin ={}
     return plugin
 
 def create_kernel(service_id='aoai_chat_completion'):
-    kernel = sk.Kernel()
-    chatgpt_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
-    kernel.add_service(
-        AzureChatCompletion(
-            service_id=service_id,
-            deployment_name=chatgpt_config['deployment'],
-            endpoint=chatgpt_config['endpoint'],
-            api_version=chatgpt_config['api_version'],
-            ad_token= chatgpt_config['api_key']
-        )
-    )
+    kernel ={}
     return kernel
 
 def get_usage_tokens(function_result, token_type='total'):

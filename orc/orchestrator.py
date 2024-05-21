@@ -21,11 +21,13 @@ from langchain.chains import LLMChain
 from langchain_core.prompts.chat import ChatPromptTemplate, MessagesPlaceholder
 
 from langchain.agents import create_openai_functions_agent
-from langchain.agents import Tool
+from langchain.agents import Tool, tool
 from langchain.agents import AgentExecutor
 from langchain.memory import ConversationBufferWindowMemory
 from langchain_community.utilities import BingSearchAPIWrapper
-from langchain_community.retrievers import AzureAISearchRetriever
+
+# from langchain_community.retrievers import AzureAISearchRetriever
+from shared.tools import AzureAISearchRetriever
 from langchain.tools.retriever import create_retriever_tool
 from datetime import date
 
@@ -116,7 +118,9 @@ def sort_string(string):
     return " ".join(sorted(string))
 
 
+@tool
 def current_time():
+    """Returns the current date."""
     return f"Today's date: {date.today()}"
 
 
@@ -161,7 +165,7 @@ async def run(conversation_id, ask, client_principal):
 
     # Initialize memory
     memory = ConversationBufferWindowMemory(
-        k=CONVERSATION_MAX_HISTORY, memory_key="chat_history",return_messages=True
+        k=CONVERSATION_MAX_HISTORY, memory_key="chat_history", return_messages=True
     )
 
     input, output = {}, {}
@@ -177,6 +181,12 @@ async def run(conversation_id, ask, client_principal):
     # Define built-in tools
 
     llm_math = LLMMathChain(llm=model)
+
+    @tool
+    def math_tool(query: str) -> str:
+        """Useful for when you need to answer questions about math."""
+        return llm_math.invoke(query)
+
     # bing_search = BingSearchAPIWrapper(k=3)
     documents = []
 
@@ -187,14 +197,16 @@ async def run(conversation_id, ask, client_principal):
         "messages": messages,
         "documents": documents,
     }
-    retriever=AzureAISearchRetriever(content_key="chunk", top_k=3,api_version="2024-03-01-preview")
-    # Create agent tools
-    tool = create_retriever_tool(
-      retriever,
-      "Retrieval",
-      "Useful for when you need to answer questions about consumer behavior, consumer pulse, segments and segmentation.",
+    retriever = AzureAISearchRetriever(
+        content_key="chunk", top_k=3, api_version="2024-03-01-preview"
     )
-    tools = [tool]
+    # Create agent tools
+    retriever = create_retriever_tool(
+        retriever,
+        "Retrieval",
+        "Useful for when you need to answer questions about consumer behavior, consumer pulse, segments and segmentation.",
+    )
+    tools = [retriever, math_tool, current_time]
     # tools = [
     #     Tool(
     #         name="Calculator",
@@ -219,16 +231,22 @@ async def run(conversation_id, ask, client_principal):
     #     # ),
     # ]
 
-    # Define agent prompt template    
-    system = '''Your name is FreddAid. Respond to the human as helpfully and accurately as possible. Always generate a citation for the information you retrieve inside brackets'''
+    # Define agent prompt template
+    system = """Your name is FredAid.
+    You are a Marketing Expert designed to assist with a wide range of tasks, from answering simple questions to providing in-depth explanations and discussions on a wide range of topics.
+    YOU MUST FOLLOW THESE INSTRUCTIONS:
+    1. Include a citation next to every fact with the file path within brackets. For example: [http://home/file.txt].
+    2. Do not call any of the retriever tools more than once with the same query.
 
-    human = '''
+    Your primary goal is to be helpful, and accurate. If you need to use any tool to enhance your response, do so effectively."""
+
+    human = """
 
     {input}
 
     {agent_scratchpad}
 
-    '''
+    """
 
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -240,35 +258,37 @@ async def run(conversation_id, ask, client_principal):
 
     # Create agent
     agent = create_openai_functions_agent(model, tools, prompt)
-    agent_executor =  AgentExecutor(agent=agent, tools=tools, verbose=True, memory=memory)
+    agent_executor = AgentExecutor(
+        agent=agent, tools=tools, verbose=True, memory=memory
+    )
     chat_history = memory.buffer_as_messages
 
     # 1) get answer from agent
-    # with get_openai_callback() as cb:
-    response = agent_executor.invoke(
-        {
-            "input": ask,
-            "chat_history": chat_history,
-        }
+    with get_openai_callback() as cb:
+        response = agent_executor.invoke(
+            {
+                "input": ask,
+                "chat_history": chat_history,
+            }
+        )
+    logging.info(
+        f"[orchestrator] {conversation_id} agent response: {response['output'][:50]}"
     )
-    logging.info(f"[orchestrator] {conversation_id} agent response: {response}")
 
-    agent_dict = agent_executor.dict()
+    # agent_dict = agent_executor.dict()
 
-    for value in agent_dict:
-        logging.error(f"{value}: {agent_dict[value]}")
+    # for value in agent_dict:
+    #     logging.error(f"{value}: {agent_dict[value]}")
 
     # 2) update and save conversation (containing history and conversation data)
 
-    # message_list = memory.buffer_as_messages
+    message_list = memory.buffer_as_messages
 
     # messages data
 
     # user message
-    # messages_data.append(message_list[-2].dict())
     messages_data.append(response["input"])
     # ai message
-    # messages_data.append(message_list[-1].dict())
     messages_data.append(response["output"])
 
     # history
@@ -298,7 +318,7 @@ async def run(conversation_id, ask, client_principal):
     update_conversation_data(conversation_id, conversation_data)
 
     # 3) store user consumed tokens
-    # store_user_consumed_tokens(client_principal["id"], cb)
+    store_user_consumed_tokens(client_principal["id"], cb)
 
     # 4) store prompt information in CosmosDB
 
@@ -309,13 +329,11 @@ async def run(conversation_id, ask, client_principal):
         "conversation_id": conversation_id,
         "answer": response["output"],
         "data_points": interaction["sources"] if "sources" in interaction else "",
-        "thoughts": response[
-            "input"
-        ],  # f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}",
+        "thoughts": response["input"],
     }
 
-    # logging.info(
-    #     f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {response['output'][:30]}"
-    # )
+    logging.info(
+        f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds."
+    )
 
     return response
