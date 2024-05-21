@@ -17,13 +17,18 @@ from langchain_openai import AzureChatOpenAI
 from langchain.chains import LLMMathChain
 from langchain.chains import LLMChain
 
-from langchain.prompts import PromptTemplate
+# from langchain.prompts import PromptTemplate
+from langchain_core.prompts.chat import ChatPromptTemplate, MessagesPlaceholder
 
-from langchain.agents import create_react_agent
-from langchain.agents import Tool
+from langchain.agents import create_openai_functions_agent
+from langchain.agents import tool
 from langchain.agents import AgentExecutor
-from langchain.chains.conversation.memory import ConversationBufferWindowMemory
+from langchain.memory import ConversationBufferWindowMemory
 from langchain_community.utilities import BingSearchAPIWrapper
+
+# from langchain_community.retrievers import AzureAISearchRetriever
+from shared.tools import AzureAISearchRetriever
+from langchain.tools.retriever import create_retriever_tool
 from datetime import date
 
 # logging level
@@ -113,7 +118,9 @@ def sort_string(string):
     return " ".join(sorted(string))
 
 
+@tool
 def current_time():
+    """Returns the current date."""
     return f"Today's date: {date.today()}"
 
 
@@ -158,7 +165,7 @@ async def run(conversation_id, ask, client_principal):
 
     # Initialize memory
     memory = ConversationBufferWindowMemory(
-        k=CONVERSATION_MAX_HISTORY, memory_key="chat_history"
+        k=CONVERSATION_MAX_HISTORY, memory_key="chat_history", return_messages=True
     )
 
     input, output = {}, {}
@@ -174,9 +181,14 @@ async def run(conversation_id, ask, client_principal):
     # Define built-in tools
 
     llm_math = LLMMathChain(llm=model)
+
+    @tool
+    def math_tool(query: str) -> str:
+        """Useful for when you need to answer questions about math."""
+        return llm_math.invoke(query)
+
     # bing_search = BingSearchAPIWrapper(k=3)
     documents = []
-    logging.error(f"List of sources BEFORE: {documents}")
 
     # arguments for code orchestration
     args = {
@@ -185,120 +197,88 @@ async def run(conversation_id, ask, client_principal):
         "messages": messages,
         "documents": documents,
     }
-
+    retriever = AzureAISearchRetriever(
+        content_key="chunk", top_k=3, api_version="2024-03-01-preview"
+    )
     # Create agent tools
-    tools = [
-        Tool(
-            name="Calculator",
-            func=llm_math.run,
-            description="Useful for when you need to answer questions about math.",
-        ),
-        Tool(
-            name="Home_Depot_library",
-            func=lambda _: code_orchestration.get_answer(**args),
-            description="Useful for when you need to answer questions about Home Depot.",
-            verbose=True,
-            return_direct=True,
-        ),
-        Tool(
-            name="Lowe's_Home_Improvement_library",
-            func=lambda _: code_orchestration.get_answer(**args),
-            description="Useful for when you need to answer questions about Lowe's Home Improvement.",
-            verbose=True,
-            return_direct=True,
-        ),
-        Tool(
-            name="ConsumerPulse_library",
-            func=lambda _: code_orchestration.get_answer(**args),
-            description="Useful for when you need to answer questions about consumer behavior, consumer pulse, segments and segmentation.",
-            verbose=True,
-            return_direct=True,
-        ),
-        Tool(
-            name="Economy_library",
-            func=lambda _: code_orchestration.get_answer(**args),
-            description="Useful for understanding how the economy affects consumer behavior and how is the economy.",
-            verbose=True,
-            return_direct=True,
-        ),
-        Tool(
-            name="MarketingFrameworks_library",
-            func=lambda _: code_orchestration.get_answer(**args),
-            description="Useful for when you need to use marketing frameworks.",
-            verbose=True,
-            return_direct=True,
-        ),
-        # Tool(
-        #   name="Bing_Search",
-        #   description="A tool to search the web. Use it when you need to find current information that is not available in the library tools.",
-        #   func=bing_search.run
-        # ),
-        Tool(
-            name="Current_Time",
-            description="Returns current time.",
-            func=lambda _: current_time(),
-        ),
-        # Tool(
-        #     name="Sort_String",
-        #     func=lambda string: sort_string(string),
-        #     description="Useful for when you need to sort a string",
-        #     verbose=True,
-        # ),
-    ]
+    retriever = create_retriever_tool(
+        retriever,
+        "Retrieval",
+        "Useful for when you need to answer questions about consumer behavior, consumer pulse, segments and segmentation.",
+    )
+    tools = [retriever, math_tool, current_time]
+    # tools = [
+    #     Tool(
+    #         name="Calculator",
+    #         func=llm_math.run,
+    #         description="Useful for when you need to answer questions about math.",
+    #     ),
+    #     # Tool(
+    #     #   name="Bing_Search",
+    #     #   description="A tool to search the web. Use it when you need to find current information that is not available in the library tools.",
+    #     #   func=bing_search.run
+    #     # ),
+    #     Tool(
+    #         name="Current_Time",
+    #         description="Returns current time.",
+    #         func=lambda _: current_time(),
+    #     ),
+    #     # Tool(
+    #     #     name="Sort_String",
+    #     #     func=lambda string: sort_string(string),
+    #     #     description="Useful for when you need to sort a string",
+    #     #     verbose=True,
+    #     # ),
+    # ]
 
     # Define agent prompt template
-    prompt_react = PromptTemplate(
-        input_variables=[
-            "agent_scratchpad",
-            "chat_history",
-            "input",
-            "tool_names",
-            "tools",
-        ],
-        name="FreddAid",
-        input_types={},
-        partial_variables={},
-        output_parser=None,
-        metadata={
-            "lc_hub_owner": "hwchase17",
-            "lc_hub_repo": "react-chat",
-            "lc_hub_commit_hash": "3ecd5f710db438a9cf3773c57d6ac8951eefd2cd9a9b2a0026a65a0893b86a6e",
-        },
-        tags=None,
-        template_format="f-string",
-        template="""Your name is FreddAid.
-        You are designed to assist with a wide range of tasks, from answering simple questions to providing in-depth explanations and discussions on a wide range of topics.
-        You have access to the following tools:
-        {tools}
-        Use the following format:
-        Question: the input question you must answer
-        Thought: you should always think about what to do
-        Action: the action to take, should be one of [{tool_names}]
-        Action Input: the input to the action
-        Observation: the result of the action
-        ... (this Thought/Action/Action Input/Observation can repeat N times)
-        Thought: I now know the final answer
-        Final Answer: the final answer to the original input question. Make sure include the cite in the response.
-        Begin!
-        Question: {input}
-        Thought:{agent_scratchpad}""",
-        validate_template=False,
+    system = """Your name is FredAid.
+    You are a Marketing Expert designed to assist with a wide range of tasks, from answering simple questions to providing in-depth explanations and discussions on a wide range of topics.
+    YOU MUST FOLLOW THESE INSTRUCTIONS:
+    1. Include a citation next to every fact with the file path within brackets. For example: [http://home/file.txt].
+    2. Do not call any of the retriever tools more than once with the same query.
+
+    Your primary goal is to be helpful, and accurate. If you need to use any tool to enhance your response, do so effectively."""
+
+    human = """
+
+    {input}
+
+    {agent_scratchpad}
+
+    """
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system),
+            MessagesPlaceholder("chat_history", optional=True),
+            ("human", human),
+        ]
     )
 
     # Create agent
-    agent = create_react_agent(model, tools, prompt_react)
+    agent = create_openai_functions_agent(model, tools, prompt)
     agent_executor = AgentExecutor(
-        agent=agent,
-        tools=tools,
-        name="FreddAid",
-        verbose=True,
-        memory=memory,
-        handle_parsing_errors=True,
+        agent=agent, tools=tools, verbose=True, memory=memory
     )
+    chat_history = memory.buffer_as_messages
 
     # 1) get answer from agent
     with get_openai_callback() as cb:
-        result = agent_executor.invoke({"input": ask})
+        response = agent_executor.invoke(
+            {
+                "input": ask,
+                "chat_history": chat_history,
+            }
+        )
+    logging.info(
+        f"[orchestrator] {conversation_id} agent response: {response['output'][:50]}"
+    )
+
+    # agent_dict = agent_executor.dict()
+
+    # for value in agent_dict:
+    #     logging.error(f"{value}: {agent_dict[value]}")
 
     # 2) update and save conversation (containing history and conversation data)
 
@@ -307,14 +287,14 @@ async def run(conversation_id, ask, client_principal):
     # messages data
 
     # user message
-    messages_data.append(message_list[-2].dict())
+    messages_data.append(response["input"])
     # ai message
-    messages_data.append(message_list[-1].dict())
+    messages_data.append(response["output"])
 
     # history
     history = conversation_data["history"]
     history.append({"role": "user", "content": ask})
-    history.append({"role": "assistant", "content": result["output"]})
+    history.append({"role": "assistant", "content": response["output"]})
 
     conversation_data["history"] = history
     conversation_data["messages_data"] = messages_data
@@ -332,9 +312,7 @@ async def run(conversation_id, ask, client_principal):
         interaction["sources"] = documents
 
     # Clear documents to prevent memory garbage
-    logging.error(f"List of sources AFTER: {documents}")
     documents.clear()
-    logging.error(f"List of sources AFTER clear: {documents}")
 
     # store updated conversation data
     update_conversation_data(conversation_id, conversation_data)
@@ -349,15 +327,13 @@ async def run(conversation_id, ask, client_principal):
     # 5) return answer
     response = {
         "conversation_id": conversation_id,
-        "answer": result["output"],
+        "answer": response["output"],
         "data_points": interaction["sources"] if "sources" in interaction else "",
-        "thoughts": result[
-            "input"
-        ],  # f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}",
+        "thoughts": response["input"],
     }
 
     logging.info(
-        f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {result['output'][:30]}"
+        f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds."
     )
 
     return response
