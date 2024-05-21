@@ -21,7 +21,7 @@ from langchain.chains import LLMChain
 from langchain_core.prompts.chat import ChatPromptTemplate, MessagesPlaceholder
 
 from langchain.agents import create_openai_functions_agent
-from langchain.agents import Tool, tool
+from langchain.agents import tool
 from langchain.agents import AgentExecutor
 from langchain.memory import ConversationBufferWindowMemory
 from langchain_community.utilities import BingSearchAPIWrapper
