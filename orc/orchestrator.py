@@ -7,7 +7,11 @@ from shared.util import get_setting
 from shared.cosmos_db import store_user_consumed_tokens, store_prompt_information
 from azure.identity.aio import DefaultAzureCredential
 import orc.code_orchestration as code_orchestration
-from shared.cosmos_db import get_conversation_data, update_conversation_data
+from shared.cosmos_db import (
+    get_conversation_data,
+    update_conversation_data,
+    store_agent_error,
+)
 
 from langchain_community.callbacks import get_openai_callback
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -259,21 +263,36 @@ async def run(conversation_id, ask, client_principal):
     # Create agent
     agent = create_openai_functions_agent(model, tools, prompt)
     agent_executor = AgentExecutor(
-        agent=agent, tools=tools, verbose=True, memory=memory
+        agent=agent,
+        tools=tools,
+        verbose=True,
+        memory=memory,
+        return_intermediate_steps=True,
     )
     chat_history = memory.buffer_as_messages
 
     # 1) get answer from agent
-    with get_openai_callback() as cb:
-        response = agent_executor.invoke(
-            {
-                "input": ask,
-                "chat_history": chat_history,
-            }
+    try:
+        with get_openai_callback() as cb:
+            response = agent_executor.invoke(
+                {
+                    "input": ask,
+                    "chat_history": chat_history,
+                }
+            )
+        logging.info(
+            f"[orchestrator] {conversation_id} agent response: {response['output'][:50]}"
         )
-    logging.info(
-        f"[orchestrator] {conversation_id} agent response: {response['output'][:50]}"
-    )
+    except Exception as e:
+        logging.error(f"[orchestrator] {conversation_id} error: {e.message}")
+        store_agent_error(client_principal["id"], e.message)
+        response = {
+            "conversation_id": conversation_id,
+            "answer": f"There was an error processing your request. Error: {e}",
+            "data_points": "",
+            "thoughts": ask,
+        }
+        return response
 
     # agent_dict = agent_executor.dict()
 

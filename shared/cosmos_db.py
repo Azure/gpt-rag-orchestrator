@@ -60,6 +60,21 @@ def store_prompt_information(user_id, prompt_information):
     except Exception as e:
         logging.error(f"Error retrieving the conversations: {e}")
 
+def store_agent_error(user_id, error):
+    try:
+        credential = DefaultAzureCredential()
+        db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
+        db = db_client.get_database_client(database=AZURE_DB_NAME)
+        container = db.get_container_client("agentErrors")
+        container.create_item(
+            {
+                "id": str(uuid.uuid4()),
+                "user_id": user_id,
+                "error": error,
+            }
+        )
+    except Exception as e:
+        logging.error(f"Error retrieving the conversations: {e}")
 
 def get_conversation_data(conversation_id):
     credential = DefaultAzureCredential()
