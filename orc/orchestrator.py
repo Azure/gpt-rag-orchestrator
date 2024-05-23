@@ -166,6 +166,12 @@ async def run(conversation_id, ask, client_principal):
         azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"],
         model_kwargs=model_kwargs,
     )
+    
+    math_model=AzureChatOpenAI(
+        temperature=0.7,
+        openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
+        azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"],
+    )
 
     # Initialize memory
     memory = ConversationBufferWindowMemory(
@@ -184,7 +190,7 @@ async def run(conversation_id, ask, client_principal):
 
     # Define built-in tools
 
-    llm_math = LLMMathChain(llm=model)
+    llm_math = LLMMathChain(llm=math_model)
 
     @tool
     def math_tool(query: str) -> str:
