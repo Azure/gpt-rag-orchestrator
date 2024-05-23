@@ -361,7 +361,9 @@ def get_conversation(conversation_id, user_id):
             'start_date': conversation['conversation_data']['start_date'],
             'messages': [{
                 'role': message['role'],
-                'content': message['content']
+                'content': message['content'],
+                'thoughts': message['thoughts'] if 'thoughts' in message else '',
+                'data_points': message['data_points'] if 'data_points' in message else ''
             } for message in conversation['conversation_data']['history']]
         }
         return formatted_conversation

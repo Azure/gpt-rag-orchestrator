@@ -166,8 +166,8 @@ async def run(conversation_id, ask, client_principal):
         azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"],
         model_kwargs=model_kwargs,
     )
-    
-    math_model=AzureChatOpenAI(
+
+    math_model = AzureChatOpenAI(
         temperature=0.7,
         openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
         azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"],
@@ -319,7 +319,17 @@ async def run(conversation_id, ask, client_principal):
     # history
     history = conversation_data["history"]
     history.append({"role": "user", "content": ask})
-    history.append({"role": "assistant", "content": response["output"]})
+    history.append(
+        {
+            "role": "assistant",
+            "content": response["output"],
+            "data_points": documents,
+            "thoughts": [
+                step[0].log if "log" in step[0] else ""
+                for step in response["intermediate_steps"]
+            ],
+        }
+    )
 
     conversation_data["history"] = history
     conversation_data["messages_data"] = messages_data
