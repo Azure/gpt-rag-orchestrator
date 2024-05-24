@@ -25,6 +25,10 @@ from langchain.chains import LLMChain
 from langchain_core.prompts.chat import ChatPromptTemplate, MessagesPlaceholder
 
 from langchain.agents import create_openai_functions_agent
+from langchain.agents.output_parsers.openai_tools import OpenAIToolsAgentOutputParser
+from langchain.agents.format_scratchpad.openai_tools import (
+    format_to_openai_tool_messages,
+)
 from langchain.agents import tool
 from langchain.agents import AgentExecutor
 from langchain.memory import ConversationBufferWindowMemory
@@ -34,6 +38,7 @@ from langchain_community.utilities import BingSearchAPIWrapper
 from shared.tools import AzureAISearchRetriever
 from langchain.tools.retriever import create_retriever_tool
 from datetime import date
+
 
 # logging level
 logging.getLogger("azure").setLevel(logging.WARNING)
@@ -194,8 +199,15 @@ async def run(conversation_id, ask, client_principal):
 
     @tool
     def math_tool(query: str) -> str:
-        """Useful for when you need to answer questions about math."""
+        """Use it for solving math problems, performing calculations, and analyzing numerical data. Ideal for tasks involving mathematical reasoning."""
         return llm_math.invoke(query)
+
+    bing_search = BingSearchAPIWrapper(k=3)
+
+    @tool
+    def bing_tool(query: str) -> str:
+        """Use for up-to-date information on current events. Best as a last resort when other resources don't have the needed data."""
+        return bing_search.run(query)
 
     # bing_search = BingSearchAPIWrapper(k=3)
     documents = []
@@ -211,35 +223,45 @@ async def run(conversation_id, ask, client_principal):
         content_key="chunk", top_k=3, api_version="2024-03-01-preview"
     )
     # Create agent tools
-    retriever = create_retriever_tool(
+    home_depot_tool = create_retriever_tool(
         retriever,
-        "Retrieval",
-        "Useful for when you need to answer questions about consumer behavior, consumer pulse, segments and segmentation.",
+        "home_depot",
+        "Useful for when you need to answer questions about Home Depot.",
     )
-    tools = [retriever, math_tool, current_time]
-    # tools = [
-    #     Tool(
-    #         name="Calculator",
-    #         func=llm_math.run,
-    #         description="Useful for when you need to answer questions about math.",
-    #     ),
-    #     # Tool(
-    #     #   name="Bing_Search",
-    #     #   description="A tool to search the web. Use it when you need to find current information that is not available in the library tools.",
-    #     #   func=bing_search.run
-    #     # ),
-    #     Tool(
-    #         name="Current_Time",
-    #         description="Returns current time.",
-    #         func=lambda _: current_time(),
-    #     ),
-    #     # Tool(
-    #     #     name="Sort_String",
-    #     #     func=lambda string: sort_string(string),
-    #     #     description="Useful for when you need to sort a string",
-    #     #     verbose=True,
-    #     # ),
-    # ]
+
+    lowes_home_tool = create_retriever_tool(
+        retriever,
+        "lowes_home",
+        "Useful for when you need to answer questions about Lowe's Home Improvement.",
+    )
+
+    consumer_pulse_tool = create_retriever_tool(
+        retriever,
+        "consumer_pulse",
+        "Use this tool for detailed insights into consumer behavior, market trends, and segmentation analysis. Ideal for understanding customer segments and consumer pulse.",
+    )
+
+    economy_tool = create_retriever_tool(
+        retriever,
+        "economy",
+        "To answer how the economic indicators like housing starts, consumer sentiment, Disposable personal income, personal income and personal consumption expenditures affect customer behavior and how is the economy.",
+    )
+
+    marketing_frameworks_tool = create_retriever_tool(
+        retriever,
+        "marketing",
+        "Useful for when you need to use marketing frameworks, marketing, marketing strategy, branding, advertising, and digital marketing.",
+    )
+
+    tools = [
+        home_depot_tool,
+        lowes_home_tool,
+        consumer_pulse_tool,
+        economy_tool,
+        marketing_frameworks_tool,
+        math_tool,
+        bing_tool,
+    ]
 
     # Define agent prompt template
     system = """Your name is FredAid.
@@ -267,13 +289,27 @@ async def run(conversation_id, ask, client_principal):
     )
 
     # Create agent
-    agent = create_openai_functions_agent(model, tools, prompt)
+    llm_with_tools = model.bind_tools(tools)
+
+    agent = (
+        {
+            "input": lambda x: x["input"],
+            "agent_scratchpad": lambda x: format_to_openai_tool_messages(
+                x["intermediate_steps"]
+            ),
+        }
+        | prompt
+        | llm_with_tools
+        | OpenAIToolsAgentOutputParser()
+    )
     agent_executor = AgentExecutor(
         agent=agent,
         tools=tools,
         verbose=True,
         memory=memory,
         return_intermediate_steps=True,
+        max_iterations=5,
+        trim_intermediate_steps=3,
     )
     chat_history = memory.buffer_as_messages
 
@@ -319,15 +355,13 @@ async def run(conversation_id, ask, client_principal):
     # history
     history = conversation_data["history"]
     history.append({"role": "user", "content": ask})
+    thought = [step[0].log for step in response["intermediate_steps"]]
     history.append(
         {
             "role": "assistant",
             "content": response["output"],
             "data_points": documents,
-            "thoughts": [
-                step[0].log if "log" in step[0] else ""
-                for step in response["intermediate_steps"]
-            ],
+            "thoughts": thought,
         }
     )
 
@@ -364,7 +398,7 @@ async def run(conversation_id, ask, client_principal):
         "conversation_id": conversation_id,
         "answer": response["output"],
         "data_points": interaction["sources"] if "sources" in interaction else "",
-        "thoughts": response["input"],
+        "thoughts": thought,
     }
 
     logging.info(
