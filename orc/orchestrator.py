@@ -196,10 +196,10 @@ async def run(conversation_id, ask, client_principal):
     # Define built-in tools
 
     llm_math = LLMMathChain(llm=math_model)
-
+    
     @tool
     def math_tool(query: str) -> str:
-        """Use it for solving math problems, performing calculations, and analyzing numerical data. Ideal for tasks involving mathematical reasoning."""
+        """Use it to solve math problems and perform calculations, such as basic arithmetic and solving equations. It is ideal for quick and accurate mathematical solutions."""
         return llm_math.invoke(query)
 
     bing_search = BingSearchAPIWrapper(k=3)
@@ -326,11 +326,11 @@ async def run(conversation_id, ask, client_principal):
             f"[orchestrator] {conversation_id} agent response: {response['output'][:50]}"
         )
     except Exception as e:
-        logging.error(f"[orchestrator] {conversation_id} error: {e.message}")
-        store_agent_error(client_principal["id"], e.message)
+        logging.error(f"[orchestrator] {conversation_id} error: {str(e)}")
+        store_agent_error(client_principal["id"], str(e))
         response = {
             "conversation_id": conversation_id,
-            "answer": f"There was an error processing your request. Error: {e}",
+            "answer": f"There was an error processing your request. Error: {str(e)}",
             "data_points": "",
             "thoughts": ask,
         }
