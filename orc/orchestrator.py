@@ -111,6 +111,7 @@ def instanciate_messages(messages_data):
         logging.error(f"[orchestrator] error instanciating messages: {e}")
         return []
 
+
 def sort_string(string):
     return " ".join(sorted(string))
 
@@ -168,7 +169,11 @@ async def run(conversation_id, ask, client_principal):
 
     # Initialize memory
     memory = ConversationBufferWindowMemory(
-        k=CONVERSATION_MAX_HISTORY, memory_key="chat_history", return_messages=True
+        memory_key="chat_history",
+        return_messages=True,
+        k=12,
+        verbose=True,
+        output_key="output",
     )
 
     input, output = {}, {}
@@ -184,7 +189,7 @@ async def run(conversation_id, ask, client_principal):
     # Define built-in tools
 
     llm_math = LLMMathChain(llm=math_model)
-    
+
     @tool
     def math_tool(query: str) -> str:
         """Use it to solve math problems and perform calculations, such as basic arithmetic and solving equations. It is ideal for quick and accurate mathematical solutions."""
@@ -310,8 +315,13 @@ async def run(conversation_id, ask, client_principal):
                     "chat_history": chat_history,
                 }
             )
-            response['output'] = response['output'].replace('Source: https://strag0vm2b2htvuuclm.blob.core.windows.net/documents/', '')
-            response['output'] = response['output'].replace('https://strag0vm2b2htvuuclm.blob.core.windows.net/documents/','')
+            response["output"] = response["output"].replace(
+                "Source: https://strag0vm2b2htvuuclm.blob.core.windows.net/documents/",
+                "",
+            )
+            response["output"] = response["output"].replace(
+                "https://strag0vm2b2htvuuclm.blob.core.windows.net/documents/", ""
+            )
         logging.info(
             f"[orchestrator] {conversation_id} agent response: {response['output'][:50]}"
         )
