@@ -9,7 +9,7 @@ LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
 logging.basicConfig(level=LOGLEVEL)
 
 async def main(req: func.HttpRequest) -> func.HttpResponse:
-    
+    req_params = {}
     if req.method == "POST":
         try:
             req_params = json.loads(req.get_body())
