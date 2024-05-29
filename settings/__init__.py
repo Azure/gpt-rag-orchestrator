@@ -9,19 +9,20 @@ LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
 logging.basicConfig(level=LOGLEVEL)
 
 async def main(req: func.HttpRequest) -> func.HttpResponse:
-
+    
     if req.method == "POST":
         try:
-            req_body = json.loads(req.get_body())
+            req_params = json.loads(req.get_body())
         except:
             return func.HttpResponse("Invalid request body", status_code=400)
-        client_principal_id = req_body.get('client_principal_id')
-        client_principal_name = req_body.get('client_principal_name') 
-    else:
-        client_principal_id = req.params.get('client_principal_id')
-        client_principal_name = req.params.get('client_principal_name')
+    if req.method == "GET":
+        req_params = req.params
+
+    client_principal_id = req_params.get('client_principal_id')
+    client_principal_name = req_params.get('client_principal_name')
     
     if not client_principal_id or client_principal_id == '':
+        logging.info('client_principal_id not set, setting to anonymous')
         client_principal_id = '00000000-0000-0000-0000-000000000000'
         client_principal_name = 'anonymous'    
     
