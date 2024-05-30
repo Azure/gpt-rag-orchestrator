@@ -327,7 +327,7 @@ async def run(conversation_id, ask, client_principal):
         )
     except Exception as e:
         logging.error(f"[orchestrator] {conversation_id} error: {str(e)}")
-        store_agent_error(client_principal["id"], str(e))
+        store_agent_error(client_principal["id"], str(e), ask)
         response = {
             "conversation_id": conversation_id,
             "answer": f"There was an error processing your request. Error: {str(e)}",
@@ -335,11 +335,6 @@ async def run(conversation_id, ask, client_principal):
             "thoughts": ask,
         }
         return response
-
-    # agent_dict = agent_executor.dict()
-
-    # for value in agent_dict:
-    #     logging.error(f"{value}: {agent_dict[value]}")
 
     # 2) update and save conversation (containing history and conversation data)
 
@@ -355,7 +350,10 @@ async def run(conversation_id, ask, client_principal):
     # history
     history = conversation_data["history"]
     history.append({"role": "user", "content": ask})
-    thought = [step[0].log for step in response["intermediate_steps"]]
+    thought = [
+        f"Tool name: {step[0].tool} > Query sent: {step[0].tool_input['query']}"
+        for step in response["intermediate_steps"]
+    ]
     history.append(
         {
             "role": "assistant",
