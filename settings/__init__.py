@@ -9,14 +9,12 @@ LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
 logging.basicConfig(level=LOGLEVEL)
 
 async def main(req: func.HttpRequest) -> func.HttpResponse:
-    req_params = {}
-    if req.method == "POST":
-        try:
-            req_params = json.loads(req.get_body())
-        except:
-            return func.HttpResponse("Invalid request body", status_code=400)
-    if req.method == "GET":
-        req_params = req.params
+    req_params = None
+    
+    try:
+        req_params = json.loads(req.get_body())
+    except:
+        return func.HttpResponse("Invalid request body", status_code=400)
 
     client_principal_id = req_params.get('client_principal_id')
     client_principal_name = req_params.get('client_principal_name')
