@@ -75,6 +75,8 @@ async def run(conversation_id, ask, client_principal):
         # 3) update and save conversation (containing history and conversation data)
         
         # history
+        if answer_dict['answer_generated_by'] == 'content_filters_check': 
+            history[-1]['content'] = '<FILTERED BY MODEL>'
         history.append({"role": "assistant", "content": answer_dict['answer']})
         conversation['history'] = history
 

@@ -5,7 +5,7 @@ import os
 import semantic_kernel as sk
 import time
 from orc.plugins.Conversation.Triage.wrapper import triage
-from orc.plugins.ResponsibleAI.Fairness.wrapper import fairness
+from orc.plugins.ResponsibleAI.wrapper import fairness
 from semantic_kernel.functions.kernel_arguments import KernelArguments
 from shared.util import call_semantic_function, get_chat_history_as_messages, get_message, get_last_messages
 from shared.util import get_blocked_list, create_kernel, get_usage_tokens, escape_xml_characters
@@ -59,6 +59,7 @@ async def get_answer(history):
     bot_description = open(BOT_DESCRIPTION_FILE, "r").read()
     search_query = ""
     sources = ""
+    detected_language = ""
     bypass_nxt_steps = False  # flag to bypass unnecessary steps
     blocked_list = []
 
@@ -69,6 +70,8 @@ async def get_answer(history):
     answer_generated_by = "none"
     prompt_tokens = 0
     completion_tokens = 0
+
+   
     
     # get user question
 
@@ -78,10 +81,31 @@ async def get_answer(history):
     logging.info(f"[code_orchest] starting RAG flow. {ask[:50]}")
     init_time = time.time()
 
+    # create kernel
+    kernel = create_kernel()
+    # create the arguments that will used by semantic functions
+    arguments = KernelArguments()
+    arguments["bot_description"] = bot_description
+    arguments["ask"] = ask
+    arguments["history"] = json.dumps(get_last_messages(messages, CONVERSATION_MAX_HISTORY), ensure_ascii=False)
+    arguments["previous_answer"] = messages[-2]['content'] if len(messages) > 1 else ""
+
+    # import RAG plugins
+    conversationPlugin = kernel.import_plugin_from_prompt_directory(PLUGINS_FOLDER, "Conversation")
+    retrievalPlugin = kernel.import_native_plugin_from_directory(PLUGINS_FOLDER, "Retrieval")
+    raiNativePlugin = kernel.import_native_plugin_from_directory(f"{PLUGINS_FOLDER}/ResponsibleAI/Native", "Filters")
+
     #############################
     # GUARDRAILS (QUESTION)
     #############################
-    
+
+    filterResult = await kernel.invoke(raiNativePlugin["ContentFliterValidator"], sk.KernelArguments(input=ask))
+    if not ('PASSED' in filterResult.value):
+        logging.info(f"[code_orchest] filtered content found in question: {ask}.")
+        answer = get_message('BLOCKED_ANSWER')
+        answer_generated_by = 'content_filters_check'
+        bypass_nxt_steps = True
+
     if BLOCKED_LIST_CHECK:
         logging.debug(f"[code_orchest] blocked list check.")
         try:
@@ -95,8 +119,9 @@ async def get_answer(history):
                     break
         except Exception as e:
             logging.error(f"[code_orchest] could not get blocked list. {e}")
-        response_time =  round(time.time() - init_time,2)
-        logging.info(f"[code_orchest] finished blocked list check. {response_time} seconds.")            
+
+    response_time =  round(time.time() - init_time,2)
+    logging.info(f"[code_orchest] finished content filter and blocklist check. {response_time} seconds.")            
 
     #############################
     # RAG-FLOW
@@ -105,21 +130,6 @@ async def get_answer(history):
     if not bypass_nxt_steps:
 
         try:
-            
-            # create kernel
-            kernel = create_kernel()
-
-            # create the arguments that will used by semantic functions
-            arguments = KernelArguments()
-            arguments["bot_description"] = bot_description
-            arguments["ask"] = ask
-            arguments["history"] = json.dumps(get_last_messages(messages, CONVERSATION_MAX_HISTORY), ensure_ascii=False)
-            arguments["previous_answer"] = messages[-2]['content'] if len(messages) > 1 else ""
-
-            # import RAG plugins
-            conversationPlugin = kernel.import_plugin_from_prompt_directory(PLUGINS_FOLDER, "Conversation")
-            retrievalPlugin = kernel.import_native_plugin_from_directory(PLUGINS_FOLDER, "Retrieval")
-
             # detect language
             logging.debug(f"[code_orchest] detecting language")
             start_time = time.time()
@@ -252,7 +262,7 @@ async def get_answer(history):
                 logging.info(f"[code_orchest] checking responsible AI (fairness). answer: {answer[:50]}")
                 start_time = time.time()            
                 arguments["answer"] = answer
-                raiPlugin = kernel.import_plugin_from_prompt_directory(PLUGINS_FOLDER, "ResponsibleAI")
+                raiPlugin = kernel.import_plugin_from_prompt_directory(f"{PLUGINS_FOLDER}/ResponsibleAI", "Semantic")
                 fairness_dict = await fairness(kernel, raiPlugin, arguments)
                 fair = fairness_dict['fair']
                 fairness_answer = fairness_dict['answer']
@@ -268,14 +278,14 @@ async def get_answer(history):
             except Exception as e:
                 logging.error(f"[code_orchest] could not check responsible AI (fairness). {e}")
 
-    answer_dict["user_ask"] = ask
+    answer_dict["user_ask"] = ask if not answer_generated_by == 'content_filters_check' else '<FILTERED BY MODEL>'
     answer_dict["answer"] = answer
     answer_dict["search_query"] = search_query
 
     # additional metadata for debugging
     if CONVERSATION_METADATA:
         answer_dict["intents"] = intents
-        answer_dict["detected_language"] = detected_language     
+        answer_dict["detected_language"] = detected_language
         answer_dict["answer_generated_by"] = answer_generated_by
         answer_dict["conversation_history_summary"] = conversation_history_summary
         answer_dict["conversation_plugin_answer"] = conversation_plugin_answer

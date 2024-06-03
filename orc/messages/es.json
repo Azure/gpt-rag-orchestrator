@@ -4,6 +4,6 @@
     "ERROR_CALLING_GPT": "Lo siento, tuve un problema técnico al llamar al modelo GPT.",
     "THROTTLING_ANSWER": "Lo siento, nuestros servidores están demasiado ocupados, por favor inténtelo de nuevo en un minuto.",
     "UNGROUNDED_ANSWER": "Lo siento, no pude encontrar la información para responder a su pregunta en las fuentes disponibles.",
-    "BLOCKED_ANSWER": "Lo siento, no puedo responder a esta pregunta.",
+    "BLOCKED_ANSWER": "Lo siento, encontré contenido inapropiado o bloqueado que fue filtrado.",
     "NO_INTENT_ANSWER": "Lo siento, no pude entender tu pregunta. ¿Podrías reformularla?"    
 }
