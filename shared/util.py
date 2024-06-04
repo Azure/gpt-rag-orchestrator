@@ -154,10 +154,12 @@ def chat_complete(messages, functions, function_call='auto'):
 
     data = {
         "messages": messages,
-        "functions": functions,
-        "function_call": function_call,
         "max_tokens": int(AZURE_OPENAI_RESP_MAX_TOKENS)
     }
+
+    if not function_call == 'none' and len(functions) > 0:
+        data["functions"] = functions
+        data["function_call"] = function_call
 
     if function_call == 'auto':
         data['temperature'] = 0
