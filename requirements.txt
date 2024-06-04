@@ -12,3 +12,10 @@ semantic-kernel==0.9.4b1
 requests==2.32.0
 tiktoken==0.5.2
 tenacity==8.2.3
+azure-cognitiveservices-search-customsearch
+beautifulsoup4
+teradatasqlalchemy
+llama-index
+llama-index-llms-azure-openai
+llama-index-embeddings-azure-openai
+pyodbc
