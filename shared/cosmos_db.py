@@ -99,7 +99,7 @@ def get_conversation_data(conversation_id):
         {
             "start_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "history": [],
-            "messages_data": [],
+            "memory_data": "",
             "interaction": {},
         },
     )

@@ -3,10 +3,11 @@ import logging
 import os
 import time
 import uuid
+import base64
+
 from shared.util import get_setting
-from shared.cosmos_db import store_user_consumed_tokens, store_prompt_information
+from shared.cosmos_db import store_user_consumed_tokens
 from azure.identity.aio import DefaultAzureCredential
-import orc.code_orchestration as code_orchestration
 from shared.cosmos_db import (
     get_conversation_data,
     update_conversation_data,
@@ -14,27 +15,19 @@ from shared.cosmos_db import (
 )
 
 from langchain_community.callbacks import get_openai_callback
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage
 
 from langchain_openai import AzureChatOpenAI
 
 from langchain.chains import LLMMathChain
-from langchain.chains import LLMChain
 
-# from langchain.prompts import PromptTemplate
-from langchain_core.prompts.chat import ChatPromptTemplate, MessagesPlaceholder
+from langgraph.prebuilt import create_react_agent
+from langgraph.checkpoint.memory import MemorySaver
 
-from langchain.agents import create_openai_functions_agent
-from langchain.agents.output_parsers.openai_tools import OpenAIToolsAgentOutputParser
-from langchain.agents.format_scratchpad.openai_tools import (
-    format_to_openai_tool_messages,
-)
 from langchain.agents import tool
-from langchain.agents import AgentExecutor
-from langchain.memory import ConversationBufferWindowMemory
+
 from langchain_community.utilities import BingSearchAPIWrapper
 
-# from langchain_community.retrievers import AzureAISearchRetriever
 from shared.tools import AzureAISearchRetriever
 from langchain.tools.retriever import create_retriever_tool
 from datetime import date
@@ -66,8 +59,6 @@ CONVERSATION_MAX_HISTORY = int(CONVERSATION_MAX_HISTORY)
 BING_SEARCH_API_KEY = os.environ.get("BING_SEARCH_API_KEY")
 BING_SEARCH_URL = os.environ.get("BING_SEARCH_URL")
 
-ANSWER_FORMAT = "html"  # html, markdown, none
-
 
 def get_credentials():
     is_local_env = os.getenv("LOCAL_ENV") == "true"
@@ -91,37 +82,6 @@ def get_settings(client_principal):
     logging.info(f"[orchestrator] settings: {settings}")
     return settings
 
-
-def instanciate_messages(messages_data):
-    messages = []
-    try:
-        for message_data in messages_data:
-            if message_data["type"] == "human":
-                message = HumanMessage(**message_data)
-            elif message_data["type"] == "system":
-                message = SystemMessage(**message_data)
-            elif message_data["type"] == "ai":
-                message = AIMessage(**message_data)
-            else:
-                Exception(f"Message type {message_data['type']} not recognized.")
-                message.from_dict(message_data)
-            messages.append(message)
-        return messages
-    except Exception as e:
-        logging.error(f"[orchestrator] error instanciating messages: {e}")
-        return []
-
-
-def sort_string(string):
-    return " ".join(sorted(string))
-
-
-@tool
-def current_time():
-    """Returns the current date."""
-    return f"Today's date: {date.today()}"
-
-
 async def run(conversation_id, ask, client_principal):
 
     start_time = time.time()
@@ -143,17 +103,28 @@ async def run(conversation_id, ask, client_principal):
     # get conversation data from CosmosDB
     conversation_data = get_conversation_data(conversation_id)
 
-    # load messages data and instanciate them
+    # load memory data and deserialize
 
-    messages_data = conversation_data["messages_data"]
-    messages = instanciate_messages(messages_data)
+    memory_data_string = conversation_data["memory_data"]
+    
+    memory = MemorySaver()
+    if memory_data_string != "":
+        logging.info(f"[orchestrator] {conversation_id} loading memory data.")
+        decoded_data = base64.b64decode(memory_data_string)
+        json_data = memory.serde.loads(decoded_data)
+        
+        memory.put(
+            config= json_data[0],
+            checkpoint= json_data[1],
+            metadata= json_data[2]
+        )
 
     # initialize other settings
     model_kwargs = dict(
         frequency_penalty=settings["frequency_penalty"],
         presence_penalty=settings["presence_penalty"],
     )
-    # Initialize model
+    # Initialize models
     model = AzureChatOpenAI(
         temperature=settings["temperature"],
         openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
@@ -162,30 +133,11 @@ async def run(conversation_id, ask, client_principal):
     )
 
     math_model = AzureChatOpenAI(
-        temperature=0.7,
+        temperature=0.0,
         openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
         azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"],
     )
-
-    # Initialize memory
-    memory = ConversationBufferWindowMemory(
-        memory_key="chat_history",
-        return_messages=True,
-        k=12,
-        verbose=True,
-        output_key="output",
-    )
-
-    input, output = {}, {}
-    for message in messages:
-        if message.type == "human":
-            input["input"] = message.content
-        if message.type == "ai":
-            output["output"] = message.content
-        if "input" in input and "output" in output:
-            memory.save_context(input, output)
-            input, output = {}, {}
-
+    
     # Define built-in tools
 
     llm_math = LLMMathChain(llm=math_model)
@@ -202,16 +154,6 @@ async def run(conversation_id, ask, client_principal):
         """Use for up-to-date information on current events. Best as a last resort when other resources don't have the needed data."""
         return bing_search.run(query)
 
-    # bing_search = BingSearchAPIWrapper(k=3)
-    documents = []
-
-    # arguments for code orchestration
-    args = {
-        "model": model,
-        "question": ask,
-        "messages": messages,
-        "documents": documents,
-    }
     retriever = AzureAISearchRetriever(
         content_key="chunk", top_k=3, api_version="2024-03-01-preview"
     )
@@ -256,74 +198,29 @@ async def run(conversation_id, ask, client_principal):
         bing_tool,
     ]
 
-    # Define agent prompt template
-    system = """Your name is FredAid.
-    You are a Marketing Expert designed to assist with a wide range of tasks, from answering simple questions to providing in-depth explanations and discussions on a wide range of topics.
+    # Define agent prompt
+    system_prompt = """Your name is FreddAid.
+    You are a data-driven Marketing Assitant designed to help with a wide range of tasks, from answering simple questions to providing in-depth plans.
     YOU MUST FOLLOW THESE INSTRUCTIONS:
-    1. Include a citation next to every fact with the file path within brackets. For example: [http://home/file.txt]. Do not add the word Source or Citation.
-    2. Do not call any of the retriever tools more than once with the same query.
-
-    Your primary goal is to be helpful, and accurate. If you need to use any tool to enhance your response, do so effectively."""
-
-    human = """
-
-    {input}
-
-    {agent_scratchpad}
-
-    """
-
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system),
-            MessagesPlaceholder("chat_history", optional=True),
-            ("human", human),
-        ]
-    )
+    1. Add a citation next to every fact with the file path within brackets. For example: [//home/docs/file.txt]. You can only skip this if your answer has no citations."""
 
     # Create agent
-    llm_with_tools = model.bind_tools(tools)
+    agent_executor = create_react_agent(
+        model, tools, checkpointer=memory, messages_modifier=system_prompt
+    )
 
-    agent = (
-        {
-            "input": lambda x: x["input"],
-            "agent_scratchpad": lambda x: format_to_openai_tool_messages(
-                x["intermediate_steps"]
-            ),
-        }
-        | prompt
-        | llm_with_tools
-        | OpenAIToolsAgentOutputParser()
-    )
-    agent_executor = AgentExecutor(
-        agent=agent,
-        tools=tools,
-        verbose=True,
-        memory=memory,
-        return_intermediate_steps=True,
-        max_iterations=5,
-        trim_intermediate_steps=3,
-    )
-    chat_history = memory.buffer_as_messages
+    # config
+    config = {"configurable": {"thread_id": conversation_id}}
 
     # 1) get answer from agent
     try:
         with get_openai_callback() as cb:
             response = agent_executor.invoke(
-                {
-                    "input": ask,
-                    "chat_history": chat_history,
-                }
-            )
-            response["output"] = response["output"].replace(
-                "Source: https://strag0vm2b2htvuuclm.blob.core.windows.net/documents/",
-                "",
-            )
-            response["output"] = response["output"].replace(
-                "https://strag0vm2b2htvuuclm.blob.core.windows.net/documents/", ""
+                {"messages": [HumanMessage(content=ask)]},
+                config,
             )
         logging.info(
-            f"[orchestrator] {conversation_id} agent response: {response['output'][:50]}"
+            f"[orchestrator] {conversation_id} agent response: {response['messages'][-1].content[:50]}"
         )
     except Exception as e:
         logging.error(f"[orchestrator] {conversation_id} error: {str(e)}")
@@ -338,33 +235,36 @@ async def run(conversation_id, ask, client_principal):
 
     # 2) update and save conversation (containing history and conversation data)
 
-    message_list = memory.buffer_as_messages
-
-    # messages data
-
-    # user message
-    messages_data.append(response["input"])
-    # ai message
-    messages_data.append(response["output"])
-
     # history
     history = conversation_data["history"]
     history.append({"role": "user", "content": ask})
-    thought = [
-        f"Tool name: {step[0].tool} > Query sent: {step[0].tool_input['query']}"
-        for step in response["intermediate_steps"]
-    ]
+    thought = []
+    if(isinstance(response['messages'][-3], AIMessage)):
+        logging.info("[orchestrator] Tool call found generating thought process")
+        thought = [
+            f"Tool name: {step['function']['name']} > Query sent: {step['function']['arguments']}"
+            for step in response['messages'][-3].additional_kwargs['tool_calls']
+        ]
     history.append(
         {
             "role": "assistant",
-            "content": response["output"],
-            "data_points": documents,
+            "content": response["messages"][-1].content,
             "thoughts": thought,
         }
     )
+    
+    #memory serialization
+    _tuple = memory.get_tuple(config)
+
+    serialized_data = memory.serde.dumps(_tuple)
+
+    byte_string = base64.b64encode(serialized_data)
+    b64_tosave = byte_string.decode("utf-8")
+    
+    #set values on cosmos object
 
     conversation_data["history"] = history
-    conversation_data["messages_data"] = messages_data
+    conversation_data["memory_data"] = b64_tosave
 
     # conversation data
     response_time = round(time.time() - start_time, 2)
@@ -375,28 +275,17 @@ async def run(conversation_id, ask, client_principal):
     }
     conversation_data["interaction"] = interaction
 
-    if len(documents) > 0:
-        interaction["sources"] = documents
-
-    # Clear documents to prevent memory garbage
-    documents.clear()
-
     # store updated conversation data
     update_conversation_data(conversation_id, conversation_data)
 
     # 3) store user consumed tokens
     store_user_consumed_tokens(client_principal["id"], cb)
 
-    # 4) store prompt information in CosmosDB
-
-    # TODO: store prompt information
-
-    # 5) return answer
+    # 4) return answer
     response = {
         "conversation_id": conversation_id,
-        "answer": response["output"],
-        "data_points": interaction["sources"] if "sources" in interaction else "",
-        "thoughts": thought,
+        "answer": response["messages"][-1].content,
+        "thoughts": thought
     }
 
     logging.info(
