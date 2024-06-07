@@ -1,20 +1,36 @@
-from shared.util import get_secret, get_aoai_config
+from shared.util import get_secret, get_aoai_config,extract_text_from_html,get_possitive_int_or_default
 # from semantic_kernel.skill_definition import sk_function
 from openai import AzureOpenAI
 from semantic_kernel.functions import kernel_function
 from tenacity import retry, wait_random_exponential, stop_after_attempt
-import logging
 import openai
+import logging
 import os
 import requests
 import time
 import sys
+import json
+import urllib
+import pyodbc
+from typing import Dict
 if sys.version_info >= (3, 9):
     from typing import Annotated
 else:
     from typing_extensions import Annotated
+from azure.cognitiveservices.search.customsearch import CustomSearchClient
+from msrest.authentication import CognitiveServicesCredentials
+from sqlalchemy import create_engine
+from azure.keyvault.secrets import SecretClient
+from azure.identity import DefaultAzureCredential
+from llama_index.llms.azure_openai import AzureOpenAI as LlamaAzureOpenAI
+from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding as LlamaAzureOpenAIEmbedding
+from llama_index.core.query_engine import NLSQLTableQueryEngine, SQLTableRetrieverQueryEngine
+from llama_index.core import SQLDatabase, Settings
+from llama_index.core.objects import SQLTableNodeMapping, ObjectIndex, SQLTableSchema
+from llama_index.core import VectorStoreIndex
+import azure.functions as func
 
-# Azure OpenAI Integration Settings
+# Azure search Integration Settings
 AZURE_OPENAI_EMBEDDING_MODEL = os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL")
 
 TERM_SEARCH_APPROACH='term'
@@ -40,6 +56,19 @@ AZURE_SEARCH_CONTENT_COLUMNS = os.environ.get("AZURE_SEARCH_CONTENT_COLUMNS") or
 AZURE_SEARCH_FILENAME_COLUMN = os.environ.get("AZURE_SEARCH_FILENAME_COLUMN") or "filepath"
 AZURE_SEARCH_TITLE_COLUMN = os.environ.get("AZURE_SEARCH_TITLE_COLUMN") or "title"
 AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
+#Bing search Integration Settings
+BING_SEARCH_TOP_K = os.environ.get("BING_SEARCH_TOP_K") or "3"
+BING_CUSTOM_SEARCH_URL="https://api.bing.microsoft.com/v7.0/custom/search?"
+BING_SEARCH_MAX_TOKENS = os.environ.get("BING_SEARCH_MAX_TOKENS") or "1000"
+#DB Integration Settings
+AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
+AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
+AZURE_OPENAI_RESOURCE = os.environ.get("AZURE_OPENAI_RESOURCE")
+AZURE_OPENAI_TEMPERATURE = os.getenv("AZURE_OPENAI_TEMPERATURE", "0.17")
+AZURE_OPENAI_APIVERSION = os.environ.get("AZURE_OPENAI_APIVERSION")
+AZURE_OPENAI_EMBEDDING_MODEL = os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL")
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
+AZURE_OPENAI_EMBEDDING_APIVERSION = os.environ.get("AZURE_OPENAI_EMBEDDING_APIVERSION")
 
 # Set up logging
 LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
@@ -60,6 +89,7 @@ def generate_embeddings(text):
     embeddings =  client.embeddings.create(input = [text], model= embeddings_config['deployment']).data[0].embedding
 
     return embeddings
+
 
 class Retrieval:
     @kernel_function(
@@ -136,3 +166,139 @@ class Retrieval:
         
         sources = ' '.join(search_results)
         return sources
+    
+    @kernel_function(
+        description="Search bing for sources to ground and give context to answer a user question. Return sources.",
+        name="BingRetrieval",
+        )
+    def BingRetrieval(
+        self,
+        input: Annotated[str, "The user question"]
+    ) -> Annotated[str, "the output is a string with the search results"]:
+        bing_custom_search_subscription_key = get_secret('bingApiKey')
+        bing_custom_config_id = get_secret('bingCustomConfigId')
+        client = CustomSearchClient(endpoint=BING_CUSTOM_SEARCH_URL, credentials=CognitiveServicesCredentials(bing_custom_search_subscription_key))
+        start_time = time.time()
+        web_data = client.custom_instance.search(query=input, custom_config=bing_custom_config_id,count=BING_SEARCH_TOP_K)
+        logging.info(f"[bing retrieval] bing search. {input}. {time.time() - start_time} seconds.")
+        bing_sources = ""
+        if web_data.web_pages and hasattr(web_data.web_pages, 'value'):
+            for web in web_data.web_pages.value:
+                try:
+                    start_time = time.time()
+                    html=extract_text_from_html(web.url)  
+                    bing_sources+=html[:get_possitive_int_or_default(BING_SEARCH_MAX_TOKENS,1000)]
+                    logging.info(f"[bing retrieval] finished scraping web. {web.url}. {time.time() - start_time} seconds.")
+                except Exception as e:
+                    logging.error(f"[bing retrieval] could not scrape web. {web.url}. {e}")
+                    bing_sources+=web.snippet
+        return bing_sources
+    
+    @kernel_function(
+        description="Search a SQL or Teradata DB for sources to ground and give context to answer a user question. Return sources.",
+        name="DBRetrieval",
+        )
+    def DBRetrieval(self,
+                       input: Annotated[str, "The user question"],
+                       db_type: Annotated[str, "The type of database to connect to (sql or teradata)"],
+                       db_server: Annotated[str, "The server to connect to"],
+                       db_database: Annotated[str, "The database to connect to"],
+                       db_table_info: Annotated[str, "The tables to search for information"],
+                       db_username: Annotated[str, "The username to connect to the database"],
+                       db_top_k: Annotated[str, "The number of results to return"]
+                       )-> Annotated[str, "the output is a string with the search results"]:
+        logging.info('Python HTTP trigger function processed a request.')
+
+        try:
+            # Get OpenAI configuration
+            oai_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
+
+            # Connect to Key Vault and get database password
+            if db_type == "sql":
+                db_password = get_secret("sqlpassword")
+            elif db_type == "teradata":
+                db_password = get_secret("teradatapassword")
+            else:
+                logging.error(f"[DBRetrieval]Invalid db_type specified")
+                return ""
+            azureOpenAIKey = get_secret("azureOpenAIKey")
+
+            # Log configuration variables
+            logging.info(f"[{db_type} Retrieval] Server: {db_server}")
+            logging.info(f"[{db_type} Retrieval] Database: {db_database}")
+            logging.info(f"[{db_type} Retrieval] Username: {db_username}")
+            logging.info(f"[{db_type} Retrieval] Password: [REDACTED]")  # Do not log the password for security
+            logging.info(f"[{db_type} Retrieval] Tables Info: {db_table_info}")
+
+            # Connect to the database
+            if db_type == "sql":
+                driver = '{ODBC Driver 17 for SQL Server}'
+                params = urllib.parse.quote_plus(f"DRIVER={driver};SERVER={db_server};DATABASE={db_database};UID={db_username};PWD={db_password}")
+                conn_str = f'mssql+pyodbc:///?odbc_connect={params}'
+            elif db_type == "teradata":
+                driver = 'Teradata'
+                params = urllib.parse.quote_plus(f"DRIVER={driver};SERVER={db_server};DATABASE={db_database};UID={db_username};PWD={db_password}")
+                conn_str = f'teradata:///?odbc_connect={params}'
+            else:
+                logging.error("[DBRetrieval] Invalid db_type specified")
+
+            engine = create_engine(conn_str)
+            logging.info(f"[{db_type} Retrieval] Connection to database is successful")
+            sql_database = SQLDatabase(engine)
+
+            # Configure Azure OpenAI
+            llm = LlamaAzureOpenAI(
+                engine=AZURE_OPENAI_CHATGPT_DEPLOYMENT,
+                model=AZURE_OPENAI_CHATGPT_MODEL,
+                temperature=AZURE_OPENAI_TEMPERATURE,
+                azure_endpoint=oai_config['endpoint'],
+                api_key=azureOpenAIKey,
+                api_version=AZURE_OPENAI_APIVERSION,
+            )
+
+            embed_model = LlamaAzureOpenAIEmbedding(
+                model=AZURE_OPENAI_EMBEDDING_MODEL,
+                deployment_name=AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+                api_key=azureOpenAIKey,
+                azure_endpoint=oai_config['endpoint'],
+                api_version=AZURE_OPENAI_EMBEDDING_APIVERSION,
+            )
+
+            Settings.llm = llm
+            Settings.embed_model = embed_model
+
+            # Get table information
+            tables_info = json.loads(db_table_info.replace("'", '"'))
+            table_schema_objs = []
+
+            for table, description in tables_info.items():
+                table_schema_objs.append(
+                    SQLTableSchema(
+                        table_name=table,
+                        context_str=description
+                    )
+                )
+
+            table_node_mapping = SQLTableNodeMapping(sql_database)
+            obj_index = ObjectIndex.from_objects(
+                table_schema_objs,
+                table_node_mapping,
+                VectorStoreIndex
+            )
+
+            query_engine = SQLTableRetrieverQueryEngine(
+                sql_database, obj_index.as_retriever(similarity_top_k=get_possitive_int_or_default(db_top_k, 3))
+            )
+
+            query = input
+            response = query_engine.query(query)
+            result=response.response
+            logging.info(f"[{db_type} Retrieval] SQLQuery: {response.metadata.get('sql_query')}")
+            engine.dispose()
+            return result
+        except EnvironmentError as e:
+            logging.error(f"[{db_type} Retrieval] Environment configuration error: {e}")
+            return ""
+        except Exception as e:
+            logging.error(f"[{db_type} Retrieval]  Unexpected error: {e}")
+            return ""

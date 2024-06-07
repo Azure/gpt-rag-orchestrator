@@ -32,7 +32,7 @@ def get_credentials():
     # return DefaultAzureCredential(exclude_managed_identity_credential=is_local_env, exclude_environment_credential=is_local_env)
     return DefaultAzureCredential()
 
-async def run(conversation_id, ask, client_principal):
+async def run(conversation_id, ask, client_principal,database_info):
     
     start_time = time.time()
 
@@ -70,7 +70,7 @@ async def run(conversation_id, ask, client_principal):
 
         # get rag answer and sources
         logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
-        answer_dict = await code_orchestration.get_answer(history)
+        answer_dict = await code_orchestration.get_answer(history,database_info)
 
         # 3) update and save conversation (containing history and conversation data)
         
@@ -99,5 +99,4 @@ async def run(conversation_id, ask, client_principal):
                 "thoughts": f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"}
 
         logging.info(f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {interaction['answer'][:30]}")
-
     return result
