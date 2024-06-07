@@ -241,10 +241,12 @@ async def run(conversation_id, ask, client_principal):
     thought = []
     if(isinstance(response['messages'][-3], AIMessage)):
         logging.info("[orchestrator] Tool call found generating thought process")
-        thought = [
-            f"Tool name: {step['function']['name']} > Query sent: {step['function']['arguments']}"
-            for step in response['messages'][-3].additional_kwargs['tool_calls']
-        ]
+        if(hasattr(response['messages'][-3], 'additional_kwargs')):
+            additional_kwargs = response['messages'][-3].additional_kwargs
+            thought = [
+                f"Tool name: {step['function']['name']} > Query sent: {step['function']['arguments']}"
+                for step in additional_kwargs if additional_kwargs.get('tool_calls') is not None
+            ]
     history.append(
         {
             "role": "assistant",
