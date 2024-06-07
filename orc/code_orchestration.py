@@ -118,7 +118,6 @@ async def get_answer(history,database_info):
             retrievalPlugin = kernel.import_native_plugin_from_directory(PLUGINS_FOLDER, "Retrieval")
 
             # detect language
-            detected_language = "es"
             logging.debug(f"[code_orchest] detecting language")
             start_time = time.time()
             function_result = await call_semantic_function(kernel, conversationPlugin["DetectLanguage"], arguments)

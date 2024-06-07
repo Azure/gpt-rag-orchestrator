@@ -59,7 +59,7 @@ AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
 #Bing search Integration Settings
 BING_SEARCH_TOP_K = os.environ.get("BING_SEARCH_TOP_K") or "3"
 BING_CUSTOM_SEARCH_URL="https://api.bing.microsoft.com/v7.0/custom/search?"
-BING_SEARCH_MAX_TOKENS = os.environ.get("BING_SEARCH_MAX_TOKENS") or "10000"
+BING_SEARCH_MAX_TOKENS = os.environ.get("BING_SEARCH_MAX_TOKENS") or "1000"
 #DB Integration Settings
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
 AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
