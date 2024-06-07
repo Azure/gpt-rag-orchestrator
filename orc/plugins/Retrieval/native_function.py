@@ -1,4 +1,4 @@
-from shared.util import get_secret, get_aoai_config,extract_text_from_html
+from shared.util import get_secret, get_aoai_config,extract_text_from_html,get_possitive_int_or_default
 # from semantic_kernel.skill_definition import sk_function
 from openai import AzureOpenAI
 from semantic_kernel.functions import kernel_function
@@ -58,6 +58,7 @@ AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
 #Bing search Integration Settings
 BING_SEARCH_TOP_K = os.environ.get("BING_SEARCH_TOP_K") or "3"
 BING_CUSTOM_SEARCH_URL="https://api.bing.microsoft.com/v7.0/custom/search?"
+BING_SEARCH_MAX_TOKENS = os.environ.get("BING_SEARCH_MAX_TOKENS") or "10000"
 #DB Integration Settings
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
 AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
@@ -67,7 +68,6 @@ AZURE_OPENAI_APIVERSION = os.environ.get("AZURE_OPENAI_APIVERSION")
 AZURE_OPENAI_EMBEDDING_MODEL = os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL")
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
 AZURE_OPENAI_EMBEDDING_APIVERSION = os.environ.get("AZURE_OPENAI_EMBEDDING_APIVERSION")
-AZURE_KEY_VAULT_NAME = os.environ.get("AZURE_KEY_VAULT_NAME")
 
 # Set up logging
 LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
@@ -88,6 +88,7 @@ def generate_embeddings(text):
     embeddings =  client.embeddings.create(input = [text], model= embeddings_config['deployment']).data[0].embedding
 
     return embeddings
+
 
 class Retrieval:
     @kernel_function(
@@ -184,7 +185,8 @@ class Retrieval:
             for web in web_data.web_pages.value:
                 try:
                     start_time = time.time()
-                    bing_sources+=extract_text_from_html(web.url)
+                    html=extract_text_from_html(web.url)  
+                    bing_sources+=html[:get_possitive_int_or_default(BING_SEARCH_MAX_TOKENS,1000)]
                     logging.info(f"[bing retrieval] finished scraping web. {web.url}. {time.time() - start_time} seconds.")
                 except Exception as e:
                     logging.error(f"[bing retrieval] could not scrape web. {web.url}. {e}")
@@ -201,7 +203,8 @@ class Retrieval:
                        db_server: Annotated[str, "The server to connect to"],
                        db_database: Annotated[str, "The database to connect to"],
                        db_table_info: Annotated[str, "The tables to search for information"],
-                       db_username: Annotated[str, "The username to connect to the database"]
+                       db_username: Annotated[str, "The username to connect to the database"],
+                       db_top_k: Annotated[str, "The number of results to return"]
                        )-> Annotated[str, "the output is a string with the search results"]:
         logging.info('Python HTTP trigger function processed a request.')
 
@@ -211,10 +214,8 @@ class Retrieval:
 
             # Connect to Key Vault and get database password
             if db_type == "sql":
-                db_username = db_username
                 db_password = get_secret("sqlpassword")
             elif db_type == "teradata":
-                db_username = db_username
                 db_password = get_secret("teradatapassword")
             else:
                 logging.error(f"[DBRetrieval]Invalid db_type specified")
@@ -285,7 +286,7 @@ class Retrieval:
             )
 
             query_engine = SQLTableRetrieverQueryEngine(
-                sql_database, obj_index.as_retriever(similarity_top_k=3)
+                sql_database, obj_index.as_retriever(similarity_top_k=get_possitive_int_or_default(db_top_k, 3))
             )
 
             query = input

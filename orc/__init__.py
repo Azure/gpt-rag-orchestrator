@@ -32,21 +32,25 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
     sql_database= req_body.get('sql_database')
     sql_table_info= req_body.get('sql_table_info')
     sql_username= req_body.get('sql_username')
+    sql_top_k= req_body.get('sql_top_k')
     teradata_username= req_body.get('teradata_username')
     teradata_server= req_body.get('teradata_server')
     teradata_database= req_body.get('teradata_database')
     teradata_table_info= req_body.get('teradata_table_info')
+    teradata_top_k= req_body.get('teradata_top_k')
     database_info= {
         'sql_search': sql_search,
-        'teradata_search': teradata_search,
         'sql_server': sql_server,
         'sql_database': sql_database,
         'sql_table_info': sql_table_info,
         'sql_username': sql_username,
+        'sql_top_k': sql_top_k,
+        'teradata_search': teradata_search,
         'teradata_username': teradata_username,
         'teradata_server': teradata_server,
         'teradata_database': teradata_database,
-        'teradata_table_info': teradata_table_info
+        'teradata_table_info': teradata_table_info,
+        'teradata_top_k': teradata_top_k
     }
 
     if question:

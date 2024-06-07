@@ -29,12 +29,6 @@ CONVERSATION_METADATA = os.environ.get("CONVERSATION_METADATA") or "true"
 CONVERSATION_METADATA = True if CONVERSATION_METADATA.lower() == "true" else False
 
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
-AZURE_OPENAI_TEMPERATURE = os.environ.get("AZURE_OPENAI_TEMPERATURE") or "0.17"
-AZURE_OPENAI_TEMPERATURE = float(AZURE_OPENAI_TEMPERATURE)
-AZURE_OPENAI_TOP_P = os.environ.get("AZURE_OPENAI_TOP_P") or "0.27"
-AZURE_OPENAI_TOP_P = float(AZURE_OPENAI_TOP_P)
-AZURE_OPENAI_RESP_MAX_TOKENS = os.environ.get("AZURE_OPENAI_MAX_TOKENS") or "1000"
-AZURE_OPENAI_RESP_MAX_TOKENS = int(AZURE_OPENAI_RESP_MAX_TOKENS)
 CONVERSATION_MAX_HISTORY = os.environ.get("CONVERSATION_MAX_HISTORY") or "3"
 CONVERSATION_MAX_HISTORY = int(CONVERSATION_MAX_HISTORY)
 ORCHESTRATOR_FOLDER = "orc"
@@ -192,13 +186,13 @@ async def get_answer(history,database_info):
                 
                 #run sql retrieval function
                 if(database_info['sql_search']==True):
-                    sql_function_result= await kernel.invoke(retrievalPlugin["DBRetrieval"], sk.KernelArguments(input=search_query,db_type="sql",db_server=database_info['sql_server'],db_database=database_info['sql_database'],db_table_info=database_info['sql_table_info'],db_username=database_info['sql_username']))
+                    sql_function_result= await kernel.invoke(retrievalPlugin["DBRetrieval"], sk.KernelArguments(input=search_query,db_type="sql",db_server=database_info['sql_server'],db_database=database_info['sql_database'],db_table_info=database_info['sql_table_info'],db_username=database_info['sql_username'],db_top_k=database_info['sql_top_k']))
                     formatted_sources = sql_function_result.value[:100].replace('\n', ' ')
                     escaped_sources = escape_xml_characters(sql_function_result.value)
                     sql_sources=escaped_sources
                     logging.info(f"[code_orchest] generated SQL sources: {formatted_sources}")
                 if(database_info['teradata_search']==True):
-                    teradata_function_result= await kernel.invoke(retrievalPlugin["DBRetrieval"], sk.KernelArguments(input=search_query,db_type="teradata",db_server=database_info['teradata_server'],db_database=database_info['teradata_database'],db_table_info=database_info['teradata_table_info'],db_username=database_info['teradata_username']))
+                    teradata_function_result= await kernel.invoke(retrievalPlugin["DBRetrieval"], sk.KernelArguments(input=search_query,db_type="teradata",db_server=database_info['teradata_server'],db_database=database_info['teradata_database'],db_table_info=database_info['teradata_table_info'],db_username=database_info['teradata_username'],db_top_k=database_info['teradata_top_k']))
                     formatted_sources = teradata_function_result.value[:100].replace('\n', ' ')
                     escaped_sources = escape_xml_characters(teradata_function_result.value)
                     teradata_sources=escaped_sources

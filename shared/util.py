@@ -417,7 +417,17 @@ def extract_text_from_html(url):
         # Extract visible text from the HTML
         texts = soup.stripped_strings
         visible_text = ' '.join(texts)
+        html_response.close()
         return visible_text
     except Exception as e:
         logging.error(f"Failed to extract text from HTML: {e}")
         raise
+    
+def get_possitive_int_or_default(var, default_value):
+    try:
+        var = int(var)
+        if var < 0:
+            var = default_value
+    except:
+        var = default_value
+    return var
