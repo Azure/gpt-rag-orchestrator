@@ -3,6 +3,7 @@ from shared.util import get_secret, get_aoai_config,extract_text_from_html,get_p
 from openai import AzureOpenAI
 from semantic_kernel.functions import kernel_function
 from tenacity import retry, wait_random_exponential, stop_after_attempt
+import openai
 import logging
 import os
 import requests
@@ -21,8 +22,8 @@ from msrest.authentication import CognitiveServicesCredentials
 from sqlalchemy import create_engine
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
-from llama_index.llms.azure_openai import AzureOpenAI
-from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
+from llama_index.llms.azure_openai import AzureOpenAI as LlamaAzureOpenAI
+from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding as LlamaAzureOpenAIEmbedding
 from llama_index.core.query_engine import NLSQLTableQueryEngine, SQLTableRetrieverQueryEngine
 from llama_index.core import SQLDatabase, Settings
 from llama_index.core.objects import SQLTableNodeMapping, ObjectIndex, SQLTableSchema
@@ -246,7 +247,7 @@ class Retrieval:
             sql_database = SQLDatabase(engine)
 
             # Configure Azure OpenAI
-            llm = AzureOpenAI(
+            llm = LlamaAzureOpenAI(
                 engine=AZURE_OPENAI_CHATGPT_DEPLOYMENT,
                 model=AZURE_OPENAI_CHATGPT_MODEL,
                 temperature=AZURE_OPENAI_TEMPERATURE,
@@ -255,7 +256,7 @@ class Retrieval:
                 api_version=AZURE_OPENAI_APIVERSION,
             )
 
-            embed_model = AzureOpenAIEmbedding(
+            embed_model = LlamaAzureOpenAIEmbedding(
                 model=AZURE_OPENAI_EMBEDDING_MODEL,
                 deployment_name=AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                 api_key=azureOpenAIKey,
@@ -293,6 +294,7 @@ class Retrieval:
             response = query_engine.query(query)
             result=response.response
             logging.info(f"[{db_type} Retrieval] SQLQuery: {response.metadata.get('sql_query')}")
+            engine.dispose()
             return result
         except EnvironmentError as e:
             logging.error(f"[{db_type} Retrieval] Environment configuration error: {e}")
