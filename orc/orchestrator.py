@@ -225,9 +225,9 @@ async def run(conversation_id, ask, client_principal):
                 {"messages": [HumanMessage(content=ask)]},
                 config,
             )
-            response['output'] = response['output'].replace('source:', '')
-            response['output'] = response['output'].replace('Source:', '')
-            response['output'] = response['output'].replace('https://strag0vm2b2htvuuclm.blob.core.windows.net/documents/','')
+            response["messages"][-1].content = response["messages"][-1].content.replace('source:', '')
+            response["messages"][-1].content = response["messages"][-1].content.replace('Source:', '')
+            response["messages"][-1].content = response["messages"][-1].content.replace('https://strag0vm2b2htvuuclm.blob.core.windows.net/documents/','')
         logging.info(
             f"[orchestrator] {conversation_id} agent response: {response['messages'][-1].content[:50]}"
         )
