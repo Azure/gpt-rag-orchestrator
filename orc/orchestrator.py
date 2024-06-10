@@ -113,12 +113,18 @@ async def run(conversation_id, ask, client_principal):
         decoded_data = base64.b64decode(memory_data_string)
         json_data = memory.serde.loads(decoded_data)
         
+        cutted_memory = json_data[1]
+        memory_messages = cutted_memory['channel_values']['messages']
+        if(len(memory_messages) >= 20):
+            cutted_messages = memory_messages[10:]
+            memory_messages = cutted_messages
+            cutted_memory['channel_values']['messages'] = memory_messages
+        
         memory.put(
             config= json_data[0],
-            checkpoint= json_data[1],
+            checkpoint= cutted_memory,
             metadata= json_data[2]
         )
-
     # initialize other settings
     model_kwargs = dict(
         frequency_penalty=settings["frequency_penalty"],
