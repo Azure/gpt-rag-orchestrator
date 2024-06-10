@@ -113,16 +113,16 @@ async def run(conversation_id, ask, client_principal):
         decoded_data = base64.b64decode(memory_data_string)
         json_data = memory.serde.loads(decoded_data)
         
-        cutted_memory = json_data[1]
-        memory_messages = cutted_memory['channel_values']['messages']
+        cut_memory = json_data[1]
+        memory_messages = cut_memory['channel_values']['messages']
         if(len(memory_messages) >= 20):
-            cutted_messages = memory_messages[10:]
-            memory_messages = cutted_messages
-            cutted_memory['channel_values']['messages'] = memory_messages
+            cut_messages = memory_messages[10:]
+            memory_messages = cut_messages
+            cut_memory['channel_values']['messages'] = memory_messages
         
         memory.put(
             config= json_data[0],
-            checkpoint= cutted_memory,
+            checkpoint= cut_memory,
             metadata= json_data[2]
         )
     # initialize other settings
