@@ -113,12 +113,18 @@ async def run(conversation_id, ask, client_principal):
         decoded_data = base64.b64decode(memory_data_string)
         json_data = memory.serde.loads(decoded_data)
         
+        cut_memory = json_data[1]
+        memory_messages = cut_memory['channel_values']['messages']
+        if(len(memory_messages) >= 20):
+            cut_messages = memory_messages[10:]
+            memory_messages = cut_messages
+            cut_memory['channel_values']['messages'] = memory_messages
+        
         memory.put(
             config= json_data[0],
-            checkpoint= json_data[1],
+            checkpoint= cut_memory,
             metadata= json_data[2]
         )
-
     # initialize other settings
     model_kwargs = dict(
         frequency_penalty=settings["frequency_penalty"],
@@ -219,6 +225,9 @@ async def run(conversation_id, ask, client_principal):
                 {"messages": [HumanMessage(content=ask)]},
                 config,
             )
+            response['output'] = response['output'].replace('source:', '')
+            response['output'] = response['output'].replace('Source:', '')
+            response['output'] = response['output'].replace('https://strag0vm2b2htvuuclm.blob.core.windows.net/documents/','')
         logging.info(
             f"[orchestrator] {conversation_id} agent response: {response['messages'][-1].content[:50]}"
         )
