@@ -30,7 +30,7 @@ from langchain_community.utilities import BingSearchAPIWrapper
 
 from shared.tools import AzureAISearchRetriever
 from langchain.tools.retriever import create_retriever_tool
-from datetime import date
+import tiktoken
 
 
 # logging level
@@ -40,6 +40,9 @@ LOGLEVEL = os.environ.get("LOGLEVEL", "DEBUG").upper()
 logging.basicConfig(level=LOGLEVEL)
 
 # Constants set from environment variables (external services credentials and configuration)
+
+#model
+AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
 
 # Cosmos DB
 AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
@@ -88,6 +91,25 @@ async def run(conversation_id, ask, client_principal):
 
     # settings
     settings = get_settings(client_principal)
+    
+    # initialize other settings
+    model_kwargs = dict(
+        frequency_penalty=settings["frequency_penalty"],
+        presence_penalty=settings["presence_penalty"],
+    )
+    # Initialize models
+    model = AzureChatOpenAI(
+        temperature=settings["temperature"],
+        openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
+        azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"],
+        model_kwargs=model_kwargs,
+    )
+
+    math_model = AzureChatOpenAI(
+        temperature=0.0,
+        openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
+        azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"],
+    )
 
     # Get conversation stored in CosmosDB
 
@@ -115,34 +137,27 @@ async def run(conversation_id, ask, client_principal):
         
         cut_memory = json_data[1]
         memory_messages = cut_memory['channel_values']['messages']
-        if(len(memory_messages) >= 20):
-            cut_messages = memory_messages[10:]
-            memory_messages = cut_messages
-            cut_memory['channel_values']['messages'] = memory_messages
-        
+        actual_tokens = 0
+        encoding = tiktoken.encoding_for_model(AZURE_OPENAI_CHATGPT_MODEL)
+        for message in memory_messages:
+            actual_tokens += len(encoding.encode(message.content))
+            if(actual_tokens > 14000):
+                logging.info("[orchestrator] memory content exceeds token limit, cutting memory.")
+                cut_messages = memory_messages[12:]
+                for element in cut_messages:
+                    if(isinstance(element, HumanMessage)):
+                        break
+                    logging.info(f"[orchestrator] removing uneven element")
+                    cut_messages.pop(0)
+                logging.info(f"[orchestrator] memory content cut to avoid token limit.")
+                memory_messages = cut_messages
+                cut_memory['channel_values']['messages'] = memory_messages
+                break
         memory.put(
             config= json_data[0],
             checkpoint= cut_memory,
             metadata= json_data[2]
         )
-    # initialize other settings
-    model_kwargs = dict(
-        frequency_penalty=settings["frequency_penalty"],
-        presence_penalty=settings["presence_penalty"],
-    )
-    # Initialize models
-    model = AzureChatOpenAI(
-        temperature=settings["temperature"],
-        openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
-        azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"],
-        model_kwargs=model_kwargs,
-    )
-
-    math_model = AzureChatOpenAI(
-        temperature=0.0,
-        openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
-        azure_deployment=os.environ["AZURE_OPENAI_CHAT_DEPLOYMENT_NAME"],
-    )
     
     # Define built-in tools
 
@@ -248,19 +263,20 @@ async def run(conversation_id, ask, client_principal):
     history = conversation_data["history"]
     history.append({"role": "user", "content": ask})
     thought = []
-    if(isinstance(response['messages'][-3], AIMessage)):
-        logging.info("[orchestrator] Tool call found generating thought process")
-        if(hasattr(response['messages'][-3], 'additional_kwargs')):
-            additional_kwargs = response['messages'][-3].additional_kwargs
-            for key in additional_kwargs.get('tool_calls', []):
-                function = key.get('function')
-                if function:
-                    name = function.get('name')
-                    arguments = function.get('arguments')
-                    if name and arguments:
-                        thought.append(
-                            f"Tool name: {name} > Query sent: {arguments}"
-                        )
+    if(len(response['messages']) > 2):
+        if(isinstance(response['messages'][-3], AIMessage)):
+            logging.info("[orchestrator] Tool call found generating thought process")
+            if(hasattr(response['messages'][-3], 'additional_kwargs')):
+                additional_kwargs = response['messages'][-3].additional_kwargs
+                for key in additional_kwargs.get('tool_calls', []):
+                    function = key.get('function')
+                    if function:
+                        name = function.get('name')
+                        arguments = function.get('arguments')
+                        if name and arguments:
+                            thought.append(
+                                f"Tool name: {name} > Query sent: {arguments}"
+                            )
     history.append(
         {
             "role": "assistant",
