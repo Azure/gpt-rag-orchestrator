@@ -141,7 +141,7 @@ async def run(conversation_id, ask, client_principal):
         encoding = tiktoken.encoding_for_model(AZURE_OPENAI_CHATGPT_MODEL)
         for message in memory_messages:
             actual_tokens += len(encoding.encode(message.content))
-            if(actual_tokens > 14000):
+            if(actual_tokens > 10000):
                 logging.info("[orchestrator] memory content exceeds token limit, cutting memory.")
                 cut_messages = memory_messages[12:]
                 for element in cut_messages:
