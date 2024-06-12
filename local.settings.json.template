@@ -45,6 +45,12 @@
 
     "BING_RETRIEVAL": "false",
     "SEARCH_RETRIEVAL": "false",
-    "RETRIEVAL_PRIORITY": "bing" "search" "sql" "teradata"
+    "RETRIEVAL_PRIORITY": "bing" "search" "db",
+    "DB_RETRIEVAL":"false",
+    "DB_SERVER":"",
+    "DB_DATABASE":"",
+    "DB_USERNAME":"",
+    "DB_TOP_K":"3",
+    "DB_MAX_TOKENS":"1000"
   }
 }

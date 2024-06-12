@@ -60,12 +60,6 @@ AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
 BING_SEARCH_TOP_K = os.environ.get("BING_SEARCH_TOP_K") or "3"
 BING_CUSTOM_SEARCH_URL = "https://api.bing.microsoft.com/v7.0/custom/search?"
 BING_SEARCH_MAX_TOKENS = os.environ.get("BING_SEARCH_MAX_TOKENS") or "1000"
-# SQL Integration Settings
-SQL_TOP_K = os.environ.get("SQL_TOP_K") or "3"
-SQL_MAX_TOKENS = os.environ.get("SQL_MAX_TOKENS") or "1000"
-# Teradata Integration Settings
-TERADATA_TOP_K = os.environ.get("TERADATA_TOP_K") or "3"
-TERADATA_MAX_TOKENS = os.environ.get("TERADATA_MAX_TOKENS") or "1000"
 # DB Integration Settings
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
 AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
@@ -75,7 +69,14 @@ AZURE_OPENAI_APIVERSION = os.environ.get("AZURE_OPENAI_APIVERSION")
 AZURE_OPENAI_EMBEDDING_MODEL = os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL")
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
 AZURE_OPENAI_EMBEDDING_APIVERSION = os.environ.get("AZURE_OPENAI_EMBEDDING_APIVERSION")
-
+DB_SERVER = os.environ.get("DB_SERVER")
+DB_DATABASE = os.environ.get("DB_DATABASE")
+DB_USERNAME = os.environ.get("DB_USERNAME")
+DB_TOP_K = os.environ.get("DB_TOP_K")
+DB_MAX_TOKENS = os.environ.get("DB_MAX_TOKENS")
+TOP_K_DEFAULT=3
+MAX_TOKENS_DEFAULT=1000
+DB_TYPE = os.environ.get("DB_TYPE")
 # Set up logging
 LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
 logging.basicConfig(level=LOGLEVEL)
@@ -203,55 +204,48 @@ class Retrieval:
     )
     def DBRetrieval(self,
                     input: Annotated[str, "The user question"],
-                    db_type: Annotated[str, "The type of database to connect to (sql or teradata)"],
-                    db_server: Annotated[str, "The server to connect to"],
-                    db_database: Annotated[str, "The database to connect to"],
-                    db_table_info: Annotated[str, "The tables to search for information"],
-                    db_username: Annotated[str, "The username to connect to the database"],
-                    db_top_k: Annotated[str, "The number of results to return"]
+                    db_table_info: Annotated[str, "The tables to search for information"]
                     ) -> Annotated[str, "the output is a string with the search results"]:
         logging.info('Python HTTP trigger function processed a request.')
 
         try:
             # Get OpenAI configuration
             oai_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
-
+           
+            db_top_k = get_possitive_int_or_default(DB_TOP_K, TOP_K_DEFAULT)
+            max_tokens = get_possitive_int_or_default(DB_MAX_TOKENS, MAX_TOKENS_DEFAULT)
             # Connect to Key Vault and get database password
-            if db_type == "sql":
+            if DB_TYPE == "sql":
                 db_password = get_secret("sqlpassword")
-                db_top_k = get_possitive_int_or_default(db_top_k, SQL_TOP_K)
-                max_tokens = get_possitive_int_or_default(SQL_MAX_TOKENS, 1000)
-            elif db_type == "teradata":
+            elif DB_TYPE == "teradata":
                 db_password = get_secret("teradatapassword")
-                db_top_k = get_possitive_int_or_default(db_top_k, TERADATA_TOP_K)
-                max_tokens = get_possitive_int_or_default(TERADATA_MAX_TOKENS, 1000)
             else:
                 logging.error(f"[DBRetrieval] Invalid db_type specified")
                 return ""
             azureOpenAIKey = get_secret("azureOpenAIKey")
 
             # Log configuration variables
-            logging.info(f"[{db_type} Retrieval] Server: {db_server}")
-            logging.info(f"[{db_type} Retrieval] Database: {db_database}")
-            logging.info(f"[{db_type} Retrieval] Username: {db_username}")
-            logging.info(f"[{db_type} Retrieval] Password: [REDACTED]")  # Do not log the password for security
-            logging.info(f"[{db_type} Retrieval] Tables Info: {db_table_info}")
+            logging.info(f"[{DB_TYPE} Retrieval] Server: {DB_SERVER}")
+            logging.info(f"[{DB_TYPE} Retrieval] Database: {DB_DATABASE}")
+            logging.info(f"[{DB_TYPE} Retrieval] Username: {DB_USERNAME}")
+            logging.info(f"[{DB_TYPE} Retrieval] Password: [REDACTED]")  # Do not log the password for security
+            logging.info(f"[{DB_TYPE} Retrieval] Tables Info: {db_table_info}")
 
             # Connect to the database
-            if db_type == "sql":
+            if DB_TYPE == "sql":
                 driver = '{ODBC Driver 17 for SQL Server}'
-                params = urllib.parse.quote_plus(f"DRIVER={driver};SERVER={db_server};DATABASE={db_database};UID={db_username};PWD={db_password}")
+                params = urllib.parse.quote_plus(f"DRIVER={driver};SERVER={DB_SERVER};DATABASE={DB_DATABASE};UID={DB_USERNAME};PWD={db_password}")
                 conn_str = f'mssql+pyodbc:///?odbc_connect={params}'
-            elif db_type == "teradata":
+            elif DB_TYPE == "teradata":
                 driver = 'Teradata'
-                params = urllib.parse.quote_plus(f"DRIVER={driver};DBCNAME={db_server};DATABASE={db_database};UID={db_username};PWD={db_password}")
+                params = urllib.parse.quote_plus(f"DRIVER={driver};DBCNAME={DB_SERVER};DATABASE={DB_DATABASE};UID={DB_USERNAME};PWD={db_password}")
                 conn_str = f'teradata:///?odbc_connect={params}'
             else:
                 logging.error("[DBRetrieval] Invalid db_type specified")
                 return ""
 
             engine = create_engine(conn_str)
-            logging.info(f"[{db_type} Retrieval] Connection to database is successful")
+            logging.info(f"[{DB_TYPE} Retrieval] Connection to database is successful")
             sql_database = SQLDatabase(engine)
 
             # Configure Azure OpenAI
@@ -301,12 +295,12 @@ class Retrieval:
             query = input[:max_tokens]
             response = query_engine.query(query)
             result = response.response
-            logging.info(f"[{db_type} Retrieval] SQLQuery: {response.metadata.get('sql_query')}")
+            logging.info(f"[{DB_TYPE} Retrieval] SQLQuery: {response.metadata.get('sql_query')}")
             engine.dispose()
             return result
         except EnvironmentError as e:
-            logging.error(f"[{db_type} Retrieval] Environment configuration error: {e}")
+            logging.error(f"[{DB_TYPE} Retrieval] Environment configuration error: {e}")
             return ""
         except Exception as e:
-            logging.error(f"[{db_type} Retrieval]  Unexpected error: {e}")
+            logging.error(f"[{DB_TYPE} Retrieval]  Unexpected error: {e}")
             return ""
