@@ -22,11 +22,10 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         'id': client_principal_id,
         'name': client_principal_name
     }
-    db_table_info= req_body.get('db_table_info')
 
     if question:
 
-        result = await orchestrator.run(conversation_id, question, client_principal,db_table_info)
+        result = await orchestrator.run(conversation_id, question, client_principal)
 
         return func.HttpResponse(json.dumps(result), mimetype="application/json", status_code=200)
     else:

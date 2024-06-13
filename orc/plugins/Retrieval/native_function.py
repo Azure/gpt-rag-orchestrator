@@ -203,8 +203,7 @@ class Retrieval:
         name="DBRetrieval",
     )
     def DBRetrieval(self,
-                    input: Annotated[str, "The user question"],
-                    db_table_info: Annotated[str, "The tables to search for information"]
+                    input: Annotated[str, "The user question"]
                     ) -> Annotated[str, "the output is a string with the search results"]:
         logging.info('Python HTTP trigger function processed a request.')
 
@@ -223,7 +222,19 @@ class Retrieval:
                 logging.error(f"[DBRetrieval] Invalid db_type specified")
                 return ""
             azureOpenAIKey = get_secret("azureOpenAIKey")
+            #Get table data
+            try:
 
+                # Get table information from file
+                with open('db_table_info.txt', 'r') as file:
+                    db_table_info = file.read()
+
+            except FileNotFoundError:
+                logging.error("[DBRetrieval] db_table_info.txt not found")
+                return ""
+            except Exception as e:
+                logging.error(f"[DBRetrieval] Unexpected error: {e}")
+                return ""
             # Log configuration variables
             logging.info(f"[{DB_TYPE} Retrieval] Server: {DB_SERVER}")
             logging.info(f"[{DB_TYPE} Retrieval] Database: {DB_DATABASE}")

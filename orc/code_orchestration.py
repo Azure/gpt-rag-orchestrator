@@ -42,7 +42,7 @@ RETRIEVAL_PRIORITY = os.environ.get("RETRIEVAL_PRIORITY") or "search"
 DB_RETRIEVAL = os.environ.get("DB_RETRIEVAL") or "true"
 DB_RETRIEVAL = True if DB_RETRIEVAL.lower() == "true" else False
 
-async def get_answer(history,db_table_info):
+async def get_answer(history):
 
 
     #############################
@@ -196,7 +196,7 @@ async def get_answer(history,db_table_info):
                 
                 #run sql retrieval function
                 if(DB_RETRIEVAL):
-                    db_function_result= await kernel.invoke(retrievalPlugin["DBRetrieval"], sk.KernelArguments(input=search_query,db_table_info=db_table_info))
+                    db_function_result= await kernel.invoke(retrievalPlugin["DBRetrieval"], sk.KernelArguments(input=search_query))
                     formatted_sources = db_function_result.value[:100].replace('\n', ' ')
                     escaped_sources = escape_xml_characters(db_function_result.value)
                     db_sources=escaped_sources
