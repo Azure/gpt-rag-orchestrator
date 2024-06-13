@@ -15,7 +15,8 @@ from shared.cosmos_db import (
 )
 
 from langchain_community.callbacks import get_openai_callback
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain.memory import ConversationSummaryMemory, ChatMessageHistory
 
 from langchain_openai import AzureChatOpenAI
 
@@ -139,17 +140,30 @@ async def run(conversation_id, ask, client_principal):
         memory_messages = cut_memory['channel_values']['messages']
         actual_tokens = 0
         encoding = tiktoken.encoding_for_model(AZURE_OPENAI_CHATGPT_MODEL)
+        logging.info(f"[orchestrator] cleaning memory content from long tool messages.")
+        for message in memory_messages:
+            if(isinstance(message, ToolMessage)):
+                if(len(message.content) > 50):
+                    message.content = message.content = ""
         for message in memory_messages:
             actual_tokens += len(encoding.encode(message.content))
-            if(actual_tokens > 10000):
-                logging.info("[orchestrator] memory content exceeds token limit, cutting memory.")
-                cut_messages = memory_messages[12:]
-                for element in cut_messages:
-                    if(isinstance(element, HumanMessage)):
-                        break
-                    logging.info(f"[orchestrator] removing uneven element")
-                    cut_messages.pop(0)
-                logging.info(f"[orchestrator] memory content cut to avoid token limit.")
+            if(actual_tokens > 14000):
+                logging.info(f"[orchestrator] memory content exceeds token limit generating summary.")
+                history = ChatMessageHistory()
+                for element in memory_messages:
+                    logging.info(f"[orchestrator] loading element: {element.content[:50]}")
+                    if isinstance(element, HumanMessage):
+                        history.add_user_message(element.content)
+                    else:
+                        history.add_ai_message(element.content)
+                summary_memory = ConversationSummaryMemory.from_messages(
+                    llm=model, chat_memory=history
+                )
+                cut_messages = [
+                    HumanMessage("Generate a conversation summary"),
+                    AIMessage(summary_memory.buffer),
+                ]
+                logging.info(f"[orchestrator] memory content cut and summarized to avoid token limit.")
                 memory_messages = cut_messages
                 cut_memory['channel_values']['messages'] = memory_messages
                 break
