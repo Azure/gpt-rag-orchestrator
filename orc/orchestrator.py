@@ -147,7 +147,7 @@ async def run(conversation_id, ask, client_principal):
                     message.content = message.content = ""
         for message in memory_messages:
             actual_tokens += len(encoding.encode(message.content))
-            if(actual_tokens > 14000):
+            if(actual_tokens > 1400):
                 logging.info(f"[orchestrator] memory content exceeds token limit generating summary.")
                 history = ChatMessageHistory()
                 for element in memory_messages:
@@ -167,6 +167,7 @@ async def run(conversation_id, ask, client_principal):
                 memory_messages = cut_messages
                 cut_memory['channel_values']['messages'] = memory_messages
                 break
+        logging.info(f"[orchestrator] total conversation tokens {actual_tokens}")
         memory.put(
             config= json_data[0],
             checkpoint= cut_memory,
@@ -317,7 +318,7 @@ async def run(conversation_id, ask, client_principal):
     interaction = {
         "user_id": client_principal["id"],
         "user_name": client_principal["name"],
-        "response_time": response_time,
+        "response_time": response_time
     }
     conversation_data["interaction"] = interaction
 
