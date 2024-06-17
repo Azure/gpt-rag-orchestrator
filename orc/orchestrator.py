@@ -253,7 +253,7 @@ async def run(conversation_id, ask, client_principal):
     consumer_pulse_tool = create_retriever_tool(
         retriever,
         "consumer_pulse",
-        "Use this tool for detailed insights into consumer behavior, market trends, and segmentation analysis. Ideal for understanding customer segments and consumer pulse.",
+        "Use this tool for detailed insights into consumer behavior, and segmentation analysis. Ideal for understanding customer segments and consumer pulse.",
     )
 
     economy_tool = create_retriever_tool(
