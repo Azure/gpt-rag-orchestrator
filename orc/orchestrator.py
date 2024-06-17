@@ -144,33 +144,32 @@ async def run(conversation_id, ask, client_principal):
         logging.info(f"[orchestrator] checking memory for long tool messages.")
         for message in memory_messages:
             if isinstance(message, ToolMessage):
-                if len(message.content) > 1400:
+                if len(message.content) > 20:
                     logging.info(f"[orchestrator] cleaning memory long tool messages.")
                     message.content = message.content = ""
         for message in memory_messages:
             actual_tokens += len(encoding.encode(message.content))
-            if actual_tokens > 20:
+            if actual_tokens > 1400:
                 logging.info(f"[orchestrator] tokens limit reached. generate summary.")
                 history = ChatMessageHistory()
+                content_to_add = None
                 if memory_messages[0].content == "Conversation summary content:":
                     logging.info(f"[orchestrator] summary item found in memory")
                     summary_request = memory_messages.pop(0)
                     summary = memory_messages.pop(0)
                     question_to_add = memory_messages.pop(0)
-                    content_to_add = None
-                    if (
-                        isinstance(memory_messages[0], AIMessage)
-                        and hasattr(memory_messages[0], "additional_kwargs")
-                        and memory_messages[0].additional_kwargs.get("tool_calls")
-                    ):
-                        logging.info(f"[orchestrator] deleting aditional tool calls")
-                        memory_messages.pop(0)
-                        memory_messages.pop(0)
-                        content_to_add = memory_messages.pop(0)
-                    else:
-                        logging.info(f"[orchestrator] no tool calls extracting message")
-                        content_to_add = memory_messages.pop(0)
-
+                    
+                    is_ai_response = False
+                    while not is_ai_response:
+                        element = memory_messages.pop(0)
+                        if (
+                        not isinstance(element, ToolMessage) and
+                        isinstance(element, AIMessage)
+                        and hasattr(element, "additional_kwargs")
+                        and not element.additional_kwargs.get("tool_calls")
+                        ):
+                            content_to_add = element
+                            is_ai_response = True
                     history.add_user_message(question_to_add.content)
                     history.add_ai_message(content_to_add.content)
                     summary_memory = ConversationSummaryMemory(llm=model)
@@ -187,18 +186,17 @@ async def run(conversation_id, ask, client_principal):
                 else:
                     logging.info(f"[orchestrator] no summary item, generating summary")
                     message_to_add = memory_messages.pop(0)
-                    if (
-                        isinstance(memory_messages[0], AIMessage)
-                        and hasattr(memory_messages[0], "additional_kwargs")
-                        and memory_messages[0].additional_kwargs.get("tool_calls")
-                    ):
-                        logging.info(f"[orchestrator] deleting aditional tool calls")
-                        memory_messages.pop(0)
-                        memory_messages.pop(0)
-                        content_to_add = memory_messages.pop(0)
-                    else:
-                        logging.info(f"[orchestrator] no tool calls extracting message")
-                        content_to_add = memory_messages.pop(0)
+                    is_ai_response = False
+                    while not is_ai_response:
+                        element = memory_messages.pop(0)
+                        if (
+                        not isinstance(element, ToolMessage) and
+                        isinstance(element, AIMessage)
+                        and hasattr(element, "additional_kwargs")
+                        and not element.additional_kwargs.get("tool_calls")
+                        ):
+                            content_to_add = element
+                            is_ai_response = True
 
                     history.add_user_message(message_to_add.content)
                     history.add_ai_message(content_to_add.content)
@@ -214,6 +212,9 @@ async def run(conversation_id, ask, client_principal):
                 cut_memory["channel_values"]["messages"] = memory_messages
                 logging.info(f"[orchestrator] content summarized to avoid token limit.")
                 break
+            
+        for element in memory_messages:
+            logging.error(f"{element}, {type(element)}")
         logging.info(f"[orchestrator] total conversation tokens {actual_tokens}")
         memory.put(config=json_data[0], checkpoint=cut_memory, metadata=json_data[2])
 
