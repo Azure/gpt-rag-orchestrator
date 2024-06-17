@@ -42,7 +42,7 @@ logging.basicConfig(level=LOGLEVEL)
 
 # Constants set from environment variables (external services credentials and configuration)
 
-#model
+# model
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
 
 # Cosmos DB
@@ -86,13 +86,14 @@ def get_settings(client_principal):
     logging.info(f"[orchestrator] settings: {settings}")
     return settings
 
+
 async def run(conversation_id, ask, client_principal):
 
     start_time = time.time()
 
     # settings
     settings = get_settings(client_principal)
-    
+
     # initialize other settings
     model_kwargs = dict(
         frequency_penalty=settings["frequency_penalty"],
@@ -129,51 +130,93 @@ async def run(conversation_id, ask, client_principal):
     # load memory data and deserialize
 
     memory_data_string = conversation_data["memory_data"]
-    
+
     memory = MemorySaver()
     if memory_data_string != "":
         logging.info(f"[orchestrator] {conversation_id} loading memory data.")
         decoded_data = base64.b64decode(memory_data_string)
         json_data = memory.serde.loads(decoded_data)
-        
+
         cut_memory = json_data[1]
-        memory_messages = cut_memory['channel_values']['messages']
+        memory_messages = cut_memory["channel_values"]["messages"]
         actual_tokens = 0
         encoding = tiktoken.encoding_for_model(AZURE_OPENAI_CHATGPT_MODEL)
-        logging.info(f"[orchestrator] cleaning memory content from long tool messages.")
+        logging.info(f"[orchestrator] checking memory for long tool messages.")
         for message in memory_messages:
-            if(isinstance(message, ToolMessage)):
-                if(len(message.content) > 50):
+            if isinstance(message, ToolMessage):
+                if len(message.content) > 1400:
+                    logging.info(f"[orchestrator] cleaning memory long tool messages.")
                     message.content = message.content = ""
         for message in memory_messages:
             actual_tokens += len(encoding.encode(message.content))
-            if(actual_tokens > 1400):
-                logging.info(f"[orchestrator] memory content exceeds token limit generating summary.")
+            if actual_tokens > 20:
+                logging.info(f"[orchestrator] tokens limit reached. generate summary.")
                 history = ChatMessageHistory()
-                for element in memory_messages:
-                    logging.info(f"[orchestrator] loading element: {element.content[:50]}")
-                    if isinstance(element, HumanMessage):
-                        history.add_user_message(element.content)
+                if memory_messages[0].content == "Conversation summary content:":
+                    logging.info(f"[orchestrator] summary item found in memory")
+                    summary_request = memory_messages.pop(0)
+                    summary = memory_messages.pop(0)
+                    question_to_add = memory_messages.pop(0)
+                    content_to_add = None
+                    if (
+                        isinstance(memory_messages[0], AIMessage)
+                        and hasattr(memory_messages[0], "additional_kwargs")
+                        and memory_messages[0].additional_kwargs.get("tool_calls")
+                    ):
+                        logging.info(f"[orchestrator] deleting aditional tool calls")
+                        memory_messages.pop(0)
+                        memory_messages.pop(0)
+                        content_to_add = memory_messages.pop(0)
                     else:
-                        history.add_ai_message(element.content)
-                summary_memory = ConversationSummaryMemory.from_messages(
-                    llm=model, chat_memory=history
-                )
-                cut_messages = [
-                    HumanMessage("Generate a conversation summary"),
-                    AIMessage(summary_memory.buffer),
-                ]
-                logging.info(f"[orchestrator] memory content cut and summarized to avoid token limit.")
-                memory_messages = cut_messages
-                cut_memory['channel_values']['messages'] = memory_messages
+                        logging.info(f"[orchestrator] no tool calls extracting message")
+                        content_to_add = memory_messages.pop(0)
+
+                    history.add_user_message(question_to_add.content)
+                    history.add_ai_message(content_to_add.content)
+                    summary_memory = ConversationSummaryMemory(llm=model)
+                    memory_messages.insert(0, summary_request)
+                    memory_messages.insert(
+                        1,
+                        AIMessage(
+                            summary_memory.predict_new_summary(
+                                history.messages, summary.content
+                            )
+                        ),
+                    )
+
+                else:
+                    logging.info(f"[orchestrator] no summary item, generating summary")
+                    message_to_add = memory_messages.pop(0)
+                    if (
+                        isinstance(memory_messages[0], AIMessage)
+                        and hasattr(memory_messages[0], "additional_kwargs")
+                        and memory_messages[0].additional_kwargs.get("tool_calls")
+                    ):
+                        logging.info(f"[orchestrator] deleting aditional tool calls")
+                        memory_messages.pop(0)
+                        memory_messages.pop(0)
+                        content_to_add = memory_messages.pop(0)
+                    else:
+                        logging.info(f"[orchestrator] no tool calls extracting message")
+                        content_to_add = memory_messages.pop(0)
+
+                    history.add_user_message(message_to_add.content)
+                    history.add_ai_message(content_to_add.content)
+                    summary_memory = ConversationSummaryMemory.from_messages(
+                        llm=model, chat_memory=history
+                    )
+                    summary_mesages = [
+                        HumanMessage("Conversation summary content:"),
+                        AIMessage(summary_memory.buffer),
+                    ]
+                    memory_messages = summary_mesages + memory_messages
+
+                cut_memory["channel_values"]["messages"] = memory_messages
+                logging.info(f"[orchestrator] content summarized to avoid token limit.")
                 break
         logging.info(f"[orchestrator] total conversation tokens {actual_tokens}")
-        memory.put(
-            config= json_data[0],
-            checkpoint= cut_memory,
-            metadata= json_data[2]
-        )
-    
+        memory.put(config=json_data[0], checkpoint=cut_memory, metadata=json_data[2])
+
     # Define built-in tools
 
     llm_math = LLMMathChain(llm=math_model)
@@ -255,9 +298,15 @@ async def run(conversation_id, ask, client_principal):
                 {"messages": [HumanMessage(content=ask)]},
                 config,
             )
-            response["messages"][-1].content = response["messages"][-1].content.replace('source:', '')
-            response["messages"][-1].content = response["messages"][-1].content.replace('Source:', '')
-            response["messages"][-1].content = response["messages"][-1].content.replace('https://strag0vm2b2htvuuclm.blob.core.windows.net/documents/','')
+            response["messages"][-1].content = response["messages"][-1].content.replace(
+                "source:", ""
+            )
+            response["messages"][-1].content = response["messages"][-1].content.replace(
+                "Source:", ""
+            )
+            response["messages"][-1].content = response["messages"][-1].content.replace(
+                "https://strag0vm2b2htvuuclm.blob.core.windows.net/documents/", ""
+            )
         logging.info(
             f"[orchestrator] {conversation_id} agent response: {response['messages'][-1].content[:50]}"
         )
@@ -278,16 +327,16 @@ async def run(conversation_id, ask, client_principal):
     history = conversation_data["history"]
     history.append({"role": "user", "content": ask})
     thought = []
-    if(len(response['messages']) > 2):
-        if(isinstance(response['messages'][-3], AIMessage)):
+    if len(response["messages"]) > 2:
+        if isinstance(response["messages"][-3], AIMessage):
             logging.info("[orchestrator] Tool call found generating thought process")
-            if(hasattr(response['messages'][-3], 'additional_kwargs')):
-                additional_kwargs = response['messages'][-3].additional_kwargs
-                for key in additional_kwargs.get('tool_calls', []):
-                    function = key.get('function')
+            if hasattr(response["messages"][-3], "additional_kwargs"):
+                additional_kwargs = response["messages"][-3].additional_kwargs
+                for key in additional_kwargs.get("tool_calls", []):
+                    function = key.get("function")
                     if function:
-                        name = function.get('name')
-                        arguments = function.get('arguments')
+                        name = function.get("name")
+                        arguments = function.get("arguments")
                         if name and arguments:
                             thought.append(
                                 f"Tool name: {name} > Query sent: {arguments}"
@@ -299,16 +348,16 @@ async def run(conversation_id, ask, client_principal):
             "thoughts": thought,
         }
     )
-    
-    #memory serialization
+
+    # memory serialization
     _tuple = memory.get_tuple(config)
 
     serialized_data = memory.serde.dumps(_tuple)
 
     byte_string = base64.b64encode(serialized_data)
     b64_tosave = byte_string.decode("utf-8")
-    
-    #set values on cosmos object
+
+    # set values on cosmos object
 
     conversation_data["history"] = history
     conversation_data["memory_data"] = b64_tosave
@@ -318,7 +367,7 @@ async def run(conversation_id, ask, client_principal):
     interaction = {
         "user_id": client_principal["id"],
         "user_name": client_principal["name"],
-        "response_time": response_time
+        "response_time": response_time,
     }
     conversation_data["interaction"] = interaction
 
@@ -332,7 +381,7 @@ async def run(conversation_id, ask, client_principal):
     response = {
         "conversation_id": conversation_id,
         "answer": response["messages"][-1].content,
-        "thoughts": thought
+        "thoughts": thought,
     }
 
     logging.info(
