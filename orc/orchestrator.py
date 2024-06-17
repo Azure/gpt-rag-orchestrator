@@ -337,9 +337,10 @@ async def run(conversation_id, ask, client_principal):
                     if function:
                         name = function.get("name")
                         arguments = function.get("arguments")
+                        cleaned_text = re.sub(r"[^\w\s+]", "", arguments).strip()
                         if name and arguments:
                             thought.append(
-                                f"Tool name: {name} > Query sent: {arguments}"
+                                f"Tool name: {name} > Query sent: {cleaned_text}"
                             )
     history.append(
         {
