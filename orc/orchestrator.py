@@ -153,7 +153,7 @@ async def run(conversation_id, ask, client_principal):
                 logging.info(f"[orchestrator] tokens limit reached. generate summary.")
                 history = ChatMessageHistory()
                 content_to_add = None
-                if memory_messages[0].content == "Conversation summary content:":
+                if memory_messages[0].content == "Summary of Prior Messages:":
                     logging.info(f"[orchestrator] summary item found in memory")
                     summary_request = memory_messages.pop(0)
                     summary = memory_messages.pop(0)
@@ -204,7 +204,7 @@ async def run(conversation_id, ask, client_principal):
                         llm=model, chat_memory=history
                     )
                     summary_mesages = [
-                        HumanMessage("Conversation summary content:"),
+                        HumanMessage("Summary of Prior Messages:"),
                         AIMessage(summary_memory.buffer),
                     ]
                     memory_messages = summary_mesages + memory_messages
