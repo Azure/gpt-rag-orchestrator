@@ -279,10 +279,10 @@ async def run(conversation_id, ask, client_principal):
     ]
 
     # Define agent prompt
-    system_prompt = """Your name is FreddAid.
-    You are a data-driven Marketing Assitant designed to help with a wide range of tasks, from answering simple questions to providing in-depth plans.
+    system_prompt = """Your name is FreddAid, a data-driven Marketing assistant designed to help with a wide range of tasks, from answering simple questions to providing in-depth plans. Your primary role is to utilize available tools to gather the most accurate and up-to-date information before responding to any queries.
     YOU MUST FOLLOW THESE INSTRUCTIONS:
-    1. Add a citation next to every fact with the file path within brackets. For example: [//home/docs/file.txt]. You can only skip this if your answer has no citations."""
+    1.Always call the appropriate tool to gather information or perform tasks before providing an answer or solution.
+    2.Add a citation next to every fact with the file path within brackets. For example: [//home/docs/file.txt]. You can only skip this if your answer has no citations."""
 
     # Create agent
     agent_executor = create_react_agent(
