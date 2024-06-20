@@ -674,3 +674,91 @@ def set_feedback(client_principal, conversation_id, feedback_message, question, 
     except Exception as e:
         logging.info(f"[util__module] set_feedback: something went wrong. {str(e)}")
     return feedback
+
+# Check if there are any users in the database
+def check_users_existance():   
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client('users')
+    _user = {}
+
+    try:
+        results = list(container.query_items(
+            query="SELECT c FROM c",
+            max_item_count=1,
+            enable_cross_partition_query=True
+        ))
+        if results:
+            if len(results) > 0:
+                return True    
+        return False
+    except Exception as e:
+        logging.info(f"[util__module] get_user: something went wrong. {str(e)}")
+    return _user
+    
+
+# return all users
+def get_users():
+    users = []
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client('users')
+    try:
+        users = container.query_items(query='SELECT * FROM c', enable_cross_partition_query=True)
+        users = list(users)
+        
+    except Exception as e:
+        logging.info(f"[get_users] get_users: no users found (keyvalue store with 'users' id does not exist).")
+    return users
+
+
+# Get user data from the database
+def get_set_user(client_principal):
+    if not client_principal['id']:
+        return { "error": "User ID not found." }
+    
+    logging.info("[get_user] Retrieving data for user: " + client_principal['id'])
+
+    user = {}
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client('users')
+    is_new_user = False
+    user = {}
+
+    try:
+        try:
+            user = container.read_item(
+                item=client_principal['id'], partition_key=client_principal['id']
+            )
+            logging.info(
+                f"[get_user] user_id {client_principal['id']} found."
+            )
+        except Exception as e:
+            logging.info(
+                f"[get_user] sent an inexistent user_id, saving new {client_principal['id']}."
+            )
+            is_new_user = True
+              
+            user = container.create_item(body={
+                "id": client_principal['id'],
+                "data": {
+                    "name": client_principal['name'],
+                    "email": client_principal['email'],
+                    "role": client_principal['role'],
+                },
+            })
+    except Exception as e:
+        logging.error(f"[get_user] Error creating the user: {e}")
+        return {
+            "is_new_user": None,
+            "user_data": None,
+        }
+
+    return {
+        "is_new_user": is_new_user,
+        "user_data": user["data"]
+    }
