@@ -22,7 +22,8 @@ from langchain_openai import AzureChatOpenAI
 
 from langchain.chains import LLMMathChain
 
-from langgraph.prebuilt import create_react_agent
+from shared.chat_agent_executor import create_react_agent
+# from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 
 from langchain.agents import tool
@@ -220,7 +221,7 @@ async def run(conversation_id, ask, client_principal):
 
     # Define built-in tools
 
-    llm_math = LLMMathChain(llm=math_model)
+    llm_math = LLMMathChain.from_llm(math_model)
 
     @tool
     def math_tool(query: str) -> str:
@@ -281,12 +282,11 @@ async def run(conversation_id, ask, client_principal):
     # Define agent prompt
     system_prompt = """Your name is FreddAid, a data-driven Marketing assistant designed to help with a wide range of tasks, from answering simple questions to providing in-depth plans. Your primary role is to utilize available tools to gather the most accurate and up-to-date information before responding to any queries.
     YOU MUST FOLLOW THESE INSTRUCTIONS:
-    1.Always call the appropriate tool to gather information or perform tasks before providing an answer or solution.
-    2.Add a citation next to every fact with the file path within brackets. For example: [//home/docs/file.txt]. You can only skip this if your answer has no citations."""
+    Always call the appropriate tool to gather information or perform tasks before providing an answer or solution."""
 
     # Create agent
     agent_executor = create_react_agent(
-        model, tools, checkpointer=memory, messages_modifier=system_prompt
+        model, tools, checkpointer=memory, messages_modifier=system_prompt, debug=False
     )
 
     # config
@@ -299,15 +299,16 @@ async def run(conversation_id, ask, client_principal):
                 {"messages": [HumanMessage(content=ask)]},
                 config,
             )
-            response["messages"][-1].content = response["messages"][-1].content.replace(
-                "source:", ""
-            )
-            response["messages"][-1].content = response["messages"][-1].content.replace(
-                "Source:", ""
-            )
-            response["messages"][-1].content = response["messages"][-1].content.replace(
-                "https://strag0vm2b2htvuuclm.blob.core.windows.net/documents/", ""
-            )
+            # logging.info(response)
+            # response["messages"][-1].content = response["messages"][-1].content.replace(
+            #     "source:", ""
+            # )
+            # response["messages"][-1].content = response["messages"][-1].content.replace(
+            #     "Source:", ""
+            # )
+            # response["messages"][-1].content = response["messages"][-1].content.replace(
+            #     "https://strag0vm2b2htvuuclm.blob.core.windows.net/documents/", ""
+            # )
         logging.info(
             f"[orchestrator] {conversation_id} agent response: {response['messages'][-1].content[:50]}"
         )
@@ -353,6 +354,8 @@ async def run(conversation_id, ask, client_principal):
 
     # memory serialization
     _tuple = memory.get_tuple(config)
+
+    # logging.info(f"[orchestrator] {conversation_id} saving memory data. {_tuple}")
 
     serialized_data = memory.serde.dumps(_tuple)
 
