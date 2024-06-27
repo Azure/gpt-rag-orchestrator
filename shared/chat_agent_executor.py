@@ -439,12 +439,22 @@ def create_react_agent(
         documents = state["documents"]
 
         prompt = PromptTemplate(
-            template="""You are a citator tasked with generating citations for a given answer from a set of documents. \n
-            Scan the answer and add a citation next to every fact with the complete file path within brackets. \n
-            Ensure the answer remains unchanged, adding only the file path to key facts. \n
-            If accurate citation is not possible, provide the complete file path from the documents at the end of the answer in the format: [Source: file path 1], [Source: file path 2].\n
-            Here is the retrieved documents: \n\n {documents} \n\n
-            Here is generated answer: {context} \n""",
+            template="""You are a citator tasked with adding citations to an answer based on a set of provided documents. Your goal is to accurately cite the sources of information in the answer without changing its content. Follow these instructions carefully:
+            First, review the following set of documents that will be used as sources for citation:
+            {documents}
+            Now, here is the answer that needs to be cited:
+            {context}
+            Your task is to scan through this answer and add citations to every fact or piece of information that can be traced back to the provided documents. Follow these guidelines:
+            1. Add citations immediately after the relevant fact or statement in the format: [Source: /path/to/file.txt]
+            2. Do not change any of the original text in the answer. Only add citations.
+            3. If multiple sources support a fact, you may include multiple citations.
+            4. If you cannot find an exact match for a fact but the information is generally supported by one or more documents, use the format: [Source: URL1, URL2] where URL1 and URL2 are the file paths of the relevant documents.
+            5. If a fact cannot be cited from any of the provided documents, do not add a citation to it.
+            For example, if the original text says:
+            "The Earth orbits the Sun. It has one natural satellite."
+            And you find sources for both facts, the cited version might look like:
+            "The Earth orbits the Sun. [Source: /astronomy/solar_system.txt] It has one natural satellite. [Source: /astronomy/earth.txt]"
+            Once you have added all appropriate citations, provide the fully cited answer. Ensure that the original text remains unchanged except for the addition of citations.""",
             input_variables=["context", "documents"],
         )
 
