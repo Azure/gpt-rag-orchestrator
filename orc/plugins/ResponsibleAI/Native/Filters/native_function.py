@@ -8,6 +8,7 @@ import openai
 import os
 import requests
 import time
+import traceback
 import sys
 if sys.version_info >= (3, 9):
     from typing import Annotated
@@ -80,8 +81,9 @@ class Filters:
             # logging.info(f"[sk_native_filters] filters query body: {body}")        
             logging.info(f"[sk_native_filters] finished validating user question on filtered content. {response_time} seconds")
         except Exception as e:
-            error_message = str(e)
-            logging.error(f"[sk_native_filters] error when validating user question on filtered content {error_message}")
-        
+            logging.error(f"[sk_native_filters] error when validating user question on filtered content. {type(e).__name__}. {error_message}")
+            detailed_error = traceback.format_exc()
+            logging.error(f"[sk_native_filters] error details {detailed_error}")
+
         result = ' '.join(filter_results)
         return result
