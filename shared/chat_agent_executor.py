@@ -434,9 +434,20 @@ def create_react_agent(
         messages = state["messages"]
         
         context = messages.pop(-1).content
-        print({ "context": context })
+        # print({ "context": context })
         
         documents = state["documents"]
+
+        if not documents:
+            print(f"Not adding citations, no documents found")
+            return {
+                "messages": [
+                    AIMessage(
+                        content=context
+                    )
+                ],
+                "documents": ""
+            }
 
         prompt = PromptTemplate(
             template="""You are a citator tasked with adding citations to an answer based on a set of provided documents. Your goal is to accurately cite the sources of information in the answer without changing its content. Follow these instructions carefully:
@@ -464,7 +475,7 @@ def create_react_agent(
             "context": context 
         })
 
-        print({ "citation": generation })
+        # print({ "citation": generation })
 
         answer = generation if generation else context
 
