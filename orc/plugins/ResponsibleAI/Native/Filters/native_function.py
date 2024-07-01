@@ -48,37 +48,38 @@ class Filters:
             response = chat_complete(messages, functions, 'none')
             
             if 'error' in response:
-                response = response['error']
-                status_code = response['status']
-                status_reason = response['code']
+                # Using .get() to avoid KeyError if 'error', 'status', or 'code' keys are missing
+                response = response.get('error', {})
+                status_code = response.get('status', 'Unknown Status')
+                status_reason = response.get('code', 'Unknown Reason')
                 
                 if status_reason == 'content_filter':
-                    contentFilterResult = response['innererror']['content_filter_result']
+                    contentFilterResult = response.get('innererror', {}).get('content_filter_result', {})
                     filterReasons = []
-
+            
                     violations = ['hate', 'self_harm', 'sexual', 'violence']
                     for violation in violations:
                         ViolationStatus = contentFilterResult.get(violation, {'filtered': False})
                         
-                        if ViolationStatus['filtered'] == True:
+                        if ViolationStatus['filtered']:
                             filterReasons.append(violation.upper())
                     
                     blocklists = contentFilterResult.get('custom_blocklists', [])
                     for blocklist in blocklists:
-                        if blocklist['filtered'] == True:
-                            filterReasons.append(blocklist['id'].upper())
+                        if blocklist.get('filtered', False):
+                            filterReasons.append(blocklist.get('id', 'Unknown ID').upper())
                     
                     error_message = f'Status Code: {status_code} Reason: {status_reason} {filterReasons}.'
-                    if response['message'] != "": error_message += f" Error: {response['message']}."
+                    if response.get('message', "") != "": error_message += f" Error: {response['message']}."
                     logging.warning(f"[sk_native_filters] content filter warning {status_code} on user question. {error_message}")
-
-                filter_results.append(error_message)
+            
+                    filter_results.append(error_message)
             else:
-                for result in response['choices']:
-                    filter_results.append(result['message']['content'])
-                    
-            response_time =  round(time.time() - start_time,2)
-            # logging.info(f"[sk_native_filters] filters query body: {body}")        
+                for result in response.get('choices', []):
+                    filter_results.append(result.get('message', {}).get('content', 'No content'))
+            
+            response_time = round(time.time() - start_time, 2)
+        
             logging.info(f"[sk_native_filters] finished validating user question on filtered content. {response_time} seconds")
         except Exception as e:
             logging.error(f"[sk_native_filters] error when validating user question on filtered content. {type(e).__name__}. {error_message}")
