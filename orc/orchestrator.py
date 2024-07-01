@@ -27,11 +27,10 @@ AZURE_OPENAI_STREAM = True if AZURE_OPENAI_STREAM.lower() == "true" else False
 
 ANSWER_FORMAT = "html" # html, markdown, none
 
-def get_credentials():
-    is_local_env = os.getenv('LOCAL_ENV') == 'true'
-    # return DefaultAzureCredential(exclude_managed_identity_credential=is_local_env, exclude_environment_credential=is_local_env)
-    return DefaultAzureCredential()
-
+async def get_credentials():
+    async with DefaultAzureCredential() as credential:
+        return credential
+    
 async def run(conversation_id, ask, client_principal):
     
     start_time = time.time()
@@ -46,7 +45,7 @@ async def run(conversation_id, ask, client_principal):
     logging.info(f"[orchestrator] {conversation_id} starting conversation flow.")
 
     # get conversation
-    credential = get_credentials()
+    credential = await get_credentials()
 
     async with CosmosClient(AZURE_DB_URI, credential=credential) as db_client:
         db = db_client.get_database_client(database=AZURE_DB_NAME)
