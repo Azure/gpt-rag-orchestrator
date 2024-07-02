@@ -25,6 +25,8 @@ GROUNDEDNESS_CHECK = os.environ.get("GROUNDEDNESS_CHECK") or "true"
 GROUNDEDNESS_CHECK = True if GROUNDEDNESS_CHECK.lower() == "true" else False
 RESPONSIBLE_AI_CHECK = os.environ.get("RESPONSIBLE_AI_CHECK") or "true"
 RESPONSIBLE_AI_CHECK = True if RESPONSIBLE_AI_CHECK.lower() == "true" else False
+SECURITY_HUB_CHECK = os.environ.get("SECURITY_HUB_CHECK") or "false"
+SECURITY_HUB_CHECK = True if SECURITY_HUB_CHECK.lower() == "true" else False
 CONVERSATION_METADATA = os.environ.get("CONVERSATION_METADATA") or "true"
 CONVERSATION_METADATA = True if CONVERSATION_METADATA.lower() == "true" else False
 
@@ -93,7 +95,7 @@ async def get_answer(history):
     conversationPlugin = kernel.import_plugin_from_prompt_directory(PLUGINS_FOLDER, "Conversation")
     retrievalPlugin = kernel.import_native_plugin_from_directory(PLUGINS_FOLDER, "Retrieval")
     raiNativePlugin = kernel.import_native_plugin_from_directory(f"{PLUGINS_FOLDER}/ResponsibleAI/Native", "Filters")
-
+    securityPlugin = kernel.import_native_plugin_from_directory(PLUGINS_FOLDER,"Security")
     #############################
     # GUARDRAILS (QUESTION)
     #############################
@@ -255,7 +257,6 @@ async def get_answer(history):
                     break
         except Exception as e:
             logging.error(f"[code_orchest] could not get blocked list. {e}")
-
     if GROUNDEDNESS_CHECK and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
             try:
                 logging.info(f"[code_orchest] checking if it is grounded. answer: {answer[:50]}")
@@ -280,7 +281,27 @@ async def get_answer(history):
                 response_time =  round(time.time() - start_time,2)
                 logging.info(f"[code_orchest] finished checking if it is grounded. {response_time} seconds.")
             except Exception as e:
-                logging.error(f"[code_orchest] could not check answer is grounded. {e}")            
+                logging.error(f"[code_orchest] could not check answer is grounded. {e}")  
+    
+    if SECURITY_HUB_CHECK and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
+            try:
+                logging.info(f"[code_orchest] checking answer with security hub. answer: {answer[:50]}")
+                start_time = time.time()            
+                arguments["answer"] = answer
+                security_check = await kernel.invoke(securityPlugin["SecurityCheck"], sk.KernelArguments(question=ask, answer=answer, sources=sources))                     
+                if security_check.value["status"]=="error" or security_check.value["successful"]== False:
+                    logging.info(f"[code_orchest] failed security hub checks: {security_check.value['details']}.")
+                    function_result = await call_semantic_function(kernel, conversationPlugin["NotInSourcesAnswer"], arguments)           
+                    answer =  str(function_result)
+                    answer_dict['security_hub'] = 1
+                    answer_generated_by = "security_hub"
+                    bypass_nxt_steps = True
+                else:
+                    answer_dict['security_hub'] = 5
+                response_time =  round(time.time() - start_time,2)
+                logging.info(f"[code_orchest] finished security hub checks. {response_time} seconds.")
+            except Exception as e:
+                logging.error(f"[code_orchest] could not execute security hub checks. {e}")            
 
     if RESPONSIBLE_AI_CHECK and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
             try:
