@@ -41,6 +41,8 @@
     "BLOCKED_LIST_CHECK" : "true",
     "GROUNDEDNESS_CHECK" : "true",
     "RESPONSIBLE_AI_CHECK" : "true",
+    "SECURITY_HUB_CHECK":"false",
+    "SECURITY_HUB_ENDPOINT":"",
     "CONVERSATION_METADATA" : "true",
 
     "BING_RETRIEVAL": "false",
