@@ -7,7 +7,6 @@ csx
 .vs
 edge
 Publish
-.vscode/
 
 # Loadtest
 Results/

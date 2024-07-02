@@ -25,23 +25,24 @@ GROUNDEDNESS_CHECK = os.environ.get("GROUNDEDNESS_CHECK") or "true"
 GROUNDEDNESS_CHECK = True if GROUNDEDNESS_CHECK.lower() == "true" else False
 RESPONSIBLE_AI_CHECK = os.environ.get("RESPONSIBLE_AI_CHECK") or "true"
 RESPONSIBLE_AI_CHECK = True if RESPONSIBLE_AI_CHECK.lower() == "true" else False
+SECURITY_HUB_CHECK = os.environ.get("SECURITY_HUB_CHECK") or "false"
+SECURITY_HUB_CHECK = True if SECURITY_HUB_CHECK.lower() == "true" else False
 CONVERSATION_METADATA = os.environ.get("CONVERSATION_METADATA") or "true"
 CONVERSATION_METADATA = True if CONVERSATION_METADATA.lower() == "true" else False
 
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
-AZURE_OPENAI_TEMPERATURE = os.environ.get("AZURE_OPENAI_TEMPERATURE") or "0.17"
-AZURE_OPENAI_TEMPERATURE = float(AZURE_OPENAI_TEMPERATURE)
-AZURE_OPENAI_TOP_P = os.environ.get("AZURE_OPENAI_TOP_P") or "0.27"
-AZURE_OPENAI_TOP_P = float(AZURE_OPENAI_TOP_P)
-AZURE_OPENAI_RESP_MAX_TOKENS = os.environ.get("AZURE_OPENAI_MAX_TOKENS") or "1000"
-AZURE_OPENAI_RESP_MAX_TOKENS = int(AZURE_OPENAI_RESP_MAX_TOKENS)
 CONVERSATION_MAX_HISTORY = os.environ.get("CONVERSATION_MAX_HISTORY") or "3"
 CONVERSATION_MAX_HISTORY = int(CONVERSATION_MAX_HISTORY)
-
 ORCHESTRATOR_FOLDER = "orc"
 PLUGINS_FOLDER = f"{ORCHESTRATOR_FOLDER}/plugins"
 BOT_DESCRIPTION_FILE = f"{ORCHESTRATOR_FOLDER}/bot_description.prompt"
-
+BING_RETRIEVAL = os.environ.get("BING_RETRIEVAL") or "true"
+BING_RETRIEVAL = True if BING_RETRIEVAL.lower() == "true" else False
+SEARCH_RETRIEVAL = os.environ.get("SEARCH_RETRIEVAL") or "true"
+SEARCH_RETRIEVAL = True if SEARCH_RETRIEVAL.lower() == "true" else False
+RETRIEVAL_PRIORITY = os.environ.get("RETRIEVAL_PRIORITY") or "search"
+DB_RETRIEVAL = os.environ.get("DB_RETRIEVAL") or "true"
+DB_RETRIEVAL = True if DB_RETRIEVAL.lower() == "true" else False
 
 async def get_answer(history):
 
@@ -94,7 +95,7 @@ async def get_answer(history):
     conversationPlugin = kernel.import_plugin_from_prompt_directory(PLUGINS_FOLDER, "Conversation")
     retrievalPlugin = kernel.import_native_plugin_from_directory(PLUGINS_FOLDER, "Retrieval")
     raiNativePlugin = kernel.import_native_plugin_from_directory(f"{PLUGINS_FOLDER}/ResponsibleAI/Native", "Filters")
-
+    securityPlugin = kernel.import_native_plugin_from_directory(PLUGINS_FOLDER,"Security")
     #############################
     # GUARDRAILS (QUESTION)
     #############################
@@ -176,14 +177,40 @@ async def get_answer(history):
             elif set(intents).intersection({"follow_up", "question_answering"}):         
     
                 search_query = triage_dict['search_query'] if triage_dict['search_query'] != '' else ask
-
-                # run retrieval function
-                function_result = await kernel.invoke(retrievalPlugin["VectorIndexRetrieval"], sk.KernelArguments(input=search_query))
-                sources = function_result.value
-                formatted_sources = sources[:100].replace('\n', ' ')
-                escaped_sources = escape_xml_characters(sources)
-                arguments["sources"] = escaped_sources
-                logging.info(f"[code_orchest] generating bot answer. sources: {formatted_sources}")
+                search_sources= ""
+                bing_sources=""
+                db_sources=""
+                #run search retrieval function
+                if(SEARCH_RETRIEVAL):
+                    search_function_result = await kernel.invoke(retrievalPlugin["VectorIndexRetrieval"], sk.KernelArguments(input=search_query))
+                    formatted_sources = search_function_result.value[:100].replace('\n', ' ')
+                    escaped_sources = escape_xml_characters(search_function_result.value)
+                    search_sources=escaped_sources
+                    logging.info(f"[code_orchest] generated Search sources: {formatted_sources}")
+                    
+                #run bing retrieval function
+                if(BING_RETRIEVAL):
+                    bing_function_result= await kernel.invoke(retrievalPlugin["BingRetrieval"], sk.KernelArguments(input=search_query))
+                    formatted_sources = bing_function_result.value[:100].replace('\n', ' ')
+                    escaped_sources = escape_xml_characters(bing_function_result.value)
+                    bing_sources=escaped_sources
+                    logging.info(f"[code_orchest] generated Bing sources: {formatted_sources}")
+                
+                #run sql retrieval function
+                if(DB_RETRIEVAL):
+                    db_function_result= await kernel.invoke(retrievalPlugin["DBRetrieval"], sk.KernelArguments(input=search_query))
+                    formatted_sources = db_function_result.value[:100].replace('\n', ' ')
+                    escaped_sources = escape_xml_characters(db_function_result.value)
+                    db_sources=escaped_sources
+                    logging.info(f"[code_orchest] generated DB sources: {formatted_sources}")
+                
+                if(RETRIEVAL_PRIORITY=="search"):
+                    sources=search_sources+bing_sources+db_sources
+                elif(RETRIEVAL_PRIORITY=="bing"):
+                    sources=bing_sources+search_sources+db_sources
+                else:
+                    sources=db_sources+bing_sources+search_sources
+                arguments["sources"] = sources
             
                 # Generate the answer augmented by the retrieval
                 logging.info(f"[code_orchest] generating bot answer. ask: {ask}")
@@ -230,7 +257,6 @@ async def get_answer(history):
                     break
         except Exception as e:
             logging.error(f"[code_orchest] could not get blocked list. {e}")
-
     if GROUNDEDNESS_CHECK and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
             try:
                 logging.info(f"[code_orchest] checking if it is grounded. answer: {answer[:50]}")
@@ -255,7 +281,27 @@ async def get_answer(history):
                 response_time =  round(time.time() - start_time,2)
                 logging.info(f"[code_orchest] finished checking if it is grounded. {response_time} seconds.")
             except Exception as e:
-                logging.error(f"[code_orchest] could not check answer is grounded. {e}")            
+                logging.error(f"[code_orchest] could not check answer is grounded. {e}")  
+    
+    if SECURITY_HUB_CHECK and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
+            try:
+                logging.info(f"[code_orchest] checking answer with security hub. answer: {answer[:50]}")
+                start_time = time.time()            
+                arguments["answer"] = answer
+                security_check = await kernel.invoke(securityPlugin["SecurityCheck"], sk.KernelArguments(question=ask, answer=answer, sources=sources))                     
+                if security_check.value["status"]=="error" or security_check.value["successful"]== False:
+                    logging.info(f"[code_orchest] failed security hub checks: {security_check.value['details']}.")
+                    function_result = await call_semantic_function(kernel, conversationPlugin["NotInSourcesAnswer"], arguments)           
+                    answer =  str(function_result)
+                    answer_dict['security_hub'] = 1
+                    answer_generated_by = "security_hub"
+                    bypass_nxt_steps = True
+                else:
+                    answer_dict['security_hub'] = 5
+                response_time =  round(time.time() - start_time,2)
+                logging.info(f"[code_orchest] finished security hub checks. {response_time} seconds.")
+            except Exception as e:
+                logging.error(f"[code_orchest] could not execute security hub checks. {e}")            
 
     if RESPONSIBLE_AI_CHECK and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
             try:

@@ -14,6 +14,8 @@ from azure.identity import DefaultAzureCredential
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 import semantic_kernel as sk
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
+from bs4 import BeautifulSoup
+
 
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
@@ -37,7 +39,8 @@ model_max_tokens = {
     'gpt-35-turbo': 4096,
     'gpt-35-turbo-16k': 16384,
     'gpt-4': 8192,
-    'gpt-4-32k': 32768
+    'gpt-4-32k': 32768,
+    'gpt-4o': 8192 
 }
 
 ##########################################################
@@ -325,8 +328,8 @@ def get_aoai_config(model):
     credential = DefaultAzureCredential()
     token = credential.get_token("https://cognitiveservices.azure.com/.default")
 
-    if model in ('gpt-35-turbo', 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'):
-        deployment = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
+    if model in ('gpt-35-turbo', 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k','gpt-4o'):
+        deployment = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT") or "gpt-4o"
     elif model == AZURE_OPENAI_EMBEDDING_MODEL:
         deployment = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
     else:
@@ -336,7 +339,7 @@ def get_aoai_config(model):
         "resource": resource,
         "endpoint": f"https://{resource}.openai.azure.com",
         "deployment": deployment,
-        "model": model, # ex: 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k'
+        "model": model, # ex: 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k', 'gpt-4o'
         "api_version": os.environ.get("AZURE_OPENAI_API_VERSION") or "2024-03-01-preview",
         "api_key": token.token
     }
@@ -401,3 +404,32 @@ def get_blocked_list():
     except Exception as e:
         logging.info(f"[util__module] get_blocked_list: no blocked words list (keyvalue store with 'blocked_list' id does not exist).")
     return blocked_list
+
+def extract_text_from_html(url):
+    try:
+        html_response = requests.get(url)
+        html_response.raise_for_status()
+        soup = BeautifulSoup(html_response.text, 'html.parser')
+        for tag in soup.find_all('header'):
+            tag.decompose()
+        for tag in soup.find_all('footer'):
+            tag.decompose()
+        for tag in soup.find_all('form'):
+            tag.decompose()
+        # Extract visible text from the HTML
+        texts = soup.stripped_strings
+        visible_text = ' '.join(texts)
+        html_response.close()
+        return visible_text
+    except Exception as e:
+        logging.error(f"Failed to extract text from HTML: {e}")
+        raise
+    
+def get_possitive_int_or_default(var, default_value):
+    try:
+        var = int(var)
+        if var < 0:
+            var = default_value
+    except:
+        var = default_value
+    return var
