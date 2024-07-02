@@ -50,7 +50,8 @@ class Filters:
                 response = response['error']
                 status_code = response['status']
                 status_reason = response['code']
-                
+                error_message = f'Status Code: {status_code} Reason: {status_reason}'
+
                 if status_reason == 'content_filter':
                     contentFilterResult = response['innererror']['content_filter_result']
                     filterReasons = []
@@ -66,12 +67,13 @@ class Filters:
                     for blocklist in blocklists:
                         if blocklist['filtered'] == True:
                             filterReasons.append(blocklist['id'].upper())
-                    
-                    error_message = f'Status Code: {status_code} Reason: {status_reason} {filterReasons}.'
-                    if response['message'] != "": error_message += f" Error: {response['message']}."
-                    logging.warning(f"[sk_native_filters] content filter warning {status_code} on user question. {error_message}")
+                
+                    error_message += f' {filterReasons}'
+                    if response['message'] != "": error_message += f" Error: {response['message']}"
 
-                filter_results.append(error_message)
+                    logging.warning(f"[sk_native_filters] content filter warning {status_code} on user question. {error_message}")
+                    
+                    filter_results.append(error_message)                                   
             else:
                 for result in response['choices']:
                     filter_results.append(result['message']['content'])
