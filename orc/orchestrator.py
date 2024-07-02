@@ -299,7 +299,7 @@ async def run(conversation_id, ask, client_principal):
                 {"messages": [HumanMessage(content=ask)]},
                 config,
             )
-            regex = r'(Source:)?(source:)?(https:\/\/)?(strag0vm2b2htvuuclm.blob.core.windows.net)?(\/?documents\/?)?'
+            regex = r'(Source:\s?\/?)?(source:)?(https:\/\/)?(strag0vm2b2htvuuclm.blob.core.windows.net)?(\/?documents\/?)?'
             response["messages"][-1].content = re.sub(regex, '', response["messages"][-1].content)
         logging.info(
             f"[orchestrator] {conversation_id} agent response: {response['messages'][-1].content[:50]}"
