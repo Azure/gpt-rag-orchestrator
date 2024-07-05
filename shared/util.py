@@ -4,17 +4,17 @@ import re
 import json
 import logging
 import os
-import requests
 import tiktoken
 import time
 import urllib.parse
-from azure.cosmos import CosmosClient
-from azure.keyvault.secrets import SecretClient
-from azure.identity import DefaultAzureCredential
+from azure.cosmos.aio import CosmosClient as AsyncCosmosClient
+from azure.keyvault.secrets.aio import SecretClient as AsyncSecretClient
+from azure.identity.aio import DefaultAzureCredential as AsyncDefaultAzureCredential
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 import semantic_kernel as sk
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
 from bs4 import BeautifulSoup
+import aiohttp
 
 
 # logging level
@@ -34,6 +34,15 @@ ORCHESTRATOR_MESSAGES_LANGUAGE = os.environ.get("ORCHESTRATOR_MESSAGES_LANGUAGE"
 AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
 AZURE_DB_NAME = os.environ.get("AZURE_DB_NAME")
 AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
+BING_RETRIEVAL = os.environ.get("BING_RETRIEVAL") or "true"
+BING_RETRIEVAL = True if BING_RETRIEVAL.lower() == "true" else False
+SEARCH_RETRIEVAL = os.environ.get("SEARCH_RETRIEVAL") or "true"
+SEARCH_RETRIEVAL = True if SEARCH_RETRIEVAL.lower() == "true" else False
+RETRIEVAL_PRIORITY = os.environ.get("RETRIEVAL_PRIORITY") or "search"
+DB_RETRIEVAL = os.environ.get("DB_RETRIEVAL") or "true"
+DB_RETRIEVAL = True if DB_RETRIEVAL.lower() == "true" else False
+SECURITY_HUB_CHECK = os.environ.get("SECURITY_HUB_CHECK") or "false"
+SECURITY_HUB_CHECK = True if SECURITY_HUB_CHECK.lower() == "true" else False
 
 model_max_tokens = {
     'gpt-35-turbo': 4096,
@@ -47,16 +56,16 @@ model_max_tokens = {
 # KEY VAULT 
 ##########################################################
 
-def get_secret(secretName):
-    start_time = time.time()
+async def get_secret(secretName):
     keyVaultName = os.environ["AZURE_KEY_VAULT_NAME"]
     KVUri = f"https://{keyVaultName}.vault.azure.net"
-    credential = DefaultAzureCredential()
-    client = SecretClient(vault_url=KVUri, credential=credential)
-    retrieved_secret = client.get_secret(secretName)
-    round(time.time() - start_time,2)
-    logging.info(f"[util__module] get_secret: retrieving {secretName} secret from {keyVaultName}.")   
-    return retrieved_secret.value
+    async with AsyncDefaultAzureCredential() as credential:
+        async with AsyncSecretClient(vault_url=KVUri, credential=credential) as client:
+            retrieved_secret = await client.get_secret(secretName)
+            value = retrieved_secret.value
+
+    # Consider logging the elapsed_time or including it in the return value if needed
+    return value
 
 ##########################################################
 # HISTORY FUNCTIONS
@@ -140,10 +149,10 @@ async def call_semantic_function(kernel, function, arguments):
     return function_result
 
 @retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(6), reraise=True)
-def chat_complete(messages, functions, function_call='auto'):
+async def chat_complete(messages, functions, function_call='auto'):
     """  Return assistant chat response based on user query. Assumes existing list of messages """
 
-    oai_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
+    oai_config = await get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
 
     messages = optmize_messages(messages, AZURE_OPENAI_CHATGPT_MODEL)
 
@@ -171,7 +180,10 @@ def chat_complete(messages, functions, function_call='auto'):
         data['top_p'] = float(AZURE_OPENAI_TOP_P) 
 
     start_time = time.time()
-    response = requests.post(url, headers=headers, data=json.dumps(data)).json()
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, data=json.dumps(data)) as request:
+            response=await request.json()
+    
     response_time =  round(time.time() - start_time,2)
     logging.info(f"[util__module] called chat completion api in {response_time:.6f} seconds")
 
@@ -287,9 +299,9 @@ def load_sk_plugin(name, oai_config):
     plugin.update(native_functions)
     return plugin
 
-def create_kernel(service_id='aoai_chat_completion'):
+async def create_kernel(service_id='aoai_chat_completion'):
     kernel = sk.Kernel()
-    chatgpt_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
+    chatgpt_config =await get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
     kernel.add_service(
         AzureChatCompletion(
             service_id=service_id,
@@ -321,32 +333,31 @@ def get_list_from_string(string):
     result = [item.strip() for item in result]
     return result
 
-def get_aoai_config(model):
-
-    resource = get_next_resource(model)
+async def get_aoai_config(model):
+    resource = await get_next_resource(model)
     
-    credential = DefaultAzureCredential()
-    token = credential.get_token("https://cognitiveservices.azure.com/.default")
+    async with AsyncDefaultAzureCredential() as credential:
+        token = await credential.get_token("https://cognitiveservices.azure.com/.default")
 
-    if model in ('gpt-35-turbo', 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k','gpt-4o'):
-        deployment = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT") or "gpt-4o"
-    elif model == AZURE_OPENAI_EMBEDDING_MODEL:
-        deployment = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
-    else:
-        raise Exception(f"Model {model} not supported. Check if you have the correct env variables set.")
+        if model in ('gpt-35-turbo', 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k','gpt-4o'):
+            deployment = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT") or "gpt-4o"
+        elif model == AZURE_OPENAI_EMBEDDING_MODEL:
+            deployment = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
+        else:
+            raise Exception(f"Model {model} not supported. Check if you have the correct env variables set.")
 
-    result ={
-        "resource": resource,
-        "endpoint": f"https://{resource}.openai.azure.com",
-        "deployment": deployment,
-        "model": model, # ex: 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k', 'gpt-4o'
-        "api_version": os.environ.get("AZURE_OPENAI_API_VERSION") or "2024-03-01-preview",
-        "api_key": token.token
-    }
+        result = {
+            "resource": resource,
+            "endpoint": f"https://{resource}.openai.azure.com",
+            "deployment": deployment,
+            "model": model,  # ex: 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k', 'gpt-4o'
+            "api_version": os.environ.get("AZURE_OPENAI_API_VERSION") or "2024-03-01-preview",
+            "api_key": token.token
+        }
+
     return result
 
-def get_next_resource(model):
-    
+async def get_next_resource(model):
     # define resource
     resources = os.environ.get("AZURE_OPENAI_RESOURCE")
     resources = get_list_from_string(resources)
@@ -354,76 +365,74 @@ def get_next_resource(model):
     if not AZURE_OPENAI_LOAD_BALANCING or model == AZURE_OPENAI_EMBEDDING_MODEL:
         return resources[0]
     else:
-        # get current resource list from cache
         start_time = time.time()
-        credential = DefaultAzureCredential()
-        db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
-        db = db_client.get_database_client(database=AZURE_DB_NAME)
-        container = db.get_container_client('models')
-        try:
-            keyvalue = container.read_item(item=model, partition_key=model)
-            # check if there's an update in the resource list and update cache
-            if set(keyvalue["resources"]) != set(resources):
-                keyvalue["resources"] = resources           
-        except Exception:
-            logging.info(f"[util__module] get_next_resource: first time execution (keyvalue store with '{model}' id does not exist, creating a new one).")  
-            keyvalue = { 
-                "id": model,
-                "resources": resources              
-            }      
-            keyvalue = container.create_item(body=keyvalue)
-        resources= keyvalue["resources"]
+        async with AsyncDefaultAzureCredential() as credential:
+            async with AsyncCosmosClient(AZURE_DB_URI, credential) as db_client:
+                db = db_client.get_database_client(database=AZURE_DB_NAME)
+                container = db.get_container_client('models')
+                try:
+                    keyvalue = await container.read_item(item=model, partition_key=model)
+                    # check if there's an update in the resource list and update cache
+                    if set(keyvalue["resources"]) != set(resources):
+                        keyvalue["resources"] = resources
+                except Exception:
+                    logging.info(f"[util__module] get_next_resource: first time execution (keyvalue store with '{model}' id does not exist, creating a new one).")
+                    keyvalue = {
+                        "id": model,
+                        "resources": resources
+                    }
+                    keyvalue = await container.create_item(body=keyvalue)
+                resources = keyvalue["resources"]
 
-        # get the first resource and move it to the end of the list
-        resource = resources.pop(0)
-        resources.append(resource)
+                # get the first resource and move it to the end of the list
+                resource = resources.pop(0)
+                resources.append(resource)
 
-        # update cache
-        keyvalue["resources"] = resources
-        keyvalue = container.replace_item(item=model, body=keyvalue)
+                # update cache
+                keyvalue["resources"] = resources
+                await container.replace_item(item=model, body=keyvalue)
 
-        response_time = round(time.time() - start_time,2)
-
-        logging.info(f"[util__module] get_next_resource: model '{model}' resource {resource}. {response_time} seconds") 
+        response_time = round(time.time() - start_time, 2)
+        logging.info(f"[util__module] get_next_resource: model '{model}' resource {resource}. {response_time} seconds")
         return resource
     
 ##########################################################
 # OTHER FUNCTIONS
 ##########################################################
 
-def get_blocked_list():
+async def get_blocked_list():
     blocked_list = []
-    credential = DefaultAzureCredential()
-    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
-    db = db_client.get_database_client(database=AZURE_DB_NAME)
-    container = db.get_container_client('guardrails')
-    try:
-        key_value = container.read_item(item='blocked_list', partition_key='blocked_list')
-        blocked_list= key_value["blocked_words"]
-        blocked_list = [word.lower() for word in blocked_list]  
-    except Exception as e:
-        logging.info(f"[util__module] get_blocked_list: no blocked words list (keyvalue store with 'blocked_list' id does not exist).")
+    async with AsyncDefaultAzureCredential() as credential:
+        async with AsyncCosmosClient(AZURE_DB_URI, credential) as db_client:
+            db = db_client.get_database_client(database=AZURE_DB_NAME)
+            container = db.get_container_client('guardrails')
+            try:
+                key_value = await container.read_item(item='blocked_list', partition_key='blocked_list')
+                blocked_list = key_value["blocked_words"]
+                blocked_list = [word.lower() for word in blocked_list]
+            except Exception as e:
+                logging.info(f"[util__module] get_blocked_list: no blocked words list (keyvalue store with 'blocked_list' id does not exist).")
     return blocked_list
 
-def extract_text_from_html(url):
-    try:
-        html_response = requests.get(url)
-        html_response.raise_for_status()
-        soup = BeautifulSoup(html_response.text, 'html.parser')
-        for tag in soup.find_all('header'):
-            tag.decompose()
-        for tag in soup.find_all('footer'):
-            tag.decompose()
-        for tag in soup.find_all('form'):
-            tag.decompose()
-        # Extract visible text from the HTML
-        texts = soup.stripped_strings
-        visible_text = ' '.join(texts)
-        html_response.close()
-        return visible_text
-    except Exception as e:
-        logging.error(f"Failed to extract text from HTML: {e}")
-        raise
+async def extract_text_from_html(web,session):
+    async with session.get(web.url) as html_response:
+        try:
+            html_response.raise_for_status()
+            text=await html_response.text()
+            soup = BeautifulSoup(text, 'html.parser')
+            for tag in soup.find_all('header'):
+                tag.decompose()
+            for tag in soup.find_all('footer'):
+                tag.decompose()
+            for tag in soup.find_all('form'):
+                tag.decompose()
+            # Extract visible text from the HTML
+            texts = soup.stripped_strings
+            visible_text = ' '.join(texts)
+            return visible_text
+        except Exception as e:
+            logging.error(f"Failed to extract text from url {web.url}, using snipet from bing: {e}")
+            return web.snippet
     
 def get_possitive_int_or_default(var, default_value):
     try:
