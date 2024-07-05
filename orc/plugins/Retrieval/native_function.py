@@ -20,15 +20,14 @@ else:
 from azure.cognitiveservices.search.customsearch import CustomSearchClient
 from msrest.authentication import CognitiveServicesCredentials
 from sqlalchemy import create_engine
-from azure.keyvault.secrets import SecretClient
-from azure.identity import DefaultAzureCredential
 from llama_index.llms.azure_openai import AzureOpenAI as LlamaAzureOpenAI
 from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding as LlamaAzureOpenAIEmbedding
 from llama_index.core.query_engine import NLSQLTableQueryEngine, SQLTableRetrieverQueryEngine
 from llama_index.core import SQLDatabase, Settings
 from llama_index.core.objects import SQLTableNodeMapping, ObjectIndex, SQLTableSchema
 from llama_index.core import VectorStoreIndex
-import azure.functions as func
+import aiohttp
+import asyncio
 
 # Azure search Integration Settings
 AZURE_OPENAI_EMBEDDING_MODEL = os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL")
@@ -83,8 +82,8 @@ logging.basicConfig(level=LOGLEVEL)
 
 @retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(6), reraise=True)
 # Function to generate embeddings for title and content fields, also used for query embeddings
-def generate_embeddings(text):
-    embeddings_config = get_aoai_config(AZURE_OPENAI_EMBEDDING_MODEL)
+async def generate_embeddings(text):
+    embeddings_config = await get_aoai_config(AZURE_OPENAI_EMBEDDING_MODEL)
 
     client = AzureOpenAI(
         api_version=embeddings_config['api_version'],
@@ -101,7 +100,7 @@ class Retrieval:
         description="Search a knowledge base for sources to ground and give context to answer a user question. Return sources.",
         name="VectorIndexRetrieval",
     )
-    def VectorIndexRetrieval(
+    async def VectorIndexRetrieval(
         self,
         input: Annotated[str, "The user question"]
     ) -> Annotated[str, "the output is a string with the search results"]:
@@ -110,10 +109,10 @@ class Retrieval:
         try:
             start_time = time.time()
             logging.info(f"[sk_retrieval] generating question embeddings. search query: {search_query}")
-            embeddings_query = generate_embeddings(search_query)
+            embeddings_query = await generate_embeddings(search_query)
             response_time = round(time.time() - start_time, 2)
             logging.info(f"[sk_retrieval] finished generating question embeddings. {response_time} seconds")
-            azureSearchKey = get_secret('azureSearchKey')
+            azureSearchKey = await get_secret('azureSearchKey')
 
             logging.info(f"[sk_retrieval] querying azure ai search. search query: {search_query}")
             # prepare body
@@ -150,17 +149,22 @@ class Retrieval:
             search_endpoint = f"https://{AZURE_SEARCH_SERVICE}.search.windows.net/indexes/{AZURE_SEARCH_INDEX}/docs/search?api-version={AZURE_SEARCH_API_VERSION}"
 
             start_time = time.time()
-            response = requests.post(search_endpoint, headers=headers, json=body)
-            status_code = response.status_code
-            if status_code >= 400:
-                error_on_search = True
-                error_message = f'Status code: {status_code}.'
-                if response.text != "": error_message += f" Error: {response.text}."
-                logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
-            else:
-                if response.json()['value']:
-                    for doc in response.json()['value']:
-                        search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
+            
+            async with aiohttp.ClientSession() as session:
+            # Make a POST request using the session.post() method
+             async with session.post(search_endpoint, headers=headers, json=body) as response:
+                status_code = response.status
+                text=await response.text()
+                json=await response.json()
+                if status_code >= 400:
+                    error_on_search = True
+                    error_message = f'Status code: {status_code}.'
+                    if text != "": error_message += f" Error: {response.text}."
+                    logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
+                else:
+                    if json['value']:
+                        for doc in json['value']:
+                            search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
 
             response_time = round(time.time() - start_time, 2)
             logging.info(f"[sk_retrieval] finished querying azure ai search. {response_time} seconds")
@@ -175,53 +179,49 @@ class Retrieval:
         description="Search bing for sources to ground and give context to answer a user question. Return sources.",
         name="BingRetrieval",
     )
-    def BingRetrieval(
+    async def BingRetrieval(
         self,
         input: Annotated[str, "The user question"]
     ) -> Annotated[str, "the output is a string with the search results"]:
-        bing_custom_search_subscription_key = get_secret('bingApiKey')
-        bing_custom_config_id = get_secret('bingCustomConfigId')
+        bing_custom_search_subscription_key = await get_secret('bingApiKey')
+        bing_custom_config_id = await get_secret('bingCustomConfigId')
         client = CustomSearchClient(endpoint=BING_CUSTOM_SEARCH_URL, credentials=CognitiveServicesCredentials(bing_custom_search_subscription_key))
         start_time = time.time()
         web_data = client.custom_instance.search(query=input, custom_config=bing_custom_config_id, count=BING_SEARCH_TOP_K)
-        logging.info(f"[bing retrieval] bing search. {input}. {time.time() - start_time} seconds.")
         bing_sources = ""
-        if web_data.web_pages and hasattr(web_data.web_pages, 'value'):
-            for web in web_data.web_pages.value:
-                try:
-                    start_time = time.time()
-                    html = extract_text_from_html(web.url)
-                    bing_sources += html[:get_possitive_int_or_default(BING_SEARCH_MAX_TOKENS, 1000)]
-                    logging.info(f"[bing retrieval] finished scraping web. {web.url}. {time.time() - start_time} seconds.")
-                except Exception as e:
-                    logging.error(f"[bing retrieval] could not scrape web. {web.url}. {e}")
-                    bing_sources += web.snippet
+        async with aiohttp.ClientSession() as session:    
+            if web_data.web_pages and hasattr(web_data.web_pages, 'value'):
+                tasks= [extract_text_from_html(web,session) for web in web_data.web_pages.value]
+                results = await asyncio.gather(*tasks)
+                for result in results:
+                    bing_sources += result[:get_possitive_int_or_default(BING_SEARCH_MAX_TOKENS, 1000)]
+        logging.info(f"[sk_retrieval] finished querying bing search. {time.time()-start_time} seconds")
         return bing_sources
 
     @kernel_function(
         description="Search a SQL or Teradata DB for sources to ground and give context to answer a user question. Return sources.",
         name="DBRetrieval",
     )
-    def DBRetrieval(self,
+    async def DBRetrieval(self,
                     input: Annotated[str, "The user question"]
                     ) -> Annotated[str, "the output is a string with the search results"]:
         logging.info('Python HTTP trigger function processed a request.')
 
         try:
             # Get OpenAI configuration
-            oai_config = get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
+            oai_config = await get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
            
             db_top_k = get_possitive_int_or_default(DB_TOP_K, TOP_K_DEFAULT)
             max_tokens = get_possitive_int_or_default(DB_MAX_TOKENS, MAX_TOKENS_DEFAULT)
             # Connect to Key Vault and get database password
             if DB_TYPE == "sql":
-                db_password = get_secret("sqlpassword")
+                db_password = await get_secret("sqlpassword")
             elif DB_TYPE == "teradata":
-                db_password = get_secret("teradatapassword")
+                db_password = await get_secret("teradatapassword")
             else:
                 logging.error(f"[DBRetrieval] Invalid db_type specified")
                 return ""
-            azureOpenAIKey = get_secret("azureOpenAIKey")
+            azureOpenAIKey = await get_secret("azureOpenAIKey")
             #Get table data
             try:
 
