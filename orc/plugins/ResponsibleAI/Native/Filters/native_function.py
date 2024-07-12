@@ -4,6 +4,7 @@ from semantic_kernel.functions import kernel_function
 import logging
 import os
 import time
+import traceback
 import sys
 if sys.version_info >= (3, 9):
     from typing import Annotated
@@ -43,41 +44,45 @@ class Filters:
             response =  await chat_complete(messages, functions, 'none')
             
             if 'error' in response:
-                response = response['error']
-                status_code = response['status']
-                status_reason = response['code']
-                
-                if status_reason == 'content_filter':
-                    contentFilterResult = response['innererror']['content_filter_result']
-                    filterReasons = []
+                # Using .get() to avoid KeyError if 'error', 'status', or 'code' keys are missing
+                response = response.get('error', {})
+                status_code = response.get('status', 'Unknown Status')
+                status_reason = response.get('code', 'Unknown Reason')
+                error_message = f'Status Code: {status_code} Reason: {status_reason}'
 
+                if status_reason == 'content_filter':
+                    contentFilterResult = response.get('innererror', {}).get('content_filter_result', {})
+                    filterReasons = []
+            
                     violations = ['hate', 'self_harm', 'sexual', 'violence']
                     for violation in violations:
                         ViolationStatus = contentFilterResult.get(violation, {'filtered': False})
                         
-                        if ViolationStatus['filtered'] == True:
+                        if ViolationStatus['filtered']:
                             filterReasons.append(violation.upper())
                     
                     blocklists = contentFilterResult.get('custom_blocklists', [])
                     for blocklist in blocklists:
-                        if blocklist['filtered'] == True:
-                            filterReasons.append(blocklist['id'].upper())
-                    
-                    error_message = f'Status Code: {status_code} Reason: {status_reason} {filterReasons}.'
-                    if response['message'] != "": error_message += f" Error: {response['message']}."
-                    logging.warning(f"[sk_native_filters] content filter warning {status_code} on user question. {error_message}")
+                        if blocklist.get('filtered', False):
+                            filterReasons.append(blocklist.get('id', 'Unknown ID').upper())
+                
+                    error_message += f' {filterReasons}'
+                    if response.get('message', "") != "": error_message += f" Error: {response['message']}"
 
-                filter_results.append(error_message)
-            else:
-                for result in response['choices']:
-                    filter_results.append(result['message']['content'])
+                    logging.warning(f"[sk_native_filters] content filter warning {status_code} on user question. {error_message}")
                     
-            response_time =  round(time.time() - start_time,2)
-            # logging.info(f"[sk_native_filters] filters query body: {body}")        
+                    filter_results.append(error_message)                                   
+            else:
+                for result in response.get('choices', []):
+                    filter_results.append(result.get('message', {}).get('content', 'No content'))
+            
+            response_time = round(time.time() - start_time, 2)
+        
             logging.info(f"[sk_native_filters] finished validating user question on filtered content. {response_time} seconds")
         except Exception as e:
-            error_message = str(e)
-            logging.error(f"[sk_native_filters] error when validating user question on filtered content {error_message}")
-        
+            logging.error(f"[sk_native_filters] error when validating user question on filtered content. {type(e).__name__}. {error_message}")
+            detailed_error = traceback.format_exc()
+            logging.error(f"[sk_native_filters] error details {detailed_error}")
+
         result = ' '.join(filter_results)
         return result
