@@ -44,6 +44,7 @@ SEARCH_RETRIEVAL = True if SEARCH_RETRIEVAL.lower() == "true" else False
 RETRIEVAL_PRIORITY = os.environ.get("RETRIEVAL_PRIORITY") or "search"
 DB_RETRIEVAL = os.environ.get("DB_RETRIEVAL") or "true"
 DB_RETRIEVAL = True if DB_RETRIEVAL.lower() == "true" else False
+SEVERITY_THRESHOLD = os.environ.get("SEVERITY_THRESHOLD") or 3
 
 async def get_answer(history):
 
@@ -303,23 +304,31 @@ async def get_answer(history):
     if SECURITY_HUB_CHECK and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
             try:
                 logging.info(f"[code_orchest] checking answer with security hub. answer: {answer[:50]}")
-                start_time = time.time()            
+                start_time = time.time()
                 arguments["answer"] = answer
-                securityPlugin= await securityPluginTask
-                security_check = await kernel.invoke(securityPlugin["SecurityCheck"], sk.KernelArguments(question=ask, answer=answer, sources=sources))                     
-                if security_check.value["status"]=="error" or security_check.value["successful"]== False:
-                    logging.info(f"[code_orchest] failed security hub checks: {security_check.value['details']}.")
-                    function_result = await call_semantic_function(kernel, conversationPlugin["NotInSourcesAnswer"], arguments)           
-                    answer =  str(function_result)
+                securityPlugin = await securityPluginTask
+                security_check = await kernel.invoke(securityPlugin["SecurityCheck"], sk.KernelArguments(question=ask, answer=answer, sources=sources))
+                logging.info(f"[code_orchest] security hub check results: {security_check.value}.")
+                check_results = security_check.value["results"]
+                check_details = security_check.value["details"]
+                # New checks based on the updated requirements
+                all_passed = all(status == "Passed" for status in check_results.values())                
+                all_below_threshold = all(category["severity"] < SEVERITY_THRESHOLD for category in check_details.get("categoriesAnalysis", []))
+                any_blocklists_match = len(check_details.get("blocklistsMatch", [])) > 0
+                if not all_passed or not all_below_threshold or any_blocklists_match:
+                    logging.error(f"[code_orchest] failed security hub checks. Details: {check_details}.")
+                    function_result = await call_semantic_function(kernel, conversationPlugin["NotInSourcesAnswer"], arguments)
+                    answer = str(function_result)
                     answer_dict['security_hub'] = 1
                     answer_generated_by = "security_hub"
                     bypass_nxt_steps = True
                 else:
                     answer_dict['security_hub'] = 5
-                response_time =  round(time.time() - start_time,2)
+                
+                response_time = round(time.time() - start_time, 2)
                 logging.info(f"[code_orchest] finished security hub checks. {response_time} seconds.")
             except Exception as e:
-                logging.error(f"[code_orchest] could not execute security hub checks. {e}")   
+                logging.error(f"[code_orchest] could not execute security hub checks. {e}")
     answer_dict["user_ask"] = ask if not answer_generated_by == 'content_filters_check' else '<FILTERED BY MODEL>'
     answer_dict["answer"] = answer
     answer_dict["search_query"] = search_query
