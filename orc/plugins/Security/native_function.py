@@ -27,21 +27,21 @@ class Security:
         try:
             security_hub_key = await get_secret("securityHubKey")
             async with aiohttp.ClientSession() as session:
-        # Make a POST request using the session.post() method
+            # Make a POST request using the session.post() method
              async with session.post(
                 security_hub_endpoint,
                 json={"question": question, "answer": answer, "sources": sources},
                 headers={"x-functions-key": security_hub_key}
             ) as request:
                 if request.status != 200:
-                    text=await request.text()
-                    logging.error(f"Error requesting security hub: {text}")
-                    return {"status": "error", "details": text}
-                result = await request.json()
-                return {"status": "success", "details": result["details"],"successful":result["successful"]}
+                    logging.error(f"Error requesting security hub: {request.status} {request.reason}")
+                    raise(Exception(f"Error requesting security hub: {request.status} {request.reason}"))
+                else:
+                    result = await request.json()
+                    return result
         except Exception as e:
             logging.error(f"Error requesting security hub: {str(e)}")
-            return {"status": "error", "details": str(e)}
+            raise(Exception(f"Error requesting security hub: {str(e)}"))
         
         
         

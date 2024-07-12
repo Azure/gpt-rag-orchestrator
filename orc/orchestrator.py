@@ -45,57 +45,58 @@ async def run(conversation_id, ask, client_principal):
     logging.info(f"[orchestrator] {conversation_id} starting conversation flow.")
 
     # get conversation
-    credential = await get_credentials()
 
-    async with CosmosClient(AZURE_DB_URI, credential=credential) as db_client:
-        db = db_client.get_database_client(database=AZURE_DB_NAME)
-        container = db.get_container_client('conversations')
-        try:
-            conversation = await container.read_item(item=conversation_id, partition_key=conversation_id)
-            logging.info(f"[orchestrator] conversation {conversation_id} retrieved.")
-        except Exception as e:
-            logging.info(f"[orchestrator] customer sent an inexistent conversation_id, saving new conversation_id")        
-            conversation = await container.create_item(body={"id": conversation_id})
+    #credential = get_credentials()
+    async with DefaultAzureCredential() as credential:       
+        async with CosmosClient(AZURE_DB_URI, credential=credential) as db_client:
+            db = db_client.get_database_client(database=AZURE_DB_NAME)
+            container = db.get_container_client('conversations')
+            try:
+                conversation = await container.read_item(item=conversation_id, partition_key=conversation_id)
+                logging.info(f"[orchestrator] conversation {conversation_id} retrieved.")
+            except Exception as e:
+                logging.info(f"[orchestrator] customer sent an inexistent conversation_id, saving new conversation_id")        
+                conversation = await container.create_item(body={"id": conversation_id})
 
-        # get conversation data
-        conversation_data = conversation.get('conversation_data', 
-                                            {'start_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 'interactions': []})
-    
-        # history
-        history = conversation.get('history', [])
-        history.append({"role": "user", "content": ask})
-
-        # 2) get answer and sources
-
-        # get rag answer and sources
-        logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
-        answer_dict = await code_orchestration.get_answer(history)
-
-        # 3) update and save conversation (containing history and conversation data)
+            # get conversation data
+            conversation_data = conversation.get('conversation_data', 
+                                                {'start_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 'interactions': []})
         
-        # history
-        if answer_dict['answer_generated_by'] == 'content_filters_check': 
-            history[-1]['content'] = '<FILTERED BY MODEL>'
-        history.append({"role": "assistant", "content": answer_dict['answer']})
-        conversation['history'] = history
+            # history
+            history = conversation.get('history', [])
+            history.append({"role": "user", "content": ask})
 
-        # conversation data
-        response_time = round(time.time() - start_time,2)
-        interaction = {
-            'user_id': client_principal['id'], 
-            'user_name': client_principal['name'], 
-            'response_time': response_time
-        }
-        interaction.update(answer_dict)
-        conversation_data['interactions'].append(interaction)
-        conversation['conversation_data'] = conversation_data
-        conversation = await container.replace_item(item=conversation, body=conversation)
-        
-        # 4) return answer
-        result = {"conversation_id": conversation_id, 
-                "answer": format_answer(interaction['answer'], ANSWER_FORMAT), 
-                "data_points": interaction['sources'] if 'sources' in interaction else '', 
-                "thoughts": f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"}
+            # 2) get answer and sources
 
-        logging.info(f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {interaction['answer'][:30]}")
+            # get rag answer and sources
+            logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
+            answer_dict = await code_orchestration.get_answer(history)
+
+            # 3) update and save conversation (containing history and conversation data)
+            
+            # history
+            if answer_dict['answer_generated_by'] == 'content_filters_check': 
+                history[-1]['content'] = '<FILTERED BY MODEL>'
+            history.append({"role": "assistant", "content": answer_dict['answer']})
+            conversation['history'] = history
+
+            # conversation data
+            response_time = round(time.time() - start_time,2)
+            interaction = {
+                'user_id': client_principal['id'], 
+                'user_name': client_principal['name'], 
+                'response_time': response_time
+            }
+            interaction.update(answer_dict)
+            conversation_data['interactions'].append(interaction)
+            conversation['conversation_data'] = conversation_data
+            conversation = await container.replace_item(item=conversation, body=conversation)
+            
+            # 4) return answer
+            result = {"conversation_id": conversation_id, 
+                    "answer": format_answer(interaction['answer'], ANSWER_FORMAT), 
+                    "data_points": interaction['sources'] if 'sources' in interaction else '', 
+                    "thoughts": f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"}
+
+            logging.info(f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {interaction['answer'][:30]}")
     return result
