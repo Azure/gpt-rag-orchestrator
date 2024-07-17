@@ -64,6 +64,8 @@ CONVERSATION_MAX_HISTORY = int(CONVERSATION_MAX_HISTORY)
 BING_SEARCH_API_KEY = os.environ.get("BING_SEARCH_API_KEY")
 BING_SEARCH_URL = os.environ.get("BING_SEARCH_URL")
 
+AZURE_STORAGE_ACCOUNT_URL = os.environ.get("AZURE_STORAGE_ACCOUNT_URL")
+
 
 def get_credentials():
     is_local_env = os.getenv("LOCAL_ENV") == "true"
@@ -300,7 +302,7 @@ async def run(conversation_id, ask, client_principal):
                     {"messages": [HumanMessage(content=ask)]},
                     config,
                 )
-                regex = r'(Source:\s?\/?)?(source:)?(https:\/\/)?(strag0vm2b2htvuuclm.blob.core.windows.net)?(\/?documents\/?)?'
+                regex = rf'(Source:\s?\/?)?(source:)?(https:\/\/)?({AZURE_STORAGE_ACCOUNT_URL})?(\/?documents\/?)?'
                 response["messages"][-1].content = re.sub(regex, '', response["messages"][-1].content)
             logging.info(
                 f"[orchestrator] {conversation_id} agent response: {response['messages'][-1].content[:50]}"
