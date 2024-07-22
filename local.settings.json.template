@@ -53,6 +53,13 @@
     "DB_DATABASE":"",
     "DB_USERNAME":"",
     "DB_TOP_K":"3",
-    "DB_MAX_TOKENS":"1000"
+    "DB_MAX_TOKENS":"1000",
+    "SECURITY_HUB_ENDPOINT": "",
+    "SECURITY_HUB_CHECK": "false",
+    "APIM_ENABLED": "false",
+    "APIM_AZURE_OPENAI_ENDPOINT": "",
+    "APIM_BING_CUSTOM_SEARCH_URL": "",
+    "APIM_AZURE_SEARCH_URL": "",
+    "APIM_SECURITY_HUB_ENDPOINT": ""
   }
 }

@@ -78,18 +78,27 @@ MAX_TOKENS_DEFAULT=1000
 DB_TYPE = os.environ.get("DB_TYPE")
 # Set up logging
 LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
+APIM_ENABLED = os.environ.get('APIM_ENABLED', 'false').lower() == 'true'
+APIM_BING_CUSTOM_SEARCH_URL=os.environ.get('APIM_BING_CUSTOM_SEARCH_URL',"")+"/search?"
+APIM_AZURE_SEARCH_URL=os.environ.get('APIM_AZURE_SEARCH_URL',"")
 logging.basicConfig(level=LOGLEVEL)
 
 @retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(6), reraise=True)
 # Function to generate embeddings for title and content fields, also used for query embeddings
-async def generate_embeddings(text):
+async def generate_embeddings(text,apim_key=None):
     embeddings_config = await get_aoai_config(AZURE_OPENAI_EMBEDDING_MODEL)
-
-    client = AzureOpenAI(
+    if APIM_ENABLED:
+        client = AzureOpenAI(
         api_version=embeddings_config['api_version'],
         azure_endpoint=embeddings_config['endpoint'],
-        azure_ad_token=embeddings_config['api_key'],
+        api_key=apim_key
     )
+    else:   
+        client = AzureOpenAI(
+            api_version=embeddings_config['api_version'],
+            azure_endpoint=embeddings_config['endpoint'],
+            azure_ad_token=embeddings_config['api_key'],
+        )
 
     embeddings = client.embeddings.create(input=[text], model=embeddings_config['deployment']).data[0].embedding
 
@@ -102,14 +111,15 @@ class Retrieval:
     )
     async def VectorIndexRetrieval(
         self,
-        input: Annotated[str, "The user question"]
+        input: Annotated[str, "The user question"],
+        apim_key: Annotated[str, "The key to access the apim endpoint"]
     ) -> Annotated[str, "the output is a string with the search results"]:
         search_results = []
         search_query = input
         try:
             start_time = time.time()
             logging.info(f"[sk_retrieval] generating question embeddings. search query: {search_query}")
-            embeddings_query = await generate_embeddings(search_query)
+            embeddings_query = await generate_embeddings(search_query,apim_key=apim_key)
             response_time = round(time.time() - start_time, 2)
             logging.info(f"[sk_retrieval] finished generating question embeddings. {response_time} seconds")
             azureSearchKey = await get_secret('azureSearchKey')
@@ -142,12 +152,19 @@ class Retrieval:
                 body["queryType"] = "semantic"
                 body["semanticConfiguration"] = AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG
 
-            headers = {
+            if APIM_ENABLED:
+                headers = {
+                'Content-Type': 'application/json',
+                'api-key': apim_key
+            }
+                search_endpoint = f"{APIM_AZURE_SEARCH_URL}/docs/search?api-version={AZURE_SEARCH_API_VERSION}"
+            else:
+                headers = {
                 'Content-Type': 'application/json',
                 'api-key': azureSearchKey
             }
-            search_endpoint = f"https://{AZURE_SEARCH_SERVICE}.search.windows.net/indexes/{AZURE_SEARCH_INDEX}/docs/search?api-version={AZURE_SEARCH_API_VERSION}"
-
+                search_endpoint = f"https://{AZURE_SEARCH_SERVICE}.search.windows.net/indexes/{AZURE_SEARCH_INDEX}/docs/search?api-version={AZURE_SEARCH_API_VERSION}"
+            logging.info(f"[sk_retrieval] search endpoint: {search_endpoint}")
             start_time = time.time()
             
             async with aiohttp.ClientSession() as session:
@@ -181,11 +198,16 @@ class Retrieval:
     )
     async def BingRetrieval(
         self,
-        input: Annotated[str, "The user question"]
+        input: Annotated[str, "The user question"],
+        bing_api_key: Annotated[str, "The key to access the bing search"],
+        bing_custom_config_id: Annotated[str, "The custom config id to access the bing search"]
     ) -> Annotated[str, "the output is a string with the search results"]:
-        bing_custom_search_subscription_key = await get_secret('bingApiKey')
         bing_custom_config_id = await get_secret('bingCustomConfigId')
-        client = CustomSearchClient(endpoint=BING_CUSTOM_SEARCH_URL, credentials=CognitiveServicesCredentials(bing_custom_search_subscription_key))
+        if(APIM_ENABLED):
+            endpoint=APIM_BING_CUSTOM_SEARCH_URL
+        else:
+            endpoint=BING_CUSTOM_SEARCH_URL
+        client = CustomSearchClient(endpoint=endpoint, credentials=CognitiveServicesCredentials(bing_api_key))
         start_time = time.time()
         web_data = client.custom_instance.search(query=input, custom_config=bing_custom_config_id, count=BING_SEARCH_TOP_K)
         bing_sources = ""
