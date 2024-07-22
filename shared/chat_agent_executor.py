@@ -455,17 +455,18 @@ def create_react_agent(
             {documents}
             Now, here is the answer that needs to be cited:
             {context}
+            **THE CITATOR INSTRUCTIONS START HERE**
             Your task is to scan through this answer and add citations to every fact or piece of information that can be traced back to the provided documents. Follow these guidelines:
-            1. Add citations immediately after the relevant fact or statement in the format: [Source: /path/to/file.txt]
-            2. DO NOT change any of the original text in the answer, and DO NOT duplicate the answer. Only add citations.
-            3. If multiple sources support a fact, you may include multiple citations.
-            4. If you cannot find an exact match for a fact but the information is generally supported by one or more documents, use the format: [Source: URL1, URL2] where URL1 and URL2 are the file paths of the relevant documents.
-            5. If a fact cannot be cited from any of the provided documents, DO NOT add a citation to it.
-            6. DO NOT alter or transform the filepath. Use the exact format provided in the documents section.
+            1. Add citations immediately after the relevant fact or statement in the format: [/path/to/file.txt]
+            2. If a fact cannot be cited from any of the provided documents, DO NOT add a citation to it.
+            3. DO NOT alter or transform the filepath.
+            4. DO NOT change any of the original text in the answer.
+            5. DO NOT duplicate the answer.
+            **THE CITATOR INSTRUCTIONS START HERE**
             For example, if the original text says:
-            "The Earth orbits the Sun. It has one natural satellite."
+            'The Earth orbits the Sun. It has one natural satellite.'
             And you find sources for both facts, the cited version might look like:
-            "The Earth orbits the Sun. [Source: /astronomy/solar_system.txt] It has one natural satellite. [Source: /astronomy/earth.txt]"
+            'The Earth orbits the Sun. [/astronomy/solar_system.txt] It has one natural satellite. [/astronomy/earth.txt]'
             Once you have added all appropriate citations, provide the fully cited answer. Ensure that the original text remains unchanged except for the addition of citations.""",
             input_variables=["context", "documents"],
         )

@@ -18,6 +18,7 @@ from langchain_core.documents import Document
 from langchain_core.pydantic_v1 import Extra, root_validator
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.utils import get_from_dict_or_env, get_from_env
+from openai import AzureOpenAI
 
 class LineListOutputParser(StrOutputParser):
     def parse(self, text: str):
@@ -38,10 +39,15 @@ def retrieval_transform(docs):
     return source_knowledge, sources
 
 
+TERM_SEARCH_APPROACH='term'
+VECTOR_SEARCH_APPROACH='vector'
+HYBRID_SEARCH_APPROACH='hybrid'
+DEFAULT_URL_SUFFIX="search.windows.net"
+AZURE_SEARCH_APPROACH=HYBRID_SEARCH_APPROACH
+AZURE_SEARCH_USE_SEMANTIC="true"
+AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG ="semantic-config"
 
-DEFAULT_URL_SUFFIX = "search.windows.net"
 """Default URL Suffix for endpoint connection - commercial cloud"""
-
 
 class AzureAISearchRetriever(BaseRetriever):
     """`Azure AI Search` service retriever."""
@@ -61,6 +67,12 @@ class AzureAISearchRetriever(BaseRetriever):
     """Key in a retrieved result to set as the Document page_content."""
     top_k: Optional[int] = None
     """Number of results to retrieve. Set to None to retrieve all results."""
+    endpoint: Optional[str] = None
+    """Endpoint URL. If not set, it will be built based on service_name."""
+    deployment: Optional[str] = None
+    """Deployment name for the OpenAI service."""
+    azure_api_key: Optional[str] = None
+    """API Key for the OpenAI service."""
 
     class Config:
         extra = Extra.forbid
@@ -93,11 +105,9 @@ class AzureAISearchRetriever(BaseRetriever):
         ):
             base_url = f"https://{self.service_name}.{url_suffix}/"
         else:
-            # pass to Azure to throw a specific error
             base_url = self.service_name
-        endpoint_path = f"indexes/{self.index_name}/docs?api-version={self.api_version}"
-        top_param = f"&$top={self.top_k}" if self.top_k else ""
-        return base_url + endpoint_path + f"&search={query}" + top_param
+        endpoint_path = f"indexes/{self.index_name}/docs/search?api-version={self.api_version}"
+        return base_url + endpoint_path
 
     @property
     def _headers(self) -> Dict[str, str]:
@@ -105,12 +115,54 @@ class AzureAISearchRetriever(BaseRetriever):
             "Content-Type": "application/json",
             "api-key": self.api_key,
         }
+    
+    def generate_embeddings(self, text):
+        client = AzureOpenAI(
+            api_version = self.api_version,
+            azure_endpoint = self.endpoint,
+            api_key = self.azure_api_key,
+        )
+    
+        embeddings =  client.embeddings.create(input = [text], model=self.deployment).data[0].embedding
+
+        return embeddings
 
     def _search(self, query: str) -> List[dict]:
         search_url = self._build_search_url(query)
-        response = requests.get(search_url, headers=self._headers)
+
+        embeddings_query = self.generate_embeddings(query)
+
+        body = {
+            "select": "title, chunk, chunk_id, filepath",
+            "top": self.top_k
+        } 
+
+        if AZURE_SEARCH_APPROACH == TERM_SEARCH_APPROACH:
+            body["search"] = query
+        elif AZURE_SEARCH_APPROACH == VECTOR_SEARCH_APPROACH:
+            body["vectorQueries"] = [{
+                "kind": "vector",
+                "vector": embeddings_query,
+                "fields": "vector",
+                "k": int(self.top_k)
+            }]
+        elif AZURE_SEARCH_APPROACH == HYBRID_SEARCH_APPROACH:
+            body["search"] = query
+            body["vectorQueries"] = [{
+                "kind": "vector",
+                "vector": embeddings_query,
+                "fields": "vector",
+                "k": int(self.top_k)
+            }]
+
+        if AZURE_SEARCH_USE_SEMANTIC == "true" and AZURE_SEARCH_APPROACH != VECTOR_SEARCH_APPROACH:
+            body["queryType"] = "semantic"
+            body["semanticConfiguration"] = AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG
+
+        response = requests.post(search_url, headers=self._headers, json=body)
+
         if response.status_code != 200:
-            raise Exception(f"Error in search request: {response}")
+            raise Exception(f"Error in search request: {response.text}")
 
         return json.loads(response.text)["value"]
 

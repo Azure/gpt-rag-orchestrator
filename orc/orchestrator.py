@@ -66,6 +66,10 @@ BING_SEARCH_URL = os.environ.get("BING_SEARCH_URL")
 
 AZURE_STORAGE_ACCOUNT_URL = os.environ.get("AZURE_STORAGE_ACCOUNT_URL")
 
+# EMBED
+AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
+AZURE_OPENAI_API_KEY = os.environ["AZURE_OPENAI_API_KEY"]
 
 def get_credentials():
     is_local_env = os.getenv("LOCAL_ENV") == "true"
@@ -239,7 +243,9 @@ async def run(conversation_id, ask, client_principal):
             return bing_search.run(query)
 
         retriever = AzureAISearchRetriever(
-            content_key="chunk", top_k=3, api_version="2024-03-01-preview"
+            content_key="chunk", top_k=3, api_version=os.environ["AZURE_OPENAI_API_VERSION"], 
+            endpoint=AZURE_OPENAI_ENDPOINT, deployment=AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+            azure_api_key=AZURE_OPENAI_API_KEY
         )
         # Create agent tools
         home_depot_tool = create_retriever_tool(
@@ -285,7 +291,8 @@ async def run(conversation_id, ask, client_principal):
         # Define agent prompt
         system_prompt = """Your name is FreddAid, a data-driven Marketing assistant designed to help with a wide range of tasks, from answering simple questions to providing in-depth plans. Your primary role is to utilize available tools to gather the most accurate and up-to-date information before responding to any queries.
         YOU MUST FOLLOW THESE INSTRUCTIONS:
-        Always call the appropriate tool to gather information or perform tasks before providing an answer or solution."""
+        Always call the appropriate tool to gather information or perform tasks before providing an answer or solution.
+        ALWAYS ADD THE NAME OF THE SUBJECT REQUESTED TO THE TOOL QUERY."""
 
         # Create agent
         agent_executor = create_react_agent(
