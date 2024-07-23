@@ -321,7 +321,6 @@ async def get_answer(history):
                     security_hub_key=await get_secret("securityHubKey")
                 securityPlugin = await securityPluginTask
                 security_check = await kernel.invoke(securityPlugin["SecurityCheck"], sk.KernelArguments(question=ask, answer=answer, sources=sources,security_hub_key=security_hub_key))
-                logging.info(f"[code_orchest] security hub check results: {security_check.value}.")
                 check_results = security_check.value["results"]
                 check_details = security_check.value["details"]
                 # New checks based on the updated requirements

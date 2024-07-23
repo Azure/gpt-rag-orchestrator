@@ -157,31 +157,43 @@ class Retrieval:
                 'Content-Type': 'application/json',
                 'api-key': apim_key
             }
-                search_endpoint = f"{APIM_AZURE_SEARCH_URL}/docs/search?api-version={AZURE_SEARCH_API_VERSION}"
+                search_endpoint = f"{APIM_AZURE_SEARCH_URL}/docs?api-version={AZURE_SEARCH_API_VERSION}"
             else:
                 headers = {
                 'Content-Type': 'application/json',
                 'api-key': azureSearchKey
             }
                 search_endpoint = f"https://{AZURE_SEARCH_SERVICE}.search.windows.net/indexes/{AZURE_SEARCH_INDEX}/docs/search?api-version={AZURE_SEARCH_API_VERSION}"
-            logging.info(f"[sk_retrieval] search endpoint: {search_endpoint}")
             start_time = time.time()
-            
             async with aiohttp.ClientSession() as session:
-            # Make a POST request using the session.post() method
-             async with session.post(search_endpoint, headers=headers, json=body) as response:
-                status_code = response.status
-                text=await response.text()
-                json=await response.json()
-                if status_code >= 400:
-                    error_on_search = True
-                    error_message = f'Status code: {status_code}.'
-                    if text != "": error_message += f" Error: {response.text}."
-                    logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
-                else:
-                    if json['value']:
-                        for doc in json['value']:
-                            search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
+                if APIM_ENABLED:
+                    async with session.get(search_endpoint, headers=headers, json=body) as response:
+                        status_code = response.status
+                        text=await response.text()
+                        json=await response.json()
+                        if status_code >= 400:
+                            error_on_search = True
+                            error_message = f'Status code: {status_code}.'
+                            if text != "": error_message += f" Error: {response.text}."
+                            logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
+                        else:
+                            if json['value']:
+                                for doc in json['value']:
+                                    search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
+                else:                
+                    async with session.post(search_endpoint, headers=headers, json=body) as response:
+                        status_code = response.status
+                        text=await response.text()
+                        json=await response.json()
+                        if status_code >= 400:
+                            error_on_search = True
+                            error_message = f'Status code: {status_code}.'
+                            if text != "": error_message += f" Error: {response.text}."
+                            logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
+                        else:
+                            if json['value']:
+                                for doc in json['value']:
+                                    search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
 
             response_time = round(time.time() - start_time, 2)
             logging.info(f"[sk_retrieval] finished querying azure ai search. {response_time} seconds")
