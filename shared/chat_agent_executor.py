@@ -541,7 +541,7 @@ def create_react_agent(
     # Define the two nodes we will cycle between
     workflow.add_node("agent", RunnableLambda(call_model, acall_model))
     workflow.add_node("tools", ToolNode(tools))
-    workflow.add_node("citator", call_citator)
+    # workflow.add_node("citator", call_citator)
     workflow.add_node("save_documents", call_save_documents)
 
     # Set the entrypoint as `agent`
