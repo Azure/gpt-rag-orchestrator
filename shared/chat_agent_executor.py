@@ -450,23 +450,24 @@ def create_react_agent(
             }
 
         prompt = PromptTemplate(
-            template="""You are a citator tasked with adding citations to an answer based on a set of provided documents. Your goal is to accurately cite the sources of information in the answer without changing its content. Here are the documents that will be used as sources for citation:
+            template="""You are a citator tasked with adding citations to an answer based on a set of provided documents. Your goal is to accurately cite the sources of information in the answer without changing its content. Follow these instructions carefully:
+            First, review the following set of documents that will be used as sources for citation:
             {documents}
-
-            **CITATOR INSTRUCTIONS**
-            1. Below is the answer that needs to be cited:
+            Now, here is the answer that needs to be cited:
             {context}
-            2. Add citations immediately after the relevant fact or statement in the format: [/path/to/file.txt]
-            3. If a fact cannot be cited from any of the provided documents, do not add a citation.
-            4. Do not alter the source file paths provided for citations.
-            5. Do not change any of the original text in the answer, except to add citations.
-
-            Example:
-            Original text: 'The Earth orbits the Sun. It has one natural satellite.'
-            Cited version: 'The Earth orbits the Sun. [/astronomy/solar_system.txt] It has one natural satellite. [/astronomy/earth.txt]'
-
-            Once you have added all appropriate citations, provide the fully cited answer, ensuring that the original text remains unchanged except for the addition of citations.
-            """,
+            **THE CITATOR INSTRUCTIONS START HERE**
+            Your task is to scan through this answer and add citations to every fact or piece of information that can be traced back to the provided documents. Follow these guidelines:
+            1. Add citations immediately after the relevant fact or statement in the format: [/path/to/file.txt]
+            2. If a fact cannot be cited from any of the provided documents, DO NOT add a citation to it.
+            3. DO NOT alter or transform the filepath.
+            4. DO NOT change any of the original text in the answer.
+            5. DO NOT duplicate the answer.
+            **THE CITATOR INSTRUCTIONS START HERE**
+            For example, if the original text says:
+            'The Earth orbits the Sun. It has one natural satellite.'
+            And you find sources for both facts, the cited version might look like:
+            'The Earth orbits the Sun. [/astronomy/solar_system.txt] It has one natural satellite. [/astronomy/earth.txt]'
+            Once you have added all appropriate citations, provide the fully cited answer. Ensure that the original text remains unchanged except for the addition of citations.""",
             input_variables=["context", "documents"],
         )
 
