@@ -565,7 +565,7 @@ def create_react_agent(
             # If `tools`, then we call the tool node.
             "continue": "tools",
             # Otherwise we finish.
-            "end": "citator",
+            "end": END,
         },
     )
 
@@ -586,7 +586,7 @@ def create_react_agent(
 
     workflow.add_edge("save_documents", "agent")
 
-    workflow.set_finish_point("citator")
+    #workflow.set_finish_point("citator")
 
     # Finally, we compile it!
     # This compiles it into a LangChain Runnable,
