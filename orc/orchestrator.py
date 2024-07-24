@@ -294,7 +294,7 @@ async def run(conversation_id, ask, client_principal):
         1.Always call the appropriate tool to gather information or perform tasks before providing an answer or solution.
         2.Always include the subject and any relevant entities when formulating a query to provide precise and comprehensive responses.
         **CITATION INSTRUCTIONS**
-        1.Add source immediately after the relevant fact or statement in the format: [/folder/file.txt]. Add a source immediately after the relevant fact or statement for each piece of information in the answer that can be attributed to a document source. It is critical that the file path remains unchanged.
+        1.Always add source immediately after the relevant fact or statement in the format: [/folder/file.txt]. Add a source immediately after the relevant fact or statement for each piece of information in the answer that can be attributed to a document source. It is critical that the file path remains unchanged.
         2.Use the exact folder name and file name provided in the document sources for the citation, enclosed in square brackets. If multiple sources support a single statement, you may include multiple citations, separated by commas.
         """
 
