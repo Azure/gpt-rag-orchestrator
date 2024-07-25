@@ -298,8 +298,8 @@ async def run(conversation_id, ask, client_principal):
         2. Provide practical examples or applications when possible.
         3. Always call the appropriate tool to gather information or perform tasks before providing an answer or solution.
         4. Always include the subject and any relevant entities when formulating a query to provide precise and comprehensive responses.
-        5. Always add the source immediately after the relevant fact or statement for each piece of information in the answer that can be attributed to a document source.
-        6. It is critical that the file path remains unchanged.
+        5. Always add the source in the form of a citation immediately after the relevant fact or statement for each piece of information in the answer that can be attributed to a document source.
+        6. It is critical that the source's file name and folder name remain unchanged.
         7. Use the exact folder name and file name provided in the document sources for the citation, enclosed in square brackets, for example: [/folder/file.txt]
         8. If multiple sources support a single statement, you may include multiple citations, separated by commas.
         """
