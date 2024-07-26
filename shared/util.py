@@ -43,6 +43,8 @@ DB_RETRIEVAL = os.environ.get("DB_RETRIEVAL") or "true"
 DB_RETRIEVAL = True if DB_RETRIEVAL.lower() == "true" else False
 SECURITY_HUB_CHECK = os.environ.get("SECURITY_HUB_CHECK") or "false"
 SECURITY_HUB_CHECK = True if SECURITY_HUB_CHECK.lower() == "true" else False
+APIM_ENABLED = os.environ.get("APIM_ENABLED") or "false"
+APIM_ENABLED = True if APIM_ENABLED.lower() == "true" else False
 
 model_max_tokens = {
     'gpt-35-turbo': 4096,
@@ -149,7 +151,7 @@ async def call_semantic_function(kernel, function, arguments):
     return function_result
 
 @retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(6), reraise=True)
-async def chat_complete(messages, functions, function_call='auto'):
+async def chat_complete(messages, functions, function_call='auto',apim_key=None):
     """  Return assistant chat response based on user query. Assumes existing list of messages """
 
     oai_config = await get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
@@ -157,12 +159,16 @@ async def chat_complete(messages, functions, function_call='auto'):
     messages = optmize_messages(messages, AZURE_OPENAI_CHATGPT_MODEL)
 
     url = f"{oai_config['endpoint']}/openai/deployments/{oai_config['deployment']}/chat/completions?api-version={oai_config['api_version']}"
-
-    headers = {
-        "Content-Type": "application/json",
-        # "api-key": oai_config['api_key']
-        "Authorization": "Bearer "+ oai_config['api_key'] 
-    }
+    if(APIM_ENABLED):
+        headers = {
+            "Content-Type": "application/json",
+            "api-key": apim_key
+        }
+    else:   
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer "+ oai_config['api_key'] 
+        }
 
     data = {
         "messages": messages,
@@ -299,18 +305,29 @@ def load_sk_plugin(name, oai_config):
     plugin.update(native_functions)
     return plugin
 
-async def create_kernel(service_id='aoai_chat_completion'):
+async def create_kernel(service_id='aoai_chat_completion',apim_key=None):
     kernel = sk.Kernel()
     chatgpt_config =await get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
-    kernel.add_service(
-        AzureChatCompletion(
-            service_id=service_id,
-            deployment_name=chatgpt_config['deployment'],
-            endpoint=chatgpt_config['endpoint'],
-            api_version=chatgpt_config['api_version'],
-            ad_token= chatgpt_config['api_key']
+    if APIM_ENABLED:
+        kernel.add_service(
+            AzureChatCompletion(
+                service_id=service_id,
+                deployment_name=chatgpt_config['deployment'],
+                endpoint=chatgpt_config['endpoint'],
+                api_version=chatgpt_config['api_version'],
+                api_key=apim_key
+            )
         )
-    )
+    else:
+        kernel.add_service(
+            AzureChatCompletion(
+                service_id=service_id,
+                deployment_name=chatgpt_config['deployment'],
+                endpoint=chatgpt_config['endpoint'],
+                api_version=chatgpt_config['api_version'],
+                ad_token=chatgpt_config['api_key']
+            )
+        )
     return kernel
 
 def get_usage_tokens(function_result, token_type='total'):
@@ -334,26 +351,38 @@ def get_list_from_string(string):
     return result
 
 async def get_aoai_config(model):
-    resource = await get_next_resource(model)
-    
-    async with AsyncDefaultAzureCredential() as credential:
-        token = await credential.get_token("https://cognitiveservices.azure.com/.default")
-
+    if APIM_ENABLED:
         if model in ('gpt-35-turbo', 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k','gpt-4o'):
             deployment = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT") or "gpt-4o"
         elif model == AZURE_OPENAI_EMBEDDING_MODEL:
             deployment = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
         else:
             raise Exception(f"Model {model} not supported. Check if you have the correct env variables set.")
-
         result = {
-            "resource": resource,
-            "endpoint": f"https://{resource}.openai.azure.com",
+            "endpoint": os.environ.get("APIM_AZURE_OPENAI_ENDPOINT"),
             "deployment": deployment,
             "model": model,  # ex: 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k', 'gpt-4o'
             "api_version": os.environ.get("AZURE_OPENAI_API_VERSION") or "2024-03-01-preview",
-            "api_key": token.token
         }
+    else:
+        resource = await get_next_resource(model)
+        async with AsyncDefaultAzureCredential() as credential:
+            token = await credential.get_token("https://cognitiveservices.azure.com/.default")
+
+            if model in ('gpt-35-turbo', 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k','gpt-4o'):
+                deployment = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT") or "gpt-4o"
+            elif model == AZURE_OPENAI_EMBEDDING_MODEL:
+                deployment = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
+            else:
+                raise Exception(f"Model {model} not supported. Check if you have the correct env variables set.")
+            result = {
+                "resource": resource,
+                "endpoint": f"https://{resource}.openai.azure.com",
+                "deployment": deployment,
+                "model": model,  # ex: 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k', 'gpt-4o'
+                "api_version": os.environ.get("AZURE_OPENAI_API_VERSION") or "2024-03-01-preview",
+                "api_key": token.token
+            }
 
     return result
 

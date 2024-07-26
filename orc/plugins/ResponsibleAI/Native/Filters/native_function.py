@@ -22,10 +22,12 @@ class Filters:
     )
     async def ContentFliterValidator(
         self,
-        input: Annotated[str, "The user question"]
+        input: Annotated[str, "The user question"],
+        apim_key: Annotated[str, "The key to access the Azure OpenAI model"]
     ) -> Annotated[str, "the output is a string with the filter results"]:
         filter_results = []
         user_question = input
+        error_message=""
         
         try:
             logging.info(f"[sk_native_filters] querying azure openai on content filtering. user question: {user_question}")
@@ -41,7 +43,7 @@ class Filters:
                 ]
             
             start_time = time.time()
-            response =  await chat_complete(messages, functions, 'none')
+            response =  await chat_complete(messages, functions, 'none',apim_key=apim_key)
             
             if 'error' in response:
                 # Using .get() to avoid KeyError if 'error', 'status', or 'code' keys are missing

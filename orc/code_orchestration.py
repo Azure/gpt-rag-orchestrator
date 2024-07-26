@@ -7,8 +7,8 @@ import time
 from orc.plugins.Conversation.Triage.wrapper import triage
 from orc.plugins.ResponsibleAI.wrapper import fairness
 from semantic_kernel.functions.kernel_arguments import KernelArguments
-from shared.util import call_semantic_function, get_chat_history_as_messages, get_message, get_last_messages
-from shared.util import get_blocked_list, create_kernel, get_usage_tokens, escape_xml_characters
+from shared.util import call_semantic_function, get_chat_history_as_messages, get_message, get_last_messages,get_possitive_int_or_default
+from shared.util import get_blocked_list, create_kernel, get_usage_tokens, escape_xml_characters,get_secret
 import asyncio
 
 # logging level
@@ -42,9 +42,13 @@ BING_RETRIEVAL = True if BING_RETRIEVAL.lower() == "true" else False
 SEARCH_RETRIEVAL = os.environ.get("SEARCH_RETRIEVAL") or "true"
 SEARCH_RETRIEVAL = True if SEARCH_RETRIEVAL.lower() == "true" else False
 RETRIEVAL_PRIORITY = os.environ.get("RETRIEVAL_PRIORITY") or "search"
-DB_RETRIEVAL = os.environ.get("DB_RETRIEVAL") or "true"
+DB_RETRIEVAL = os.environ.get("DB_RETRIEVAL") or "false"
 DB_RETRIEVAL = True if DB_RETRIEVAL.lower() == "true" else False
 SEVERITY_THRESHOLD = os.environ.get("SEVERITY_THRESHOLD") or 3
+APIM_ENABLED = os.environ.get("APIM_ENABLED") or "false"
+APIM_ENABLED = True if APIM_ENABLED.lower() == "true" else False
+if SECURITY_HUB_CHECK:
+    SECURITY_HUB_THRESHOLDS=[get_possitive_int_or_default(os.environ.get("SECURITY_HUB_HATE_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SELFHARM_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SEXUAL_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_VIOLENCE_THRESHHOLD"), 0)]
 
 async def get_answer(history):
 
@@ -72,7 +76,9 @@ async def get_answer(history):
     answer_generated_by = "none"
     prompt_tokens = 0
     completion_tokens = 0
-    
+    apim_key=None
+    if APIM_ENABLED:
+        apim_key = await get_secret("apimSubscriptionKey")
     # get user question
     messages = get_chat_history_as_messages(history, include_last_turn=True)
     ask = messages[-1]['content']
@@ -80,7 +86,7 @@ async def get_answer(history):
     logging.info(f"[code_orchest] starting RAG flow. {ask[:50]}")
     init_time = time.time()
     # create kernel
-    kernel = await create_kernel()
+    kernel = await create_kernel(apim_key=apim_key)
     # create the arguments that will used by semantic functions
     arguments = KernelArguments()
     arguments["bot_description"] = bot_description
@@ -100,7 +106,7 @@ async def get_answer(history):
     # GUARDRAILS (QUESTION)
     #############################
     raiNativePlugin= await raiNativePluginTask
-    filterResult = await kernel.invoke(raiNativePlugin["ContentFliterValidator"], sk.KernelArguments(input=ask))
+    filterResult = await kernel.invoke(raiNativePlugin["ContentFliterValidator"], sk.KernelArguments(input=ask,apim_key=apim_key))
     if not ('PASSED' in filterResult.value):
         logging.info(f"[code_orchest] filtered content found in question: {ask}.")
         answer = get_message('BLOCKED_ANSWER')
@@ -183,14 +189,19 @@ async def get_answer(history):
                 #run search retrieval function
                 retrievalPlugin= await retrievalPluginTask
                 if(SEARCH_RETRIEVAL):
-                    search_function_result = await kernel.invoke(retrievalPlugin["VectorIndexRetrieval"], sk.KernelArguments(input=search_query))
+                    search_function_result = await kernel.invoke(retrievalPlugin["VectorIndexRetrieval"], sk.KernelArguments(input=search_query,apim_key=apim_key))
                     formatted_sources = search_function_result.value[:100].replace('\n', ' ')
                     escaped_sources = escape_xml_characters(search_function_result.value)
                     search_sources=escaped_sources
                     
                 #run bing retrieval function
                 if(BING_RETRIEVAL):
-                    bing_function_result= await kernel.invoke(retrievalPlugin["BingRetrieval"], sk.KernelArguments(input=search_query))
+                    if APIM_ENABLED:
+                        bing_api_key=apim_key
+                    else:
+                        bing_api_key=await get_secret("bingapikey")
+                    bing_custom_config_id=await get_secret("bingCustomConfigID")
+                    bing_function_result= await kernel.invoke(retrievalPlugin["BingRetrieval"], sk.KernelArguments(input=search_query, bing_api_key=bing_api_key, bing_custom_config_id=bing_custom_config_id))
                     formatted_sources = bing_function_result.value[:100].replace('\n', ' ')
                     escaped_sources = escape_xml_characters(bing_function_result.value)
                     bing_sources=escaped_sources
@@ -306,14 +317,25 @@ async def get_answer(history):
                 logging.info(f"[code_orchest] checking answer with security hub. answer: {answer[:50]}")
                 start_time = time.time()
                 arguments["answer"] = answer
+                if(APIM_ENABLED):
+                    security_hub_key=apim_key
+                else:
+                    security_hub_key=await get_secret("securityHubKey")
                 securityPlugin = await securityPluginTask
-                security_check = await kernel.invoke(securityPlugin["SecurityCheck"], sk.KernelArguments(question=ask, answer=answer, sources=sources))
-                logging.info(f"[code_orchest] security hub check results: {security_check.value}.")
+                security_check = await kernel.invoke(securityPlugin["SecurityCheck"], sk.KernelArguments(question=ask, answer=answer, sources=sources,security_hub_key=security_hub_key))
                 check_results = security_check.value["results"]
                 check_details = security_check.value["details"]
                 # New checks based on the updated requirements
-                all_passed = all(status == "Passed" for status in check_results.values())                
-                all_below_threshold = all(category["severity"] < SEVERITY_THRESHOLD for category in check_details.get("categoriesAnalysis", []))
+                all_passed = True
+                for name, status in check_results.items():
+                    if status.lower() != "passed":
+                        if name!="groundedness":
+                            all_passed = False
+                            break
+                        elif check_details.get("groundedness", {}).get("ungroundedPercentage", 1) > float(os.environ.get("SECURITY_HUB_UNGROUNDED_PERCENTAGE_THRESHHOLD",0)):
+                            all_passed = False
+                            break
+                all_below_threshold = all(category["severity"] <= SECURITY_HUB_THRESHOLDS[index] for index,category in check_details.get("categoriesAnalysis", []))
                 any_blocklists_match = len(check_details.get("blocklistsMatch", [])) > 0
                 if not all_passed or not all_below_threshold or any_blocklists_match:
                     logging.error(f"[code_orchest] failed security hub checks. Details: {check_details}.")
