@@ -7,7 +7,7 @@ import time
 from orc.plugins.Conversation.Triage.wrapper import triage
 from orc.plugins.ResponsibleAI.wrapper import fairness
 from semantic_kernel.functions.kernel_arguments import KernelArguments
-from shared.util import call_semantic_function, get_chat_history_as_messages, get_message, get_last_messages
+from shared.util import call_semantic_function, get_chat_history_as_messages, get_message, get_last_messages,get_possitive_int_or_default
 from shared.util import get_blocked_list, create_kernel, get_usage_tokens, escape_xml_characters,get_secret
 import asyncio
 
@@ -42,11 +42,13 @@ BING_RETRIEVAL = True if BING_RETRIEVAL.lower() == "true" else False
 SEARCH_RETRIEVAL = os.environ.get("SEARCH_RETRIEVAL") or "true"
 SEARCH_RETRIEVAL = True if SEARCH_RETRIEVAL.lower() == "true" else False
 RETRIEVAL_PRIORITY = os.environ.get("RETRIEVAL_PRIORITY") or "search"
-DB_RETRIEVAL = os.environ.get("DB_RETRIEVAL") or "true"
+DB_RETRIEVAL = os.environ.get("DB_RETRIEVAL") or "false"
 DB_RETRIEVAL = True if DB_RETRIEVAL.lower() == "true" else False
 SEVERITY_THRESHOLD = os.environ.get("SEVERITY_THRESHOLD") or 3
 APIM_ENABLED = os.environ.get("APIM_ENABLED") or "false"
 APIM_ENABLED = True if APIM_ENABLED.lower() == "true" else False
+if SECURITY_HUB_CHECK:
+    SECURITY_HUB_THRESHOLDS=[get_possitive_int_or_default(os.environ.get("SECURITY_HUB_HATE_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SELFHARM_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SEXUAL_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_VIOLENCE_THRESHHOLD"), 0)]
 
 async def get_answer(history):
 
@@ -324,8 +326,16 @@ async def get_answer(history):
                 check_results = security_check.value["results"]
                 check_details = security_check.value["details"]
                 # New checks based on the updated requirements
-                all_passed = all(status == "Passed" for status in check_results.values())                
-                all_below_threshold = all(category["severity"] < SEVERITY_THRESHOLD for category in check_details.get("categoriesAnalysis", []))
+                all_passed = True
+                for name, status in check_results.items():
+                    if status.lower() != "passed":
+                        if name!="groundedness":
+                            all_passed = False
+                            break
+                        elif check_details.get("groundedness", {}).get("ungroundedPercentage", 1) > float(os.environ.get("SECURITY_HUB_UNGROUNDED_PERCENTAGE_THRESHHOLD",0)):
+                            all_passed = False
+                            break
+                all_below_threshold = all(category["severity"] <= SECURITY_HUB_THRESHOLDS[index] for index,category in check_details.get("categoriesAnalysis", []))
                 any_blocklists_match = len(check_details.get("blocklistsMatch", [])) > 0
                 if not all_passed or not all_below_threshold or any_blocklists_match:
                     logging.error(f"[code_orchest] failed security hub checks. Details: {check_details}.")
