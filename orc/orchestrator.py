@@ -34,6 +34,9 @@ from shared.tools import AzureAISearchRetriever
 from langchain.tools.retriever import create_retriever_tool
 import tiktoken
 
+import pandas as pd
+from langchain_experimental.agents import create_pandas_dataframe_agent
+
 
 # logging level
 logging.getLogger("azure").setLevel(logging.WARNING)
@@ -94,9 +97,44 @@ def get_settings(client_principal):
     return settings
 
 
-async def run(conversation_id, ask, client_principal):
+def csv_execute(model, url, ask):
+    logging.info(f"[orchestrator] csv_tool query: {ask} file: {url}")
+    try:
+        df = pd.read_csv(url)
+
+        pandas_agent = create_pandas_dataframe_agent(
+            llm=model,
+            df=df,
+            verbose=False,
+            agent_type="tool-calling",
+            allow_dangerous_code=True,
+        )
+        response = pandas_agent.invoke(ask)
+
+        logging.info(
+            f"[orchestrator] PANDAS response: {response}"
+        )
+
+        return {
+            "messages": [
+                AIMessage(
+                    content=response["output"],
+                )
+            ]
+        }
+    except Exception as e:      
+        response = {
+            "answer": f"Your query cannot be answered, please be more specific, or ask a different question.",
+            "error": str(e),
+            "question": ask,
+        }
+        return response       
+
+
+async def run(conversation_id, ask, url, client_principal):
     try:
         start_time = time.time()
+        is_csv_answer = url != ""
 
         # settings
         settings = get_settings(client_principal)
@@ -221,8 +259,8 @@ async def run(conversation_id, ask, client_principal):
                     logging.info(f"[orchestrator] content summarized to avoid token limit.")
                     break
                 
-            for element in memory_messages:
-                logging.error(f"{element}, {type(element)}")
+            # for element in memory_messages:
+            #     logging.error(f"{element}, {type(element)}")
             logging.info(f"[orchestrator] total conversation tokens {actual_tokens}")
             memory.put(config=json_data[0], checkpoint=cut_memory, metadata=json_data[2])
 
@@ -314,16 +352,29 @@ async def run(conversation_id, ask, client_principal):
         # 1) get answer from agent
         try:
             with get_openai_callback() as cb:
-                response = agent_executor.invoke(
-                    {"messages": [HumanMessage(content=ask)]},
-                    config,
-                )
-                regex = rf'(Source:\s?\/?)?(source:)?(https:\/\/)?({AZURE_STORAGE_ACCOUNT_URL})?(\/?documents\/?)?'
-                response["messages"][-1].content = re.sub(regex, '', response["messages"][-1].content)
-            logging.info(
-                f"[orchestrator] {conversation_id} agent response: {response['messages'][-1].content[:50]}"
-            )
+                if is_csv_answer:
+                    response = csv_execute(model, url, ask)
+                    logging.info(
+                        f"[orchestrator] {conversation_id} response: {response}"
+                    )
+                    if "error" in response:
+                        return {
+                            "conversation_id": conversation_id,
+                            "answer": response["answer"],
+                            "thoughts": ask,
+                        }
+                else:
+                    response = agent_executor.invoke(
+                        {"messages": [HumanMessage(content=ask)]},
+                        config,
+                    )
+                    regex = rf'(Source:\s?\/?)?(source:)?(https:\/\/)?({AZURE_STORAGE_ACCOUNT_URL})?(\/?documents\/?)?'
+                    response["messages"][-1].content = re.sub(regex, '', response["messages"][-1].content)
+                    logging.info(
+                        f"[orchestrator] {conversation_id} agent response: {response['messages'][-1].content[:50]}"
+                    )
         except Exception as e:
+            logging.error(f"[orchestrator] error: {e.__class__.__name__}")
             logging.error(f"[orchestrator] {conversation_id} error: {str(e)}")
             store_agent_error(client_principal["id"], str(e), ask)
             response = {
@@ -355,8 +406,13 @@ async def run(conversation_id, ask, client_principal):
                                 thought.append(
                                     f"Tool name: {name} > Query sent: {cleaned_text}"
                                 )
-        if(thought == []):
+
+        if is_csv_answer:
+            thought.append(f"CSV process > Query sent: {ask}")
+
+        if len(thought) == 0:
             thought.append(f"Tool name: agent_memory > Query sent: {ask}")
+
         history.append(
             {
                 "role": "assistant",

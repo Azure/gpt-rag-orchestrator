@@ -15,6 +15,7 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
     question = req_body.get('question')
     client_principal_id = req_body.get('client_principal_id')
     client_principal_name = req_body.get('client_principal_name') 
+    url = req_body.get('url', '')
     if not client_principal_id or client_principal_id == '':
         client_principal_id = '00000000-0000-0000-0000-000000000000'
         client_principal_name = 'anonymous'    
@@ -24,7 +25,7 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
     }
 
     if question:
-        result = await orchestrator.run(conversation_id, question, client_principal)
+        result = await orchestrator.run(conversation_id, question, url, client_principal)
 
         return func.HttpResponse(json.dumps(result), mimetype="application/json", status_code=200)
     else:
