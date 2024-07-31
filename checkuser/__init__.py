@@ -9,6 +9,7 @@ logging.basicConfig(level=LOGLEVEL)
 
 
 async def main(req: func.HttpRequest) -> func.HttpResponse:
+    #todo rename function and endpoint to match rest api endpoint naming conventions
     logging.info("Python HTTP trigger function processed a request.")
 
     if req.method == "GET":
