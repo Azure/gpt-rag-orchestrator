@@ -713,6 +713,32 @@ def get_users():
         logging.info(f"[get_users] get_users: no users found (keyvalue store with 'users' id does not exist).")
     return users
 
+def get_user(user_id):
+    if not user_id:
+        return { "error": "User ID not found." }
+    
+    logging.info("User ID found. Getting data for user: " + user_id)
+
+    user = {}
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level='Session')
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client('users')
+    try:
+        query = "SELECT * FROM c WHERE c.id = @user_id"
+        parameters = [
+            {"name": "@user_id", "value": user_id}
+        ]
+        result = list(container.query_items(
+            query=query,
+            parameters=parameters,
+            enable_cross_partition_query=True
+        ))
+        if result:
+            user = result[0]
+    except Exception as e:
+        logging.info(f"[get_user] get_user: something went wrong. {str(e)}")
+    return user
 
 # Get user data from the database
 def get_set_user(client_principal):
