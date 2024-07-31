@@ -2,16 +2,23 @@ import logging
 import azure.functions as func
 import json
 import os
-from shared.util import get_set_user, get_users
+from shared.util import get_set_user, get_users, get_user
 
 LOGLEVEL = os.environ.get("LOGLEVEL", "DEBUG").upper()
 logging.basicConfig(level=LOGLEVEL)
 
 
 async def main(req: func.HttpRequest) -> func.HttpResponse:
+    #todo rename function and endpoint to match rest api endpoint naming conventions
     logging.info("Python HTTP trigger function processed a request.")
 
     if req.method == "GET":
+        user_id = req.params.get("id")
+        if user_id:
+            user = get_user(user_id)
+            return func.HttpResponse(
+                json.dumps(user), mimetype="application/json", status_code=200
+            )
         users = get_users()
         return func.HttpResponse(
             json.dumps(users), mimetype="application/json", status_code=200
