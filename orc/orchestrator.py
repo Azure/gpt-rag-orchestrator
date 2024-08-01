@@ -195,7 +195,7 @@ async def run(conversation_id, ask, url, client_principal):
                         message.content = message.content = ""
             for message in memory_messages:
                 actual_tokens += len(encoding.encode(message.content))
-                if actual_tokens > 6000:
+                if actual_tokens > 5000:
                     logging.info(f"[orchestrator] tokens limit reached. generate summary.")
                     history = ChatMessageHistory()
                     content_to_add = None
