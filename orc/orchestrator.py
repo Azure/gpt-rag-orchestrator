@@ -359,6 +359,7 @@ async def run(conversation_id, ask, url, client_principal):
                             "conversation_id": conversation_id,
                             "answer": response["answer"],
                             "thoughts": ask,
+                            "error": response["error"]
                         }
                 else:
                     response = agent_executor.invoke(
