@@ -100,7 +100,7 @@ def get_settings(client_principal):
 def csv_execute(model, url, ask):
     logging.info(f"[orchestrator] csv_tool query: {ask} file: {url}")
     try:
-        df = pd.read_csv(url, encoding='latin-1')
+        df = pd.read_csv(url, encoding='latin-1', on_bad_lines='skip')
 
         pandas_agent = create_pandas_dataframe_agent(
             llm=model,
