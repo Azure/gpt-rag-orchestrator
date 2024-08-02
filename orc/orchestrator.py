@@ -16,7 +16,8 @@ from shared.cosmos_db import (
 
 from langchain_community.callbacks import get_openai_callback
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from langchain.memory import ConversationSummaryMemory, ChatMessageHistory
+from langchain.memory import ConversationSummaryMemory
+from langchain_community.chat_message_histories import ChatMessageHistory
 
 from langchain_openai import AzureChatOpenAI
 
@@ -34,9 +35,8 @@ from shared.tools import AzureAISearchRetriever
 from langchain.tools.retriever import create_retriever_tool
 import tiktoken
 
-import pandas as pd
-from langchain_experimental.agents import create_pandas_dataframe_agent
-
+from langchain_experimental.agents.agent_toolkits import create_csv_agent
+from langchain.agents.agent_types import AgentType
 
 # logging level
 logging.getLogger("azure").setLevel(logging.WARNING)
@@ -100,16 +100,15 @@ def get_settings(client_principal):
 def csv_execute(model, url, ask):
     logging.info(f"[orchestrator] csv_tool query: {ask} file: {url}")
     try:
-        df = pd.read_csv(url, encoding='latin-1', on_bad_lines='skip')
-
-        pandas_agent = create_pandas_dataframe_agent(
-            llm=model,
-            df=df,
+        agent = create_csv_agent(
+            model,
+            url,
             verbose=False,
-            agent_type="tool-calling",
-            allow_dangerous_code=True,
+            agent_type=AgentType.OPENAI_FUNCTIONS,
+            allow_dangerous_code=True
         )
-        response = pandas_agent.invoke(ask)
+
+        response = agent.invoke(ask)
 
         logging.info(
             f"[orchestrator] PANDAS response: {response}"
@@ -183,86 +182,87 @@ async def run(conversation_id, ask, url, client_principal):
             decoded_data = base64.b64decode(memory_data_string)
             json_data = memory.serde.loads(decoded_data)
 
-            cut_memory = json_data[1]
-            memory_messages = cut_memory["channel_values"]["messages"]
-            actual_tokens = 0
-            encoding = tiktoken.encoding_for_model(AZURE_OPENAI_CHATGPT_MODEL)
-            logging.info(f"[orchestrator] checking memory for long tool messages.")
-            for message in memory_messages:
-                if isinstance(message, ToolMessage):
-                    if len(message.content) > 20:
-                        logging.info(f"[orchestrator] cleaning memory long tool messages.")
-                        message.content = message.content = ""
-            for message in memory_messages:
-                actual_tokens += len(encoding.encode(message.content))
-                if actual_tokens > 5000:
-                    logging.info(f"[orchestrator] tokens limit reached. generate summary.")
-                    history = ChatMessageHistory()
-                    content_to_add = None
-                    if memory_messages[0].content == "Give me a summary of prior messages:":
-                        logging.info(f"[orchestrator] summary item found in memory")
-                        summary_request = memory_messages.pop(0)
-                        summary = memory_messages.pop(0)
-                        question_to_add = memory_messages.pop(0)
-                        
-                        is_ai_response = False
-                        while not is_ai_response:
-                            element = memory_messages.pop(0)
-                            if (
-                            not isinstance(element, ToolMessage) and
-                            isinstance(element, AIMessage)
-                            and hasattr(element, "additional_kwargs")
-                            and not element.additional_kwargs.get("tool_calls")
-                            ):
-                                content_to_add = element
-                                is_ai_response = True
-                        history.add_user_message(question_to_add.content)
-                        history.add_ai_message(content_to_add.content)
-                        summary_memory = ConversationSummaryMemory(llm=model)
-                        memory_messages.insert(0, summary_request)
-                        memory_messages.insert(
-                            1,
-                            AIMessage(
-                                summary_memory.predict_new_summary(
-                                    history.messages, summary.content
-                                )
-                            ),
-                        )
+            if json_data:
+                cut_memory = json_data[1]
+                memory_messages = cut_memory["channel_values"]["messages"]
+                actual_tokens = 0
+                encoding = tiktoken.encoding_for_model(AZURE_OPENAI_CHATGPT_MODEL)
+                logging.info(f"[orchestrator] checking memory for long tool messages.")
+                for message in memory_messages:
+                    if isinstance(message, ToolMessage):
+                        if len(message.content) > 20:
+                            logging.info(f"[orchestrator] cleaning memory long tool messages.")
+                            message.content = message.content = ""
+                for message in memory_messages:
+                    actual_tokens += len(encoding.encode(message.content))
+                    if actual_tokens > 5000:
+                        logging.info(f"[orchestrator] tokens limit reached. generate summary.")
+                        history = ChatMessageHistory()
+                        content_to_add = None
+                        if memory_messages[0].content == "Give me a summary of prior messages:":
+                            logging.info(f"[orchestrator] summary item found in memory")
+                            summary_request = memory_messages.pop(0)
+                            summary = memory_messages.pop(0)
+                            question_to_add = memory_messages.pop(0)
+                            
+                            is_ai_response = False
+                            while not is_ai_response:
+                                element = memory_messages.pop(0)
+                                if (
+                                not isinstance(element, ToolMessage) and
+                                isinstance(element, AIMessage)
+                                and hasattr(element, "additional_kwargs")
+                                and not element.additional_kwargs.get("tool_calls")
+                                ):
+                                    content_to_add = element
+                                    is_ai_response = True
+                            history.add_user_message(question_to_add.content)
+                            history.add_ai_message(content_to_add.content)
+                            summary_memory = ConversationSummaryMemory(llm=model)
+                            memory_messages.insert(0, summary_request)
+                            memory_messages.insert(
+                                1,
+                                AIMessage(
+                                    summary_memory.predict_new_summary(
+                                        history.messages, summary.content
+                                    )
+                                ),
+                            )
 
-                    else:
-                        logging.info(f"[orchestrator] no summary item, generating summary")
-                        message_to_add = memory_messages.pop(0)
-                        is_ai_response = False
-                        while not is_ai_response:
-                            element = memory_messages.pop(0)
-                            if (
-                            not isinstance(element, ToolMessage) and
-                            isinstance(element, AIMessage)
-                            and hasattr(element, "additional_kwargs")
-                            and not element.additional_kwargs.get("tool_calls")
-                            ):
-                                content_to_add = element
-                                is_ai_response = True
+                        else:
+                            logging.info(f"[orchestrator] no summary item, generating summary")
+                            message_to_add = memory_messages.pop(0)
+                            is_ai_response = False
+                            while not is_ai_response:
+                                element = memory_messages.pop(0)
+                                if (
+                                not isinstance(element, ToolMessage) and
+                                isinstance(element, AIMessage)
+                                and hasattr(element, "additional_kwargs")
+                                and not element.additional_kwargs.get("tool_calls")
+                                ):
+                                    content_to_add = element
+                                    is_ai_response = True
 
-                        history.add_user_message(message_to_add.content)
-                        history.add_ai_message(content_to_add.content)
-                        summary_memory = ConversationSummaryMemory.from_messages(
-                            llm=model, chat_memory=history
-                        )
-                        summary_mesages = [
-                            HumanMessage("Give me a summary of prior messages:"),
-                            AIMessage(summary_memory.buffer),
-                        ]
-                        memory_messages = summary_mesages + memory_messages
+                            history.add_user_message(message_to_add.content)
+                            history.add_ai_message(content_to_add.content)
+                            summary_memory = ConversationSummaryMemory.from_messages(
+                                llm=model, chat_memory=history
+                            )
+                            summary_mesages = [
+                                HumanMessage("Give me a summary of prior messages:"),
+                                AIMessage(summary_memory.buffer),
+                            ]
+                            memory_messages = summary_mesages + memory_messages
 
-                    cut_memory["channel_values"]["messages"] = memory_messages
-                    logging.info(f"[orchestrator] content summarized to avoid token limit.")
-                    break
+                        cut_memory["channel_values"]["messages"] = memory_messages
+                        logging.info(f"[orchestrator] content summarized to avoid token limit.")
+                        break
                 
-            # for element in memory_messages:
-            #     logging.error(f"{element}, {type(element)}")
-            logging.info(f"[orchestrator] total conversation tokens {actual_tokens}")
-            memory.put(config=json_data[0], checkpoint=cut_memory, metadata=json_data[2])
+                # for element in memory_messages:
+                #     logging.error(f"{element}, {type(element)}")
+                logging.info(f"[orchestrator] total conversation tokens {actual_tokens}")
+                memory.put(config=json_data[0], checkpoint=cut_memory, metadata=json_data[2])
 
         # Define built-in tools
 
