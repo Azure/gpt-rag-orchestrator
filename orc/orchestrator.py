@@ -24,6 +24,7 @@ from langchain_openai import AzureChatOpenAI
 from langchain.chains import LLMMathChain
 
 from shared.chat_agent_executor import create_react_agent
+
 # from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -74,6 +75,7 @@ AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
 AZURE_OPENAI_API_KEY = os.environ["AZURE_OPENAI_API_KEY"]
 
+
 def get_credentials():
     is_local_env = os.getenv("LOCAL_ENV") == "true"
     # return DefaultAzureCredential(exclude_managed_identity_credential=is_local_env, exclude_environment_credential=is_local_env)
@@ -105,14 +107,12 @@ def csv_execute(model, url, ask):
             url,
             verbose=False,
             agent_type=AgentType.OPENAI_FUNCTIONS,
-            allow_dangerous_code=True
+            allow_dangerous_code=True,
         )
 
         response = agent.invoke(ask)
 
-        logging.info(
-            f"[orchestrator] PANDAS response: {response}"
-        )
+        logging.info(f"[orchestrator] PANDAS response: {response}")
 
         return {
             "messages": [
@@ -121,13 +121,13 @@ def csv_execute(model, url, ask):
                 )
             ]
         }
-    except Exception as e:      
+    except Exception as e:
         response = {
             "answer": f"Your query cannot be answered, please be more specific, or ask a different question.",
             "error": str(e),
             "question": ask,
         }
-        return response       
+        return response
 
 
 async def run(conversation_id, ask, url, client_principal):
@@ -191,28 +191,35 @@ async def run(conversation_id, ask, url, client_principal):
                 for message in memory_messages:
                     if isinstance(message, ToolMessage):
                         if len(message.content) > 20:
-                            logging.info(f"[orchestrator] cleaning memory long tool messages.")
+                            logging.info(
+                                f"[orchestrator] cleaning memory long tool messages."
+                            )
                             message.content = message.content = ""
                 for message in memory_messages:
                     actual_tokens += len(encoding.encode(message.content))
                     if actual_tokens > 5000:
-                        logging.info(f"[orchestrator] tokens limit reached. generate summary.")
+                        logging.info(
+                            f"[orchestrator] tokens limit reached. generate summary."
+                        )
                         history = ChatMessageHistory()
                         content_to_add = None
-                        if memory_messages[0].content == "Give me a summary of prior messages:":
+                        if (
+                            memory_messages[0].content
+                            == "Give me a summary of prior messages:"
+                        ):
                             logging.info(f"[orchestrator] summary item found in memory")
                             summary_request = memory_messages.pop(0)
                             summary = memory_messages.pop(0)
                             question_to_add = memory_messages.pop(0)
-                            
+
                             is_ai_response = False
                             while not is_ai_response:
                                 element = memory_messages.pop(0)
                                 if (
-                                not isinstance(element, ToolMessage) and
-                                isinstance(element, AIMessage)
-                                and hasattr(element, "additional_kwargs")
-                                and not element.additional_kwargs.get("tool_calls")
+                                    not isinstance(element, ToolMessage)
+                                    and isinstance(element, AIMessage)
+                                    and hasattr(element, "additional_kwargs")
+                                    and not element.additional_kwargs.get("tool_calls")
                                 ):
                                     content_to_add = element
                                     is_ai_response = True
@@ -230,16 +237,18 @@ async def run(conversation_id, ask, url, client_principal):
                             )
 
                         else:
-                            logging.info(f"[orchestrator] no summary item, generating summary")
+                            logging.info(
+                                f"[orchestrator] no summary item, generating summary"
+                            )
                             message_to_add = memory_messages.pop(0)
                             is_ai_response = False
                             while not is_ai_response:
                                 element = memory_messages.pop(0)
                                 if (
-                                not isinstance(element, ToolMessage) and
-                                isinstance(element, AIMessage)
-                                and hasattr(element, "additional_kwargs")
-                                and not element.additional_kwargs.get("tool_calls")
+                                    not isinstance(element, ToolMessage)
+                                    and isinstance(element, AIMessage)
+                                    and hasattr(element, "additional_kwargs")
+                                    and not element.additional_kwargs.get("tool_calls")
                                 ):
                                     content_to_add = element
                                     is_ai_response = True
@@ -256,13 +265,19 @@ async def run(conversation_id, ask, url, client_principal):
                             memory_messages = summary_mesages + memory_messages
 
                         cut_memory["channel_values"]["messages"] = memory_messages
-                        logging.info(f"[orchestrator] content summarized to avoid token limit.")
+                        logging.info(
+                            f"[orchestrator] content summarized to avoid token limit."
+                        )
                         break
-                
+
                 # for element in memory_messages:
                 #     logging.error(f"{element}, {type(element)}")
-                logging.info(f"[orchestrator] total conversation tokens {actual_tokens}")
-                memory.put(config=json_data[0], checkpoint=cut_memory, metadata=json_data[2])
+                logging.info(
+                    f"[orchestrator] total conversation tokens {actual_tokens}"
+                )
+                memory.put(
+                    config=json_data[0], checkpoint=cut_memory, metadata=json_data[2]
+                )
 
         # Define built-in tools
 
@@ -281,9 +296,12 @@ async def run(conversation_id, ask, url, client_principal):
             return bing_search.run(query)
 
         retriever = AzureAISearchRetriever(
-            content_key="chunk", top_k=3, api_version=os.environ["AZURE_OPENAI_API_VERSION"], 
-            endpoint=AZURE_OPENAI_ENDPOINT, deployment=AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
-            azure_api_key=AZURE_OPENAI_API_KEY
+            content_key="chunk",
+            top_k=3,
+            api_version=os.environ["AZURE_OPENAI_API_VERSION"],
+            endpoint=AZURE_OPENAI_ENDPOINT,
+            deployment=AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+            azure_api_key=AZURE_OPENAI_API_KEY,
         )
         # Create agent tools
         home_depot_tool = create_retriever_tool(
@@ -328,19 +346,24 @@ async def run(conversation_id, ask, url, client_principal):
 
         # Define agent prompt
         system_prompt = """
-        Your name is FreddAid, a data-driven marketing assistant designed to answer questions in a markdown code snippet using one of the tools provided. Your primary role is to educate while providing answers. Your responses should be based on factual information.
-        You MUST follow the next instructions:
+        Your name is FreddAid, a data-driven marketing assistant designed to answer questions in a markdown code snippet format using one of the tools provided. Your primary role is to educate while providing answers. Your responses should be grounded in the three provided documents.
+        Follow these communication style rules:
+        1. Encourage Sentence Variation: Use a mix of short and long sentences with varied structures to mimic natural human writing styles.
+        2. Incorporate Complexity and Nuance: Use a range of vocabulary, syntax, and colloquial expressions to reflect nuanced human communication.
+        3. Emphasize Emotional Tone: Convey specific emotional tones, such as enthusiasm, curiosity, or skepticism, to add a human touch.
+        4. Ensure Natural Flow and Transitions: As in human-written content, ensure the text flows naturally with smooth transitions.
+        You MUST follow these instructions:
         1. Utilize Tools Appropriately: Always call the appropriate tool to gather information or perform tasks before providing an answer or solution.
         2. Formulate Precise Queries: Include the subject and any relevant entities when formulating a query to ensure precise and comprehensive responses.
-        3. Immediate Source Attribution: Always include the source immediately after the relevant fact or statement in your answers. For example, "The population of Paris is over 2 million [https://folder/file.pdf]."
-        4. Consistent Citation Format: Citations should include only the URL in square brackets. Do not use document names or parentheses for URLs.
-        5. Multiple Source Attribution: If multiple sources support a single statement, include all URLs within the same set of square brackets, separated by commas. For example, "Several studies confirm this [https://folder/file1.pdf,https://folder/file2.pdf]."
-        6. Always Generate with Sources: To maintain credibility and traceability, ensure that every factual statement generated is followed by its source.
         """
 
         # Create agent
         agent_executor = create_react_agent(
-            model, tools, checkpointer=memory, messages_modifier=system_prompt, debug=False
+            model,
+            tools,
+            checkpointer=memory,
+            messages_modifier=system_prompt,
+            debug=False,
         )
 
         # config
@@ -359,15 +382,17 @@ async def run(conversation_id, ask, url, client_principal):
                             "conversation_id": conversation_id,
                             "answer": response["answer"],
                             "thoughts": ask,
-                            "error": response["error"]
+                            "error": response["error"],
                         }
                 else:
                     response = agent_executor.invoke(
                         {"messages": [HumanMessage(content=ask)]},
                         config,
                     )
-                    regex = rf'(Source:\s?\/?)?(source:)?(https:\/\/)?({AZURE_STORAGE_ACCOUNT_URL})?(\/?documents\/?)?'
-                    response["messages"][-1].content = re.sub(regex, '', response["messages"][-1].content)
+                    regex = rf"(Source:\s?\/?)?(source:)?(https:\/\/)?({AZURE_STORAGE_ACCOUNT_URL})?(\/?documents\/?)?"
+                    response["messages"][-1].content = re.sub(
+                        regex, "", response["messages"][-1].content
+                    )
                     logging.info(
                         f"[orchestrator] {conversation_id} agent response: {response['messages'][-1].content[:50]}"
                     )
@@ -391,7 +416,9 @@ async def run(conversation_id, ask, url, client_principal):
         thought = []
         if len(response["messages"]) > 2:
             if isinstance(response["messages"][-3], AIMessage):
-                logging.info("[orchestrator] Tool call found generating thought process")
+                logging.info(
+                    "[orchestrator] Tool call found generating thought process"
+                )
                 if hasattr(response["messages"][-3], "additional_kwargs"):
                     additional_kwargs = response["messages"][-3].additional_kwargs
                     for key in additional_kwargs.get("tool_calls", []):
