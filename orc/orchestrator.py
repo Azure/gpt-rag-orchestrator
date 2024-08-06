@@ -295,6 +295,11 @@ async def run(conversation_id, ask, url, client_principal):
             """Use for up-to-date information on current events. Best as a last resort when other resources don't have the needed data."""
             return bing_search.run(query)
 
+        @tool
+        def bing_tool_competitive_analysis(query: str) -> str:
+            """Use to perform competitive analysis, learn more about the competition, or identify main players in a category."""
+            return bing_search.run(query)
+
         retriever = AzureAISearchRetriever(
             content_key="chunk",
             top_k=3,
@@ -342,6 +347,7 @@ async def run(conversation_id, ask, url, client_principal):
             marketing_frameworks_tool,
             math_tool,
             bing_tool,
+            bing_tool_competitive_analysis,
         ]
 
         # Define agent prompt
