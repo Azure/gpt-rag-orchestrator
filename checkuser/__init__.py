@@ -2,7 +2,7 @@ import logging
 import azure.functions as func
 import json
 import os
-from shared.util import get_set_user, get_users, get_user, update_user_suscription
+from shared.util import get_set_user, get_users, get_user
 
 LOGLEVEL = os.environ.get("LOGLEVEL", "DEBUG").upper()
 logging.basicConfig(level=LOGLEVEL)
@@ -40,16 +40,5 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps(user_data), mimetype="application/json", status_code=200
         )
-
-    elif req.method == "PATCH":
-        req_body = req.get_json()
-        user_id = req_body.get("id")
-        suscriptionId = req_body.get("subscriptionId")
-        sessionId = req_body.get("sessionId")
-        paymentStatus = req_body.get("paymentStatus")
-        user = update_user_suscription(user_id, suscriptionId, sessionId, paymentStatus)
-        return func.HttpResponse(
-            json.dumps(user), mimetype="application/json", status_code=200)
-
     else:
         return func.HttpResponse("Method not allowed", status_code=405)
