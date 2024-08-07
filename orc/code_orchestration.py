@@ -127,7 +127,45 @@ async def get_answer(history):
         except Exception as e:
             logging.error(f"[code_orchest] could not get blocked list. {e}")
     response_time =  round(time.time() - init_time,2)
-    logging.info(f"[code_orchest] finished content filter and blocklist check. {response_time} seconds.")            
+    logging.info(f"[code_orchest] finished content filter and blocklist check. {response_time} seconds.")
+    
+    if SECURITY_HUB_CHECK and not APIM_ENABLED and not bypass_nxt_steps:
+            try:
+                logging.info(f"[code_orchest] checking question with security hub. question: {ask[:50]}")
+                start_time = time.time()
+                arguments["answer"] = answer
+                security_hub_key=await get_secret("securityHubKey")
+                securityPlugin = await securityPluginTask
+                security_check = await kernel.invoke(securityPlugin["QuestionSecurityCheck"], sk.KernelArguments(question=ask,security_hub_key=security_hub_key))
+                check_results = security_check.value["results"]
+                check_details = security_check.value["details"]
+                # New checks based on the updated requirements
+                all_passed = True
+                for name, status in check_results.items():
+                    if status.lower() != "passed":
+                        all_passed = False
+                        break
+                all_below_threshold = all(category["severity"] <= SECURITY_HUB_THRESHOLDS[index] for index,category in check_details.get("categoriesAnalysis", []))
+                any_blocklists_match = len(check_details.get("blocklistsMatch", [])) > 0
+                if not all_passed or not all_below_threshold or any_blocklists_match:
+                    logging.error(f"[code_orchest] failed security hub question checks. Details: {check_details}.")
+                    function_result = await call_semantic_function(kernel, conversationPlugin["NotInSourcesAnswer"], arguments)
+                    answer = str(function_result)
+                    answer_dict['security_hub'] = 1
+                    answer_generated_by = "security_hub"
+                    bypass_nxt_steps = True
+                else:
+                    answer_dict['security_hub'] = 5
+                
+                response_time = round(time.time() - start_time, 2)
+                logging.info(f"[code_orchest] finished security hub checks. {response_time} seconds.")
+            except Exception as e:
+                logging.error(f"[code_orchest] could not execute security hub checks. {e}")  
+                function_result = await call_semantic_function(kernel, conversationPlugin["NotInSourcesAnswer"], arguments)
+                answer = str(function_result)
+                answer_dict['security_hub'] = 1
+                answer_generated_by = "security_hub"
+                bypass_nxt_steps = True     
     #############################
     # RAG-FLOW
     #############################
@@ -171,16 +209,9 @@ async def get_answer(history):
             completion_tokens += triage_dict["completion_tokens"]
             response_time = round(time.time() - start_time,2)
             logging.info(f"[code_orchest] finished checking intents: {intents}. {response_time} seconds.")
-            
-
-            # Handle general intents
-            if set(intents).intersection({"about_bot", "off_topic"}):
-                answer = triage_dict['answer']
-                answer_generated_by = "conversation_plugin_triage"
-                logging.info(f"[code_orchest] triage answer: {answer}")
 
             # Handle question answering intent
-            elif set(intents).intersection({"follow_up", "question_answering"}):         
+            if set(intents).intersection({"follow_up", "question_answering"}):         
     
                 search_query = triage_dict['search_query'] if triage_dict['search_query'] != '' else ask
                 search_sources= ""
@@ -234,6 +265,12 @@ async def get_answer(history):
                 response_time =  round(time.time() - start_time,2)              
                 logging.info(f"[code_orchest] finished generating bot answer. {response_time} seconds. {answer[:100]}.")
 
+            # Handle general intents
+            elif set(intents).intersection({"about_bot", "off_topic"}):
+                answer = triage_dict['answer']
+                answer_generated_by = "conversation_plugin_triage"
+                logging.info(f"[code_orchest] triage answer: {answer}")
+                
             elif "greeting" in intents:
                 answer = triage_dict['answer']
                 answer_generated_by = "conversation_plugin_triage"
@@ -312,17 +349,13 @@ async def get_answer(history):
             except Exception as e:
                 logging.error(f"[code_orchest] could not check responsible AI (fairness). {e}")
                 
-    if SECURITY_HUB_CHECK and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
+    if SECURITY_HUB_CHECK and not APIM_ENABLED and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
             try:
                 logging.info(f"[code_orchest] checking answer with security hub. answer: {answer[:50]}")
                 start_time = time.time()
                 arguments["answer"] = answer
-                if(APIM_ENABLED):
-                    security_hub_key=apim_key
-                else:
-                    security_hub_key=await get_secret("securityHubKey")
                 securityPlugin = await securityPluginTask
-                security_check = await kernel.invoke(securityPlugin["SecurityCheck"], sk.KernelArguments(question=ask, answer=answer, sources=sources,security_hub_key=security_hub_key))
+                security_check = await kernel.invoke(securityPlugin["AnswerSecurityCheck"], sk.KernelArguments(question=ask, answer=answer, sources=sources,security_hub_key=security_hub_key))
                 check_results = security_check.value["results"]
                 check_details = security_check.value["details"]
                 # New checks based on the updated requirements
@@ -338,19 +371,19 @@ async def get_answer(history):
                 all_below_threshold = all(category["severity"] <= SECURITY_HUB_THRESHOLDS[index] for index,category in check_details.get("categoriesAnalysis", []))
                 any_blocklists_match = len(check_details.get("blocklistsMatch", [])) > 0
                 if not all_passed or not all_below_threshold or any_blocklists_match:
-                    logging.error(f"[code_orchest] failed security hub checks. Details: {check_details}.")
+                    logging.error(f"[code_orchest] failed security hub answer checks. Details: {check_details}.")
                     function_result = await call_semantic_function(kernel, conversationPlugin["NotInSourcesAnswer"], arguments)
                     answer = str(function_result)
                     answer_dict['security_hub'] = 1
-                    answer_generated_by = "security_hub"
+                    answer_generated_by = "security_hub_answer_check"
                     bypass_nxt_steps = True
                 else:
                     answer_dict['security_hub'] = 5
                 
                 response_time = round(time.time() - start_time, 2)
-                logging.info(f"[code_orchest] finished security hub checks. {response_time} seconds.")
+                logging.info(f"[code_orchest] finished answer security hub checks. {response_time} seconds.")
             except Exception as e:
-                logging.error(f"[code_orchest] could not execute security hub checks. {e}")
+                logging.error(f"[code_orchest] could not execute answer security hub checks. {e}")
     answer_dict["user_ask"] = ask if not answer_generated_by == 'content_filters_check' else '<FILTERED BY MODEL>'
     answer_dict["answer"] = answer
     answer_dict["search_query"] = search_query

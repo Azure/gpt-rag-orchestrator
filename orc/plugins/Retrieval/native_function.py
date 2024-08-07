@@ -26,6 +26,7 @@ from llama_index.core.query_engine import NLSQLTableQueryEngine, SQLTableRetriev
 from llama_index.core import SQLDatabase, Settings
 from llama_index.core.objects import SQLTableNodeMapping, ObjectIndex, SQLTableSchema
 from llama_index.core import VectorStoreIndex
+from azure.identity.aio import DefaultAzureCredential
 import aiohttp
 import asyncio
 
@@ -117,86 +118,88 @@ class Retrieval:
         search_results = []
         search_query = input
         try:
-            start_time = time.time()
-            logging.info(f"[sk_retrieval] generating question embeddings. search query: {search_query}")
-            embeddings_query = await generate_embeddings(search_query,apim_key=apim_key)
-            response_time = round(time.time() - start_time, 2)
-            logging.info(f"[sk_retrieval] finished generating question embeddings. {response_time} seconds")
-            azureSearchKey = await get_secret('azureSearchKey')
+            async with DefaultAzureCredential() as credential:
+                start_time = time.time()
+                logging.info(f"[sk_retrieval] generating question embeddings. search query: {search_query}")
+                embeddings_query = await generate_embeddings(search_query,apim_key=apim_key)
+                response_time = round(time.time() - start_time, 2)
+                logging.info(f"[sk_retrieval] finished generating question embeddings. {response_time} seconds")
+                azureSearchKey =await credential.get_token("https://search.azure.com/.default")
+                azureSearchKey = azureSearchKey.token
 
-            logging.info(f"[sk_retrieval] querying azure ai search. search query: {search_query}")
-            # prepare body
-            body = {
-                "select": "title, content, url, filepath, chunk_id",
-                "top": AZURE_SEARCH_TOP_K
-            }
-            if AZURE_SEARCH_APPROACH == TERM_SEARCH_APPROACH:
-                body["search"] = search_query
-            elif AZURE_SEARCH_APPROACH == VECTOR_SEARCH_APPROACH:
-                body["vectorQueries"] = [{
-                    "kind": "vector",
-                    "vector": embeddings_query,
-                    "fields": "contentVector",
-                    "k": int(AZURE_SEARCH_TOP_K)
-                }]
-            elif AZURE_SEARCH_APPROACH == HYBRID_SEARCH_APPROACH:
-                body["search"] = search_query
-                body["vectorQueries"] = [{
-                    "kind": "vector",
-                    "vector": embeddings_query,
-                    "fields": "contentVector",
-                    "k": int(AZURE_SEARCH_TOP_K)
-                }]
+                logging.info(f"[sk_retrieval] querying azure ai search. search query: {search_query}")
+                # prepare body
+                body = {
+                    "select": "title, content, url, filepath, chunk_id",
+                    "top": AZURE_SEARCH_TOP_K
+                }
+                if AZURE_SEARCH_APPROACH == TERM_SEARCH_APPROACH:
+                    body["search"] = search_query
+                elif AZURE_SEARCH_APPROACH == VECTOR_SEARCH_APPROACH:
+                    body["vectorQueries"] = [{
+                        "kind": "vector",
+                        "vector": embeddings_query,
+                        "fields": "contentVector",
+                        "k": int(AZURE_SEARCH_TOP_K)
+                    }]
+                elif AZURE_SEARCH_APPROACH == HYBRID_SEARCH_APPROACH:
+                    body["search"] = search_query
+                    body["vectorQueries"] = [{
+                        "kind": "vector",
+                        "vector": embeddings_query,
+                        "fields": "contentVector",
+                        "k": int(AZURE_SEARCH_TOP_K)
+                    }]
 
-            if AZURE_SEARCH_USE_SEMANTIC == "true" and AZURE_SEARCH_APPROACH != VECTOR_SEARCH_APPROACH:
-                body["queryType"] = "semantic"
-                body["semanticConfiguration"] = AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG
+                if AZURE_SEARCH_USE_SEMANTIC == "true" and AZURE_SEARCH_APPROACH != VECTOR_SEARCH_APPROACH:
+                    body["queryType"] = "semantic"
+                    body["semanticConfiguration"] = AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG
 
-            if APIM_ENABLED:
-                headers = {
-                'Content-Type': 'application/json',
-                'api-key': apim_key
-            }
-                search_endpoint = f"{APIM_AZURE_SEARCH_URL}/docs?api-version={AZURE_SEARCH_API_VERSION}"
-            else:
-                headers = {
-                'Content-Type': 'application/json',
-                'api-key': azureSearchKey
-            }
-                search_endpoint = f"https://{AZURE_SEARCH_SERVICE}.search.windows.net/indexes/{AZURE_SEARCH_INDEX}/docs/search?api-version={AZURE_SEARCH_API_VERSION}"
-            start_time = time.time()
-            async with aiohttp.ClientSession() as session:
                 if APIM_ENABLED:
-                    async with session.get(search_endpoint, headers=headers, json=body) as response:
-                        status_code = response.status
-                        text=await response.text()
-                        json=await response.json()
-                        if status_code >= 400:
-                            error_on_search = True
-                            error_message = f'Status code: {status_code}.'
-                            if text != "": error_message += f" Error: {response.text}."
-                            logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
-                        else:
-                            if json['value']:
-                                for doc in json['value']:
-                                    search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
-                else:                
-                    async with session.post(search_endpoint, headers=headers, json=body) as response:
-                        status_code = response.status
-                        text=await response.text()
-                        json=await response.json()
-                        if status_code >= 400:
-                            error_on_search = True
-                            error_message = f'Status code: {status_code}.'
-                            if text != "": error_message += f" Error: {response.text}."
-                            logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
-                        else:
-                            if json['value']:
-                                for doc in json['value']:
-                                    search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
+                    headers = {
+                    'Content-Type': 'application/json',
+                    'api-key': apim_key
+                }
+                    search_endpoint = f"{APIM_AZURE_SEARCH_URL}/docs?api-version={AZURE_SEARCH_API_VERSION}"
+                else:
+                    headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {azureSearchKey}'
+                }
+                    search_endpoint = f"https://{AZURE_SEARCH_SERVICE}.search.windows.net/indexes/{AZURE_SEARCH_INDEX}/docs/search?api-version={AZURE_SEARCH_API_VERSION}"
+                start_time = time.time()
+                async with aiohttp.ClientSession() as session:
+                    if APIM_ENABLED:
+                        async with session.get(search_endpoint, headers=headers, json=body) as response:
+                            status_code = response.status
+                            text=await response.text()
+                            json=await response.json()
+                            if status_code >= 400:
+                                error_on_search = True
+                                error_message = f'Status code: {status_code}.'
+                                if text != "": error_message += f" Error: {response.text}."
+                                logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
+                            else:
+                                if json['value']:
+                                    for doc in json['value']:
+                                        search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
+                    else:                
+                        async with session.post(search_endpoint, headers=headers, json=body) as response:
+                            status_code = response.status
+                            text=await response.text()
+                            json=await response.json()
+                            if status_code >= 400:
+                                error_on_search = True
+                                error_message = f'Status code: {status_code}.'
+                                if text != "": error_message += f" Error: {response.text}."
+                                logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
+                            else:
+                                if json['value']:
+                                    for doc in json['value']:
+                                        search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
 
-            response_time = round(time.time() - start_time, 2)
-            logging.info(f"[sk_retrieval] finished querying azure ai search. {response_time} seconds")
+                response_time = round(time.time() - start_time, 2)
+                logging.info(f"[sk_retrieval] finished querying azure ai search. {response_time} seconds")
         except Exception as e:
             error_message = str(e)
             logging.error(f"[sk_retrieval] error when getting the answer {error_message}")
@@ -288,11 +291,9 @@ class Retrieval:
             else:
                 logging.error("[DBRetrieval] Invalid db_type specified")
                 return ""
-
             engine = create_engine(conn_str)
             logging.info(f"[{DB_TYPE} Retrieval] Connection to database is successful")
             sql_database = SQLDatabase(engine)
-
             # Configure Azure OpenAI
             llm = LlamaAzureOpenAI(
                 engine=AZURE_OPENAI_CHATGPT_DEPLOYMENT,
@@ -310,7 +311,6 @@ class Retrieval:
                 azure_endpoint=oai_config['endpoint'],
                 api_version=AZURE_OPENAI_EMBEDDING_APIVERSION,
             )
-
             Settings.llm = llm
             Settings.embed_model = embed_model
 
@@ -332,13 +332,11 @@ class Retrieval:
                 table_node_mapping,
                 VectorStoreIndex
             )
-
             query_engine = SQLTableRetrieverQueryEngine(
                 sql_database, obj_index.as_retriever(similarity_top_k=db_top_k)
             )
-
             query = input[:max_tokens]
-            response = query_engine.query(query)
+            response =await query_engine.aquery(query)
             result = response.response
             logging.info(f"[{DB_TYPE} Retrieval] SQLQuery: {response.metadata.get('sql_query')}")
             engine.dispose()
