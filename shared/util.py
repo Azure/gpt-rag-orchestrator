@@ -921,36 +921,95 @@ def get_set_user(client_principal):
     return {"is_new_user": is_new_user, "user_data": user["data"]}
 
 
-def update_user_suscription(user_id, suscription_id, session_id, payment_status):
+def get_organization(organization_id):
+    if not organization_id:
+        return {"error": "Organization ID not found."}
+
+    logging.info("Organization ID found. Getting data for organization: " + organization_id)
+
+    organization = {}
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client("organizations")
+    try:
+        query = "SELECT * FROM c WHERE c.id = @organization_id"
+        parameters = [{"name": "@organization_id", "value": organization_id}]
+        result = list(
+            container.query_items(
+                query=query, parameters=parameters, enable_cross_partition_query=True
+            )
+        )
+        if result:
+            organization = result[0]
+    except Exception as e:
+        logging.info(f"[get_organization] get_organization: something went wrong. {str(e)}")
+    return organization
+
+def update_organization_subscription(
+    user_id,
+    organization_id,
+    suscription_id,
+    session_id,
+    payment_status,
+    organization_name,
+    expiration_date,
+):
     if not user_id:
         return {"error": "User ID not found."}
-
-    logging.info("User ID found. Updating data for user: " + user_id)
 
     credential = DefaultAzureCredential()
     db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
     db = db_client.get_database_client(database=AZURE_DB_NAME)
-    container = db.get_container_client("users")
-    result = container.read_item(item=user_id, partition_key=user_id)
-    if result:
-        logging.info(f"[util__module] update_user_suscription: user_id {user_id} found")
-        user = result
-        userData = user["data"]
-        userData["subscriptionId"] = suscription_id
-        userData["sessionId"] = session_id
-        if payment_status == "paid":
-            userData["subscriptionStatus"] = "active"
-        user["data"] = userData
-        try:
-            container.replace_item(item=user["id"], body=user)
-            logging.info(
-                f"Successfully updated suscription information for user {user_id}"
-            )
-        except Exception as e:
-            logging.error(
-                f"Failed to update suscription information for user {user_id}. Error: {str(e)}"
-            )
-    else:
-        logging.info(
-            f"[util__module] update_user_suscription: user_id {user_id} not found"
+    container = db.get_container_client("organizations")
+    
+    if organization_id == "":
+        logging.info(f"[util__module] organization id not found creating new organization for user {user_id}")
+        result = container.create_item(
+            body={
+                "id": str(uuid.uuid4()),
+                "name": organization_name,
+                "subscriptionId": suscription_id,
+                "owner": user_id,
+                "sessionId": session_id,
+                "subscriptionStatus": (
+                    "active" if payment_status == "paid" else "inactive"
+                ),
+                "subscriptionExpirationDate": expiration_date,
+            }
         )
+        logging.info(f"[util__module] Successfully created new organization, adding organizationId to user {user_id}")
+        try:
+            container = db.get_container_client("users")
+            user = container.read_item(item=user_id, partition_key=user_id)
+            user["data"]["organizationId"] = result["id"]
+            container.replace_item(item=user["id"], body=user)
+            logging.info(f"[util__module] Successfully updated user organizationId")
+        except Exception as e:
+            logging.error(f"[util__module] Failed to update user organizationId. Error: {str(e)}")
+    else:
+        try:
+            result = container.read_item(item=organization_id, partition_key=organization_id)
+            logging.info(
+                f"[util__module] update_organization_subscription: {organization_id} found"
+            )
+            organization = result
+            organization["subscriptionId"] = suscription_id
+            organization["sessionId"] = session_id
+            organization["subscriptionStatus"] = (
+                "active" if payment_status == "paid" else "inactive",
+            )
+            organization["subscriptionExpirationDate"] = expiration_date
+
+            try:
+                container.replace_item(item=organization["id"], body=organization)
+                logging.info(
+                    f"Successfully updated suscription information for organization {organization_id}"
+                )
+            except Exception as e:
+                logging.error(
+                    f"Failed to update suscription information for organization {organization_id}. Error: {str(e)}"
+                )
+        except Exception as e:
+            logging.info(f"[util__module] update_organization_subscription: {organization_id} not found")
+        
