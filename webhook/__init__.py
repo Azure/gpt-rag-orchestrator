@@ -27,7 +27,7 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         event = json.loads(payload)
     except json.decoder.JSONDecodeError as e:
         print("⚠️  Webhook error while parsing basic request." + str(e))
-        return json(success=False)
+        return json.dumps({"success": False}), 400
     if endpoint_secret:
         # Only verify the event if there is an endpoint secret defined
         # Otherwise use the basic event deserialized with json
@@ -37,13 +37,13 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
             event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
         except stripe.error.SignatureVerificationError as e:
             print("⚠️  Webhook signature verification failed. " + str(e))
-            return json(success=False)
+            return json.dumps({"success": False}), 400
 
     # Handle the event
     if event["type"] == "checkout.session.completed":
         print("🔔  Webhook received!", event["type"])
         userId = event["data"]["object"]["client_reference_id"]
-        organizationId = event["data"]["object"]["metadata"]["organizationId"]
+        organizationId = event["data"]["object"].get("metadata", {}).get("organizationId", "") or ""
         sessionId = event["data"]["object"]["id"]
         subscriptionId = event["data"]["object"]["subscription"]
         paymentStatus = event["data"]["object"]["payment_status"]
@@ -64,5 +64,5 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(f"Unexpected event type: {event['type']}")
 
     return func.HttpResponse(
-        json.dumps({"success": True}), mimetype="application/json", status_code=200
+        json.dumps({"success": True}), status_code=200
     )
