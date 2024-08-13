@@ -6,7 +6,7 @@ import os
 import stripe
 
 
-from shared.util import update_organization_subscription
+from shared.util import update_organization_subscription, disable_organization_active_subscription, enable_organization_subscription
 
 LOGLEVEL = os.environ.get("LOGLEVEL", "DEBUG").upper()
 logging.basicConfig(level=LOGLEVEL)
@@ -59,6 +59,24 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json",
                 status_code=500,
             )
+    elif event["type"] == "customer.subscription.updated":
+        print("🔔  Webhook received!", event["type"])
+        subscriptionId = event["data"]["object"]["id"]
+        status = event["data"]["object"]["status"]
+        print(event)
+        print(f"Subscription {subscriptionId} updated to status {status}")
+        enable_organization_subscription(subscriptionId)
+    elif event["type"] == "customer.subscription.paused":
+        print("🔔  Webhook received!", event["type"])
+        subscriptionId = event["data"]["object"]["id"]
+        disable_organization_active_subscription(subscriptionId)
+    elif event["type"] == "customer.subscription.resumed":
+        print("🔔  Webhook received!", event["type"])
+        enable_organization_subscription(subscriptionId)
+    elif event["type"] == "customer.subscription.deleted":
+        print("🔔  Webhook received!", event["type"])
+        subscriptionId = event["data"]["object"]["id"]
+        disable_organization_active_subscription(subscriptionId)
     else:
         # Unexpected event type
         logging.info(f"Unexpected event type: {event['type']}")

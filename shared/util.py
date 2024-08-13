@@ -946,6 +946,63 @@ def get_organization(organization_id):
         logging.info(f"[get_organization] get_organization: something went wrong. {str(e)}")
     return organization
 
+def enable_organization_subscription(subscription_id):
+    if not subscription_id:
+        return {"error": "Subscription ID not found."}
+
+    logging.info("Subscription ID found. Enabling subscription: " + subscription_id)
+
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client("organizations")
+    try:
+        query = "SELECT * FROM c WHERE c.subscriptionId = @subscription_id"
+        parameters = [{"name": "@subscription_id", "value": subscription_id}]
+        result = list(
+            container.query_items(
+                query=query, parameters=parameters, enable_cross_partition_query=True
+            )
+        )
+        if result:
+            organization = result[0]
+            organization["subscriptionStatus"] = "active"
+            container.replace_item(item=organization["id"], body=organization)
+            logging.info(
+                f"[enable_organization_subscription] Successfully enabled subscription for organization {organization['id']}")
+        else:
+            logging.info(f"[enable_organization_subscription] enable_organization_subscription: {subscription_id} not found")
+    except Exception as e:
+        logging.info(f"[enable_organization_subscription] enable_organization_subscription: something went wrong. {str(e)}")
+def disable_organization_active_subscription(subscription_id):
+    if not subscription_id:
+        return {"error": "Subscription ID not found."}
+
+    logging.info("Subscription ID found. Disabling active subscription: " + subscription_id)
+
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client("organizations")
+    try:
+        query = "SELECT * FROM c WHERE c.subscriptionId = @subscription_id"
+        parameters = [{"name": "@subscription_id", "value": subscription_id}]
+        result = list(
+            container.query_items(
+                query=query, parameters=parameters, enable_cross_partition_query=True
+            )
+        )
+        if result:
+            organization = result[0]
+            organization["subscriptionStatus"] = "inactive"
+            container.replace_item(item=organization["id"], body=organization)
+            logging.info(
+                f"[disable_organization_active_subscription] Successfully disabled active subscription for organization {organization['id']}")
+        else:
+            logging.info(f"[disable_organization_active_subscription] disable_organization_active_subscription: {subscription_id} not found")
+    except Exception as e:
+        logging.info(f"[disable_organization_active_subscription] disable_organization_active_subscription: something went wrong. {str(e)}")
+
 def update_organization_subscription(
     user_id,
     organization_id,
