@@ -6,7 +6,7 @@ import os
 import stripe
 
 
-from shared.util import update_organization_subscription
+from shared.util import update_organization_subscription, disable_organization_active_subscription, enable_organization_subscription
 
 LOGLEVEL = os.environ.get("LOGLEVEL", "DEBUG").upper()
 logging.basicConfig(level=LOGLEVEL)
@@ -18,7 +18,7 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse("Method not allowed", status_code=405)
     
     stripe.api_key = os.getenv("STRIPE_API_KEY")
-    endpoint_secret = os.getenv("STRIPE_SIGNING_SECRET")
+    endpoint_secret = "whsec_0779836e83ec050479136bbc3f17a8fa46e655fe81e5a80ec107042c4b061ec2" #os.getenv("STRIPE_SIGNING_SECRET")
 
     event = None
     payload = req.get_body()
@@ -59,6 +59,24 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json",
                 status_code=500,
             )
+    elif event["type"] == "customer.subscription.updated":
+        print("🔔  Webhook received!", event["type"])
+        subscriptionId = event["data"]["object"]["id"]
+        status = event["data"]["object"]["status"]
+        print(event)
+        print(f"Subscription {subscriptionId} updated to status {status}")
+        enable_organization_subscription(subscriptionId)
+    elif event["type"] == "customer.subscription.paused":
+        print("🔔  Webhook received!", event["type"])
+        subscriptionId = event["data"]["object"]["id"]
+        disable_organization_active_subscription(subscriptionId)
+    elif event["type"] == "customer.subscription.resumed":
+        print("🔔  Webhook received!", event["type"])
+        enable_organization_subscription(subscriptionId)
+    elif event["type"] == "customer.subscription.deleted":
+        print("🔔  Webhook received!", event["type"])
+        subscriptionId = event["data"]["object"]["id"]
+        disable_organization_active_subscription(subscriptionId)
     else:
         # Unexpected event type
         logging.info(f"Unexpected event type: {event['type']}")
