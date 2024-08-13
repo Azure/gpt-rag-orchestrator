@@ -18,7 +18,7 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse("Method not allowed", status_code=405)
     
     stripe.api_key = os.getenv("STRIPE_API_KEY")
-    endpoint_secret = "whsec_0779836e83ec050479136bbc3f17a8fa46e655fe81e5a80ec107042c4b061ec2" #os.getenv("STRIPE_SIGNING_SECRET")
+    endpoint_secret = os.getenv("STRIPE_SIGNING_SECRET")
 
     event = None
     payload = req.get_body()
