@@ -32,8 +32,7 @@ from langchain.agents import tool
 
 from langchain_community.utilities import BingSearchAPIWrapper
 
-from shared.tools import AzureAISearchRetriever
-from langchain.tools.retriever import create_retriever_tool
+from shared.tools import AzureAISearchRetriever, use_retriever_chain_citation
 import tiktoken
 
 from langchain_experimental.agents.agent_toolkits import create_csv_agent
@@ -309,35 +308,45 @@ async def run(conversation_id, ask, url, client_principal):
             azure_api_key=AZURE_OPENAI_API_KEY,
         )
         # Create agent tools
-        home_depot_tool = create_retriever_tool(
-            retriever,
-            "home_depot",
-            "Useful for when you need to answer questions about Home Depot.",
-        )
+        @tool("home_depot")
+        def home_depot_tool(query: str) -> str:
+            "Useful for when you need to answer questions about Home Depot."
 
-        lowes_home_tool = create_retriever_tool(
-            retriever,
-            "lowes_home",
-            "Useful for when you need to answer questions about Lowe's Home Improvement.",
-        )
+            print(f"[orchestrator] home_depot_tool query: {query}")
+            return use_retriever_chain_citation(model, query, retriever)
 
-        consumer_pulse_tool = create_retriever_tool(
-            retriever,
-            "consumer_pulse",
-            "Use this tool for detailed insights into consumer behavior, and segmentation analysis. Ideal for understanding customer segments and consumer pulse.",
-        )
+        @tool("lowes_home")
+        def lowes_home_tool(query: str) -> str:
+            "Useful for when you need to answer questions about Lowe's Home Improvement."
 
-        economy_tool = create_retriever_tool(
-            retriever,
-            "economy",
-            "To answer how the economic indicators like housing starts, consumer sentiment, Disposable personal income, personal income and personal consumption expenditures affect customer behavior and how is the economy.",
-        )
+            print(f"[orchestrator] lowes_home_tool query: {query}")
+            return use_retriever_chain_citation(model, query, retriever)
 
-        marketing_frameworks_tool = create_retriever_tool(
-            retriever,
-            "marketing",
-            "Useful for when you need to use marketing frameworks, marketing, marketing strategy, branding, advertising, and digital marketing.",
-        )
+        @tool("consumer_pulse")
+        def consumer_pulse_tool(query: str) -> str:
+            """Use this tool for detailed insights into consumer behavior, and segmentation analysis. 
+            Ideal for understanding customer segments and consumer pulse."""
+
+            print(f"[orchestrator] consumer_pulse_tool query: {query}")
+            return use_retriever_chain_citation(model, query, retriever)
+
+        @tool("economy")
+        def economy_tool(query: str) -> str:
+            """To answer how the economic indicators like housing starts, 
+            consumer sentiment, Disposable personal income, 
+            personal income and personal consumption expenditures affect customer 
+            behavior and how is the economy."""
+            
+            print(f"[orchestrator] economy_tool query: {query}")
+            return use_retriever_chain_citation(model, query, retriever)
+
+        @tool("marketing")
+        def marketing_frameworks_tool(query: str) -> str:
+            """Useful for when you need to use marketing frameworks, 
+            marketing, marketing strategy, branding, advertising, and digital marketing."""
+            
+            print(f"[orchestrator] marketing_frameworks_tool query: {query}")
+            return use_retriever_chain_citation(model, query, retriever)
 
         tools = [
             home_depot_tool,
@@ -362,6 +371,8 @@ async def run(conversation_id, ask, url, client_principal):
         1. Utilize Tools Appropriately: Always call the appropriate tool to gather information or perform tasks before providing an answer or solution.
         2. Formulate Precise Queries: Include the subject and any relevant entities when formulating a query to ensure precise and comprehensive responses.
         """
+        # 3. Always include the EXACT SOURCE filepath for each fact in the response, referencing its full path with square brackets, e.g., [info1.txt]. (do not forget to include folder name)
+        # 4. Do not combine SOURCES; list each source separately, e.g., [/folder_a/info1.txt][/info2.pdf].
 
         # Create agent
         agent_executor = create_react_agent(

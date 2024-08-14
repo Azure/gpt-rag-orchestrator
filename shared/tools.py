@@ -14,11 +14,16 @@ from langchain_core.callbacks import (
     AsyncCallbackManagerForRetrieverRun,
     CallbackManagerForRetrieverRun,
 )
-from langchain_core.documents import Document
 from langchain_core.pydantic_v1 import Extra, root_validator
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.utils import get_from_dict_or_env, get_from_env
 from openai import AzureOpenAI
+
+from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+
+
 
 class LineListOutputParser(StrOutputParser):
     def parse(self, text: str):
@@ -46,6 +51,7 @@ DEFAULT_URL_SUFFIX="search.windows.net"
 AZURE_SEARCH_APPROACH=HYBRID_SEARCH_APPROACH
 AZURE_SEARCH_USE_SEMANTIC="true"
 AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG ="semantic-config"
+AZURE_STORAGE_ACCOUNT_URL=get_from_env("", "AZURE_STORAGE_ACCOUNT_URL")
 
 """Default URL Suffix for endpoint connection - commercial cloud"""
 
@@ -184,11 +190,15 @@ class AzureAISearchRetriever(BaseRetriever):
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
     ) -> List[Document]:
         search_results = self._search(query)
-
-        return [
-            Document(page_content="Source: " + result.pop("filepath") + "\n" + result.pop(self.content_key), metadata=result)
-            for result in search_results
-        ]
+        docs = []
+        for result in search_results:
+            result["filepath"] = result["filepath"].replace(AZURE_STORAGE_ACCOUNT_URL, "")
+            docs.append(
+                Document(page_content=result.pop(self.content_key), metadata=result)
+            )
+            # old code used to include the source in the content
+            # Document(page_content="Source: " + result["filepath"] + "\n" + result.pop(self.content_key), metadata=result)
+        return docs
 
     async def _aget_relevant_documents(
         self, query: str, *, run_manager: AsyncCallbackManagerForRetrieverRun
@@ -206,3 +216,75 @@ class AzureCognitiveSearchRetriever(AzureAISearchRetriever):
     This version of the retriever will soon be
     depreciated. Please switch to AzureAISearchRetriever
     """
+
+class Citation(BaseModel):
+    # source_id: int = Field(
+    #     ...,
+    #     description="The integer ID of a SPECIFIC source which justifies the answer.",
+    # )
+    source_filepath: str = Field(
+        ...,
+        description="The filepath of a SPECIFIC source which justifies the answer.",
+    )
+    quote: str = Field(
+        ...,
+        description="The VERBATIM quote from the specified source that justifies the answer.",
+    )
+
+
+class QuotedAnswer(BaseModel):
+    """Answer the user question based only on the given sources, and cite the sources used."""
+
+    answer: str = Field(
+        ...,
+        description="The answer to the user question, which is based only on the given sources.",
+    )
+    citations: List[Citation] = Field(
+        ..., description="Citations from the given sources that justify the answer."
+    )
+
+
+def format_docs_with_id(docs: List[Document]) -> str:
+    formatted = [
+        f"Source ID: {i}\nDocument filepath: {doc.metadata['filepath']}\nDocument Snippet: {doc.page_content}"
+        for i, doc in enumerate(docs)
+    ]
+    return "\n\n" + "\n\n".join(formatted)
+
+
+def use_retriever_chain_citation(model, query, retriever):
+    system_prompt = (
+        "You're a helpful AI assistant. Given a user question "
+        "and some Document snippets, answer the user "
+        "question. If none of the documents answer the question, "
+        "just say you don't know."
+        "\n\nHere are the Documents: "
+        "{context}"
+    )
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            ("human", "{input}"),
+        ]
+    )
+
+    rag_chain_from_docs = (
+        RunnablePassthrough.assign(context=(lambda x: format_docs_with_id(x["context"])))
+        | prompt
+        | model.with_structured_output(QuotedAnswer)
+    )
+    retrieve_docs = (lambda x: x["input"]) | retriever
+
+    chain = RunnablePassthrough.assign(context=retrieve_docs).assign(
+        answer=rag_chain_from_docs
+    )
+
+    result = chain.invoke({"input": query})
+
+    return {
+        "input": query,
+        "answer": result["answer"].answer,
+        "citations": [{"filepath": c.source_filepath, "quote": c.quote} for c in result["answer"].citations],
+        "context": [doc.page_content for doc in result["context"]],
+    }

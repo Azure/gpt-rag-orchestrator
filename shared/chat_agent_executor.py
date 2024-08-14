@@ -23,6 +23,7 @@ from langgraph.prebuilt.tool_executor import ToolExecutor, ToolInvocation
 from langgraph.prebuilt.tool_node import ToolNode
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.messages import ToolMessage
 
 
 # We create the AgentState that we will pass around
@@ -397,7 +398,7 @@ def create_react_agent(
         ]
 
         if last_message.name in retrievers:
-            return "continue_save_documents"
+            return "continue_retriever_end"
         
         return "continue_agent"
 
@@ -492,14 +493,39 @@ def create_react_agent(
             "documents": ""
         }
     
-    def call_save_documents(
+    def call_retriever_answer(
         state: AgentState,
         config: RunnableConfig,
     ):
         messages = state["messages"]
         last_message = messages[-1]
-        print("Retriever used, saving documents")
-        return {"documents": last_message.content}
+        citation_filepaths = []
+
+        if isinstance(last_message, ToolMessage):
+            try:
+                prev_message = json.loads(last_message.content)
+                citation_filepaths = [c["filepath"] for c in prev_message["citations"]]
+            except Exception as e:
+                print("[chat_agent_executor] call_retriever_answer error: ", e)
+
+        response = model_runnable.invoke(messages, config)
+
+        should_append_citations = len(citation_filepaths) > 0
+
+        if should_append_citations:
+            response.content = response.content + "\n\n[" + " ], [".join(citation_filepaths) + "]"
+
+        if state["is_last_step"] and response.tool_calls:
+            return {
+                "messages": [
+                    AIMessage(
+                        id=response.id,
+                        content="Sorry, need more steps to process this request.",
+                    )
+                ]
+            }
+        # We return a list, because this will get added to the existing list
+        return {"messages": [response]}
 
     # Define the function that calls the model
     def call_model(
@@ -542,7 +568,7 @@ def create_react_agent(
     workflow.add_node("agent", RunnableLambda(call_model, acall_model))
     workflow.add_node("tools", ToolNode(tools))
     # workflow.add_node("citator", call_citator)
-    workflow.add_node("save_documents", call_save_documents)
+    workflow.add_node("process_retriever_answer", call_retriever_answer)
 
     # Set the entrypoint as `agent`
     # This means that this node is the first one called
@@ -580,11 +606,11 @@ def create_react_agent(
         check_retrieved_documents,
         {
             "continue_agent": "agent",
-            "continue_save_documents": "save_documents",
+            "continue_retriever_end": "process_retriever_answer",
         }
     )
 
-    workflow.add_edge("save_documents", "agent")
+    workflow.add_edge("process_retriever_answer", END)
 
     #workflow.set_finish_point("citator")
 
