@@ -139,7 +139,7 @@ class AzureAISearchRetriever(BaseRetriever):
         embeddings_query = self.generate_embeddings(query)
 
         body = {
-            "select": "title, chunk, chunk_id, filepath",
+            "select": "title, content, id, filepath",
             "top": self.top_k
         } 
 
@@ -149,7 +149,7 @@ class AzureAISearchRetriever(BaseRetriever):
             body["vectorQueries"] = [{
                 "kind": "vector",
                 "vector": embeddings_query,
-                "fields": "vector",
+                "fields": "contentVector",
                 "k": int(self.top_k)
             }]
         elif AZURE_SEARCH_APPROACH == HYBRID_SEARCH_APPROACH:
@@ -157,7 +157,7 @@ class AzureAISearchRetriever(BaseRetriever):
             body["vectorQueries"] = [{
                 "kind": "vector",
                 "vector": embeddings_query,
-                "fields": "vector",
+                "fields": "contentVector",
                 "k": int(self.top_k)
             }]
 
