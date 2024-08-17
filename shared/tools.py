@@ -194,10 +194,8 @@ class AzureAISearchRetriever(BaseRetriever):
         for result in search_results:
             result["filepath"] = result["filepath"].replace(AZURE_STORAGE_ACCOUNT_URL, "")
             docs.append(
-                Document(page_content=result.pop(self.content_key), metadata=result)
+                Document(page_content="Source: [" + result["filepath"] + "]\n" + result.pop(self.content_key), metadata=result)
             )
-            # old code used to include the source in the content
-            # Document(page_content="Source: " + result["filepath"] + "\n" + result.pop(self.content_key), metadata=result)
         return docs
 
     async def _aget_relevant_documents(

@@ -398,7 +398,7 @@ def create_react_agent(
         ]
 
         if last_message.name in retrievers:
-            return "continue_retriever_end"
+            return "continue_retriever"
         
         return "continue_agent"
 
@@ -417,82 +417,6 @@ def create_react_agent(
             f"Got unexpected type for `messages_modifier`: {type(messages_modifier)}"
         )
     
-    # Define the function that calls the model
-    def call_citator(
-        state: AgentState,
-        config: RunnableConfig,
-    ):
-        """
-        Generates citations for an answer based on the response and the documents content
-        Args:
-        state (dict): The current graph state
-        Returns:
-        state (dict): The response with the relevant citations added
-        """
-        print("---CITATION---")
-        print("Checking if needs citation")
-
-        messages = state["messages"]
-        
-        context = messages.pop(-1).content
-        # print({ "context": context })
-        
-        documents = state["documents"]
-
-        if not documents:
-            print(f"Not adding citations, no documents found")
-            return {
-                "messages": [
-                    AIMessage(
-                        content=context
-                    )
-                ],
-                "documents": ""
-            }
-
-        prompt = PromptTemplate(
-            template="""You are a citator tasked with adding citations to an answer based on a set of provided documents. Your goal is to accurately cite the sources of information in the answer without changing its content. Follow these instructions carefully:
-            First, review the following set of documents that will be used as sources for citation:
-            {documents}
-            Now, here is the answer that needs to be cited:
-            {context}
-            **THE CITATOR INSTRUCTIONS START HERE**
-            Your task is to scan through this answer and add citations to every fact or piece of information that can be traced back to the provided documents. Follow these guidelines:
-            1. Add citations immediately after the relevant fact or statement in the format: [/path/to/file.txt]
-            2. If a fact cannot be cited from any of the provided documents, DO NOT add a citation to it.
-            3. DO NOT alter or transform the filepath.
-            4. DO NOT change any of the original text in the answer.
-            5. DO NOT duplicate the answer.
-            **THE CITATOR INSTRUCTIONS START HERE**
-            For example, if the original text says:
-            'The Earth orbits the Sun. It has one natural satellite.'
-            And you find sources for both facts, the cited version might look like:
-            'The Earth orbits the Sun. [/astronomy/solar_system.txt] It has one natural satellite. [/astronomy/earth.txt]'
-            Once you have added all appropriate citations, provide the fully cited answer. Ensure that the original text remains unchanged except for the addition of citations.""",
-            input_variables=["context", "documents"],
-        )
-
-        citation_chain = prompt | model | StrOutputParser()
-        generation = citation_chain.invoke({ 
-            "documents": documents, 
-            "context": context 
-        })
-
-        # print({ "citation": generation })
-
-        answer = generation if generation else context
-
-        # We return a list, because this will get added to the existing list
-        # return {"messages": [generation], "documents": ""}
-        return {
-            "messages": [
-                AIMessage(
-                    content=answer
-                )
-            ],
-            "documents": ""
-        }
-    
     def call_retriever_answer(
         state: AgentState,
         config: RunnableConfig,
@@ -504,16 +428,40 @@ def create_react_agent(
         if isinstance(last_message, ToolMessage):
             try:
                 prev_message = json.loads(last_message.content)
+                # print(prev_message)
                 citation_filepaths = [c["filepath"] for c in prev_message["citations"]]
             except Exception as e:
                 print("[chat_agent_executor] call_retriever_answer error: ", e)
 
+        _system_message = """
+            For each "document" and "source" pair, review the content to determine if it provides sufficient information to answer the given "question". If it does, insert a sentence into the main body of the text that refers to the "document", followed by its numerical citation in square brackets. Provide a legend at the end with the sources. 
+
+            example:
+
+            Question: What are the key contributions and areas of research in the field of language models and natural language processing?
+
+            According to MIT researchers, language models play a vital role in natural language processing tasks [1]. Deep learning techniques have been extensively explored for large language models as documented by Smith et al. [2]. Reinforcement learning approaches have also been investigated for training intelligent agents [3]. The GPT architecture and training methods have been studied in detail by Johnson et al. [4]. Various studies have emphasized the importance of efficient training strategies for large language models [5].
+
+            Sources:
+
+            [1][/Segmentation/Title of Understanding_Language_Models.pdf]
+
+            [2][/documents/Deep_Learning_for_Large_Language_Models.docx]
+
+            [3][/LLMs/Title of Reinforcement_Learning_Approaches_for_Training_Agents.pdf]"
+
+            [4][/GPT_Architecture_and_Training.csv]
+
+            [5][/Marketing/Efficient_Training_Strategies_for_Large_Language_Models.docx]
+        """
+            
+        model_runnable = (lambda messages: [_system_message] + messages) | model
+
         response = model_runnable.invoke(messages, config)
 
-        should_append_citations = len(citation_filepaths) > 0
-
-        if should_append_citations:
-            response.content = response.content + "\n\n[" + " ], [".join(citation_filepaths) + "]"
+        # should_append_citations = len(citation_filepaths) > 0
+        # if should_append_citations:
+        #     response.content = response.content + "\n\n[" + " ], [".join(citation_filepaths) + "]"
 
         if state["is_last_step"] and response.tool_calls:
             return {
@@ -567,7 +515,6 @@ def create_react_agent(
     # Define the two nodes we will cycle between
     workflow.add_node("agent", RunnableLambda(call_model, acall_model))
     workflow.add_node("tools", ToolNode(tools))
-    # workflow.add_node("citator", call_citator)
     workflow.add_node("process_retriever_answer", call_retriever_answer)
 
     # Set the entrypoint as `agent`
@@ -595,9 +542,6 @@ def create_react_agent(
         },
     )
 
-    # workflow.add_edge("citator", END)
-
-
     # We now add a normal edge from `tools` to `agent`.
     # This means that after `tools` is called, `agent` node is called next.
     # workflow.add_edge("tools", "agent")
@@ -606,17 +550,17 @@ def create_react_agent(
         check_retrieved_documents,
         {
             "continue_agent": "agent",
-            "continue_retriever_end": "process_retriever_answer",
+            "continue_retriever": "process_retriever_answer",
         }
     )
 
     workflow.add_edge("process_retriever_answer", END)
 
-    #workflow.set_finish_point("citator")
-
     # Finally, we compile it!
     # This compiles it into a LangChain Runnable,
     # meaning you can use it as you would any other runnable
+    # to generate the graph image  (xxxx = result from compile)
+    # xxxx.get_graph().draw_mermaid_png(output_file_path="graph.png")
     return workflow.compile(
         checkpointer=checkpointer,
         interrupt_before=interrupt_before,
