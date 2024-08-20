@@ -302,12 +302,11 @@ async def run(conversation_id, ask, url, client_principal):
         retriever = AzureAISearchRetriever(
             content_key="content",
             top_k=3,
-            api_version=os.environ["AZURE_SEARCH_API_VERSION"],
+            api_version=os.environ["AZURE_OPENAI_API_VERSION"],
             endpoint=AZURE_OPENAI_ENDPOINT,
             deployment=AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
             azure_api_key=AZURE_OPENAI_API_KEY,
         )
-
         # Create agent tools
         @tool("home_depot")
         def home_depot_tool(query: str) -> str:
@@ -325,7 +324,7 @@ async def run(conversation_id, ask, url, client_principal):
 
         @tool("consumer_pulse")
         def consumer_pulse_tool(query: str) -> str:
-            """Use this tool for detailed insights into consumer behavior, and segmentation analysis.
+            """Use this tool for detailed insights into consumer behavior, and segmentation analysis. 
             Ideal for understanding customer segments and consumer pulse."""
 
             print(f"[orchestrator] consumer_pulse_tool query: {query}")
@@ -333,20 +332,19 @@ async def run(conversation_id, ask, url, client_principal):
 
         @tool("economy")
         def economy_tool(query: str) -> str:
-            """To answer how the economic indicators like housing starts,
-            consumer sentiment, Disposable personal income,
-            personal income and personal consumption expenditures affect customer
+            """To answer how the economic indicators like housing starts, 
+            consumer sentiment, Disposable personal income, 
+            personal income and personal consumption expenditures affect customer 
             behavior and how is the economy."""
-
+            
             print(f"[orchestrator] economy_tool query: {query}")
             return use_retriever_chain_citation(model, query, retriever)
 
         @tool("marketing")
         def marketing_frameworks_tool(query: str) -> str:
-            """Useful for when you need to use marketing frameworks,
-            marketing, marketing strategy, branding, advertising, and digital marketing.
-            """
-
+            """Useful for when you need to use marketing frameworks, 
+            marketing, marketing strategy, branding, advertising, and digital marketing."""
+            
             print(f"[orchestrator] marketing_frameworks_tool query: {query}")
             return use_retriever_chain_citation(model, query, retriever)
 
@@ -404,7 +402,6 @@ async def run(conversation_id, ask, url, client_principal):
                             "error": response["error"],
                         }
                 else:
-                    logging.info("[orchestrator] invoking agent No CSV")
                     response = agent_executor.invoke(
                         {"messages": [HumanMessage(content=ask)]},
                         config,
