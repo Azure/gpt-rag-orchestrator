@@ -1,12 +1,8 @@
-from shared.util import get_secret, get_aoai_config, chat_complete
+from shared.util import chat_complete
 # from semantic_kernel.skill_definition import sk_function
-from openai import AzureOpenAI
 from semantic_kernel.functions import kernel_function
-from tenacity import retry, wait_random_exponential, stop_after_attempt
 import logging
-import openai
 import os
-import requests
 import time
 import traceback
 import sys
@@ -24,12 +20,14 @@ class Filters:
         description="Validate if user question gets filtered with blocklisted words. Return filtered result.",
         name="ContentFliterValidator",
     )
-    def ContentFliterValidator(
+    async def ContentFliterValidator(
         self,
-        input: Annotated[str, "The user question"]
+        input: Annotated[str, "The user question"],
+        apim_key: Annotated[str, "The key to access the Azure OpenAI model"]
     ) -> Annotated[str, "the output is a string with the filter results"]:
         filter_results = []
         user_question = input
+        error_message=""
         
         try:
             logging.info(f"[sk_native_filters] querying azure openai on content filtering. user question: {user_question}")
@@ -45,7 +43,7 @@ class Filters:
                 ]
             
             start_time = time.time()
-            response = chat_complete(messages, functions, 'none')
+            response =  await chat_complete(messages, functions, 'none',apim_key=apim_key)
             
             if 'error' in response:
                 # Using .get() to avoid KeyError if 'error', 'status', or 'code' keys are missing
