@@ -887,7 +887,6 @@ def get_set_user(client_principal):
     db = db_client.get_database_client(database=AZURE_DB_NAME)
     container = db.get_container_client("users")
     is_new_user = False
-    user = {}
 
     try:
         try:
@@ -900,7 +899,10 @@ def get_set_user(client_principal):
                 f"[get_user] sent an inexistent user_id, saving new {client_principal['id']}."
             )
             is_new_user = True
-
+            
+            logging.info("[get_user] Checking user invitations for new user registration")
+            user_invitation = get_invitation(client_principal['email'])
+            
             user = container.create_item(
                 body={
                     "id": client_principal["id"],
@@ -908,6 +910,7 @@ def get_set_user(client_principal):
                         "name": client_principal["name"],
                         "email": client_principal["email"],
                         "role": client_principal["role"],
+                        "organizationId": user_invitation["organization_id"] if user_invitation else None,
                     },
                 }
             )
@@ -925,7 +928,9 @@ def get_organization(organization_id):
     if not organization_id:
         return {"error": "Organization ID not found."}
 
-    logging.info("Organization ID found. Getting data for organization: " + organization_id)
+    logging.info(
+        "Organization ID found. Getting data for organization: " + organization_id
+    )
 
     organization = {}
     credential = DefaultAzureCredential()
@@ -943,8 +948,11 @@ def get_organization(organization_id):
         if result:
             organization = result[0]
     except Exception as e:
-        logging.info(f"[get_organization] get_organization: something went wrong. {str(e)}")
+        logging.info(
+            f"[get_organization] get_organization: something went wrong. {str(e)}"
+        )
     return organization
+
 
 def enable_organization_subscription(subscription_id):
     if not subscription_id:
@@ -969,16 +977,25 @@ def enable_organization_subscription(subscription_id):
             organization["subscriptionStatus"] = "active"
             container.replace_item(item=organization["id"], body=organization)
             logging.info(
-                f"[enable_organization_subscription] Successfully enabled subscription for organization {organization['id']}")
+                f"[enable_organization_subscription] Successfully enabled subscription for organization {organization['id']}"
+            )
         else:
-            logging.info(f"[enable_organization_subscription] enable_organization_subscription: {subscription_id} not found")
+            logging.info(
+                f"[enable_organization_subscription] enable_organization_subscription: {subscription_id} not found"
+            )
     except Exception as e:
-        logging.info(f"[enable_organization_subscription] enable_organization_subscription: something went wrong. {str(e)}")
+        logging.info(
+            f"[enable_organization_subscription] enable_organization_subscription: something went wrong. {str(e)}"
+        )
+
+
 def disable_organization_active_subscription(subscription_id):
     if not subscription_id:
         return {"error": "Subscription ID not found."}
 
-    logging.info("Subscription ID found. Disabling active subscription: " + subscription_id)
+    logging.info(
+        "Subscription ID found. Disabling active subscription: " + subscription_id
+    )
 
     credential = DefaultAzureCredential()
     db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
@@ -997,11 +1014,17 @@ def disable_organization_active_subscription(subscription_id):
             organization["subscriptionStatus"] = "inactive"
             container.replace_item(item=organization["id"], body=organization)
             logging.info(
-                f"[disable_organization_active_subscription] Successfully disabled active subscription for organization {organization['id']}")
+                f"[disable_organization_active_subscription] Successfully disabled active subscription for organization {organization['id']}"
+            )
         else:
-            logging.info(f"[disable_organization_active_subscription] disable_organization_active_subscription: {subscription_id} not found")
+            logging.info(
+                f"[disable_organization_active_subscription] disable_organization_active_subscription: {subscription_id} not found"
+            )
     except Exception as e:
-        logging.info(f"[disable_organization_active_subscription] disable_organization_active_subscription: something went wrong. {str(e)}")
+        logging.info(
+            f"[disable_organization_active_subscription] disable_organization_active_subscription: something went wrong. {str(e)}"
+        )
+
 
 def update_organization_subscription(
     user_id,
@@ -1019,9 +1042,11 @@ def update_organization_subscription(
     db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
     db = db_client.get_database_client(database=AZURE_DB_NAME)
     container = db.get_container_client("organizations")
-    
+
     if organization_id == "":
-        logging.info(f"[util__module] organization id not found creating new organization for user {user_id}")
+        logging.info(
+            f"[util__module] organization id not found creating new organization for user {user_id}"
+        )
         result = container.create_item(
             body={
                 "id": str(uuid.uuid4()),
@@ -1035,7 +1060,9 @@ def update_organization_subscription(
                 "subscriptionExpirationDate": expiration_date,
             }
         )
-        logging.info(f"[util__module] Successfully created new organization, adding organizationId to user {user_id}")
+        logging.info(
+            f"[util__module] Successfully created new organization, adding organizationId to user {user_id}"
+        )
         try:
             container = db.get_container_client("users")
             user = container.read_item(item=user_id, partition_key=user_id)
@@ -1043,10 +1070,14 @@ def update_organization_subscription(
             container.replace_item(item=user["id"], body=user)
             logging.info(f"[util__module] Successfully updated user organizationId")
         except Exception as e:
-            logging.error(f"[util__module] Failed to update user organizationId. Error: {str(e)}")
+            logging.error(
+                f"[util__module] Failed to update user organizationId. Error: {str(e)}"
+            )
     else:
         try:
-            result = container.read_item(item=organization_id, partition_key=organization_id)
+            result = container.read_item(
+                item=organization_id, partition_key=organization_id
+            )
             logging.info(
                 f"[util__module] update_organization_subscription: {organization_id} found"
             )
@@ -1068,5 +1099,76 @@ def update_organization_subscription(
                     f"Failed to update suscription information for organization {organization_id}. Error: {str(e)}"
                 )
         except Exception as e:
-            logging.info(f"[util__module] update_organization_subscription: {organization_id} not found")
-        
+            logging.info(
+                f"[util__module] update_organization_subscription: {organization_id} not found"
+            )
+
+
+def create_invitation(
+    invited_user_email,
+    organization_id,
+):
+    if not invited_user_email:
+        return {"error": "User ID not found."}
+
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client("invitations")
+    invitation = {}
+    try:
+        invitation = {
+            "id": str(uuid.uuid4()),
+            "invited_user_email": invited_user_email,
+            "organization_id": organization_id,
+            "active": True,
+        }
+        result = container.create_item(body=invitation)
+        logging.info(
+            f"[util__module] Successfully created new invitation for user {invited_user_email}"
+        )
+    except Exception as e:
+        logging.info(
+            f"[util__module] create_invitation: something went wrong. {str(e)}"
+        )
+    return invitation
+
+
+def get_invitation(invited_user_email):
+    if not invited_user_email:
+        return {"error": "User ID not found."}
+
+    logging.info("[get_invitation] Getting invitation for user: " + invited_user_email)
+
+    invitation = {}
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client("invitations")
+    try:
+        query = "SELECT * FROM c WHERE c.invited_user_email = @invited_user_email AND c.active = true"
+        parameters = [{"name": "@invited_user_email", "value": invited_user_email}]
+        result = list(
+            container.query_items(
+                query=query, parameters=parameters, enable_cross_partition_query=True
+            )
+        )
+        if result:
+            logging.info(
+                f"[get_invitation] active invitation found for user {invited_user_email}"
+            )
+            invitation = result[0]
+            invitation["active"] = False
+            container.replace_item(item=invitation["id"], body=invitation)
+            logging.info(
+                f"[get_invitation] Successfully updated invitation status for user {invited_user_email}"
+            )
+        else:
+            logging.info(
+                f"[get_invitation] no active invitation found for user {invited_user_email}"
+            )
+    except Exception as e:
+        logging.error(
+            f"[get_invitation] something went wrong. {str(e)}"
+        )
+    return invitation
