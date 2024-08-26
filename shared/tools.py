@@ -50,7 +50,7 @@ HYBRID_SEARCH_APPROACH='hybrid'
 DEFAULT_URL_SUFFIX="search.windows.net"
 AZURE_SEARCH_APPROACH=HYBRID_SEARCH_APPROACH
 AZURE_SEARCH_USE_SEMANTIC="true"
-AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG ="semantic-config"
+AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG = get_from_env("my-semantic-config", "AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG")
 AZURE_STORAGE_ACCOUNT_URL=get_from_env("", "AZURE_STORAGE_ACCOUNT_URL")
 
 """Default URL Suffix for endpoint connection - commercial cloud"""
@@ -139,7 +139,7 @@ class AzureAISearchRetriever(BaseRetriever):
         embeddings_query = self.generate_embeddings(query)
 
         body = {
-            "select": "title, chunk, chunk_id, filepath",
+            "select": "title, content, id, filepath",
             "top": self.top_k
         } 
 
