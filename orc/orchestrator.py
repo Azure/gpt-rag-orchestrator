@@ -348,12 +348,22 @@ async def run(conversation_id, ask, url, client_principal):
             print(f"[orchestrator] marketing_frameworks_tool query: {query}")
             return use_retriever_chain_citation(model, query, retriever)
 
+        @tool("manufacturer")
+        def manufacturer_tool(query: str) -> str:
+            """Useful for when you need to find financial information about manufacturers,
+            manufacturing processes, and manufacturing companies. Such as their revenue,
+            profit, and market share."""
+                
+            print(f"[orchestrator] manufacturer_tool query: {query}")
+            return use_retriever_chain_citation(model, query, retriever)
+
         tools = [
             home_depot_tool,
             lowes_home_tool,
             consumer_pulse_tool,
             economy_tool,
             marketing_frameworks_tool,
+            manufacturer_tool,
             math_tool,
             bing_tool,
             bing_tool_competitive_analysis,
