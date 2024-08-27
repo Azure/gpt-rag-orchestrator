@@ -829,7 +829,7 @@ def check_users_existance():
 
 
 # return all users
-def get_users():
+def get_users(organization_id):
     users = []
     credential = DefaultAzureCredential()
     db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
@@ -837,7 +837,9 @@ def get_users():
     container = db.get_container_client("users")
     try:
         users = container.query_items(
-            query="SELECT * FROM c", enable_cross_partition_query=True
+            query="SELECT * FROM c WHERE c.data.organizationId = @organization_id",
+            parameters=[{"name": "@organization_id", "value": organization_id}],
+            enable_cross_partition_query=True,
         )
         users = list(users)
 
