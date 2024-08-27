@@ -14,12 +14,13 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
 
     if req.method == "GET":
         user_id = req.params.get("id")
+        organization_id = req.params.get("organizationId")
         if user_id:
             user = get_user(user_id)
             return func.HttpResponse(
                 json.dumps(user), mimetype="application/json", status_code=200
             )
-        users = get_users()
+        users = get_users(organization_id)
         return func.HttpResponse(
             json.dumps(users), mimetype="application/json", status_code=200
         )
