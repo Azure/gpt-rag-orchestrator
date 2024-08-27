@@ -849,7 +849,38 @@ def get_users(organization_id):
         )
     return users
 
+def delete_user(user_id):
+    if not user_id:
+        return {"error": "User ID not found."}
 
+    logging.info("User ID found. Deleting user: " + user_id)
+
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client("users")
+    try:
+        user = container.read_item(item=user_id, partition_key=user_id)
+        user_email = user["data"]["email"]
+        user["data"]["organizationId"] = None
+        container.replace_item(item=user_id, body=user)
+        logging.info(f"[delete_user] User {user_id} deleted from its organization")
+        logging.info(f"[delete_user] Deleting all {user_id} active invitations")
+        container = db.get_container_client("invitations")
+        invitations = container.query_items(
+            query="SELECT * FROM c WHERE c.invited_user_email = @user_email",
+            parameters=[{"name": "@user_email", "value": user_email}],
+            enable_cross_partition_query=True,
+        )
+        for invitation in invitations:
+            container.delete_item(item=invitation["id"], partition_key=invitation["id"])
+            logging.info(f"Deleted invitation with ID: {invitation['id']}")
+        
+    except Exception as e:
+        logging.error(f"[delete_user] delete_user: something went wrong. {str(e)}")
+    
+    return user
+        
 def get_user(user_id):
     if not user_id:
         return {"error": "User ID not found."}
