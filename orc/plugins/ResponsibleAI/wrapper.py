@@ -15,7 +15,7 @@ async def fairness(kernel, rai_plugin, arguments):
         'answer' (str): The answer to the request. Defaults to an empty string if not found.
         'prompt_tokens' (str): The prompt tokens for the request. Retrieved using the get_usage_tokens function.
         'completion_tokens' (str): The completion tokens for the request. Retrieved using the get_usage_tokens function.
-        'bypass' (bool): A flag indicating whether to bypass the the reminder flow steps (in case of an error has occurred).
+        'bypass' (bool): A flag indicating whether to bypass the reminder flow steps (in case of an error has occurred).
     """    
     fairness_dict= {"fair": True, "answer": "", "bypass": False}
     function_result =  await call_semantic_function(kernel, rai_plugin["Fairness"], arguments)
