@@ -942,7 +942,7 @@ def get_set_user(client_principal):
                     "data": {
                         "name": client_principal["name"],
                         "email": client_principal["email"],
-                        "role": client_principal["role"],
+                        "role": user_invitation["role"] if user_invitation else "admin",
                         "organizationId": user_invitation["organization_id"] if user_invitation else None,
                     },
                 }
@@ -1140,6 +1140,7 @@ def update_organization_subscription(
 def create_invitation(
     invited_user_email,
     organization_id,
+    role
 ):
     if not invited_user_email:
         return {"error": "User ID not found."}
@@ -1154,6 +1155,7 @@ def create_invitation(
             "id": str(uuid.uuid4()),
             "invited_user_email": invited_user_email,
             "organization_id": organization_id,
+            "role": role,
             "active": True,
         }
         result = container.create_item(body=invitation)
