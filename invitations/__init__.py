@@ -26,8 +26,9 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         logging.info('Python HTTP trigger function processed a request to set settings. request body: %s', req.get_json())
         invited_user_email = req_body.get("invited_user_email")
         organization_id = req_body.get("organization_id")
+        role = req_body.get("role")
         create_invitation(
-            invited_user_email,organization_id
+            invited_user_email, organization_id, role
         )
         return func.HttpResponse(json.dumps(req_body), mimetype="application/json", status_code=200)
     else:
