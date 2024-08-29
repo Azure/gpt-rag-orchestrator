@@ -300,9 +300,9 @@ async def run(conversation_id, ask, url, client_principal):
             return bing_search.run(query)
 
         retriever = AzureAISearchRetriever(
-            content_key="chunk",
+            content_key="content",
             top_k=3,
-            api_version=os.environ["AZURE_OPENAI_API_VERSION"],
+            api_version=os.environ["AZURE_SEARCH_API_VERSION"],
             endpoint=AZURE_OPENAI_ENDPOINT,
             deployment=AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
             azure_api_key=AZURE_OPENAI_API_KEY,
