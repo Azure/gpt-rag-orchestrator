@@ -459,9 +459,21 @@ def create_react_agent(
 
         response = model_runnable.invoke(messages, config)
 
-        # should_append_citations = len(citation_filepaths) > 0
-        # if should_append_citations:
-        #     response.content = response.content + "\n\n[" + " ], [".join(citation_filepaths) + "]"
+        if response.content == "":
+            answer = prev_message["answer"]
+
+            should_append_citations = len(citation_filepaths) > 0
+            if should_append_citations:
+                answer = answer + "\n\n[" + " ], [".join(citation_filepaths) + "]"
+
+            return {
+                "messages": [
+                    AIMessage(
+                        id=response.id,
+                        content=answer,
+                    )
+                ]
+            }
 
         if state["is_last_step"] and response.tool_calls:
             return {
