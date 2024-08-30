@@ -47,7 +47,8 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         sessionId = event["data"]["object"]["id"]
         subscriptionId = event["data"]["object"]["subscription"]
         paymentStatus = event["data"]["object"]["payment_status"]
-        organizationName = event["data"]["object"]["custom_fields"][0]["text"]["value"]
+        custom_fields = event["data"]["object"].get("custom_fields", [])
+        organizationName = custom_fields[0]["text"]["value"] if custom_fields else "No name"
         expirationDate = event["data"]["object"]["expires_at"]
         try:
             update_organization_subscription(userId, organizationId, subscriptionId, sessionId, paymentStatus, organizationName, expirationDate)
