@@ -68,9 +68,10 @@ async def run(conversation_id, ask, client_principal):
 
             # 2) get answer and sources
 
+            client_principal_id = client_principal['id']
             # get rag answer and sources
             logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
-            answer_dict = await code_orchestration.get_answer(history)
+            answer_dict = await code_orchestration.get_answer(history,client_principal_id)
 
             # 3) update and save conversation (containing history and conversation data)
             

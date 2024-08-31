@@ -60,6 +60,7 @@ AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
 BING_SEARCH_TOP_K = os.environ.get("BING_SEARCH_TOP_K") or "3"
 BING_CUSTOM_SEARCH_URL = "https://api.bing.microsoft.com/v7.0/custom/search?"
 BING_SEARCH_MAX_TOKENS = os.environ.get("BING_SEARCH_MAX_TOKENS") or "1000"
+AZURE_SEARCH_TRIMMING = os.environ.get("AZURE_SEARCH_TRIMMING") or False
 # DB Integration Settings
 AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
 AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
@@ -113,10 +114,12 @@ class Retrieval:
     async def VectorIndexRetrieval(
         self,
         input: Annotated[str, "The user question"],
-        apim_key: Annotated[str, "The key to access the apim endpoint"]
+        apim_key: Annotated[str, "The key to access the apim endpoint"],
+        client_principal_id: Annotated[str, "The user client principal id"]
     ) -> Annotated[str, "the output is a string with the search results"]:
         search_results = []
         search_query = input
+        search_filter = f"security_id/any(g:search.in(g,'{client_principal_id}'))"
         try:
             async with DefaultAzureCredential() as credential:
                 start_time = time.time()
@@ -154,6 +157,9 @@ class Retrieval:
                 if AZURE_SEARCH_USE_SEMANTIC == "true" and AZURE_SEARCH_APPROACH != VECTOR_SEARCH_APPROACH:
                     body["queryType"] = "semantic"
                     body["semanticConfiguration"] = AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG
+
+                if AZURE_SEARCH_TRIMMING:
+                    body["filter"] = search_filter
 
                 if APIM_ENABLED:
                     headers = {
