@@ -849,6 +849,7 @@ def get_users(organization_id):
         )
     return users
 
+
 def delete_user(user_id):
     if not user_id:
         return {"error": "User ID not found."}
@@ -875,12 +876,13 @@ def delete_user(user_id):
         for invitation in invitations:
             container.delete_item(item=invitation["id"], partition_key=invitation["id"])
             logging.info(f"Deleted invitation with ID: {invitation['id']}")
-        
+
     except Exception as e:
         logging.error(f"[delete_user] delete_user: something went wrong. {str(e)}")
-    
+
     return user
-        
+
+
 def get_user(user_id):
     if not user_id:
         return {"error": "User ID not found."}
@@ -932,10 +934,12 @@ def get_set_user(client_principal):
                 f"[get_user] sent an inexistent user_id, saving new {client_principal['id']}."
             )
             is_new_user = True
-            
-            logging.info("[get_user] Checking user invitations for new user registration")
-            user_invitation = get_invitation(client_principal['email'])
-            
+
+            logging.info(
+                "[get_user] Checking user invitations for new user registration"
+            )
+            user_invitation = get_invitation(client_principal["email"])
+
             user = container.create_item(
                 body={
                     "id": client_principal["id"],
@@ -943,7 +947,11 @@ def get_set_user(client_principal):
                         "name": client_principal["name"],
                         "email": client_principal["email"],
                         "role": user_invitation["role"] if user_invitation else "admin",
-                        "organizationId": user_invitation["organization_id"] if user_invitation else None,
+                        "organizationId": (
+                            user_invitation["organization_id"]
+                            if user_invitation
+                            else None
+                        ),
                     },
                 }
             )
@@ -1059,6 +1067,48 @@ def disable_organization_active_subscription(subscription_id):
         )
 
 
+def create_organization_without_subscription(
+    user_id, organization_name
+):
+    if not user_id:
+        return {"error": "User ID not found."}
+
+    logging.info(
+        f"[util__module] organization id not found creating new organization for user {user_id}"
+    )
+
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client("organizations")
+
+    result = container.create_item(
+        body={
+            "id": str(uuid.uuid4()),
+            "name": organization_name,
+            "owner": user_id,
+            "sessionId": None,
+            "subscriptionStatus": "inactive",
+            "subscriptionExpirationDate": None
+        }
+    )
+    
+    logging.info(
+        f"[util__module] Successfully created new organization, adding organizationId to user {user_id}"
+    )
+    try:
+        container = db.get_container_client("users")
+        user = container.read_item(item=user_id, partition_key=user_id)
+        user["data"]["organizationId"] = result["id"]
+        container.replace_item(item=user["id"], body=user)
+        logging.info(f"[util__module] Successfully updated user organizationId")
+    except Exception as e:
+        logging.error(
+            f"[util__module] Failed to update user organizationId. Error: {str(e)}"
+        )
+    return result
+
+
 def update_organization_subscription(
     user_id,
     organization_id,
@@ -1137,11 +1187,7 @@ def update_organization_subscription(
             )
 
 
-def create_invitation(
-    invited_user_email,
-    organization_id,
-    role
-):
+def create_invitation(invited_user_email, organization_id, role):
     if not invited_user_email:
         return {"error": "User ID not found."}
 
@@ -1203,7 +1249,5 @@ def get_invitation(invited_user_email):
                 f"[get_invitation] no active invitation found for user {invited_user_email}"
             )
     except Exception as e:
-        logging.error(
-            f"[get_invitation] something went wrong. {str(e)}"
-        )
+        logging.error(f"[get_invitation] something went wrong. {str(e)}")
     return invitation
