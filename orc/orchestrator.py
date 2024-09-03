@@ -429,7 +429,7 @@ async def run(conversation_id, ask, url, client_principal):
             store_agent_error(client_principal["id"], str(e), ask)
             response = {
                 "conversation_id": conversation_id,
-                "answer": f"There was an error processing your request. Error: {str(e)}",
+                "answer": f"Service is currently unavailable, please retry later",
                 "data_points": "",
                 "thoughts": ask,
             }
