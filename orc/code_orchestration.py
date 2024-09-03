@@ -42,8 +42,6 @@ BING_RETRIEVAL = True if BING_RETRIEVAL.lower() == "true" else False
 SEARCH_RETRIEVAL = os.environ.get("SEARCH_RETRIEVAL") or "true"
 SEARCH_RETRIEVAL = True if SEARCH_RETRIEVAL.lower() == "true" else False
 RETRIEVAL_PRIORITY = os.environ.get("RETRIEVAL_PRIORITY") or "search"
-DB_RETRIEVAL = os.environ.get("DB_RETRIEVAL") or "false"
-DB_RETRIEVAL = True if DB_RETRIEVAL.lower() == "true" else False
 SEVERITY_THRESHOLD = os.environ.get("SEVERITY_THRESHOLD") or 3
 APIM_ENABLED = os.environ.get("APIM_ENABLED") or "false"
 APIM_ENABLED = True if APIM_ENABLED.lower() == "true" else False
@@ -216,7 +214,6 @@ async def get_answer(history,client_principal_id):
                 search_query = triage_dict['search_query'] if triage_dict['search_query'] != '' else ask
                 search_sources= ""
                 bing_sources=""
-                db_sources=""
                 #run search retrieval function
                 retrievalPlugin= await retrievalPluginTask
                 if(SEARCH_RETRIEVAL):
@@ -237,19 +234,10 @@ async def get_answer(history,client_principal_id):
                     escaped_sources = escape_xml_characters(bing_function_result.value)
                     bing_sources=escaped_sources
                 
-                #run sql retrieval function
-                if(DB_RETRIEVAL):
-                    db_function_result= await kernel.invoke(retrievalPlugin["DBRetrieval"], sk.KernelArguments(input=search_query))
-                    formatted_sources = db_function_result.value[:100].replace('\n', ' ')
-                    escaped_sources = escape_xml_characters(db_function_result.value)
-                    db_sources=escaped_sources
-                
                 if(RETRIEVAL_PRIORITY=="search"):
-                    sources=search_sources+bing_sources+db_sources
-                elif(RETRIEVAL_PRIORITY=="bing"):
-                    sources=bing_sources+search_sources+db_sources
+                    sources=search_sources+bing_sources
                 else:
-                    sources=db_sources+bing_sources+search_sources
+                    sources=bing_sources+search_sources
                 arguments["sources"] = sources
                 # Generate the answer augmented by the retrieval
                 logging.info(f"[code_orchest] generating bot answer. ask: {ask}")
