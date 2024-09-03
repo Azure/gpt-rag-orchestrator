@@ -1214,6 +1214,34 @@ def create_invitation(invited_user_email, organization_id, role):
         )
     return invitation
 
+def get_invitations(organization_id):
+    if not organization_id:
+        return {"error": "Organization ID not found."}
+
+    logging.info(
+        "Organization ID found. Getting invitations for organization: " + organization_id
+    )
+
+    invitations = []
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client("invitations")
+    try:
+        query = "SELECT * FROM c WHERE c.organization_id = @organization_id"
+        parameters = [{"name": "@organization_id", "value": organization_id}]
+        result = list(
+            container.query_items(
+                query=query, parameters=parameters, enable_cross_partition_query=True
+            )
+        )
+        if result:
+            invitations = result
+    except Exception as e:
+        logging.info(
+            f"[get_invitations] get_invitations: something went wrong. {str(e)}"
+        )
+    return invitations
 
 def get_invitation(invited_user_email):
     if not invited_user_email:
