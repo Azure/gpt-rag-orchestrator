@@ -176,6 +176,7 @@ class Retrieval:
                                 logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
                             else:
                                 if json['value']:
+                                    logging.info(f"[sk_retrieval] {len(json['value'])} documents retrieved")                                    
                                     for doc in json['value']:
                                         search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
                     else:                
@@ -190,6 +191,7 @@ class Retrieval:
                                 logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
                             else:
                                 if json['value']:
+                                    logging.info(f"[sk_retrieval] {len(json['value'])} documents retrieved")
                                     for doc in json['value']:
                                         search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
 
