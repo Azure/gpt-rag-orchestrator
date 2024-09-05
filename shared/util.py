@@ -39,8 +39,6 @@ BING_RETRIEVAL = True if BING_RETRIEVAL.lower() == "true" else False
 SEARCH_RETRIEVAL = os.environ.get("SEARCH_RETRIEVAL") or "true"
 SEARCH_RETRIEVAL = True if SEARCH_RETRIEVAL.lower() == "true" else False
 RETRIEVAL_PRIORITY = os.environ.get("RETRIEVAL_PRIORITY") or "search"
-DB_RETRIEVAL = os.environ.get("DB_RETRIEVAL") or "true"
-DB_RETRIEVAL = True if DB_RETRIEVAL.lower() == "true" else False
 SECURITY_HUB_CHECK = os.environ.get("SECURITY_HUB_CHECK") or "false"
 SECURITY_HUB_CHECK = True if SECURITY_HUB_CHECK.lower() == "true" else False
 APIM_ENABLED = os.environ.get("APIM_ENABLED") or "false"
