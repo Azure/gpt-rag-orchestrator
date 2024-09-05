@@ -179,6 +179,8 @@ class Retrieval:
                                     logging.info(f"[sk_retrieval] {len(json['value'])} documents retrieved")                                    
                                     for doc in json['value']:
                                         search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
+                                else:
+                                    logging.info(f"[sk_retrieval] No documents retrieved")                                        
                     else:                
                         async with session.post(search_endpoint, headers=headers, json=body) as response:
                             status_code = response.status
@@ -194,6 +196,8 @@ class Retrieval:
                                     logging.info(f"[sk_retrieval] {len(json['value'])} documents retrieved")
                                     for doc in json['value']:
                                         search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
+                                else:
+                                    logging.info(f"[sk_retrieval] No documents retrieved")
 
                 response_time = round(time.time() - start_time, 2)
                 logging.info(f"[sk_retrieval] finished querying azure ai search. {response_time} seconds")
