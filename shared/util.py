@@ -204,7 +204,8 @@ def format_answer(answer, format= 'none'):
     
     if format == 'html':
         
-        # Convert bold syntax (**text**) to HTML
+        # Convert bold syntax (**text**) to HTMLFhtml
+        
         formatted_answer = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', formatted_answer)
         
         # Convert italic syntax (*text*) to HTML

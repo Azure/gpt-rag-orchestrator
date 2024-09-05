@@ -57,6 +57,10 @@ BING_SEARCH_TOP_K = os.environ.get("BING_SEARCH_TOP_K") or "3"
 BING_CUSTOM_SEARCH_URL = "https://api.bing.microsoft.com/v7.0/custom/search?"
 BING_SEARCH_MAX_TOKENS = os.environ.get("BING_SEARCH_MAX_TOKENS") or "1000"
 
+VECTOR_SEARCH_APPROACH="vector"
+TERM_SEARCH_APPROACH="term"
+HYBRID_SEARCH_APPROACH="hybrid"
+
 # General Settings
 TOP_K_DEFAULT = 3
 MAX_TOKENS_DEFAULT = 1000
