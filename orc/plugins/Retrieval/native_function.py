@@ -186,6 +186,12 @@ class Retrieval:
                             status_code = response.status
                             text=await response.text()
                             json=await response.json()
+
+                            logging.info(f"[sk_retrieval] DEBUG request body: {body}")
+                            logging.info(f"[sk_retrieval] DEBUG response text: {text}")
+                            logging.info(f"[sk_retrieval] DEBUG response status: {status_code}")                            
+                            logging.info(f"[sk_retrieval] DEBUG response json: {json}")       
+
                             if status_code >= 400:
                                 error_on_search = True
                                 error_message = f'Status code: {status_code}.'
