@@ -10,6 +10,7 @@ from semantic_kernel.functions.kernel_arguments import KernelArguments
 from shared.util import call_semantic_function, get_chat_history_as_messages, get_message, get_last_messages,get_possitive_int_or_default
 from shared.util import get_blocked_list, create_kernel, get_usage_tokens, escape_xml_characters,get_secret
 import asyncio
+import xml.sax.saxutils as saxutils
 
 # logging level
 
@@ -37,7 +38,7 @@ CONVERSATION_MAX_HISTORY = int(CONVERSATION_MAX_HISTORY)
 ORCHESTRATOR_FOLDER = "orc"
 PLUGINS_FOLDER = f"{ORCHESTRATOR_FOLDER}/plugins"
 BOT_DESCRIPTION_FILE = f"{ORCHESTRATOR_FOLDER}/bot_description.prompt"
-BING_RETRIEVAL = os.environ.get("BING_RETRIEVAL") or "true"
+BING_RETRIEVAL = os.environ.get("BING_RETRIEVAL") or "false"
 BING_RETRIEVAL = True if BING_RETRIEVAL.lower() == "true" else False
 SEARCH_RETRIEVAL = os.environ.get("SEARCH_RETRIEVAL") or "true"
 SEARCH_RETRIEVAL = True if SEARCH_RETRIEVAL.lower() == "true" else False
@@ -294,7 +295,7 @@ async def get_answer(history,client_principal_id):
             try:
                 logging.info(f"[code_orchest] checking if it is grounded. answer: {answer[:50]}")
                 groundness_time = time.time()            
-                arguments["answer"] = answer                      
+                arguments["answer"] = saxutils.escape(answer)                      
                 function_result = await call_semantic_function(kernel, conversationPlugin["IsGrounded"], arguments)
                 grounded =  str(function_result)
                 prompt_tokens += get_usage_tokens(function_result, 'prompt')
@@ -320,7 +321,7 @@ async def get_answer(history,client_principal_id):
             try:
                 logging.info(f"[code_orchest] checking responsible AI (fairness). answer: {answer[:50]}")
                 start_time = time.time()            
-                arguments["answer"] = answer
+                arguments["answer"] = saxutils.escape(answer)
                 raiPlugin= await raiPluginTask
                 fairness_dict = await fairness(kernel, raiPlugin, arguments)
                 fair = fairness_dict['fair']
@@ -341,7 +342,7 @@ async def get_answer(history,client_principal_id):
             try:
                 logging.info(f"[code_orchest] checking answer with security hub. answer: {answer[:50]}")
                 start_time = time.time()
-                arguments["answer"] = answer
+                arguments["answer"] = saxutils.escape(answer)
                 securityPlugin = await securityPluginTask
                 security_check = await kernel.invoke(securityPlugin["AnswerSecurityCheck"], sk.KernelArguments(question=ask, answer=answer, sources=sources,security_hub_key=security_hub_key))
                 check_results = security_check.value["results"]

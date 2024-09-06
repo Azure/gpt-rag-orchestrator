@@ -50,12 +50,17 @@ AZURE_SEARCH_CONTENT_COLUMNS = os.environ.get("AZURE_SEARCH_CONTENT_COLUMNS") or
 AZURE_SEARCH_FILENAME_COLUMN = os.environ.get("AZURE_SEARCH_FILENAME_COLUMN") or "filepath"
 AZURE_SEARCH_TITLE_COLUMN = os.environ.get("AZURE_SEARCH_TITLE_COLUMN") or "title"
 AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
-AZURE_SEARCH_TRIMMING = os.environ.get("AZURE_SEARCH_TRIMMING") or False
+AZURE_SEARCH_TRIMMING = os.environ.get("AZURE_SEARCH_TRIMMING") or "false"
+AZURE_SEARCH_TRIMMING = True if AZURE_SEARCH_TRIMMING == "true" else False
 
 # Bing Search Integration Settings
 BING_SEARCH_TOP_K = os.environ.get("BING_SEARCH_TOP_K") or "3"
 BING_CUSTOM_SEARCH_URL = "https://api.bing.microsoft.com/v7.0/custom/search?"
 BING_SEARCH_MAX_TOKENS = os.environ.get("BING_SEARCH_MAX_TOKENS") or "1000"
+
+VECTOR_SEARCH_APPROACH="vector"
+TERM_SEARCH_APPROACH="term"
+HYBRID_SEARCH_APPROACH="hybrid"
 
 # General Settings
 TOP_K_DEFAULT = 3
@@ -172,13 +177,16 @@ class Retrieval:
                                 logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
                             else:
                                 if json['value']:
+                                    logging.info(f"[sk_retrieval] {len(json['value'])} documents retrieved")                                    
                                     for doc in json['value']:
                                         search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
+                                else:
+                                    logging.info(f"[sk_retrieval] No documents retrieved")                                        
                     else:                
                         async with session.post(search_endpoint, headers=headers, json=body) as response:
                             status_code = response.status
                             text=await response.text()
-                            json=await response.json()
+                            json=await response.json()    
                             if status_code >= 400:
                                 error_on_search = True
                                 error_message = f'Status code: {status_code}.'
@@ -186,8 +194,11 @@ class Retrieval:
                                 logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
                             else:
                                 if json['value']:
+                                    logging.info(f"[sk_retrieval] {len(json['value'])} documents retrieved")
                                     for doc in json['value']:
                                         search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
+                                else:
+                                    logging.info(f"[sk_retrieval] No documents retrieved")
 
                 response_time = round(time.time() - start_time, 2)
                 logging.info(f"[sk_retrieval] finished querying azure ai search. {response_time} seconds")
