@@ -95,7 +95,8 @@ async def get_answer(history,client_principal_id):
     # import RAG plugins
     conversationPluginTask = asyncio.create_task(asyncio.to_thread(kernel.import_plugin_from_prompt_directory, PLUGINS_FOLDER, "Conversation"))
     retrievalPluginTask = asyncio.create_task(asyncio.to_thread(kernel.import_native_plugin_from_directory, PLUGINS_FOLDER, "Retrieval"))
-    raiNativePluginTask = asyncio.create_task(asyncio.to_thread(kernel.import_native_plugin_from_directory, f"{PLUGINS_FOLDER}/ResponsibleAI/Native", "Filters"))
+    # temporary disabled
+    # raiNativePluginTask = asyncio.create_task(asyncio.to_thread(kernel.import_native_plugin_from_directory, f"{PLUGINS_FOLDER}/ResponsibleAI/Native", "Filters"))
     if(SECURITY_HUB_CHECK):
         securityPluginTask = asyncio.create_task(asyncio.to_thread(kernel.import_native_plugin_from_directory, PLUGINS_FOLDER, "Security"))
     if(RESPONSIBLE_AI_CHECK):
@@ -104,13 +105,16 @@ async def get_answer(history,client_principal_id):
     #############################
     # GUARDRAILS (QUESTION)
     #############################
-    raiNativePlugin= await raiNativePluginTask
-    filterResult = await kernel.invoke(raiNativePlugin["ContentFliterValidator"], sk.KernelArguments(input=ask,apim_key=apim_key))
-    if not ('PASSED' in filterResult.value):
-        logging.info(f"[code_orchest] filtered content found in question: {ask}.")
-        answer = get_message('BLOCKED_ANSWER')
-        answer_generated_by = 'content_filters_check'
-        bypass_nxt_steps = True
+    
+    # temporary disabled
+    # raiNativePlugin= await raiNativePluginTask
+    # filterResult = await kernel.invoke(raiNativePlugin["ContentFliterValidator"], sk.KernelArguments(input=ask,apim_key=apim_key))
+    # if not ('PASSED' in filterResult.value):
+    #     logging.info(f"[code_orchest] filtered content found in question: {ask}.")
+    #     answer = get_message('BLOCKED_ANSWER')
+    #     answer_generated_by = 'content_filters_check'
+    #     bypass_nxt_steps = True
+
     if BLOCKED_LIST_CHECK:
         logging.debug(f"[code_orchest] blocked list check.")
         try:
