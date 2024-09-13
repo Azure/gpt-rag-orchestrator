@@ -462,7 +462,7 @@ async def extract_text_from_html(web,session):
             logging.error(f"Failed to extract text from url {web.url}, using snipet from bing: {e}")
             return web.snippet
     
-def get_possitive_int_or_default(var, default_value):
+def get_positive_int_or_default(var, default_value):
     try:
         var = int(var)
         if var < 0:
