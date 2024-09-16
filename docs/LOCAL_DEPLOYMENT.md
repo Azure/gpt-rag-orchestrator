@@ -52,7 +52,7 @@ $resourceGroupName='your resource group name'
 $cosmosDbaccountName='CosmosDB Service name'
 $roleDefinitionId='00000000-0000-0000-0000-000000000002'
 $principalId='Object id of your user in Microsoft Entra ID'
-New-AzCosmosDBSqlRoleAssignment -AccountName $cosmosDbaccountName -ResourceGroupName $resourceGroupName -RoleDefinitionId $roleDefinitionId -Scope "/" -PrincipalId $principalId
+az cosmosdb sql role assignment create --account-name $cosmosDbaccountName --resource-group $resourceGroupName --scope "/" --principal-id $principalId --role-definition-id $roleDefinitionId
 ```
 
 2. Azure OpenAI resource 'Cognitive Services OpenAI User' role.
@@ -72,5 +72,27 @@ $subscriptionId='your subscription id'
 $resourceGroupName='your resource group name'
 $openAIAccountName='Azure OpenAI service name'
 $principalId='Object id of your user in Microsoft Entra ID'
-New-AzRoleAssignment -ObjectId $principalId -RoleDefinitionName 'Cognitive Services OpenAI User' -Scope "/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.CognitiveServices/accounts/$openAIAccountName"
+az role assignment create --role "Cognitive Services OpenAI User" --assignee $principalId --scope /subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.CognitiveServices/accounts/$openAIAccountName
+```
+
+3. Azure AI Search Search Service Contributor and Search Index Data Contributor roles.
+
+*bash*
+```
+subscriptionId='your subscription id'
+resourceGroupName='your resource group name'
+aiSearchResource='your AI Search resource name'
+principalId='Object id of your user in Microsoft Entra ID'
+az role assignment create --role "Search Index Data Contributor" --assignee $principalId --scope /subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.Search/searchServices/$aiSearchResource
+az role assignment create --role "Search Service Contributor" --assignee $principalId --scope /subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.Search/searchServices/$aiSearchResource
+```
+
+*PowerShell*
+```
+subscriptionId='your subscription id'
+resourceGroupName='your resource group name'
+aiSearchResource='your AI Search resource name'
+principalId='Object id of your user in Microsoft Entra ID'
+az role assignment create --role "Search Index Data Contributor" --assignee $principalId --scope /subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.Search/searchServices/$aiSearchResource
+az role assignment create --role "Search Service Contributor" --assignee $principalId --scope /subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.Search/searchServices/$aiSearchResource
 ```
