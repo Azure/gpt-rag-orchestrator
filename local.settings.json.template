@@ -12,9 +12,9 @@
 
     "AZURE_SEARCH_SERVICE": "[example: search0-abcd123456789]",
     "AZURE_SEARCH_INDEX": "ragindex",
-    "AZURE_SEARCH_API_VERSION": "2023-10-01-Preview",
+    "AZURE_SEARCH_API_VERSION": "2024-07-01",
     "AZURE_SEARCH_APPROACH": "hybrid",
-    "AZURE_SEARCH_USE_SEMANTIC": "true",
+    "AZURE_SEARCH_USE_SEMANTIC": "false",
     "AZURE_SEARCH_TOP_K": "3",
 
     "AZURE_OPENAI_RESOURCE" : "[example: oai0-abcd123456789]",
@@ -46,8 +46,8 @@
     "CONVERSATION_METADATA" : "true",
 
     "BING_RETRIEVAL": "false",
-    "SEARCH_RETRIEVAL": "false",
-    "RETRIEVAL_PRIORITY": "bing" "search" "db",
+    "SEARCH_RETRIEVAL": "true",
+    "RETRIEVAL_PRIORITY": [choose between "bing" "search" "db"],
     "DB_RETRIEVAL":"false",
     "DB_SERVER":"",
     "DB_DATABASE":"",
