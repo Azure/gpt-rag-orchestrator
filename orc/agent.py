@@ -31,7 +31,6 @@ def get_search_results(
     indexes: list,
     k: int = 3,
     reranker_threshold: int = 2,  # range between 0 and 4 (high to low)
-    sas_token: str = "",
 ) -> List[dict]:
     """Performs multi-index hybrid search and returns ordered dictionary with the combined results"""
 
@@ -96,7 +95,7 @@ def get_search_results(
                     "name": result["name"],
                     "chunk": result["chunk"],
                     "location": (
-                        result["location"] + f"?{sas_token}"
+                        result["location"]
                         if result["location"]
                         else ""
                     ),
@@ -121,7 +120,6 @@ class CustomRetriever(BaseRetriever):
     topK: int
     reranker_threshold: int
     indexes: List
-    sas_token: str = None
 
     """Modify the _get_relevant_documents methods in BaseRetriever so that it aligns with our previous settings
        Retrieved Documents are sorted based on reranker score (semantic score)
@@ -134,7 +132,6 @@ class CustomRetriever(BaseRetriever):
             self.indexes,
             k=self.topK,
             reranker_threshold=self.reranker_threshold,
-            sas_token=self.sas_token,
         )
         top_docs = []
 
@@ -268,7 +265,6 @@ def create_agent(
         indexes=indexes,
         topK=3,
         reranker_threshold=2,
-        sas_token=os.environ["BLOB_SAS_TOKEN_SF"],
     )
 
     def retrieval_transform_query(state):
@@ -478,7 +474,6 @@ def create_agent(
 
         # remove "RemoveMessage" from the list
         new_messages = [m for m in new_messages if not isinstance(m, RemoveMessage)]
-        print("new_messages", new_messages)
 
         conversation_summary = mini_model.invoke(new_messages)
 

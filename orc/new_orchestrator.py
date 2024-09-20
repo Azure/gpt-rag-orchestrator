@@ -3,6 +3,7 @@ import logging
 import base64
 import uuid
 import time
+import re
 from langchain_openai import AzureChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from orc.agent import create_agent
@@ -19,6 +20,7 @@ logging.getLogger("azure").setLevel(logging.WARNING)
 logging.getLogger("azure.cosmos").setLevel(logging.WARNING)
 LOGLEVEL = os.environ.get("LOGLEVEL", "DEBUG").upper()
 logging.basicConfig(level=LOGLEVEL)
+AZURE_STORAGE_ACCOUNT_URL = os.environ.get("AZURE_STORAGE_ACCOUNT_URL")
 
 async def run(conversation_id, ask, url, client_principal):
     try:
@@ -77,6 +79,9 @@ async def run(conversation_id, ask, url, client_principal):
                     {"question": ask},
                     config,
                 )
+                if AZURE_STORAGE_ACCOUNT_URL in response["generation"]:
+                    regex = rf"(Source:\s?\/?)?(source:)?(https:\/\/)?({AZURE_STORAGE_ACCOUNT_URL})?(\/?documents\/?)?"
+                    response["generation"] = re.sub(regex, "", response["generation"])
                 logging.info(f"[orchestrator] {conversation_id} agent response: {response['generation'][:50]}")
         except Exception as e:
             logging.error(f"[orchestrator] error: {e.__class__.__name__}")
@@ -101,7 +106,7 @@ async def run(conversation_id, ask, url, client_principal):
         history.append(
             {
                 "role": "assistant",
-                "content": response["messages"][-1].content,
+                "content": response["generation"],
                 "thoughts": thoughts,
             }
         )
