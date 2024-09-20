@@ -2,7 +2,7 @@ import logging
 import azure.functions as func
 import json
 import os
-from . import orchestrator
+from . import new_orchestrator
 
 LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
 logging.basicConfig(level=LOGLEVEL)
@@ -25,7 +25,7 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
     }
 
     if question:
-        result = await orchestrator.run(conversation_id, question, url, client_principal)
+        result = await new_orchestrator.run(conversation_id, question, url, client_principal)
 
         return func.HttpResponse(json.dumps(result), mimetype="application/json", status_code=200)
     else:
