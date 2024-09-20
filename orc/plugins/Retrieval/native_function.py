@@ -149,7 +149,9 @@ class Retrieval:
                             + "Nombre de Suplidor: "+ doc['Nombre_de_Suplidor'] + "\n"
                             + "Teléfono de Contacto del Suplidor: "+ doc['Telefono_de_Contacto_de_Suplidor'] + "\n"
                             + "Email del Suplidor: "+ doc['Email_de_Suplidor'] + "\n"
-                            + "Url de Archivo de Orden De Compra: "+ doc['Url_de_Archivo_de_Orden_de_Compra'] + "\n")      
+                            + "Url de Archivo de Orden De Compra: "+ doc['Url_de_Archivo_de_Orden_de_Compra'] + "\n"
+                            + "\n"
+                            + "-" * 150 + "\n\n")      
                     
             response_time =  round(time.time() - start_time,2)
             # logging.info(f"[sk_retrieval] search query body: {body}")        
@@ -158,5 +160,5 @@ class Retrieval:
             error_message = str(e)
             logging.error(f"[sk_retrieval] error when getting the answer {error_message}")
         
-        sources = ' '.join(search_results)
+        sources = ''.join(search_results)
         return sources
