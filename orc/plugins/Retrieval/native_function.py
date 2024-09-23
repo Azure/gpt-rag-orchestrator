@@ -125,7 +125,7 @@ class Retrieval:
             else:
                 if response.json()['value']:
                         for doc in response.json()['value']:
-                            search_results.append("Numero de Caso: "+ doc['Numero_de_Caso']
+                            search_results.append("Numero de Caso: "+ doc['Numero_de_Caso'] + "\n"
                             + "Costo Unitario Estimado del Artículo: "+ doc['Costo_Unitario_Estimado_de_Articulo'] + "\n"
                             + "Fecha Recibo de Requisición: "+ doc['Fecha_Recibo_de_Requisicion'] + "\n"
                             + "Número de Requisición: "+ doc['Numero_de_Requisicion'] + "\n"
@@ -151,7 +151,7 @@ class Retrieval:
                             + "Email del Suplidor: "+ doc['Email_de_Suplidor'] + "\n"
                             + "Url de Archivo de Orden De Compra: "+ doc['Url_de_Archivo_de_Orden_de_Compra'] + "\n"
                             + "\n"
-                            + "-" * 150 + "\n\n")      
+                            + "-" * 100 + "\n\n")      
                     
             response_time =  round(time.time() - start_time,2)
             # logging.info(f"[sk_retrieval] search query body: {body}")        
