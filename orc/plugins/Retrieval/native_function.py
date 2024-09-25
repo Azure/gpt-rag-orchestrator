@@ -40,6 +40,7 @@ content = AZURE_SEARCH_CONTENT_COLUMNS = os.environ.get("AZURE_SEARCH_CONTENT_CO
 chunkid = filepath = AZURE_SEARCH_FILENAME_COLUMN = os.environ.get("AZURE_SEARCH_FILENAME_COLUMN") or "filepath"
 title = AZURE_SEARCH_TITLE_COLUMN = os.environ.get("AZURE_SEARCH_TITLE_COLUMN") or "title"
 url = AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
+print(f"The value of AZURE_SEARCH_URL_COLUMN is: {url}")
 
 # Set up logging
 LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
@@ -85,7 +86,15 @@ class Retrieval:
             body = {
                 "select": f"{title}, {content}, {url}, {filepath}, {chunkid} ",
                 "top": AZURE_SEARCH_TOP_K
-            }    
+                
+            }  
+            print(f"The body is:{body}")
+            print(f"The title is:{title}")
+            print(f"The content is:{content}")  
+            print(f"The url is:{url}") 
+            print(f"The filepath is:{filepath}") 
+            print(f"The chunkid is:{chunkid}")
+            
             if AZURE_SEARCH_APPROACH == TERM_SEARCH_APPROACH:
                 body["search"] = search_query
             elif AZURE_SEARCH_APPROACH == VECTOR_SEARCH_APPROACH:
@@ -151,11 +160,15 @@ class Retrieval:
                             + "Email del Suplidor: "+ doc['Email_de_Suplidor'] + "\n"
                             + "Url de Archivo de Orden De Compra: "+ doc['Url_de_Archivo_de_Orden_de_Compra'] + "\n"
                             + "\n"
-                            + "-" * 100 + "\n\n")      
+                            + "-" * 100 + "\n\n")  
+                        else: doc= "No results for docs found"    
                     
             response_time =  round(time.time() - start_time,2)
-            # logging.info(f"[sk_retrieval] search query body: {body}")        
+            # logging.info(f"[sk_retrieval] search query body: {body}") 
+            print(f"The search_results result is: {search_results}")       
+            print(f"The doc is: {doc}")
             logging.info(f"[sk_retrieval] finished querying azure ai search. {response_time} seconds")
+                    
         except Exception as e:
             error_message = str(e)
             logging.error(f"[sk_retrieval] error when getting the answer {error_message}")
