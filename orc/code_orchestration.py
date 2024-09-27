@@ -7,7 +7,7 @@ import time
 from orc.plugins.Conversation.Triage.wrapper import triage
 from orc.plugins.ResponsibleAI.wrapper import fairness
 from semantic_kernel.functions.kernel_arguments import KernelArguments
-from shared.util import call_semantic_function, get_chat_history_as_messages, get_message, get_last_messages,get_possitive_int_or_default
+from shared.util import call_semantic_function, get_chat_history_as_messages, get_message, get_last_messages,get_positive_int_or_default
 from shared.util import get_blocked_list, create_kernel, get_usage_tokens, escape_xml_characters,get_secret
 import asyncio
 import xml.sax.saxutils as saxutils
@@ -47,7 +47,7 @@ SEVERITY_THRESHOLD = os.environ.get("SEVERITY_THRESHOLD") or 3
 APIM_ENABLED = os.environ.get("APIM_ENABLED") or "false"
 APIM_ENABLED = True if APIM_ENABLED.lower() == "true" else False
 if SECURITY_HUB_CHECK:
-    SECURITY_HUB_THRESHOLDS=[get_possitive_int_or_default(os.environ.get("SECURITY_HUB_HATE_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SELFHARM_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SEXUAL_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_VIOLENCE_THRESHHOLD"), 0)]
+    SECURITY_HUB_THRESHOLDS=[get_positive_int_or_default(os.environ.get("SECURITY_HUB_HATE_THRESHOLD"), 0),get_positive_int_or_default(os.environ.get("SECURITY_HUB_SELFHARM_THRESHOLD"), 0),get_positive_int_or_default(os.environ.get("SECURITY_HUB_SEXUAL_THRESHOLD"), 0),get_positive_int_or_default(os.environ.get("SECURITY_HUB_VIOLENCE_THRESHOLD"), 0)]
 
 async def get_answer(history,client_principal_id):
 
@@ -358,7 +358,7 @@ async def get_answer(history,client_principal_id):
                         if name!="groundedness":
                             all_passed = False
                             break
-                        elif check_details.get("groundedness", {}).get("ungroundedPercentage", 1) > float(os.environ.get("SECURITY_HUB_UNGROUNDED_PERCENTAGE_THRESHHOLD",0)):
+                        elif check_details.get("groundedness", {}).get("ungroundedPercentage", 1) > float(os.environ.get("SECURITY_HUB_UNGROUNDED_PERCENTAGE_THRESHOLD",0)):
                             all_passed = False
                             break
                 all_below_threshold = all(category["severity"] <= SECURITY_HUB_THRESHOLDS[index] for index,category in check_details.get("categoriesAnalysis", []))
