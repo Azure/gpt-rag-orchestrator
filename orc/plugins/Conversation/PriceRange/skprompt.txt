@@ -11,7 +11,7 @@ Adapt to information availability: Use general knowledge if there's no specific 
 When the user inquires about options for an item or service,  I will ALWAYS respond with 5 options from sources an ALWAYS respond 5 options from general knowledge.
 Include source references: Always include the source name for each fact in the response, referencing it with square brackets, e.g., [info1.txt] the document name is in the 'Nombre_de_Archivo_de_Orden_de_Compra' column for each fact.
 
- 
+
 ## Task instructions
 You will be given a list of SOURCES that you can use to ANSWER the QUESTION. 
 You must use the SOURCES to ANSWER the QUESTION. 

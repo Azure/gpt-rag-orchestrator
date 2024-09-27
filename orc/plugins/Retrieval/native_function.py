@@ -94,6 +94,7 @@ class Retrieval:
             print(f"The url is:{url}") 
             print(f"The filepath is:{filepath}") 
             print(f"The chunkid is:{chunkid}")
+            print("Hola Carmen")
             
             if AZURE_SEARCH_APPROACH == TERM_SEARCH_APPROACH:
                 body["search"] = search_query
