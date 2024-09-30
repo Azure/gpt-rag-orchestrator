@@ -94,7 +94,6 @@ class Retrieval:
             print(f"The url is:{url}") 
             print(f"The filepath is:{filepath}") 
             print(f"The chunkid is:{chunkid}")
-            print("Hola Carmen")
             
             if AZURE_SEARCH_APPROACH == TERM_SEARCH_APPROACH:
                 body["search"] = search_query
@@ -162,7 +161,6 @@ class Retrieval:
                             + "Url de Archivo de Orden De Compra: "+ doc['Url_de_Archivo_de_Orden_de_Compra'] + "\n"
                             + "\n"
                             + "-" * 100 + "\n\n")  
-                        else: doc= "No results for docs found"    
                     
             response_time =  round(time.time() - start_time,2)
             # logging.info(f"[sk_retrieval] search query body: {body}") 

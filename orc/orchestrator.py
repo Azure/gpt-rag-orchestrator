@@ -86,6 +86,8 @@ async def run(conversation_id, ask, client_principal):
             'response_time': response_time
         }
         interaction.update(answer_dict)
+        logging.info(f"[orchestrator] sources in answer: {interaction.get('sources')}")
+
         conversation_data['interactions'].append(interaction)
         conversation['conversation_data'] = conversation_data
         conversation = await container.replace_item(item=conversation, body=conversation)
@@ -94,7 +96,11 @@ async def run(conversation_id, ask, client_principal):
         result = {"conversation_id": conversation_id, 
                 "answer": format_answer(interaction['answer'], ANSWER_FORMAT), 
                 "data_points": interaction['sources'] if 'sources' in interaction else '', 
-                "thoughts": f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"}
+                # "thoughts": f"Searched for:\n{interaction['search_query']}\n\nPrompt:\n{interaction['prompt']}"
+                # Cat Test - Remove intents (Commented the above for the below)
+                "thoughts": f"Searched for:\n{interaction.get('search_query', '')}\n\nPrompt:\n{interaction.get('prompt', 'No prompt available')}"
+                }
+        
 
         logging.info(f"[orchestrator] {conversation_id} finished conversation flow. {response_time} seconds. answer: {interaction['answer'][:30]}")
 
