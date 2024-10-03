@@ -6,7 +6,7 @@ import time
 import re
 from langchain_openai import AzureChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
-from orc.agent import create_agent
+from orc.graphs.main import create_main_agent
 from shared.cosmos_db import (
     get_conversation_data,
     update_conversation_data,
@@ -22,6 +22,7 @@ LOGLEVEL = os.environ.get("LOGLEVEL", "DEBUG").upper()
 logging.basicConfig(level=LOGLEVEL)
 AZURE_STORAGE_ACCOUNT_URL = os.environ.get("AZURE_STORAGE_ACCOUNT_URL")
 
+
 async def run(conversation_id, ask, url, client_principal):
     try:
         start_time = time.time()
@@ -32,17 +33,6 @@ async def run(conversation_id, ask, url, client_principal):
             logging.info(
                 f"[orchestrator] {conversation_id} conversation_id is Empty, creating new conversation_id."
             )
-
-        model = AzureChatOpenAI(
-            temperature=0.3, 
-            openai_api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-05-01-preview"),
-            azure_deployment="Agent"
-        )
-        mini_model = AzureChatOpenAI(
-            temperature=0, 
-            openai_api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-05-01-preview"),
-            azure_deployment="gpt-4o-mini"
-        )
 
         # get conversation data from CosmosDB
         conversation_data = get_conversation_data(conversation_id)
@@ -62,12 +52,7 @@ async def run(conversation_id, ask, url, client_principal):
                 )
 
         # create agent
-        agent_executor = create_agent(
-            model, 
-            mini_model, 
-            checkpointer=memory,
-            verbose=True
-        )
+        agent_executor = create_main_agent(checkpointer=memory, verbose=True)
 
         # config
         config = {"configurable": {"thread_id": conversation_id}}
@@ -79,10 +64,13 @@ async def run(conversation_id, ask, url, client_principal):
                     {"question": ask},
                     config,
                 )
-                if AZURE_STORAGE_ACCOUNT_URL in response["generation"]:
-                    regex = rf"(Source:\s?\/?)?(source:)?(https:\/\/)?({AZURE_STORAGE_ACCOUNT_URL})?(\/?documents\/?)?"
-                    response["generation"] = re.sub(regex, "", response["generation"])
-                logging.info(f"[orchestrator] {conversation_id} agent response: {response['generation'][:50]}")
+                print("RESPONSE: ", response["combined_messages"][-1].content)
+                # if AZURE_STORAGE_ACCOUNT_URL in response["generation"]:
+                #     regex = rf"(Source:\s?\/?)?(source:)?(https:\/\/)?({AZURE_STORAGE_ACCOUNT_URL})?(\/?documents\/?)?"
+                #     response["generation"] = re.sub(regex, "", response["generation"])
+                # logging.info(
+                #     f"[orchestrator] {conversation_id} agent response: {response['generation'][:50]}"
+                # )
         except Exception as e:
             logging.error(f"[orchestrator] error: {e.__class__.__name__}")
             logging.error(f"[orchestrator] {conversation_id} error: {str(e)}")
@@ -103,10 +91,12 @@ async def run(conversation_id, ask, url, client_principal):
         if len(thoughts) == 0:
             thoughts.append(f"Tool name: agent_memory > Query sent: {ask}")
 
+        # print("RESPONSE: ", response)
+
         history.append(
             {
                 "role": "assistant",
-                "content": response["generation"],
+                "content": response["combined_messages"][-1].content,
                 "thoughts": thoughts,
             }
         )
@@ -139,7 +129,7 @@ async def run(conversation_id, ask, url, client_principal):
         # 4) return answer
         response = {
             "conversation_id": conversation_id,
-            "answer": response["generation"],
+            "answer": response["combined_messages"][-1].content,
             "thoughts": thoughts,
         }
 
