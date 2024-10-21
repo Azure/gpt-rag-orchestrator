@@ -131,8 +131,9 @@ async def get_answer(history,client_principal_id):
             logging.error(f"[code_orchest] could not get blocked list. {e}")
     response_time =  round(time.time() - init_time,2)
     logging.info(f"[code_orchest] finished content filter and blocklist check. {response_time} seconds.")
-    
-    if SECURITY_HUB_CHECK and not APIM_ENABLED and not bypass_nxt_steps:
+    conversationPlugin= await conversationPluginTask
+
+    if SECURITY_HUB_CHECK and not bypass_nxt_steps:
             try:
                 logging.info(f"[code_orchest] checking question with security hub. question: {ask[:50]}")
                 start_time = time.time()
@@ -152,8 +153,7 @@ async def get_answer(history,client_principal_id):
                 any_blocklists_match = len(check_details.get("blocklistsMatch", [])) > 0
                 if not all_passed or not all_below_threshold or any_blocklists_match:
                     logging.error(f"[code_orchest] failed security hub question checks. Details: {check_details}.")
-                    function_result = await call_semantic_function(kernel, conversationPlugin["NotInSourcesAnswer"], arguments)
-                    answer = str(function_result)
+                    answer=get_message('BLOCKED_ANSWER')
                     answer_dict['security_hub'] = 1
                     answer_generated_by = "security_hub"
                     bypass_nxt_steps = True
@@ -179,7 +179,6 @@ async def get_answer(history,client_principal_id):
             # detect language
             logging.debug(f"[code_orchest] detecting language")
             start_time = time.time()
-            conversationPlugin= await conversationPluginTask
             function_result = await call_semantic_function(kernel, conversationPlugin["DetectLanguage"], arguments)
             prompt_tokens += get_usage_tokens(function_result, 'prompt')
             completion_tokens += get_usage_tokens(function_result, 'completion')            
@@ -342,7 +341,7 @@ async def get_answer(history,client_principal_id):
             except Exception as e:
                 logging.error(f"[code_orchest] could not check responsible AI (fairness). {e}")
                 
-    if SECURITY_HUB_CHECK and not APIM_ENABLED and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
+    if SECURITY_HUB_CHECK and set(intents).intersection({"follow_up", "question_answering"}) and not bypass_nxt_steps:
             try:
                 logging.info(f"[code_orchest] checking answer with security hub. answer: {answer[:50]}")
                 start_time = time.time()
