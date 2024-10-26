@@ -72,6 +72,7 @@ def store_agent_error(user_id, error, ask):
                 "user_id": user_id,
                 "ask": ask,
                 "error": error,
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
         )
     except Exception as e:
