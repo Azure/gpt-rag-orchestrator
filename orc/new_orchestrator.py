@@ -64,13 +64,20 @@ async def run(conversation_id, ask, url, client_principal):
                     {"question": ask},
                     config,
                 )
-                print("RESPONSE: ", response["combined_messages"][-1].content)
-                # if AZURE_STORAGE_ACCOUNT_URL in response["generation"]:
-                #     regex = rf"(Source:\s?\/?)?(source:)?(https:\/\/)?({AZURE_STORAGE_ACCOUNT_URL})?(\/?documents\/?)?"
-                #     response["generation"] = re.sub(regex, "", response["generation"])
-                # logging.info(
-                #     f"[orchestrator] {conversation_id} agent response: {response['generation'][:50]}"
-                # )
+                logging.info(
+                    "[orchestrator] Response", response["combined_messages"][-1].content
+                )
+                text = ""
+                if (
+                    AZURE_STORAGE_ACCOUNT_URL
+                    in response["combined_messages"][-1].content
+                ):
+                    text = response["combined_messages"][-1].content
+                    regex = rf"(Source:\s?\/?)?(source:)?(https:\/\/)?({AZURE_STORAGE_ACCOUNT_URL})?(\/?documents\/?)?"
+                    response["combined_messages"][-1].content = re.sub(regex, "", text)
+                logging.info(
+                    f"[orchestrator] {conversation_id} agent filtered response: {text[:50]}"
+                )
         except Exception as e:
             logging.error(f"[orchestrator] error: {e.__class__.__name__}")
             logging.error(f"[orchestrator] {conversation_id} error: {str(e)}")
