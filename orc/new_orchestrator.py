@@ -64,9 +64,6 @@ async def run(conversation_id, ask, url, client_principal):
                     {"question": ask},
                     config,
                 )
-                logging.info(
-                    "[orchestrator] Response", response["combined_messages"][-1].content
-                )
                 text = ""
                 if (
                     AZURE_STORAGE_ACCOUNT_URL
@@ -74,9 +71,10 @@ async def run(conversation_id, ask, url, client_principal):
                 ):
                     text = response["combined_messages"][-1].content
                     regex = rf"(Source:\s?\/?)?(source:)?(https:\/\/)?({AZURE_STORAGE_ACCOUNT_URL})?(\/?documents\/?)?"
-                    response["combined_messages"][-1].content = re.sub(regex, "", text)
+                    if isinstance(text, str):
+                        response["combined_messages"][-1].content = re.sub(regex, "", text)
                 logging.info(
-                    f"[orchestrator] {conversation_id} agent filtered response: {text[:50]}"
+                    f"[orchestrator] {conversation_id} agent response: {text[:50]}"
                 )
         except Exception as e:
             logging.error(f"[orchestrator] error: {e.__class__.__name__}")
