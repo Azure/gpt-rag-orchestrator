@@ -149,7 +149,7 @@ async def call_semantic_function(kernel, function, arguments):
     return function_result
 
 @retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(6), reraise=True)
-async def chat_complete(messages, functions, function_call='auto',apim_key=None):
+async def chat_complete(messages, functions, params={}, function_call='auto',apim_key=None):
     """  Return assistant chat response based on user query. Assumes existing list of messages """
 
     oai_config = await get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
@@ -170,7 +170,7 @@ async def chat_complete(messages, functions, function_call='auto',apim_key=None)
 
     data = {
         "messages": messages,
-        "max_tokens": int(AZURE_OPENAI_RESP_MAX_TOKENS)
+        "max_tokens": params.get("max_tokens", int(AZURE_OPENAI_RESP_MAX_TOKENS)) 
     }
 
     if not function_call == 'none' and len(functions) > 0:
@@ -180,8 +180,8 @@ async def chat_complete(messages, functions, function_call='auto',apim_key=None)
     if function_call == 'auto':
         data['temperature'] = 0
     else:
-        data['temperature'] = float(AZURE_OPENAI_TEMPERATURE)
-        data['top_p'] = float(AZURE_OPENAI_TOP_P) 
+        data['temperature'] = params.get("temperature", float(AZURE_OPENAI_TEMPERATURE))
+        data['top_p'] = params.get("top_p", float(AZURE_OPENAI_TOP_P))
 
     start_time = time.time()
     async with aiohttp.ClientSession() as session:

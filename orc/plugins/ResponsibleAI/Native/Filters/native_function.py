@@ -7,13 +7,17 @@ import time
 import traceback
 import sys
 if sys.version_info >= (3, 9):
-    from typing import Annotated
+    from typing import Annotated, Tuple, NamedTuple
 else:
-    from typing_extensions import Annotated
+    from typing_extensions import Annotated, Tuple, NamedTuple
 
 # Set up logging
 LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
 logging.basicConfig(level=LOGLEVEL)
+
+class ValidationResult(NamedTuple):
+    passed: bool
+    result: str
 
 class Filters:
     @kernel_function(
@@ -24,28 +28,33 @@ class Filters:
         self,
         input: Annotated[str, "The user question"],
         apim_key: Annotated[str, "The key to access the Azure OpenAI model"]
-    ) -> Annotated[str, "the output is a string with the filter results"]:
+    ) -> Annotated[
+            ValidationResult,
+            "the output is a tuple with filter results"]:
         filter_results = []
         user_question = input
         error_message=""
+        validationPassed = True
         
         try:
             logging.info(f"[sk_native_filters] querying azure openai on content filtering. user question: {user_question}")
             
             functions = []
+            params = {
+                "max_tokens": 1
+            }
             messages = [
-                    {
-                        "role": "system", "content": "You are content filtering validator. ALWAYS RESPOND WITH \'PASSED\', unless filtered."
-                    },
                     {
                         "role": "user", "content": f"{user_question}"
                     }
                 ]
             
             start_time = time.time()
-            response =  await chat_complete(messages, functions, 'none',apim_key=apim_key)
+            response =  await chat_complete(messages, functions, params, 'none', apim_key=apim_key)
             
             if 'error' in response:
+                validationPassed = False
+
                 # Using .get() to avoid KeyError if 'error', 'status', or 'code' keys are missing
                 response = response.get('error', {})
                 status_code = response.get('status', 'Unknown Status')
@@ -75,16 +84,16 @@ class Filters:
                     
                     filter_results.append(error_message)                                   
             else:
-                for result in response.get('choices', []):
-                    filter_results.append(result.get('message', {}).get('content', 'No content'))
+                filter_results.append("Validation Passed")
             
             response_time = round(time.time() - start_time, 2)
         
             logging.info(f"[sk_native_filters] finished validating user question on filtered content. {response_time} seconds")
+        
         except Exception as e:
             logging.error(f"[sk_native_filters] error when validating user question on filtered content. {type(e).__name__}. {error_message}")
             detailed_error = traceback.format_exc()
             logging.error(f"[sk_native_filters] error details {detailed_error}")
 
         result = ' '.join(filter_results)
-        return result
+        return ValidationResult(validationPassed, result)
