@@ -11,7 +11,7 @@
     "AZURE_DB_NAME": "[example: db0-abcd123456789] ",
 
     "AZURE_SEARCH_SERVICE": "[example: search0-abcd123456789]",
-    "AZURE_SEARCH_INDEX": "ragindex",
+    "AZURE_SEARCH_INDEX": "vector-embedding-and-chunking",
     "AZURE_SEARCH_API_VERSION": "2023-10-01-Preview",
     "AZURE_SEARCH_APPROACH": "hybrid",
     "AZURE_SEARCH_USE_SEMANTIC": "true",
@@ -19,13 +19,17 @@
     "AZURE_OPENAI_RESOURCE" : "[example: oai0-abcd123456789]",
     "AZURE_OPENAI_CHATGPT_DEPLOYMENT": "chat",
     "AZURE_OPENAI_CHATGPT_MODEL": "[example: gpt-35-turbo-16k]",
-    "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": "text-embedding-ada-002",
+    "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": "text-embedding-3-small",
     "AZURE_OPENAI_CHATGPT_MONITORING_DEPLOYMENT": "chat",
     "AZURE_OPENAI_CHATGPT_LLM_MONITORING": "true",        
     "AZURE_OPENAI_STREAM" : "false",
     "AZURE_OPENAI_LOAD_BALANCING": "true",
 
     "ORCHESTRATOR_MESSAGES_LANGUAGE": "en",
+
+    "BING_SEARCH_API_KEY": "bing_search_api_key",
+    "BING_SEARCH_URL": "bing_search_url",
+    "BING_SUBSCRIPTION_KEY": "bing_search_suscription_key",
 
     "BLOCKED_LIST_CHECK" : "true",
     "GROUNDEDNESS_CHECK" : "true",

@@ -1,0 +1,28 @@
+## Bot description
+
+{{$bot_description}}
+
+## Task Goal
+The task goal is to generate an ANSWER for the QUESTION, based on the model training.
+
+## Task instructions
+You will be given a QUESTION to generate an ANSWER
+The output is in the string format do not add the word ANSWER to the output.
+The answer must be generated in {{$language}} language.
+
+## Answer generation instructions
+
+At the end of every generated answer add a static text that says "(LLM-Training-Answer)"
+
+ALWAYS generate the ANSWER in the same language(ex: Spanish, English, Portuguese) of the QUESTION. 
+
+## Task Input:
+"QUESTION": "{{$ask}}"
+"PREVIOUS_ANSWER": "{{$previous_answer}}"
+"CONVERSATION_HISTORY_SUMMARY": "{{$conversation_summary}}"
+ 
+## Task Output:
+
+
+
+
