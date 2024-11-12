@@ -213,7 +213,7 @@ IMPROVED_GENERAL_PROMPT = ChatPromptTemplate.from_messages(
             "human",
             "Here is the question: {question}\n\n"
             "Here is the previous answer: {previous_answer}\n\n"
-            "Here is the provided additional context: {bing_documents}",
+            "Here is the provided additional context: {google_documents}",
         ),
     ]
 )

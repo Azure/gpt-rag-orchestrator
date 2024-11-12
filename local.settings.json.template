@@ -1,40 +1,23 @@
 {
-  "IsEncrypted": false,
-  "Values": {
-    "FUNCTIONS_WORKER_RUNTIME": "python",
-    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
-    "LOCAL_ENV": "true",    
-
-    "AZURE_KEY_VAULT_NAME": "[example: kv0-abcd123456789]",
-
-    "AZURE_DB_ID": "[example: dbgpt0-abcd123456789]",
-    "AZURE_DB_NAME": "[example: db0-abcd123456789] ",
-
-    "AZURE_SEARCH_SERVICE": "[example: search0-abcd123456789]",
-    "AZURE_SEARCH_INDEX": "vector-embedding-and-chunking",
-    "AZURE_SEARCH_API_VERSION": "2023-10-01-Preview",
-    "AZURE_SEARCH_APPROACH": "hybrid",
-    "AZURE_SEARCH_USE_SEMANTIC": "true",
-
-    "AZURE_OPENAI_RESOURCE" : "[example: oai0-abcd123456789]",
-    "AZURE_OPENAI_CHATGPT_DEPLOYMENT": "chat",
-    "AZURE_OPENAI_CHATGPT_MODEL": "[example: gpt-35-turbo-16k]",
-    "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": "text-embedding-3-small",
-    "AZURE_OPENAI_CHATGPT_MONITORING_DEPLOYMENT": "chat",
-    "AZURE_OPENAI_CHATGPT_LLM_MONITORING": "true",        
-    "AZURE_OPENAI_STREAM" : "false",
-    "AZURE_OPENAI_LOAD_BALANCING": "true",
-
-    "ORCHESTRATOR_MESSAGES_LANGUAGE": "en",
-
-    "BING_SEARCH_API_KEY": "bing_search_api_key",
-    "BING_SEARCH_URL": "bing_search_url",
-    "BING_SUBSCRIPTION_KEY": "bing_search_suscription_key",
-
-    "BLOCKED_LIST_CHECK" : "true",
-    "GROUNDEDNESS_CHECK" : "true",
-    "RESPONSIBLE_AI_CHECK" : "true",
-    "CONVERSATION_METADATA" : "true"
-
+    "IsEncrypted": false,
+    "Values": {
+      "AZURE_SEARCH_API_VERSION": "2024-05-01-preview",
+      "AZURE_OPENAI_API_VERSION": "2024-05-01-preview",
+      "BING_SEARCH_URL": "https://api.bing.microsoft.com/v7.0/search",
+      "AZURE_OPENAI_ENDPOINT": "<your-openai-endpoint>",
+      "AZURE_OPENAI_API_KEY": "<your-openai-api-key>",
+      "AZURE_SEARCH_SERVICE": "<your-search-service-name>",
+      "AZURE_AI_SEARCH_API_KEY": "<your-search-api-key>",
+      "AZURE_COSMOS_ENDPOINT": "<your-cosmos-endpoint>",
+      "AZURE_AI_SEARCH_INDEX_NAME": "<your-search-index-name>",
+      "AZURE_DB_ID": "<your-cosmos-db-id>",
+      "AZURE_DB_NAME": "<your-cosmos-db-name>",
+      "TAVILY_API_KEY": "<your-tavily-api-key>",
+      "AZURE_STORAGE_ACCOUNT_URL": "<your-storage-account-url>",
+      "AZURE_COSMOS_KEY": "<your-cosmos-key>",
+      "FUNCTIONS_WORKER_RUNTIME": "python",
+      "BING_SUBSCRIPTION_KEY": "<your-bing-subscription-key>",
+      "SERPER_API_KEY": "<your-serper-api-key>",
+      "AZURE_KEYVAULT_URL": "<your-keyvault-url>"
+    }
   }
-}

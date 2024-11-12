@@ -92,18 +92,53 @@ def get_conversation_data(conversation_id):
         logging.info(
             f"[CosmosDB] customer sent an inexistent conversation_id, saving new {conversation_id}"
         )
-        conversation = container.create_item(body={"id": conversation_id})
+        # Initialize with default structure including all required keys
+        conversation = container.create_item(
+            body={
+                "id": conversation_id,
+                "conversation_data": {
+                    "start_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "history": [],  # Initialize empty history list
+                    "memory_data": "",
+                    "interaction": {},
+                }
+            }
+        )
 
-    # get conversation data
+    # Get conversation data with complete default structure
     conversation_data = conversation.get(
         "conversation_data",
         {
             "start_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "history": [],
+            "history": [],  # Ensure history exists in default structure
             "memory_data": "",
             "interaction": {},
         },
     )
+
+    # Double-check that history exists
+    if "history" not in conversation_data:
+        logging.info(
+            f"[CosmosDB] 'history' not found for conversation_id: {conversation_id}. Initializing."
+        )
+        conversation_data["history"] = []
+        
+        # Update the conversation item in CosmosDB to include 'history'
+        try:
+            container.upsert_item(
+                {
+                    "id": conversation_id,
+                    "conversation_data": conversation_data,
+                }
+            )
+            logging.info(
+                f"[CosmosDB] 'history' initialized and updated for conversation_id: {conversation_id}."
+            )
+        except Exception as e:
+            logging.error(
+                f"[CosmosDB] Failed to update 'history' for conversation_id: {conversation_id}. Error: {e}", 
+                exc_info=True
+            )
 
     return conversation_data
 
