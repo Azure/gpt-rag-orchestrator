@@ -119,7 +119,6 @@ class Retrieval:
                 logging.info(f"[sk_retrieval] finished generating question embeddings. {response_time} seconds")
                 azureSearchKey =await credential.get_token("https://search.azure.com/.default")
                 azureSearchKey = azureSearchKey.token
-
                 logging.info(f"[sk_retrieval] querying azure ai search. search query: {search_query}")
                 # prepare body
                 body = {
@@ -154,7 +153,8 @@ class Retrieval:
                 if APIM_ENABLED:
                     headers = {
                     'Content-Type': 'application/json',
-                    'api-key': apim_key
+                    'api-key': apim_key,
+                    '$top': AZURE_SEARCH_TOP_K
                 }
                     search_endpoint = f"{APIM_AZURE_SEARCH_URL}/docs?api-version={AZURE_SEARCH_API_VERSION}"
                 else:

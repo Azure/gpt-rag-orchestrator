@@ -1,0 +1,6 @@
+category: benchmark
+true_description: |
+      The response text is directly is similar and contains the same facts as the expected response.
+
+false_description: |
+      The response text does not correlate with the expected response.
