@@ -36,7 +36,7 @@ class Orchestrator(BaseModel):
     """Determine whether the question is relevant to conversation history, marketing, retails, economics topics."""
 
     route_assignment: Literal["RAG", "general_model"] = Field(
-        description="If the question is relevant to conversation history, marketing, retails, or economics, then return 'RAG', else return 'general_model' "
+        description="Categorize user question into one of the two categories"
     )
 
 
@@ -85,8 +85,6 @@ def create_main_agent(
         question = state["question"]
         conversation_summary = state.get("summary", "")
         retrieval_messages = state.get("retrieval_messages", [])
-
-        # retrieval_messages = retrieval_messages + [conversation_summary]
 
         route_decision = orchestrator_agent.invoke(
             {
