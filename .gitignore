@@ -7,10 +7,7 @@ csx
 .vs
 edge
 Publish
-
-# poetry env 
-poetry.lock
-pyproject.toml
+.vscode/
 
 # Loadtest
 Results/
@@ -58,8 +55,6 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-.vscode/
-.python-version
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

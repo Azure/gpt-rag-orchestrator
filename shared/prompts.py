@@ -97,35 +97,27 @@ DOCSEARCH_PROMPT = ChatPromptTemplate.from_messages(
 
 ORCHESTRATOR_SYSPROMPT = """You are an orchestrator responsible for categorizing questions. Evaluate each question based on its content:
 
-1. If the question relates to **conversation history**, **marketing**, **retail**, **products**, **home improvement industry**, **economics**, or some relevant companies in these fields return 'RAG'.
+1. If the question relates to **conversation history**, **marketing**, **retail**, **products**, or **economics**, return 'RAG'.
 
-2. If the question relates to a **conversation summary** but is **not relevant** to **marketing**, **retail**, **products**, **home improvement industry**, or **economics**, return 'general_model'.
+2. If the question relates to a **conversation summary** but is **not relevant** to **marketing**, **retail**, **products**, or **economics**, return 'general_model'.
 
 3. If the question is **completely unrelated** to both **conversation history**, **conversation summary** and any of the topics above (i.e., marketing, retail, products, or economics), return 'general_model'.
-
-Here is the conversation history:
-
-```
-{retrieval_messages}
-```
-Here is the conversation summary to date:
-
-```
-{conversation_summary}
-```
-
-Here is the user question:
-
-```
-{question}
-```
 """
 
 ORCHESTRATOR_PROMPT = ChatPromptTemplate.from_messages(
     [
         ("system", ORCHESTRATOR_SYSPROMPT),
         (
-            "human","Help me categorize the question into one of the following categories: 'RAG', 'general_model'. Your response should be only one word, either 'RAG' or 'general_model' nothing else"
+            "human",
+            """Here is conversation history:
+                {retrieval_messages}\n\n
+
+                Here is conversation summary to date: 
+                {conversation_summary}\n\n
+
+                Here is user question:
+                {question}
+            """,
         ),
     ]
 )
@@ -221,7 +213,7 @@ IMPROVED_GENERAL_PROMPT = ChatPromptTemplate.from_messages(
             "human",
             "Here is the question: {question}\n\n"
             "Here is the previous answer: {previous_answer}\n\n"
-            "Here is the provided additional context: {google_documents}",
+            "Here is the provided additional context: {bing_documents}",
         ),
     ]
 )
