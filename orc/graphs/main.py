@@ -1,25 +1,27 @@
+# Standard library imports
 import os
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Optional, TypedDict
+
+# Third-party imports
+from langchain_core.language_models import LanguageModelLike
+from langchain_core.messages import HumanMessage, RemoveMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.pydantic_v1 import BaseModel, Field
-from langchain_core.language_models import LanguageModelLike
-from typing import Optional, TypedDict
-from langgraph.checkpoint import BaseCheckpointSaver
-from langgraph.graph.graph import CompiledGraph
-from langgraph.graph.message import add_messages, AnyMessage
-from langchain_core.messages import (
-    HumanMessage,
-    RemoveMessage,
-)
 from langchain_openai import AzureChatOpenAI
+from langgraph.checkpoint import BaseCheckpointSaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.graph import CompiledGraph
+from langgraph.graph.message import AnyMessage, add_messages
 from typing_extensions import TypedDict
-from langgraph.graph import END, StateGraph, START
-from shared.prompts import ORCHESTRATOR_PROMPT
+
+# Local imports
 from orc.graphs.general import create_general_graph
 from orc.graphs.rag import create_retrieval_graph
+from shared.prompts import ORCHESTRATOR_PROMPT
 
 
 class EntryGraphState(TypedDict):
+    """State for the entry graph containing conversation and routing information."""
     question: str
     retrieval_messages: Annotated[list[AnyMessage], add_messages]
     web_search: str
@@ -34,7 +36,7 @@ class Orchestrator(BaseModel):
     """Determine whether the question is relevant to conversation history, marketing, retails, economics topics."""
 
     route_assignment: Literal["RAG", "general_model"] = Field(
-        description="If the question is relevant to conversation history, marketing, retails, or economics, then return 'RAG', else return 'general_model' "
+        description="Categorize user question into one of the two categories"
     )
 
 
@@ -49,7 +51,7 @@ def create_main_agent(
             "AZURE_OPENAI_API_VERSION", "2024-05-01-preview"
         ),
         azure_deployment="gpt-4o-orchestrator",
-        model_kwargs={"seed": 1},
+        seed = 1,
     )
     model_4o_temp_03 = AzureChatOpenAI(
         temperature=0.3,
@@ -71,7 +73,7 @@ def create_main_agent(
             "AZURE_OPENAI_API_VERSION", "2024-05-01-preview"
         ),
         azure_deployment="gpt-4o-mini-generalmodel",
-        model_kwargs={"seed": 1},
+        seed = 1,
     )
 
     # ORCHESTRATOR
@@ -83,8 +85,6 @@ def create_main_agent(
         question = state["question"]
         conversation_summary = state.get("summary", "")
         retrieval_messages = state.get("retrieval_messages", [])
-
-        # retrieval_messages = retrieval_messages + [conversation_summary]
 
         route_decision = orchestrator_agent.invoke(
             {
@@ -188,30 +188,50 @@ def create_main_agent(
             "combined_messages": retained_combined_messages,
         }
 
-    general_llm_subgraph = create_general_graph(model_mini_4o_temp_03, verbose=verbose)
+    # Create subgraphs
+    general_llm_subgraph = create_general_graph(
+        model=model_mini_4o_temp_03,
+        verbose=verbose
+    )
+    
     rag_subgraph = create_retrieval_graph(
-        model_4o_temp_03, model_mini_4o_temp_0, verbose=verbose
+        model=model_4o_temp_03,
+        model_two=model_mini_4o_temp_0, 
+        verbose=verbose
     )
 
+    # Initialize main graph
     entry_builder = StateGraph(EntryGraphState)
 
-    # Nodes
+    # Add nodes for core functionality
     entry_builder.add_node("orchestrator", orchestrator_func)
     entry_builder.add_node("RAG", rag_subgraph)
     entry_builder.add_node("general_llm", general_llm_subgraph)
+
+    # Add nodes for conversation management
     entry_builder.add_node("summary_check", summary_check)
     entry_builder.add_node("summarization", summarization)
 
-    # Edges
+    # Define graph flow
+    # Initial routing
     entry_builder.add_edge(START, "orchestrator")
     entry_builder.add_conditional_edges(
-        "orchestrator", route_decision, {"RAG": "RAG", "general_llm": "general_llm"}
+        "orchestrator",
+        route_decision,
+        {
+            "RAG": "RAG",
+            "general_llm": "general_llm"
+        }
     )
+
+    # Connect main paths to summary check
     entry_builder.add_edge("RAG", "summary_check")
     entry_builder.add_edge("general_llm", "summary_check")
+
+    # Summary handling
     entry_builder.add_conditional_edges("summary_check", summary_decision)
     entry_builder.add_edge("summarization", END)
 
+    # Compile and return final graph
     parent_graph = entry_builder.compile(checkpointer=checkpointer)
-
     return parent_graph
