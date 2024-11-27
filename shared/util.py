@@ -864,6 +864,7 @@ def delete_user(user_id):
         user = container.read_item(item=user_id, partition_key=user_id)
         user_email = user["data"]["email"]
         user["data"]["organizationId"] = None
+        user["data"]["role"] = None
         container.replace_item(item=user_id, body=user)
         logging.info(f"[delete_user] User {user_id} deleted from its organization")
         logging.info(f"[delete_user] Deleting all {user_id} active invitations")
@@ -1189,7 +1190,13 @@ def update_organization_subscription(
 
 def create_invitation(invited_user_email, organization_id, role):
     if not invited_user_email:
-        return {"error": "User ID not found."}
+        return {"error": "User email is required."}
+
+    if not organization_id:
+        return {"error": "Organization ID is required."}
+
+    if not role:
+        return {"error": "Role is required."}
 
     credential = DefaultAzureCredential()
     db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
@@ -1197,6 +1204,20 @@ def create_invitation(invited_user_email, organization_id, role):
     container = db.get_container_client("invitations")
     invitation = {}
     try:
+        user_container = db.get_container_client("users")
+        user = user_container.query_items(
+            query="SELECT * FROM c WHERE c.data.email = @invited_user_email",
+            parameters=[{"name": "@invited_user_email", "value": invited_user_email}],
+            enable_cross_partition_query=True
+        )
+
+        for u in user:
+            if u["data"].get("organizationId") is None:
+                u["data"]["organizationId"] = organization_id
+                u["data"]["role"] = role
+                user_container.replace_item(item=u["id"], body=u)
+                logging.info(f"[create_invitation] Updated user {invited_user_email} organizationId to {organization_id}")
+
         invitation = {
             "id": str(uuid.uuid4()),
             "invited_user_email": invited_user_email,
