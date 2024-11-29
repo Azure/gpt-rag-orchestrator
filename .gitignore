@@ -72,3 +72,4 @@ __queuestorage__
 __azurite_db*__.json
 
 .azure
+financial-orc/graphs/test.ipynb

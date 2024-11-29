@@ -9,8 +9,9 @@ from langchain_core.retrievers import BaseRetriever
 from langchain.schema import Document
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.language_models import LanguageModelLike
-from typing import TypedDict, List
+from typing import TypedDict, List, Dict
 from langgraph.graph.graph import CompiledGraph
+from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain_community.retrievers import TavilySearchAPIRetriever
 from langgraph.graph.message import add_messages, AnyMessage
 from langchain_core.messages import (
@@ -21,7 +22,53 @@ from langchain_core.messages import (
 from typing_extensions import TypedDict
 from langgraph.graph import END, StateGraph, START
 from shared.prompts import DOCSEARCH_PROMPT, RETRIEVAL_REWRITER_PROMPT, GRADE_PROMPT
+from shared.util import get_secret
 
+# obtain google search api key
+GOOGLE_SEARCH_API_KEY = os.environ.get("SERPER_API_KEY") or get_secret("GoogleSearchKey")
+
+
+def ggsearch_reformat(result: Dict) -> List[Document]:
+    """
+    Reformats Google search results into a list of Document objects.
+
+    Args:
+        result (Dict): The raw search results from Google.
+
+    Returns:
+        List[Document]: A list of Document objects containing the search results.
+    """
+    documents = []
+    try:
+        # Process Knowledge Graph results if present
+        if 'knowledgeGraph' in result:
+            kg = result['knowledgeGraph']
+            doc = Document(
+                page_content=kg.get('description', ''),
+                metadata={'source': kg.get('descriptionLink', ''), 'title': kg.get('title', '')}
+            )
+            documents.append(doc)
+        
+        # Process organic search results
+        if 'organic' in result:
+            for item in result['organic']:
+                doc = Document(
+                    page_content=item.get('snippet', ''),
+                    metadata={'source': item.get('link', ''), 'title': item.get('title', '')}
+                )
+                documents.append(doc)
+        
+        if not documents:
+            raise ValueError("No search results found")
+        
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+        documents.append(Document(
+            page_content="No search results found or an error occurred.",
+            metadata={'source': 'Error', 'title': 'Search Error'}
+        ))
+    
+    return documents
 
 class GradeDocuments(BaseModel):
     """Binary score for relevance check on retrieved documents."""
@@ -179,7 +226,11 @@ def create_retrieval_graph(
     model_two: LanguageModelLike,
     verbose: bool = False,
 ) -> CompiledGraph:
-    web_search_tool = TavilySearchAPIRetriever(k=2)
+    # web_search_tool = TavilySearchAPIRetriever(k=3, 
+    #                                            search_depth= 'advanced',
+    #                                            include_raw_content = True,
+    #                                            )
+    web_search_tool = GoogleSerperAPIWrapper(k=3, serper_api_key= GOOGLE_SEARCH_API_KEY)
     rag_chain = DOCSEARCH_PROMPT | model | StrOutputParser()
     index_name = os.environ["AZURE_AI_SEARCH_INDEX_NAME"]
     indexes = [index_name]
@@ -394,7 +445,7 @@ def create_retrieval_graph(
         documents = state["documents"]
 
         # Web search
-        docs = web_search_tool.invoke(question)
+        docs = ggsearch_reformat(web_search_tool.results(question))
 
         # append to the existing document
         documents.extend(docs)
