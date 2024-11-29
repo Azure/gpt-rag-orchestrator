@@ -106,23 +106,22 @@ class CustomRetriever(BaseRetriever):
                 "top": k,
             }
 
-            try:
-                resp = requests.post(
-                    os.environ["AZURE_SEARCH_ENDPOINT"]
-                    + "/indexes/"
-                    + index
-                    + "/docs/search",
-                    data=json.dumps(search_payload),
-                    headers=headers,
-                    params=params,
-                )
-                # resp.raise_for_status()
-                search_results = resp.json()
-                agg_search_results[index] = search_results
-            except Exception as e:
-                if self.verbose:
-                    print(f"[financial-orchestrator-agent] Error in get_search_results: {str(e)}")
-                return []
+            AZURE_SEARCH_SERVICE = os.environ.get("AZURE_SEARCH_SERVICE")
+            AZURE_SEARCH_ENDPOINT_SF = (
+                f"https://{AZURE_SEARCH_SERVICE}.search.windows.net"
+            )
+
+            
+            resp = requests.post(
+                AZURE_SEARCH_ENDPOINT_SF  + "/indexes/" + index + "/docs/search",
+                data=json.dumps(search_payload),
+                headers=headers,
+                params=params,
+            )
+
+            search_results = resp.json()
+            agg_search_results[index] = search_results
+
 
         content = dict()
         ordered_content = OrderedDict()
