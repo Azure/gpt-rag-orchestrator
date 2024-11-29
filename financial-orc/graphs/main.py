@@ -2,8 +2,7 @@ import os
 import json
 import requests
 from collections import OrderedDict
-from typing import List, Annotated, Sequence, TypedDict
-import logging
+from typing import List, Annotated, Sequence, TypedDict, Literal
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import (
     AIMessage,
@@ -19,10 +18,10 @@ from langchain_community.retrievers import TavilySearchAPIRetriever
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langchain_openai import AzureChatOpenAI
-
-
-LOGLEVEL = os.environ.get("LOGLEVEL", "DEBUG").upper()
-logging.basicConfig(level=LOGLEVEL)
+from shared.cosmos_db import (
+    get_conversation_data,
+    update_conversation_data,
+)
 
 
 # Define agent graph
@@ -31,6 +30,7 @@ class AgentState(TypedDict):
 
     messages: Annotated[Sequence[BaseMessage], add_messages]
     report: str
+    chat_summary: str = ""
 
 
 # Update CustomRetriever with error handling
@@ -42,21 +42,24 @@ class CustomRetriever(BaseRetriever):
         topK (int): Number of top results to retrieve.
         reranker_threshold (float): Threshold for reranker score.
         indexes (List): List of index names to search.
-        sas_token (str): SAS token for authentication.
     """
 
-    topK: int
-    reranker_threshold: float
+    topK = 1
+    reranker_threshold = 1.2 
+    vector_similarity_threshold = 0.5
+    semantic_config = "financial-index-semantic-configuration"
+    index_name = "financial-index"
     indexes: List
-    sas_token: str = None
+    verbose: bool
 
     def get_search_results(
         self,
         query: str,
         indexes: list,
-        k: int = 3,
-        reranker_threshold: float = 1.2,  # range between 0 and 4 (high to low)
-        sas_token: str = "",
+        k: int = topK,
+        semantic_config: str = semantic_config,
+        reranker_threshold: float = reranker_threshold,  # range between 0 and 
+        vector_similarity_threshold: float = vector_similarity_threshold,
     ) -> List[dict]:
         """
         Performs multi-index hybrid search and returns ordered dictionary with the combined results.
@@ -66,7 +69,6 @@ class CustomRetriever(BaseRetriever):
             indexes (list): List of index names to search.
             k (int): Number of top results to retrieve. Default is 5.
             reranker_threshold (float): Threshold for reranker score. Default is 1.2.
-            sas_token (str): SAS token for authentication. Default is empty string.
 
         Returns:
             OrderedDict: Ordered dictionary of search results.
@@ -93,11 +95,11 @@ class CustomRetriever(BaseRetriever):
                         "k": k,
                         "threshold": {
                             "kind": "vectorSimilarity",
-                            "value": 0.5,  # 0.333 - 1.00 (Cosine), 0 to 1 for Euclidean and DotProduct.
+                            "value": vector_similarity_threshold,  # 0.333 - 1.00 (Cosine), 0 to 1 for Euclidean and DotProduct.
                         },
                     }
                 ],
-                "semanticConfiguration": "financial-index-semantic-configuration",  # change the name depends on your config name
+                "semanticConfiguration": semantic_config,  # change the name depends on your config name
                 "captions": "extractive",
                 "answers": "extractive",
                 "count": "true",
@@ -118,7 +120,8 @@ class CustomRetriever(BaseRetriever):
                 search_results = resp.json()
                 agg_search_results[index] = search_results
             except Exception as e:
-                logging.info(f"[financial-orchestrator-agent] Error in get_search_results: {str(e)}")
+                if self.verbose:
+                    print(f"[financial-orchestrator-agent] Error in get_search_results: {str(e)}")
                 return []
 
         content = dict()
@@ -131,25 +134,8 @@ class CustomRetriever(BaseRetriever):
                 ):  # Range between 0 and 4
                     content[result["chunk_id"]] = {
                         "filename": result["file_name"],
-                        # "title": result['title'],
                         "chunk": (result["chunk"] if "chunk" in result else ""),
                         "location": (result["url"] if "url" in result else ""),
-                        "caption": result["@search.captions"][0]["text"],
-                        "score": result["@search.rerankerScore"],
-                        "index": index,
-                    }
-
-        for index, search_results in agg_search_results.items():
-            for result in search_results["value"]:
-                if (
-                    result["@search.rerankerScore"] > reranker_threshold
-                ):  # Range between 0 and 4
-                    content[result["chunk_id"]] = {
-                        "filename": result["file_name"],
-                        "chunk": result["chunk"],
-                        "location": (
-                            result["url"] + f"?{sas_token}" if result["url"] else ""
-                        ),
                         "date_last_modified": result["date_last_modified"],
                         "caption": result["@search.captions"][0]["text"],
                         "score": result["@search.rerankerScore"],
@@ -183,7 +169,6 @@ class CustomRetriever(BaseRetriever):
             self.indexes,
             k=self.topK,
             reranker_threshold=self.reranker_threshold,
-            sas_token=self.sas_token,
         )
         top_docs = []
 
@@ -199,7 +184,7 @@ class CustomRetriever(BaseRetriever):
         return top_docs
 
 
-def create_main_agent(checkpointer, verbose=True):
+def create_main_agent(checkpointer, documentName, verbose=True):
     # Define model
     llm = AzureChatOpenAI(
         azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
@@ -220,37 +205,44 @@ def create_main_agent(checkpointer, verbose=True):
         indexes=indexes,
         topK=k,
         reranker_threshold=1.2,
-        sas_token=os.environ["BLOB_SAS_TOKEN"],
+        verbose=verbose,
     )
 
     def report_retriever(state: AgentState):
-        """Retrieve the initial report for consumer segmentation."""
+        """Retrieve the initial report."""
         try:
             # Get documents from retriever
-            documents = retriever.invoke("consumer segmentation")
+            documents = retriever.invoke(documentName)
 
-            logging.info(f"[financial-orchestrator-agent] RETRIEVED DOCUMENTS: {len(documents)}")
+            if verbose:
+                print(f"[financial-orchestrator-agent] RETRIEVED DOCUMENTS: {len(documents)}")
+                # print(f"[financial-orchestrator-agent] DOCUMENT NAME: {documentName}")
+                # print(documents[0].page_content)
 
             if not documents or len(documents) == 0:
-                logging.info("[financial-orchestrator-agent] No documents retrieved, using fallback content")
+                if verbose:
+                    print("[financial-orchestrator-agent] No documents retrieved, using fallback content")
                 documents = [
                     Document(
-                        page_content="No information found about consumer segmentation."
+                        page_content="No information found about the report"
                     )
                 ]
 
             return {"report": documents}
         except Exception as e:
-            logging.info(f"[financial-orchestrator-agent] Error in report_retriever: {str(e)}")
+            if verbose:
+                print(f"[financial-orchestrator-agent] Error in report_retriever: {str(e)}")
             # Return a fallback document to prevent crashes
             return {
                 "report": [
                     Document(
-                        page_content="Error retrieving consumer segmentation information."
+                        page_content="Error retrieving report information."
                     )
                 ]
             }
-
+    ###################################################
+    # Define web search tool
+    ###################################################
     @tool
     def web_search(query: str) -> str:
         """Conduct web search for user query that is not included in the report"""
@@ -274,7 +266,8 @@ def create_main_agent(checkpointer, verbose=True):
                 f"URL: {metadata['source']}\n" f"Content: {page_content}\n"
             )
 
-        logging.info(f"[financial-orchestrator-agent] WEBSEARCH RESULTS: {len(results)}")
+        if verbose:
+            print(f"[financial-orchestrator-agent] WEBSEARCH RESULTS: {len(results)}")
 
         return "\n\n".join(formatted_results)
 
@@ -304,54 +297,218 @@ def create_main_agent(checkpointer, verbose=True):
             raise Exception(f"Error processing tool calls: {e}")
 
         return {"messages": outputs}
+    
+
+    def format_chat_history(messages):
+        from langchain_core.messages import HumanMessage
+        """Format chat history into a clean, readable string."""
+        if not messages:
+            return "No previous conversation history."
+            
+        formatted_messages = []
+        for msg in messages:
+            # Add a separator line
+            formatted_messages.append("-" * 50)
+            
+            # Format based on message type
+            if isinstance(msg, HumanMessage):
+                formatted_messages.append("Human:")
+                formatted_messages.append(f"{msg.content}")
+                
+            elif isinstance(msg, AIMessage):
+                formatted_messages.append("Assistant:")
+                formatted_messages.append(f"{msg.content}")
+                
+            elif isinstance(msg, ToolMessage):
+                formatted_messages.append("Tool Output:")
+                # Try to format tool output nicely
+                try:
+                    tool_name = getattr(msg, 'name', 'Unknown Tool')
+                    formatted_messages.append(f"Tool: {tool_name}")
+                    formatted_messages.append(f"Output: {msg.content[:200]}")
+                except:
+                    formatted_messages.append(f"{msg.content[:200]}")
+        
+        # Add final separator
+        formatted_messages.append("-" * 50)
+        
+        # Join all lines with newlines
+        return "\n".join(formatted_messages)
 
     def call_model(state: AgentState, config: RunnableConfig):
-
         report = state["report"][0].page_content
+        
+        # Get the most recent message except the latest one 
+        chat_history = state['messages'][:-1] or []
+
+        # Format chat history using the new formatting function
+        formatted_chat_history = format_chat_history(chat_history)
+
+        # Get chat summary
+        chat_summary = state.get("chat_summary", "")
 
         system_prompt = """
-        You are a helpful assistant. Use the available tool to help answer user queries if the provided report are deemed irrelevant
+        You are a helpful assistant. Use available tools to answer queries if provided information is irrelevant. 
+        Consider conversation history for context in your responses if available. 
+        If the context is already relevant, then do not use any tools.
+        Treat the report as a primary source of information, but use the web search tool to supplement the information if needed.
+        
+        ***Important***: If the tool is triggered, then mention in the response that external sources were used to supplement the information. You must also provide the URL of the source in the response.
+        
+        Report Information:
 
-        Here is the report:
         {report}
+        ==================
+
+        Previous Conversation:
+
+        {formatted_chat_history}
+        ====================
+
+        Conversation Summary:
+
+        {chat_summary}
         """.format(
-            report=report
+            report=report,
+            formatted_chat_history=formatted_chat_history,
+            chat_summary=chat_summary
         )
 
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", system_prompt),
-                ("placeholder", "{chat_history}"),
-                ("human", "{input}"),
-                ("placeholder", "{agent_scratchpad}"),
-            ]
-        )
+        # if verbose:                
+        #     print(f"[financial-orchestrator-agent] Formatted system prompt:\n{system_prompt}")
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("human", "{input}"),
+            ("placeholder", "{agent_scratchpad}"),
+        ])
+    
         agent = create_tool_calling_agent(llm, tools, prompt)
         agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
         response = agent_executor.invoke(
             {
                 "input": state["messages"][-1].content,
-                "chat_history": state["messages"][:-1],
             }
         )
 
         return {"messages": [AIMessage(content=response["output"])]}
 
+    ###################################################
+    # summarize chat history 
+    ###################################################
+    # summarize conversation at the end if total messages > 6
+    
+    # dummy node for conversation history 
+    def conv_length_check(state: AgentState):
+        return state
+    
     # define the conditional edge that determines whether to continue or not
+    def chat_length_check(state: AgentState) -> Literal['summarize_chat', "__end__"]:
+        """summarize the conversation if msg > 6, if not then end """
+        # Filter out ToolMessages and count only user/assistant messages
+        message_count = len([
+            msg for msg in state['messages'] 
+            if not isinstance(msg, ToolMessage)
+        ])
+        
+        if verbose:
+            print(f"[financial-orchestrator-agent] Message count: {message_count}")
+        
+        if message_count > 6:
+            return "summarize_chat"
+        return "__end__"
+
+    def summarize_chat(state: AgentState):
+        from langchain_core.messages import HumanMessage, RemoveMessage
+        
+        # Get existing summary
+        summary = state.get("chat_summary", "")
+        
+        # Filter out tool messages for summarization
+        messages_to_summarize = [
+            msg for msg in state['messages'] 
+            if not isinstance(msg, ToolMessage)
+        ]
+        
+        if verbose:
+            print(f"[financial-orchestrator-agent] Summarizing {len(messages_to_summarize)} messages")
+        
+        # Create summary prompt
+        if summary:
+            summary_msg = (
+                f"This is the summary of the conversation so far: \n\n{summary}\n\n"
+                "Extend the summary by taking into account the new messages above. "
+                "Just return the summary, no need to say anything else:"
+            )
+        else:
+            summary_msg = (
+                "Summarize the following conversation history. "
+                "Just return the summary, no need to say anything else:"
+            )
+        
+        # Create messages for summary generation
+        final_summary_msg = messages_to_summarize + [HumanMessage(content=summary_msg)]
+        
+        # Generate summary
+        new_summary = llm.invoke(final_summary_msg)
+    ###################################################
+    ### will need to revisit this later
+    ###################################################
+        # # Keep only the last two non-tool messages
+        # messages_to_keep = [
+        #     msg for msg in state['messages'][-4:] 
+        #     if not isinstance(msg, ToolMessage)
+        # ][-2:]
+        
+        # # Create remove messages for all except the kept ones
+        # messages_to_remove = [
+        #     RemoveMessage(id=msg.id) 
+        #     for msg in state['messages'] 
+        #     if msg not in messages_to_keep
+        # ]
+        
+        # Store in CosmosDB
+        conversation_id = state.get('configurable', {}).get('thread_id', '')
+        if conversation_id:
+            try:
+                conversation_data = get_conversation_data(conversation_id)
+                if conversation_data:
+                    conversation_data['summary'] = new_summary.content
+                    update_conversation_data(conversation_id, conversation_data)
+                    if verbose:
+                        print(f"[financial-orchestrator-agent] Updated summary in CosmosDB for conversation {conversation_id}")
+            except Exception as e:
+                if verbose:
+                    print(f"[financial-orchestrator-agent] Failed to update summary in CosmosDB: {str(e)}")
+        
+        return {
+            "chat_summary": new_summary.content,
+            # "messages": messages_to_remove
+        }
+        
+
     def should_continue(state: AgentState):
         messages = state["messages"]
         last_message = messages[-1]
-        # if there is not function call, then we finish
+        
+        if verbose:
+            print(f"[financial-orchestrator-agent] Checking continuation condition")
+        
+        # if there is no function call, then we check conversation length
         if not last_message.tool_calls:
-            return "end"
-        # otherwise if there is, we continue
-        else:
-            return "continue"
+            if verbose:
+                print("[financial-orchestrator-agent] No tool calls, checking conversation length")
+            return "conv_length_check"
+        
+        # if there is a function call, we continue with tools
+        if verbose:
+            print("[financial-orchestrator-agent] Tool calls present, continuing with tools")
+        return "continue"
 
     ###################################################
     # define graph
     ###################################################
-    # define a new graph
+
     workflow = StateGraph(AgentState)
 
     # define the preload document node
@@ -359,6 +516,8 @@ def create_main_agent(checkpointer, verbose=True):
     # define the two nodes we will cycle between
     workflow.add_node("agent", call_model)
     workflow.add_node("tools", tool_node)
+    workflow.add_node("conv_length_check", conv_length_check)
+    workflow.add_node("summarize_chat", summarize_chat)
 
     # set the entry point as agent
     workflow.set_entry_point("report_preload")
@@ -367,11 +526,16 @@ def create_main_agent(checkpointer, verbose=True):
     workflow.add_edge("report_preload", "agent")
 
     workflow.add_conditional_edges(
-        "agent", should_continue, {"continue": "tools", "end": END}
+        "agent", should_continue, {"continue": "tools", "conv_length_check": "conv_length_check"}
     )
 
     # add a normal edge from tools to agent
     workflow.add_edge("tools", "agent")
+
+    workflow.add_conditional_edges(
+        "conv_length_check", chat_length_check, {"summarize_chat": "summarize_chat", "__end__": END}
+    )
+    workflow.add_edge("summarize_chat", END)
 
     # compile the graph
     graph = workflow.compile(checkpointer=checkpointer)
