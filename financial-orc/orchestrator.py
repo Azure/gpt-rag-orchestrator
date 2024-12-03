@@ -61,21 +61,23 @@ async def run(conversation_id, question, documentName, client_principal):
         serialized_data = memory.serde.dumps(_tuple)
         b64_memory = base64.b64encode(serialized_data).decode("utf-8")
 
-        # Update conversation data
-        conversation_data = {
-            "memory_data": b64_memory,
-            "history": conversation_data.get("history", []),
-            "interaction": {
-                "user_id": client_principal["id"],
-                "user_name": client_principal["name"],
-            },
-        }
+        # set values on cosmos object
+        conversation_data["memory_data"] = b64_memory
 
         # Add new messages to history
         conversation_data["history"].append({"role": "user", "content": question})
         conversation_data["history"].append(
             {"role": "assistant", "content": response["messages"][-1].content}
         )
+
+        # conversation data
+        response_time = round(time.time() - start_time, 2)
+        interaction = {
+            "user_id": client_principal["id"],
+            "user_name": client_principal["name"],
+            "response_time": response_time,
+        }
+        conversation_data["interaction"] = interaction
 
         # Store in CosmosDB
         update_conversation_data(conversation_id, conversation_data)
