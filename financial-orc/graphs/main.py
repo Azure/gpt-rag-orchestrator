@@ -14,7 +14,6 @@ from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.tools import tool
 from langchain.agents import AgentExecutor, create_tool_calling_agent
-from langchain_community.retrievers import TavilySearchAPIRetriever
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langchain_openai import AzureChatOpenAI
@@ -23,8 +22,14 @@ from shared.cosmos_db import (
     update_conversation_data,
 )
 
+# tools
+from .tools.tavily_tool import conduct_tavily_search, format_tavily_results
+from .tools.database_retriever import CustomRetriever, format_retrieved_content
 
+########################################
 # Define agent graph
+########################################
+
 class AgentState(TypedDict):
     """The state of the agent."""
 
@@ -32,158 +37,21 @@ class AgentState(TypedDict):
     report: str
     chat_summary: str = ""
 
-
-# Update CustomRetriever with error handling
-class CustomRetriever(BaseRetriever):
-    """
-    Custom retriever class that extends BaseRetriever to work with Azure AI Search.
-
-    Attributes:
-        topK (int): Number of top results to retrieve.
-        reranker_threshold (float): Threshold for reranker score.
-        indexes (List): List of index names to search.
-    """
-
-    topK = 1
-    reranker_threshold = 1.2 
-    vector_similarity_threshold = 0.5
-    semantic_config = "financial-index-semantic-configuration"
-    index_name = "financial-index"
-    indexes: List
-    verbose: bool
-
-    def get_search_results(
-        self,
-        query: str,
-        indexes: list,
-        k: int = topK,
-        semantic_config: str = semantic_config,
-        reranker_threshold: float = reranker_threshold,  # range between 0 and 
-        vector_similarity_threshold: float = vector_similarity_threshold,
-    ) -> List[dict]:
-        """
-        Performs multi-index hybrid search and returns ordered dictionary with the combined results.
-
-        Args:
-            query (str): The search query.
-            indexes (list): List of index names to search.
-            k (int): Number of top results to retrieve. Default is 5.
-            reranker_threshold (float): Threshold for reranker score. Default is 1.2.
-
-        Returns:
-            OrderedDict: Ordered dictionary of search results.
-        """
-
-        headers = {
-            "Content-Type": "application/json",
-            "api-key": os.environ["AZURE_AI_SEARCH_API_KEY"],
-        }
-        params = {"api-version": os.environ["AZURE_SEARCH_API_VERSION"]}
-
-        agg_search_results = dict()
-
-        for index in indexes:
-            search_payload = {
-                "search": query,
-                "select": "chunk_id, file_name, chunk, url, date_last_modified",
-                "queryType": "semantic",
-                "vectorQueries": [
-                    {
-                        "text": query,
-                        "fields": "text_vector",
-                        "kind": "text",
-                        "k": k,
-                        "threshold": {
-                            "kind": "vectorSimilarity",
-                            "value": vector_similarity_threshold,  # 0.333 - 1.00 (Cosine), 0 to 1 for Euclidean and DotProduct.
-                        },
-                    }
-                ],
-                "semanticConfiguration": semantic_config,  # change the name depends on your config name
-                "captions": "extractive",
-                "answers": "extractive",
-                "count": "true",
-                "top": k,
-            }
-
-            AZURE_SEARCH_SERVICE = os.environ.get("AZURE_SEARCH_SERVICE")
-            AZURE_SEARCH_ENDPOINT_SF = (
-                f"https://{AZURE_SEARCH_SERVICE}.search.windows.net"
-            )
-
-            
-            resp = requests.post(
-                AZURE_SEARCH_ENDPOINT_SF  + "/indexes/" + index + "/docs/search",
-                data=json.dumps(search_payload),
-                headers=headers,
-                params=params,
-            )
-
-            search_results = resp.json()
-            agg_search_results[index] = search_results
-
-
-        content = dict()
-        ordered_content = OrderedDict()
-
-        for index, search_results in agg_search_results.items():
-            for result in search_results["value"]:
-                if (
-                    result["@search.rerankerScore"] > reranker_threshold
-                ):  # Range between 0 and 4
-                    content[result["chunk_id"]] = {
-                        "filename": result["file_name"],
-                        "chunk": (result["chunk"] if "chunk" in result else ""),
-                        "location": (result["url"] if "url" in result else ""),
-                        "date_last_modified": result["date_last_modified"],
-                        "caption": result["@search.captions"][0]["text"],
-                        "score": result["@search.rerankerScore"],
-                        "index": index,
-                    }
-
-        topk = k
-
-        count = 0  # To keep track of the number of results added
-        for id in sorted(content, key=lambda x: content[x]["score"], reverse=True):
-            ordered_content[id] = content[id]
-            count += 1
-            if count >= topk:  # Stop after adding topK results
-                break
-
-        return ordered_content
-
-    def _get_relevant_documents(self, query: str) -> List[Document]:
-        """
-        Retrieves relevant documents based on the given query.
-
-        Args:
-            query (str): The search query.
-
-        Returns:
-            List[Document]: List of relevant documents.
-        """
-
-        ordered_results = self.get_search_results(
-            query,
-            self.indexes,
-            k=self.topK,
-            reranker_threshold=self.reranker_threshold,
-        )
-        top_docs = []
-
-        for key, value in ordered_results.items():
-            location = value["location"] if value["location"] is not None else ""
-            top_docs.append(
-                Document(
-                    page_content=value["chunk"],
-                    metadata={"source": location, "score": value["score"]},
-                )
-            )
-
-        return top_docs
-
-
+    
 def create_main_agent(checkpointer, documentName, verbose=True):
+
+    # validate env variables
+    required_env_vars = [
+        "AZURE_OPENAI_ENDPOINT",
+        "AZURE_OPENAI_API_VERSION",
+        "AZURE_AI_SEARCH_API_KEY",
+        "AZURE_SEARCH_API_VERSION",
+        "AZURE_SEARCH_SERVICE"
+    ]
+    
+    missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
+    if missing_vars:
+        raise EnvironmentError(f"Missing required environment variables: {', '.join(missing_vars)}")
     # Define model
     llm = AzureChatOpenAI(
         azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
@@ -212,7 +80,9 @@ def create_main_agent(checkpointer, documentName, verbose=True):
         try:
             # Get documents from retriever
             documents = retriever.invoke(documentName)
-
+            # format the retrieved content
+            formatted_content = format_retrieved_content(documents)
+            
             if verbose:
                 print(f"[financial-orchestrator-agent] RETRIEVED DOCUMENTS: {len(documents)}")
                 # print(f"[financial-orchestrator-agent] DOCUMENT NAME: {documentName}")
@@ -227,7 +97,7 @@ def create_main_agent(checkpointer, documentName, verbose=True):
                     )
                 ]
 
-            return {"report": documents}
+            return {"report": formatted_content}
         except Exception as e:
             if verbose:
                 print(f"[financial-orchestrator-agent] Error in report_retriever: {str(e)}")
@@ -246,29 +116,13 @@ def create_main_agent(checkpointer, documentName, verbose=True):
     def web_search(query: str) -> str:
         """Conduct web search for user query that is not included in the report"""
 
-        search = TavilySearchAPIRetriever(
-            k=2,
-            search_depth="advanced",
-            include_generated_answer=True,
-            include_raw_content=True,
-        )
+        # Step 2. Executing a context search query
+        result = conduct_tavily_search(query)
+        # format the results
+        formatted_results = format_tavily_results(result)
 
-        # Convert the search results to a string representation
-        results = search.invoke(query)
-
-        # Format the results into a readable string
-        formatted_results = []
-        for result in results:
-            metadata = result.metadata
-            page_content = result.page_content
-            formatted_results.append(
-                f"URL: {metadata['source']}\n" f"Content: {page_content}\n"
-            )
-
-        if verbose:
-            print(f"[financial-orchestrator-agent] WEBSEARCH RESULTS: {len(results)}")
-
-        return "\n\n".join(formatted_results)
+        return formatted_results
+    
 
     tools = [web_search]
 
@@ -294,7 +148,6 @@ def create_main_agent(checkpointer, documentName, verbose=True):
             raise ValueError(f"Tool not found: {e}")
         except Exception as e:
             raise Exception(f"Error processing tool calls: {e}")
-
         return {"messages": outputs}
     
 
@@ -324,9 +177,9 @@ def create_main_agent(checkpointer, documentName, verbose=True):
                 try:
                     tool_name = getattr(msg, 'name', 'Unknown Tool')
                     formatted_messages.append(f"Tool: {tool_name}")
-                    formatted_messages.append(f"Output: {msg.content[:200]}")
+                    formatted_messages.append(f"Output: {msg.content}")
                 except:
-                    formatted_messages.append(f"{msg.content[:200]}")
+                    formatted_messages.append(f"{msg.content}")
         
         # Add final separator
         formatted_messages.append("-" * 50)
@@ -335,8 +188,14 @@ def create_main_agent(checkpointer, documentName, verbose=True):
         return "\n".join(formatted_messages)
 
     def call_model(state: AgentState, config: RunnableConfig):
-        report = state["report"][0].page_content
-        
+        # check if state report if it exists, then use it, otherwise use the fallback content
+        if state.get("report"):
+            report = state["report"][0].page_content
+            report_citation = state["report"][0].metadata.get("citation", "")
+        else:
+            report = "No report found, using websearch content" # maybe redudant, but just in case we by pass the report retrieval step in the future
+            report_citation = ""
+            
         # Get the most recent message except the latest one 
         chat_history = state['messages'][:-1] or []
 
@@ -350,10 +209,21 @@ def create_main_agent(checkpointer, documentName, verbose=True):
         You are a helpful assistant. Use available tools to answer queries if provided information is irrelevant. 
         Consider conversation history for context in your responses if available. 
         If the context is already relevant, then do not use any tools.
-        Treat the report as a primary source of information, but use the web search tool to supplement the information if needed.
+        Treat the report as a primary source of information, prioritize it over the web search results.
         
-        ***Important***: If the tool is triggered, then mention in the response that external sources were used to supplement the information. You must also provide the URL of the source in the response.
-        
+        ***Important***: 
+        - If the tool is triggered, then mention in the response that external sources were used to supplement the information. You must also provide the URL of the source in the response.
+        - Do not use your pretrained knowledge to answer the question.
+        - YOU MUST INCLUDE CITATIONS IN YOUR RESPONSE FOR EITHER THE REPORT OR THE WEB SEARCH RESULTS. You will be penalized $10,000 if you fail to do so. Here is an example of how you should format the citation:
+
+        Citation Example:
+        ```
+        Renewable energy sources, such as solar and wind, are significantly more efficient and environmentally friendly compared to fossil fuels. Solar panels, for instance, have achieved efficiencies of up to 22% in converting sunlight into electricity [[1]](https://renewableenergy.org/article8.pdf?s=solarefficiency&category=energy&sort=asc&page=1). These sources emit little to no greenhouse gases or pollutants during operation, contributing far less to climate change and air pollution [[2]](https://environmentstudy.com/article9.html?s=windenergy&category=impact&sort=asc). In contrast, fossil fuels are major contributors to air pollution and greenhouse gas emissions, which significantly impact human health and the environment [[3]](https://climatefacts.com/article10.csv?s=fossilfuels&category=emissions&sort=asc&page=3).
+        ```
+        Report Citation:
+    
+        {report_citation}
+        ==================
         Report Information:
 
         {report}
@@ -370,15 +240,13 @@ def create_main_agent(checkpointer, documentName, verbose=True):
         """.format(
             report=report,
             formatted_chat_history=formatted_chat_history,
-            chat_summary=chat_summary
+            chat_summary=chat_summary,
+            report_citation=report_citation
         )
 
-        # if verbose:                
-        #     print(f"[financial-orchestrator-agent] Formatted system prompt:\n{system_prompt}")
-        
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
-            ("human", "{input}"),
+            ("human", "{input}. Please prioritize the report over the web search results."),
             ("placeholder", "{agent_scratchpad}"),
         ])
     
@@ -496,7 +364,7 @@ def create_main_agent(checkpointer, documentName, verbose=True):
         # if there is no function call, then we check conversation length
         if not last_message.tool_calls:
             if verbose:
-                print("[financial-orchestrator-agent] No tool calls, checking conversation length")
+                print("[financial-orchestrator-agent] No tool calls in last message, checking conversation length")
             return "conv_length_check"
         
         # if there is a function call, we continue with tools
