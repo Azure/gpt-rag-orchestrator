@@ -25,6 +25,8 @@ from shared.cosmos_db import (
 # tools
 from .tools.tavily_tool import conduct_tavily_search, format_tavily_results
 from .tools.database_retriever import CustomRetriever, format_retrieved_content
+from datetime import datetime
+
 
 ########################################
 # Define agent graph
@@ -205,8 +207,12 @@ def create_main_agent(checkpointer, documentName, verbose=True):
         # Get chat summary
         chat_summary = state.get("chat_summary", "")
 
+        # get curretn date 
+        current_date = datetime.now().strftime("%Y-%m-%d")
+
         system_prompt = """
-        You are a helpful assistant. Use available tools to answer queries if provided information is irrelevant. 
+        You are a helpful assistant. Today's date is {current_date}.
+        Use available tools to answer queries if provided information is irrelevant. You should only use sources within the past 6 months.
         Consider conversation history for context in your responses if available. 
         If the context is already relevant, then do not use any tools.
         Treat the report as a primary source of information, prioritize it over the web search results.
@@ -215,10 +221,12 @@ def create_main_agent(checkpointer, documentName, verbose=True):
         - If the tool is triggered, then mention in the response that external sources were used to supplement the information. You must also provide the URL of the source in the response.
         - Do not use your pretrained knowledge to answer the question.
         - YOU MUST INCLUDE CITATIONS IN YOUR RESPONSE FOR EITHER THE REPORT OR THE WEB SEARCH RESULTS. You will be penalized $10,000 if you fail to do so. Here is an example of how you should format the citation:
+        - Citation format: [[1]](https://www.example.com)
 
         Citation Example:
         ```
-        Renewable energy sources, such as solar and wind, are significantly more efficient and environmentally friendly compared to fossil fuels. Solar panels, for instance, have achieved efficiencies of up to 22% in converting sunlight into electricity [[1]](https://renewableenergy.org/article8.pdf?s=solarefficiency&category=energy&sort=asc&page=1). These sources emit little to no greenhouse gases or pollutants during operation, contributing far less to climate change and air pollution [[2]](https://environmentstudy.com/article9.html?s=windenergy&category=impact&sort=asc). In contrast, fossil fuels are major contributors to air pollution and greenhouse gas emissions, which significantly impact human health and the environment [[3]](https://climatefacts.com/article10.csv?s=fossilfuels&category=emissions&sort=asc&page=3).
+        Renewable energy sources, such as solar and wind, are significantly more efficient and environmentally friendly compared to fossil fuels. Solar panels, for instance, have achieved efficiencies of up to 22% in converting sunlight into electricity [[1]](https://renewableenergy.org/article8.pdf?s=solarefficiency&category=energy&sort=asc&page=1). 
+        These sources emit little to no greenhouse gases or pollutants during operation, contributing far less to climate change and air pollution [[2]](https://environmentstudy.com/article9.html?s=windenergy&category=impact&sort=asc). In contrast, fossil fuels are major contributors to air pollution and greenhouse gas emissions, which significantly impact human health and the environment [[3]](https://climatefacts.com/article10.csv?s=fossilfuels&category=emissions&sort=asc&page=3).
         ```
         Report Citation:
     
@@ -241,12 +249,13 @@ def create_main_agent(checkpointer, documentName, verbose=True):
             report=report,
             formatted_chat_history=formatted_chat_history,
             chat_summary=chat_summary,
-            report_citation=report_citation
+            report_citation=report_citation,
+            current_date=current_date
         )
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
-            ("human", "{input}. Please prioritize the report over the web search results."),
+            ("human", "{input}"),
             ("placeholder", "{agent_scratchpad}"),
         ])
     
