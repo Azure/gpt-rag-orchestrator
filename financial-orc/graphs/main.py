@@ -25,6 +25,8 @@ from shared.cosmos_db import (
 # tools
 from .tools.tavily_tool import conduct_tavily_search, format_tavily_results
 from .tools.database_retriever import CustomRetriever, format_retrieved_content
+from datetime import datetime
+
 
 ########################################
 # Define agent graph
@@ -205,8 +207,12 @@ def create_main_agent(checkpointer, documentName, verbose=True):
         # Get chat summary
         chat_summary = state.get("chat_summary", "")
 
+        # get curretn date 
+        current_date = datetime.now().strftime("%Y-%m-%d")
+
         system_prompt = """
-        You are a helpful assistant. Use available tools to answer queries if provided information is irrelevant. 
+        You are a helpful assistant. Today's date is {current_date}.
+        Use available tools to answer queries if provided information is irrelevant. You should only use sources within the past 6 months.
         Consider conversation history for context in your responses if available. 
         If the context is already relevant, then do not use any tools.
         Treat the report as a primary source of information, prioritize it over the web search results.
@@ -241,7 +247,8 @@ def create_main_agent(checkpointer, documentName, verbose=True):
             report=report,
             formatted_chat_history=formatted_chat_history,
             chat_summary=chat_summary,
-            report_citation=report_citation
+            report_citation=report_citation,
+            current_date=current_date
         )
 
         prompt = ChatPromptTemplate.from_messages([
