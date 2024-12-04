@@ -26,7 +26,7 @@ async def run(conversation_id, question, documentName, client_principal):
 
         # Get existing conversation data from CosmosDB
         logging.info("[financial-orchestrator] Loading conversation data")
-        conversation_data = get_conversation_data(conversation_id, type="financial")
+        conversation_data = get_conversation_data(conversation_id)
 
         start_time = time.time()
 
