@@ -417,6 +417,7 @@ def get_conversations(user_id):
                 "id": con["id"],
                 "start_date": con["conversation_data"]["start_date"] if "start_date" in con["conversation_data"] else default_date,
                 "content": con["conversation_data"]["history"][0]["content"],
+                "type": con["conversation_data"]["type"] if "type" in con["conversation_data"] else "default",
             }   
             for con in conversations
         ]
@@ -452,6 +453,7 @@ def get_conversation(conversation_id, user_id):
                 }
                 for message in conversation["conversation_data"]["history"]
             ],
+            "type": conversation["conversation_data"]["type"] if "type" in conversation["conversation_data"] else "default",
         }
         return formatted_conversation
     except Exception:
