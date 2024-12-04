@@ -78,7 +78,7 @@ def store_agent_error(user_id, error, ask):
     except Exception as e:
         logging.error(f"Error retrieving the conversations: {e}")
 
-def get_conversation_data(conversation_id):
+def get_conversation_data(conversation_id, type = None):
     credential = DefaultAzureCredential()
     db_client = CosmosClient(AZURE_DB_URI, credential=credential)
     db = db_client.get_database_client(database=AZURE_DB_NAME)
@@ -101,7 +101,8 @@ def get_conversation_data(conversation_id):
                     "history": [],  # Initialize empty history list
                     "memory_data": "",
                     "interaction": {},
-                }
+                    "type": type if type else "default",
+                },
             }
         )
 
@@ -113,6 +114,7 @@ def get_conversation_data(conversation_id):
             "history": [],  # Ensure history exists in default structure
             "memory_data": "",
             "interaction": {},
+            "type": type if type else "default",
         },
     )
 
