@@ -3,10 +3,59 @@ import azure.functions as func
 import os
 import json
 from . import orchestrator
+from langchain_openai import AzureChatOpenAI
+from pydantic import BaseModel, Field
+from typing import Literal
 
 LOGLEVEL = os.environ.get("LOGLEVEL", "DEBUG").upper()
 logging.basicConfig(level=LOGLEVEL)
 
+class ReportType(BaseModel):
+    """Categorize user query into one of the predefined report types.
+    
+    Attributes:
+        report_type: The classified type of report based on user query
+    """
+    report_type: Literal[
+        "monthly_economics",
+        "weekly_economics", 
+        "company_analysis",
+        "ecommerce",
+        "creative_brief"
+    ] = Field(
+        default="monthly_economics",
+        description="Report classification based on query content",
+        title="Report Type Classification"
+    )
+
+def initialize_llm() -> AzureChatOpenAI:
+    """Initialize Azure OpenAI chat model with configuration.
+    
+    Returns:
+        AzureChatOpenAI: Configured language model instance
+    """
+    return AzureChatOpenAI(
+        azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+        azure_deployment="Agent",
+        openai_api_version=os.environ["AZURE_OPENAI_API_VERSION"],
+        temperature=0.1,
+    )
+
+def categorize_query(query: str, llm: AzureChatOpenAI) -> str:
+    """Categorize user query into predefined report types.
+    
+    Args:
+        query: User's input query
+        llm: Configured language model
+        
+    Returns:
+        str: Classified report type
+    """
+    categorizer = llm.with_structured_output(ReportType)
+    result = categorizer.invoke(query)
+    return result.report_type
+
+llm = initialize_llm()
 
 async def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info("[financial-orchestrator] Python HTTP trigger function processed a request.")
@@ -49,6 +98,8 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
     #     return func.HttpResponse('{"error": "invalid documentName"}', mimetype="application/json", status_code=200)
 
     if question:
+        if documentName  == "defaultDocument" or documentName == "":
+            documentName = categorize_query(question, llm)
         result = await orchestrator.run(
             conversation_id, question, documentName, client_principal
         )
