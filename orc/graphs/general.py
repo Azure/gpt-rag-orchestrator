@@ -12,12 +12,7 @@ from langchain_community.utilities import GoogleSerperAPIWrapper
 from langgraph.graph import END, StateGraph, START
 from shared.prompts import GENERAL_PROMPT, ANSWER_GRADER_PROMPT, IMPROVED_GENERAL_PROMPT
 from shared.util import get_secret
-
-
-# obtain google search api key
-GOOGLE_SEARCH_API_KEY = os.environ.get("SERPER_API_KEY") or get_secret("GoogleSearchKey")
-
-
+from orc.graphs.tools import GoogleSearch
 
 
 class GradeAnswer(BaseModel):
@@ -52,6 +47,9 @@ def create_general_graph(
     structured_llm_answer_grader = model.with_structured_output(GradeAnswer)
     answer_grader = ANSWER_GRADER_PROMPT | structured_llm_answer_grader
     final_general_chain_model = IMPROVED_GENERAL_PROMPT | model
+    
+    # Initialize GoogleSearch tool
+    web_search_tool = GoogleSearch(k=3)
 
     def general_llm_node(state: GeneralModState):
         """
@@ -108,79 +106,27 @@ def create_general_graph(
             return "__end__"
         
     
-    google_search = GoogleSerperAPIWrapper(k=3, serper_api_key= GOOGLE_SEARCH_API_KEY)
-
-
-    def ggsearch_reformat(result: Dict) -> List[Document]:
-        """
-        Reformats Google search results into a list of Document objects.
-
-        Args:
-            result (Dict): The raw search results from Google.
-
-        Returns:
-            List[Document]: A list of Document objects containing the search results.
-        """
-        documents = []
-        try:
-            # Process Knowledge Graph results if present
-            if 'knowledgeGraph' in result:
-                kg = result['knowledgeGraph']
-                doc = Document(
-                    page_content=kg.get('description', ''),
-                    metadata={'source': kg.get('descriptionLink', ''), 'title': kg.get('title', '')}
-                )
-                documents.append(doc)
-            
-            # Process organic search results
-            if 'organic' in result:
-                for item in result['organic']:
-                    doc = Document(
-                        page_content=item.get('snippet', ''),
-                        metadata={'source': item.get('link', ''), 'title': item.get('title', '')}
-                    )
-                    documents.append(doc)
-            
-            if not documents:
-                raise ValueError("No search results found")
-            
-        except Exception as e:
-            print(f"An error occurred: {str(e)}")
-            documents.append(Document(
-                page_content="No search results found or an error occurred.",
-                metadata={'source': 'Error', 'title': 'Search Error'}
-            ))
-        
-        return documents
-    
     def google_search_node(state: GeneralModState) -> GeneralModState:
         """ 
-        Retrieve documents from Google search.
-        
-        Args:
-            state (InterviewState): The current state of the interview.
-        
-        Returns:
-            dict: A dictionary containing the retrieved documents as context.
+        Retrieve documents from Google search using the GoogleSearch tool.
         """
         general_model_messages = state["general_model_messages"]
         question = state["question"]
+        
         if verbose:
             print("---GOOGLE SEARCH---")
 
-        # Perform Google search using the generated search query
-        docs = ggsearch_reformat(google_search.results(question))
+        # Use the GoogleSearch tool directly
+        docs = web_search_tool.search(question)
         
         # Create a message to remove the last conversation message
         messages_to_delete = RemoveMessage(id=general_model_messages[-1].id)
 
-        # Return updated state
         return {
             "google_documents": docs,
             "general_model_messages": [messages_to_delete],
             "combined_messages": [messages_to_delete],
         }
-
 
     def final_general_generation(state: GeneralModState):
         """

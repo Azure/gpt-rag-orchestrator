@@ -112,7 +112,7 @@ ANSWER_GRADER_SYSTEM_PROMPT = """You are tasked with evaluating whether an answe
 
 - If the answer is off-topic, incomplete, or missing key details, return 'no.'
 
-- For casual or conversational questions, such as simple greetings or small talk, always return 'yes.'
+- For casual or conversational questions, such as simple greetings or small talk, today's date, always return 'yes.'
 
 - For complex questions that require in-depth analysis or a multi-step reasoning process, return 'no' even if the answer is somewhat relevant.
 
@@ -164,14 +164,17 @@ GRADE_PROMPT = ChatPromptTemplate.from_messages(
     ]
 )
 
-GENERAL_LLM_SYSTEM_PROMPT = (
-    "You are a helpful assistant that provides answer to general questions"
-)
+from datetime import date
+
+GENERAL_LLM_SYSTEM_PROMPT = """You are a helpful assistant.
+Today's date is {date}.
+If the user's question is about recent events happening in the past few months, you should say 'I am not sure about that' """.format(date=date.today())
+
 
 GENERAL_PROMPT = ChatPromptTemplate.from_messages(
     [
-        ("system", GENERAL_LLM_SYSTEM_PROMPT),
-        ("human", "Here is user question:\n{question}"),
+        ("system", (GENERAL_LLM_SYSTEM_PROMPT)),
+        ("human", "{question}"),
     ]
 )
 
@@ -185,6 +188,17 @@ IMPROVED_GENERAL_LLM_SYSTEMPROMPT = """
 You're a helpful writing assistant. You enrich generated answers 
 by using provided additional context to improve the previous answer,
 ensuring it fully addresses the user's question.
+
+You must provide citations/references in your answer if available. 
+
+Here is the citation format: `[[number]](url)`
+
+Here is an example: 
+
+```
+Artificial Intelligence has revolutionized healthcare in several ways [[1]](https://medical-ai.org/research/impact2023) through improved diagnosis accuracy and treatment planning. Machine learning models have shown a 95% accuracy rate in detecting early-stage cancers [[2]](https://cancer-research.org/studies/ml-detection?year=2023). Recent studies indicate that AI-assisted surgeries have reduced recovery times by 30% [[3]](https://surgical-innovations.com/ai-impact?study=recovery).
+```
+
 """
 
 # Create a chat prompt template

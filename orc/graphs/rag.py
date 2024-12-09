@@ -24,51 +24,9 @@ from langgraph.graph import END, StateGraph, START
 from shared.prompts import DOCSEARCH_PROMPT, RETRIEVAL_REWRITER_PROMPT, GRADE_PROMPT
 from shared.util import get_secret
 
-# obtain google search api key
-GOOGLE_SEARCH_API_KEY = os.environ.get("SERPER_API_KEY") or get_secret("GoogleSearchKey")
-
-
-def ggsearch_reformat(result: Dict) -> List[Document]:
-    """
-    Reformats Google search results into a list of Document objects.
-
-    Args:
-        result (Dict): The raw search results from Google.
-
-    Returns:
-        List[Document]: A list of Document objects containing the search results.
-    """
-    documents = []
-    try:
-        # Process Knowledge Graph results if present
-        if 'knowledgeGraph' in result:
-            kg = result['knowledgeGraph']
-            doc = Document(
-                page_content=kg.get('description', ''),
-                metadata={'source': kg.get('descriptionLink', ''), 'title': kg.get('title', '')}
-            )
-            documents.append(doc)
-        
-        # Process organic search results
-        if 'organic' in result:
-            for item in result['organic']:
-                doc = Document(
-                    page_content=item.get('snippet', ''),
-                    metadata={'source': item.get('link', ''), 'title': item.get('title', '')}
-                )
-                documents.append(doc)
-        
-        if not documents:
-            raise ValueError("No search results found")
-        
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
-        documents.append(Document(
-            page_content="No search results found or an error occurred.",
-            metadata={'source': 'Error', 'title': 'Search Error'}
-        ))
-    
-    return documents
+# import tools
+from orc.graphs.tools import CustomRetriever, GoogleSearch
+from concurrent.futures import ThreadPoolExecutor
 
 class GradeDocuments(BaseModel):
     """Binary score for relevance check on retrieved documents."""
@@ -98,139 +56,13 @@ class RetrievalState(TypedDict):
     documents: List[str]
 
 
-class CustomRetriever(BaseRetriever):
-    """
-    Custom Retriever class that extends the BaseRetriever class to perform multi-index hybrid search
-    and return ordered dictionary with the combined results
-    """
-
-    topK: int
-    reranker_threshold: int
-    indexes: List
-
-    def get_search_results(
-        self,
-        query: str,
-        indexes: list,
-        k: int = 5,
-        reranker_threshold: float = 1.2,  # range between 0 and 4 (high to low)
-    ) -> List[dict]:
-        """Performs multi-index hybrid search and returns ordered dictionary with the combined results"""
-
-        headers = {
-            "Content-Type": "application/json",
-            "api-key": os.environ["AZURE_AI_SEARCH_API_KEY"],
-        }
-        params = {"api-version": os.environ["AZURE_SEARCH_API_VERSION"]}
-
-        agg_search_results = dict()
-
-        for index in indexes:
-            search_payload = {
-                "search": query,
-                "select": "id, title, content, filepath",
-                "queryType": "semantic",
-                "vectorQueries": [
-                    {
-                        "text": query,
-                        "fields": "vector",
-                        "kind": "text",
-                        "k": k,
-                        "threshold": {
-                            "kind": "vectorSimilarity",
-                            "value": 0.5,  # 0.333 - 1.00 (Cosine), 0 to 1 for Euclidean and DotProduct.
-                        },
-                    }
-                ],
-                "semanticConfiguration": "my-semantic-config",  # change the name depends on your config name
-                "captions": "extractive",
-                "answers": "extractive",
-                "count": "true",
-                "top": k,
-            }
-
-            AZURE_SEARCH_SERVICE = os.environ.get("AZURE_SEARCH_SERVICE")
-            AZURE_SEARCH_ENDPOINT_SF = (
-                f"https://{AZURE_SEARCH_SERVICE}.search.windows.net"
-            )
-
-            resp = requests.post(
-                AZURE_SEARCH_ENDPOINT_SF + "/indexes/" + index + "/docs/search",
-                data=json.dumps(search_payload),
-                headers=headers,
-                params=params,
-            )
-
-            search_results = resp.json()
-            agg_search_results[index] = search_results
-
-        content = dict()
-        ordered_content = OrderedDict()
-
-        for index, search_results in agg_search_results.items():
-            for result in search_results["value"]:
-                if (
-                    result["@search.rerankerScore"] > reranker_threshold
-                ):  # Range between 0 and 4
-                    content[result["id"]] = {
-                        "title": result["title"],
-                        "name": (result["name"] if "name" in result else ""),
-                        "chunk": (result["content"] if "content" in result else ""),
-                        "location": (
-                            result["filepath"] if "filepath" in result else ""
-                        ),
-                        "caption": result["@search.captions"][0]["text"],
-                        "score": result["@search.rerankerScore"],
-                        "index": index,
-                    }
-
-        topk = k
-
-        count = 0  # To keep track of the number of results added
-        for id in sorted(content, key=lambda x: content[x]["score"], reverse=True):
-            ordered_content[id] = content[id]
-            count += 1
-            if count >= topk:  # Stop after adding topK results
-                break
-
-        return ordered_content
-
-    def _get_relevant_documents(self, query: str) -> List[Document]:
-        """
-        Modify the _get_relevant_documents methods in BaseRetriever so that it aligns with our previous settings
-        Retrieved Documents are sorted based on reranker score (semantic score)
-        """
-        ordered_results = self.get_search_results(
-            query,
-            self.indexes,
-            k=self.topK,
-            reranker_threshold=self.reranker_threshold,
-        )
-
-        top_docs = []
-
-        for key, value in ordered_results.items():
-            location = value["location"] if value["location"] is not None else ""
-            top_docs.append(
-                Document(
-                    page_content=value["chunk"],
-                    metadata={"source": location, "score": value["score"]},
-                )
-            )
-
-        return top_docs
-
-
 def create_retrieval_graph(
     model: LanguageModelLike,
     model_two: LanguageModelLike,
     verbose: bool = False,
 ) -> CompiledGraph:
-    # web_search_tool = TavilySearchAPIRetriever(k=3, 
-    #                                            search_depth= 'advanced',
-    #                                            include_raw_content = True,
-    #                                            )
-    web_search_tool = GoogleSerperAPIWrapper(k=3, serper_api_key= GOOGLE_SEARCH_API_KEY)
+    
+    web_search_tool = GoogleSearch(k=3)
     rag_chain = DOCSEARCH_PROMPT | model | StrOutputParser()
     index_name = os.environ["AZURE_AI_SEARCH_INDEX_NAME"]
     indexes = [index_name]
@@ -359,44 +191,35 @@ def create_retrieval_graph(
         documents = state["documents"]
         previous_conversation = state["retrieval_messages"] + [state.get("summary", "")]
 
-        # Score each doc
-        filtered_docs = []
-        web_search = "No"
+        def grade_document(document):
+            score = retrieval_grader.invoke(
+                {
+                    "question": question,
+                    "previous_conversation": previous_conversation,
+                    "document": document.page_content,
+                }
+            )
+            return document if score.binary_score == "yes" else None
+
         if not documents:
             if verbose:
                 print("---NO RELEVANT DOCUMENTS RETRIEVED FROM THE DATABASE---")
-            relevant_doc_count = 0
-            web_search = "Yes"
-        else:
-            if verbose:
-                print("---EVALUATING RETRIEVED DOCUMENTS---")
-            for d in documents:
-                score = retrieval_grader.invoke(
-                    {
-                        "question": question,
-                        "previous_conversation": previous_conversation,
-                        "document": d.page_content,
-                    }
-                )
-                grade = score.binary_score
-                if grade == "yes":
-                    if verbose:
-                        print("---GRADE: DOCUMENT RELEVANT---")
-                    filtered_docs.append(d)
-                else:
-                    if verbose:
-                        print("---GRADE: DOCUMENT NOT RELEVANT---")
+            return {"documents": [], "web_search": "Yes"}
 
-        # count the number of retrieved documents
+        if verbose:
+            print("---EVALUATING RETRIEVED DOCUMENTS---")
+
+        # Use ThreadPoolExecutor to run grading in parallel
+        with ThreadPoolExecutor() as executor:
+            graded_docs = list(executor.map(grade_document, documents))
+
+        filtered_docs = [d for d in graded_docs if d is not None]
         relevant_doc_count = len(filtered_docs)
 
         if verbose:
-            print(f"---NUMBER OF DATABASE RETRIEVED DOCUMENTS---: {relevant_doc_count}")
+            print(f"---NUMBER OF RELEVANT DATABASE RETRIEVED DOCUMENTS---: {relevant_doc_count}")
 
-        if relevant_doc_count >= 3:
-            web_search = "No"
-        else:
-            web_search = "Yes"
+        web_search = "No" if relevant_doc_count >= 3 else "Yes"
 
         return {"documents": filtered_docs, "web_search": web_search}
 
@@ -437,15 +260,14 @@ def create_retrieval_graph(
         Returns:
             state (dict): Updates documents key with appended web results
         """
-
         if verbose:
             print("---WEB SEARCH---")
 
         question = state["question"]
         documents = state["documents"]
 
-        # Web search
-        docs = ggsearch_reformat(web_search_tool.results(question))
+        # Web search - note the updated method call
+        docs = web_search_tool.search(question)
 
         # append to the existing document
         documents.extend(docs)
