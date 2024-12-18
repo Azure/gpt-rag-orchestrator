@@ -9,7 +9,7 @@ import time
 import urllib.parse
 from azure.cosmos.aio import CosmosClient as AsyncCosmosClient
 from azure.keyvault.secrets.aio import SecretClient as AsyncSecretClient
-from azure.identity.aio import DefaultAzureCredential as AsyncDefaultAzureCredential
+from azure.identity.aio import ManagedIdentityCredential, AzureCliCredential, ChainedTokenCredential
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 import semantic_kernel as sk
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
@@ -59,7 +59,7 @@ model_max_tokens = {
 async def get_secret(secretName):
     keyVaultName = os.environ["AZURE_KEY_VAULT_NAME"]
     KVUri = f"https://{keyVaultName}.vault.azure.net"
-    async with AsyncDefaultAzureCredential() as credential:
+    async with ChainedTokenCredential( ManagedIdentityCredential(), AzureCliCredential()) as credential:
         async with AsyncSecretClient(vault_url=KVUri, credential=credential) as client:
             retrieved_secret = await client.get_secret(secretName)
             value = retrieved_secret.value
@@ -149,7 +149,7 @@ async def call_semantic_function(kernel, function, arguments):
     return function_result
 
 @retry(wait=wait_random_exponential(min=2, max=60), stop=stop_after_attempt(6), reraise=True)
-async def chat_complete(messages, functions, function_call='auto',apim_key=None):
+async def chat_complete(messages, functions, params={}, function_call='auto',apim_key=None):
     """  Return assistant chat response based on user query. Assumes existing list of messages """
 
     oai_config = await get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
@@ -170,7 +170,7 @@ async def chat_complete(messages, functions, function_call='auto',apim_key=None)
 
     data = {
         "messages": messages,
-        "max_tokens": int(AZURE_OPENAI_RESP_MAX_TOKENS)
+        "max_tokens": params.get("max_tokens", int(AZURE_OPENAI_RESP_MAX_TOKENS)) 
     }
 
     if not function_call == 'none' and len(functions) > 0:
@@ -180,8 +180,8 @@ async def chat_complete(messages, functions, function_call='auto',apim_key=None)
     if function_call == 'auto':
         data['temperature'] = 0
     else:
-        data['temperature'] = float(AZURE_OPENAI_TEMPERATURE)
-        data['top_p'] = float(AZURE_OPENAI_TOP_P) 
+        data['temperature'] = params.get("temperature", float(AZURE_OPENAI_TEMPERATURE))
+        data['top_p'] = params.get("top_p", float(AZURE_OPENAI_TOP_P))
 
     start_time = time.time()
     async with aiohttp.ClientSession() as session:
@@ -365,7 +365,7 @@ async def get_aoai_config(model):
         }
     else:
         resource = await get_next_resource(model)
-        async with AsyncDefaultAzureCredential() as credential:
+        async with ChainedTokenCredential( ManagedIdentityCredential(), AzureCliCredential()) as credential:
             token = await credential.get_token("https://cognitiveservices.azure.com/.default")
 
             if model in ('gpt-35-turbo', 'gpt-35-turbo-16k', 'gpt-4', 'gpt-4-32k','gpt-4o'):
@@ -394,7 +394,7 @@ async def get_next_resource(model):
         return resources[0]
     else:
         start_time = time.time()
-        async with AsyncDefaultAzureCredential() as credential:
+        async with ChainedTokenCredential( ManagedIdentityCredential(), AzureCliCredential()) as credential:
             async with AsyncCosmosClient(AZURE_DB_URI, credential) as db_client:
                 db = db_client.get_database_client(database=AZURE_DB_NAME)
                 container = db.get_container_client('models')
@@ -430,7 +430,7 @@ async def get_next_resource(model):
 
 async def get_blocked_list():
     blocked_list = []
-    async with AsyncDefaultAzureCredential() as credential:
+    async with ChainedTokenCredential( ManagedIdentityCredential(), AzureCliCredential()) as credential:
         async with AsyncCosmosClient(AZURE_DB_URI, credential) as db_client:
             db = db_client.get_database_client(database=AZURE_DB_NAME)
             container = db.get_container_client('guardrails')

@@ -49,7 +49,7 @@ APIM_ENABLED = True if APIM_ENABLED.lower() == "true" else False
 if SECURITY_HUB_CHECK:
     SECURITY_HUB_THRESHOLDS=[get_possitive_int_or_default(os.environ.get("SECURITY_HUB_HATE_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SELFHARM_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SEXUAL_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_VIOLENCE_THRESHHOLD"), 0)]
 
-async def get_answer(history,client_principal_id):
+async def get_answer(history, security_ids):
 
     #############################
     # INITIALIZATION
@@ -95,8 +95,7 @@ async def get_answer(history,client_principal_id):
     # import RAG plugins
     conversationPluginTask = asyncio.create_task(asyncio.to_thread(kernel.import_plugin_from_prompt_directory, PLUGINS_FOLDER, "Conversation"))
     retrievalPluginTask = asyncio.create_task(asyncio.to_thread(kernel.import_native_plugin_from_directory, PLUGINS_FOLDER, "Retrieval"))
-    # temporary disabled
-    # raiNativePluginTask = asyncio.create_task(asyncio.to_thread(kernel.import_native_plugin_from_directory, f"{PLUGINS_FOLDER}/ResponsibleAI/Native", "Filters"))
+    raiNativePluginTask = asyncio.create_task(asyncio.to_thread(kernel.import_native_plugin_from_directory, f"{PLUGINS_FOLDER}/ResponsibleAI/Native", "Filters"))
     if(SECURITY_HUB_CHECK):
         securityPluginTask = asyncio.create_task(asyncio.to_thread(kernel.import_native_plugin_from_directory, PLUGINS_FOLDER, "Security"))
     if(RESPONSIBLE_AI_CHECK):
@@ -106,14 +105,14 @@ async def get_answer(history,client_principal_id):
     # GUARDRAILS (QUESTION)
     #############################
     
-    # temporary disabled
-    # raiNativePlugin= await raiNativePluginTask
-    # filterResult = await kernel.invoke(raiNativePlugin["ContentFliterValidator"], sk.KernelArguments(input=ask,apim_key=apim_key))
-    # if not ('PASSED' in filterResult.value):
-    #     logging.info(f"[code_orchest] filtered content found in question: {ask}.")
-    #     answer = get_message('BLOCKED_ANSWER')
-    #     answer_generated_by = 'content_filters_check'
-    #     bypass_nxt_steps = True
+    # AOAI Content filter validator
+    raiNativePlugin = await raiNativePluginTask
+    filterResult = await kernel.invoke(raiNativePlugin["ContentFliterValidator"], sk.KernelArguments(input=ask,apim_key=apim_key))
+    if not (filterResult.value.passed):
+        logging.info(f"[code_orchest] filtered content found in question: {ask}.")
+        answer = get_message('BLOCKED_ANSWER')
+        answer_generated_by = 'content_filters_check'
+        bypass_nxt_steps = True
 
     if BLOCKED_LIST_CHECK:
         logging.debug(f"[code_orchest] blocked list check.")
@@ -221,7 +220,7 @@ async def get_answer(history,client_principal_id):
                 #run search retrieval function
                 retrievalPlugin= await retrievalPluginTask
                 if(SEARCH_RETRIEVAL):
-                    search_function_result = await kernel.invoke(retrievalPlugin["VectorIndexRetrieval"], sk.KernelArguments(input=search_query,apim_key=apim_key,client_principal_id=client_principal_id))
+                    search_function_result = await kernel.invoke(retrievalPlugin["VectorIndexRetrieval"], sk.KernelArguments(input=search_query,apim_key=apim_key,security_ids=security_ids))
                     formatted_sources = search_function_result.value[:100].replace('\n', ' ')
                     escaped_sources = escape_xml_characters(search_function_result.value)
                     search_sources=escaped_sources
