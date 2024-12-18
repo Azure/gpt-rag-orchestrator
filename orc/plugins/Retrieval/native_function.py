@@ -14,7 +14,7 @@ else:
     from typing_extensions import Annotated
 from azure.cognitiveservices.search.customsearch import CustomSearchClient
 from msrest.authentication import CognitiveServicesCredentials
-from azure.identity.aio import DefaultAzureCredential
+from azure.identity.aio import ManagedIdentityCredential, AzureCliCredential, ChainedTokenCredential
 import aiohttp
 import asyncio
 
@@ -50,8 +50,6 @@ AZURE_SEARCH_CONTENT_COLUMNS = os.environ.get("AZURE_SEARCH_CONTENT_COLUMNS") or
 AZURE_SEARCH_FILENAME_COLUMN = os.environ.get("AZURE_SEARCH_FILENAME_COLUMN") or "filepath"
 AZURE_SEARCH_TITLE_COLUMN = os.environ.get("AZURE_SEARCH_TITLE_COLUMN") or "title"
 AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
-AZURE_SEARCH_TRIMMING = os.environ.get("AZURE_SEARCH_TRIMMING") or "false"
-AZURE_SEARCH_TRIMMING = True if AZURE_SEARCH_TRIMMING == "true" else False
 
 # Bing Search Integration Settings
 BING_SEARCH_TOP_K = os.environ.get("BING_SEARCH_TOP_K") or "3"
@@ -105,13 +103,21 @@ class Retrieval:
         self,
         input: Annotated[str, "The user question"],
         apim_key: Annotated[str, "The key to access the apim endpoint"],
-        client_principal_id: Annotated[str, "The user client principal id"]
+        # client_principal_id: Annotated[str, "The user client principal id"]
+        security_ids: Annotated[str, "Comma separated list string with user security ids"]
     ) -> Annotated[str, "the output is a string with the search results"]:
         search_results = []
         search_query = input
-        search_filter = f"security_id/any(g:search.in(g,'{client_principal_id}'))"
+        # search_filter = f"security_id/any(g:search.in(g,'{client_principal_id}'))"
+        search_filter = (
+                            f"metadata_security_id/any(g:search.in(g, '{security_ids}')) "
+                            f"or not metadata_security_id/any()"
+                        )        
         try:
-            async with DefaultAzureCredential() as credential:
+            async with ChainedTokenCredential(
+                ManagedIdentityCredential(),
+                AzureCliCredential()
+            ) as credential:
                 start_time = time.time()
                 logging.info(f"[sk_retrieval] generating question embeddings. search query: {search_query}")
                 embeddings_query = await generate_embeddings(search_query,apim_key=apim_key)
@@ -147,8 +153,14 @@ class Retrieval:
                     body["queryType"] = "semantic"
                     body["semanticConfiguration"] = AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG
 
-                if AZURE_SEARCH_TRIMMING:
-                    body["filter"] = search_filter
+                body["filter"] = search_filter
+
+                logging.debug(f"[ai_search] search filter: {search_filter}")
+
+                headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {azureSearchKey}'
+                }                    
 
                 if APIM_ENABLED:
                     headers = {
