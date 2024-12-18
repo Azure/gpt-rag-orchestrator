@@ -5,7 +5,7 @@ import uuid
 from azure.cosmos.aio import CosmosClient
 from datetime import datetime
 from shared.util import format_answer
-from azure.identity.aio import DefaultAzureCredential
+from azure.identity.aio import ManagedIdentityCredential, AzureCliCredential, ChainedTokenCredential
 import orc.code_orchestration as code_orchestration
 
 # logging level
@@ -28,8 +28,18 @@ AZURE_OPENAI_STREAM = True if AZURE_OPENAI_STREAM.lower() == "true" else False
 ANSWER_FORMAT = "html" # html, markdown, none
 
 async def get_credentials():
-    async with DefaultAzureCredential() as credential:
+    async with ChainedTokenCredential(
+                ManagedIdentityCredential(),
+                AzureCliCredential()
+            ) as credential:
         return credential
+    
+def generate_security_ids(client_principal):
+    security_ids = 'anonymous'
+    if client_principal is not None:
+        group_names = client_principal['group_names']
+        security_ids = f"{client_principal['id']}" + (f",{group_names}" if group_names else "")
+    return security_ids    
     
 async def run(conversation_id, ask, client_principal):
     
@@ -47,7 +57,10 @@ async def run(conversation_id, ask, client_principal):
     # get conversation
 
     #credential = get_credentials()
-    async with DefaultAzureCredential() as credential:       
+    async with ChainedTokenCredential(
+                ManagedIdentityCredential(),
+                AzureCliCredential()
+            ) as credential:       
         async with CosmosClient(AZURE_DB_URI, credential=credential) as db_client:
             db = db_client.get_database_client(database=AZURE_DB_NAME)
             container = db.get_container_client('conversations')
@@ -68,10 +81,9 @@ async def run(conversation_id, ask, client_principal):
 
             # 2) get answer and sources
 
-            client_principal_id = client_principal['id']
-            # get rag answer and sources
             logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
-            answer_dict = await code_orchestration.get_answer(history,client_principal_id)
+            security_ids = generate_security_ids(client_principal)
+            answer_dict = await code_orchestration.get_answer(history, security_ids)
 
             # 3) update and save conversation (containing history and conversation data)
             
