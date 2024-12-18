@@ -1,4 +1,4 @@
-from shared.util import get_secret, get_aoai_config, extract_text_from_html, get_possitive_int_or_default
+from shared.util import get_secret, get_aoai_config, extract_text_from_html, get_positive_int_or_default
 # from semantic_kernel.skill_definition import sk_function
 from openai import AzureOpenAI
 from semantic_kernel.functions import kernel_function
@@ -233,6 +233,6 @@ class Retrieval:
                 tasks= [extract_text_from_html(web,session) for web in web_data.web_pages.value]
                 results = await asyncio.gather(*tasks)
                 for result in results:
-                    bing_sources += result[:get_possitive_int_or_default(BING_SEARCH_MAX_TOKENS, 1000)]
+                    bing_sources += result[:get_positive_int_or_default(BING_SEARCH_MAX_TOKENS, 1000)]
         logging.info(f"[sk_retrieval] finished querying bing search. {time.time()-start_time} seconds")
         return bing_sources
