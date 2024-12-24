@@ -42,6 +42,8 @@
     "GROUNDEDNESS_CHECK" : "true",
     "RESPONSIBLE_AI_CHECK" : "true",
     "SECURITY_HUB_CHECK":"false",
+    "SECURITY_HUB_AUDIT": "true",
+
     "SECURITY_HUB_ENDPOINT":"",
     "CONVERSATION_METADATA" : "true",
 
