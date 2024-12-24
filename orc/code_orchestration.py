@@ -29,6 +29,8 @@ RESPONSIBLE_AI_CHECK = os.environ.get("RESPONSIBLE_AI_CHECK") or "true"
 RESPONSIBLE_AI_CHECK = True if RESPONSIBLE_AI_CHECK.lower() == "true" else False
 SECURITY_HUB_CHECK = os.environ.get("SECURITY_HUB_CHECK") or "false"
 SECURITY_HUB_CHECK = True if SECURITY_HUB_CHECK.lower() == "true" else False
+SECURITY_HUB_AUDIT = os.environ.get("SECURITY_HUB_AUDIT") or "false"
+SECURITY_HUB_AUDIT = True if SECURITY_HUB_AUDIT.lower() == "true" else False
 CONVERSATION_METADATA = os.environ.get("CONVERSATION_METADATA") or "true"
 CONVERSATION_METADATA = True if CONVERSATION_METADATA.lower() == "true" else False
 
@@ -49,7 +51,7 @@ APIM_ENABLED = True if APIM_ENABLED.lower() == "true" else False
 if SECURITY_HUB_CHECK:
     SECURITY_HUB_THRESHOLDS=[get_possitive_int_or_default(os.environ.get("SECURITY_HUB_HATE_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SELFHARM_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SEXUAL_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_VIOLENCE_THRESHHOLD"), 0)]
 
-async def get_answer(history, security_ids):
+async def get_answer(history, security_ids,conversation_id):
 
     #############################
     # INITIALIZATION
@@ -67,7 +69,7 @@ async def get_answer(history, security_ids):
     detected_language = ""
     bypass_nxt_steps = False  # flag to bypass unnecessary steps
     blocked_list = []
-
+    security_check=""
     # conversation metadata
     conversation_plugin_answer = ""
     conversation_history_summary = ''
@@ -389,7 +391,10 @@ async def get_answer(history, security_ids):
         answer_dict["prompt_tokens"] = prompt_tokens
         answer_dict["completion_tokens"] = completion_tokens
 
-
+    if SECURITY_HUB_AUDIT:
+        logging.info(f"[code_orchest] security hub audit.")
+        await kernel.invoke(securityPlugin["Auditing"], sk.KernelArguments(question=ask, answer=answer, sources=sources,security_hub_key=security_hub_key,conversation_id=conversation_id,security_checks=security_check))
+        
     answer_dict["prompt"] = prompt
     answer_dict["sources"] = sources.replace('[', '{').replace(']', '}')
 

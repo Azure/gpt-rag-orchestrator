@@ -8,6 +8,7 @@ from shared.util import format_answer
 from azure.identity.aio import ManagedIdentityCredential, AzureCliCredential, ChainedTokenCredential
 import orc.code_orchestration as code_orchestration
 
+
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
 logging.getLogger('azure.cosmos').setLevel(logging.WARNING)
@@ -83,7 +84,7 @@ async def run(conversation_id, ask, client_principal):
 
             logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
             security_ids = generate_security_ids(client_principal)
-            answer_dict = await code_orchestration.get_answer(history, security_ids)
+            answer_dict = await code_orchestration.get_answer(history, security_ids,conversation_id)
 
             # 3) update and save conversation (containing history and conversation data)
             
