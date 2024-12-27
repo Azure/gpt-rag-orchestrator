@@ -78,6 +78,40 @@ class Security:
         except Exception as e:
             logging.error(f"Error requesting security hub: {str(e)}")
             raise(Exception(f"Error requesting security hub: {str(e)}"))
-        
+    
+    @kernel_function(
+        description="Audit the question and answer.",
+        name="Auditing",
+    )    
+    async def Auditing(
+        self,
+        question: str,
+        answer: str,
+        sources: str,
+        security_checks: str,
+        conversation_id: str,
+        security_hub_key: str
+    ) -> Dict:
+        if APIM_ENABLED:
+            security_hub_endpoint=os.environ["APIM_SECURITY_HUB_ENDPOINT"]
+        else:
+            security_hub_endpoint=SECURITY_HUB_ENDPOINT
+        try:
+            async with aiohttp.ClientSession() as session:
+            # Make a POST request using the session.post() method
+             async with session.post(
+                security_hub_endpoint+"/audit",
+                json={"question": question, "answer": answer, "sources": sources, "security_checks": security_checks, "conversation_id": conversation_id},
+                headers={"x-functions-key": security_hub_key}
+            ) as request:
+                if request.status != 200:
+                    logging.error(f"Error requesting security hub: {request.status} {request.reason}")
+                    raise(Exception(f"Error requesting security hub: {request.status} {request.reason}"))
+                else:
+                    logging.info(f"Successfully audited question and answer")
+                    return
+        except Exception as e:
+            logging.error(f"Error requesting security hub: {str(e)}")
+            raise(Exception(f"Error requesting security hub: {str(e)}"))
         
         

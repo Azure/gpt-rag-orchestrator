@@ -29,7 +29,7 @@ class Filters:
         input: Annotated[str, "The user question"],
         apim_key: Annotated[str, "The key to access the Azure OpenAI model"]
     ) -> Annotated[
-            ValidationResult,
+            NamedTuple,
             "the output is a tuple with filter results"]:
         filter_results = []
         user_question = input
