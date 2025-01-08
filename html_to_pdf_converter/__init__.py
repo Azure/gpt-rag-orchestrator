@@ -1,13 +1,14 @@
 import logging
 import azure.functions as func
-from pathlib import Path
-import json
+import io
 from weasyprint import HTML
 
-def html_to_pdf(html_content: str, output_path: str) -> Path:
-    """Convert the html content to a pdf file."""
-    HTML(string=html_content).write_pdf(output_path)
-    return Path(output_path)
+def html_to_pdf(html_content: str) -> bytes:
+    """Convert the html content to PDF bytes."""
+    # Create a bytes buffer instead of writing to file
+    pdf_buffer = io.BytesIO()
+    HTML(string=html_content).write_pdf(pdf_buffer)
+    return pdf_buffer.getvalue()
 
 async def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
@@ -16,22 +17,19 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         # Get request body
         req_body = req.get_json()
         html_content = req_body.get('html')
-        output_path = req_body.get('output_path')
         
-        if not html_content or not output_path:
+        if not html_content:
             return func.HttpResponse(
-                "Please provide both 'html' and 'output_path' in the request body",
+                "Please provide 'html' in the request body",
                 status_code=400
             )
 
-        # Convert HTML to PDF using the original function
-        result_path = html_to_pdf(html_content, output_path)
+        # Convert HTML to PDF bytes
+        pdf_bytes = html_to_pdf(html_content)
         
         return func.HttpResponse(
-            body=json.dumps({
-                'path': str(result_path)
-            }),
-            mimetype="application/json",
+            body=pdf_bytes,
+            mimetype="application/pdf",
             status_code=200
         )
         
