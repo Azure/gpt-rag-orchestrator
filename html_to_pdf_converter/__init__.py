@@ -2,6 +2,10 @@ import logging
 import azure.functions as func
 import io
 from weasyprint import HTML
+import os
+
+LOGLEVEL = os.environ.get("LOGLEVEL", "DEBUG").upper()
+logging.basicConfig(level=LOGLEVEL)
 
 def html_to_pdf(html_content: str) -> bytes:
     """Convert the html content to PDF bytes."""
