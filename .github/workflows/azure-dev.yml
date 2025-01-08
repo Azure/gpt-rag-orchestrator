@@ -30,10 +30,11 @@ jobs:
       - name: Install azd
         uses: Azure/setup-azd@v1.0.0
 
-      - name: Install Azure Function Core Tools
+      - name: Install Azure Function Core Tools and Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install azure-functions-core-tools-4
+          apt install python3-pip libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0 libffi-dev libjpeg-dev libopenjp2-7-dev
 
       - name: Log in with Azure (Federated Credentials)
         if: ${{ env.AZURE_CLIENT_ID != '' }}
