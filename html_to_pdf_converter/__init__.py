@@ -1,7 +1,6 @@
 import logging
 import azure.functions as func
 import io
-from weasyprint import HTML
 import os
 import platform
 
@@ -14,6 +13,14 @@ def html_to_pdf(html_content: str) -> bytes:
     Note: Requires WeasyPrint and its dependencies to be properly installed.
     For installation issues, see: https://github.com/assafelovic/gpt-researcher/issues/166
     """
+    try:
+        from weasyprint import HTML
+    except ImportError as e:
+        error_msg = "WeasyPrint import failed. Please ensure WeasyPrint and its dependencies are properly installed."
+        if platform.system() == 'Windows':
+            error_msg += "\nFor Windows installation guide, see: https://github.com/assafelovic/gpt-researcher/issues/166"
+        raise ImportError(error_msg) from e
+
     # Create a bytes buffer instead of writing to file
     pdf_buffer = io.BytesIO()
     HTML(string=html_content).write_pdf(pdf_buffer)
