@@ -2,7 +2,7 @@ import datetime
 import logging
 import json
 import os
-from datetime import datetime,UTC
+from datetime import datetime,timezone
 import azure.functions as func
 from shared.cosmos_db import was_summarized_today
 from shared.cosmo_data_loader import CosmosDBLoader
@@ -32,7 +32,7 @@ def trigger_document_fetch(schedule: dict) -> bool:
     cosmos_data_loader = CosmosDBLoader(os.getenv('SCHEDULES_CONTAINER'))
     process_and_summarize_url = os.getenv('PROCESS_AND_SUMMARIZE_URL')
     
-    start_time = datetime.now(UTC).isoformat()
+    start_time = datetime.now(timezone.utc).isoformat()
     
     try:
         if was_summarized_today(schedule):
@@ -43,7 +43,7 @@ def trigger_document_fetch(schedule: dict) -> bool:
         payload = {
             "equity_id": schedule['companyId'],
             "filing_type": schedule['reportType'],
-            "after_date": datetime.now(UTC).strftime('%Y-%m-%d')
+            "after_date": datetime.now(timezone.utc).strftime('%Y-%m-%d')
         }
 
         response = requests.post(
