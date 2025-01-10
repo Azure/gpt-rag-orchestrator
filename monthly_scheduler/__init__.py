@@ -4,7 +4,8 @@ import requests
 from datetime import datetime, timezone 
 from typing import List, Dict, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
-import azure.functions as func
+import azure.functions as func  
+from azure.cosmos import CosmosClient
 # logger setting 
 logging.basicConfig(level=logging.INFO) 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,31 @@ RECIPIENTS = ['namtran6701@gmail.com']
 
 MAX_RETRIES = 3
 
+class CosmoDBManager:
+    def __init__(self, container_name: str = 'subscription_emails', 
+                 db_uri: str = os.environ['AZURE_COSMOS_ENDPOINT'], 
+                 credential: str = os.environ['AZURE_COSMOS_KEY'], 
+                 database_name: str = os.environ['AZURE_DB_NAME']):
+        self.container_name = container_name
+        self.db_uri = db_uri
+        self.credential = credential
+        self.database_name = database_name
+
+        if not all([self.container_name, self.db_uri, self.credential, self.database_name]):
+            raise ValueError("Missing required environment variables for Cosmos DB connection")
+
+        self.client = CosmosClient(url=self.db_uri, credential=self.credential, consistency_level="Session")
+        self.database = self.client.get_database_client(self.database_name)
+        self.container = self.database.get_container_client(self.container_name)
+    
+    def get_email_list(self) -> List[str]:
+        query = "SELECT * FROM c"
+        items = self.container.query_items(query, enable_cross_partition_query=True)
+        email_list: List[str] = []
+        for item in items:
+            email_list.append(item['email'])
+        return email_list
+
 def generate_report(report_topic: str) -> Optional[Dict]:
     """Generate a report and return the response if successful """
 
@@ -66,10 +92,13 @@ def generate_report(report_topic: str) -> Optional[Dict]:
 def send_report_email(blob_link: str, report_name: str) -> bool:
     """Send email with report link and return success status """
 
+    cosmo_db_manager = CosmoDBManager()
+    email_list = cosmo_db_manager.get_email_list()
+
     email_payload = {
         'blob_link': blob_link,
         'email_subject': 'Sales Factory Monthly Report',
-        'recipients': RECIPIENTS,
+        'recipients': email_list,
         'save_email': 'yes'
     }
 
