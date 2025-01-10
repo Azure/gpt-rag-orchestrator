@@ -74,3 +74,33 @@ $openAIAccountName='Azure OpenAI service name'
 $principalId='Object id of your user in Microsoft Entra ID'
 New-AzRoleAssignment -ObjectId $principalId -RoleDefinitionName 'Cognitive Services OpenAI User' -Scope "/subscriptions/$subscriptionId/resourceGroups/$resourceGroupName/providers/Microsoft.CognitiveServices/accounts/$openAIAccountName"
 ```
+
+## Installation Notes
+
+### Windows Users - Important WeasyPrint Setup
+⚠️ **If you're using Windows**, WeasyPrint requires additional setup:
+
+1. Install GTK3 using one of these methods:
+   - Download and install the GTK3 installer from [here](https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer/releases)
+
+
+2. Add GTK3 to your system PATH:
+   - Typically: `C:\Program Files\GTK3-Runtime\bin`
+
+3. Install WeasyPrint:
+   ```bash
+   pip install weasyprint
+   ```
+
+4. Verify installation:
+   ```bash
+   python -c "import weasyprint; weasyprint.HTML('http://weasyprint.org/').write_pdf('weasyprint.pdf')"
+   ```
+
+If you encounter any issues:
+- Check our detailed troubleshooting guide: [WeasyPrint Installation Issues](https://github.com/assafelovic/gpt-researcher/issues/166)
+
+- Restart your system after installing GTK3
+
+### Linux/MacOS Users
+Standard installation should work without additional setup. For more information, see the [WeasyPrint documentation](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html).
