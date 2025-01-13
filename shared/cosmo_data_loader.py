@@ -1,6 +1,6 @@
 import json
 import os
-from azure.cosmos import CosmosClient, PartitionKey, exceptions, ThroughputProperties
+from azure.cosmos import CosmosClient, PartitionKey, exceptions
 import uuid
 from datetime import datetime, timezone
 from dotenv import load_dotenv
@@ -30,11 +30,11 @@ class CosmosDBLoader:
         self.database = self.client.get_database_client(self.database_name)
         self.container = self.database.get_container_client(self.container_name)
 
-    def create_container(self):
+    def create_container(self, partition_key: list = ['/companyId', '/reportType']):
         try: 
             self.container = self.database.create_container(
                 id=self.container_name,
-                partition_key=PartitionKey(path =["/companyId", "/reportType"], kind="MultiHash"),
+                partition_key=PartitionKey(path = partition_key, kind="MultiHash"),
                 analytical_storage_ttl= -1,
                 offer_throughput= 400, 
             )
@@ -57,7 +57,9 @@ class CosmosDBLoader:
 
             # Upload each schedule to Cosmos DB
             for item in data:
-                item['id'] = str(uuid.uuid4())
+                if item['id'] is None:
+                    item['id'] = str(uuid.uuid4())
+
                 item['lastRun'] = datetime.now(timezone.utc).isoformat()
 
                 self.container.create_item(item)
@@ -149,10 +151,12 @@ if __name__ == "__main__":
     # except Exception as e:
     #     logger.error(f"Unexpected error: {str(e)}")
     
-    loader = CosmosDBLoader(container_name="schedules")
-    data = loader.get_data(frequency="twice_a_day")
-    for item in data:
-        print(item)
+    loader = CosmosDBLoader(container_name="subscription_emails")
+    loader.create_container(partition_key=["/id"])
+    loader.upload_data(os.path.join(os.path.dirname(__file__), "data/subscription_emails.json"))
+    # data = loader.get_data(frequency="twice_a_day")
+    # for item in data:
+    #     print(item)
 
 
 
