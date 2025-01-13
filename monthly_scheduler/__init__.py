@@ -6,6 +6,7 @@ from typing import List, Dict, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
 import azure.functions as func  
 from azure.cosmos import CosmosClient
+from azure.identity import DefaultAzureCredential
 # logger setting 
 logging.basicConfig(level=logging.INFO) 
 logger = logging.getLogger(__name__)
@@ -33,15 +34,13 @@ EMAIL_ENDPOINT = f'{os.environ["WEB_APP_URL"]}/api/reports/digest'
 
 TIMEOUT_SECONDS = 300
 
-RECIPIENTS = ['namtran6701@gmail.com']
-
 MAX_RETRIES = 3
 
 class CosmoDBManager:
-    def __init__(self, container_name: str = 'subscription_emails', 
-                 db_uri: str = os.environ['AZURE_COSMOS_ENDPOINT'], 
-                 credential: str = os.environ['AZURE_COSMOS_KEY'], 
-                 database_name: str = os.environ['AZURE_DB_NAME']):
+    def __init__(self, container_name: str, 
+                 db_uri: str, 
+                 credential: str, 
+                 database_name: str):
         self.container_name = container_name
         self.db_uri = db_uri
         self.credential = credential
@@ -55,11 +54,12 @@ class CosmoDBManager:
         self.container = self.database.get_container_client(self.container_name)
     
     def get_email_list(self) -> List[str]:
-        query = "SELECT * FROM c"
+        query = "SELECT * FROM c where c.isActive = true"
         items = self.container.query_items(query, enable_cross_partition_query=True)
         email_list: List[str] = []
         for item in items:
-            email_list.append(item['email'])
+            if "email" in item:
+                email_list.append(item['email'])
         return email_list
 
 def generate_report(report_topic: str) -> Optional[Dict]:
@@ -92,7 +92,17 @@ def generate_report(report_topic: str) -> Optional[Dict]:
 def send_report_email(blob_link: str, report_name: str) -> bool:
     """Send email with report link and return success status """
 
-    cosmo_db_manager = CosmoDBManager()
+    container_name = 'subscription_emails'
+    db_uri = f"https://{os.environ['AZURE_DB_ID']}.documents.azure.com:443/" if os.environ.get('AZURE_DB_ID') else None
+    credential = DefaultAzureCredential()
+    database_name = os.environ.get('AZURE_DB_NAME') if os.environ.get('AZURE_DB_NAME') else None
+
+    cosmo_db_manager = CosmoDBManager(
+        container_name=container_name,
+        db_uri=db_uri,
+        credential=credential,
+        database_name=database_name
+    )
     email_list = cosmo_db_manager.get_email_list()
 
     email_payload = {
@@ -112,6 +122,10 @@ def send_report_email(blob_link: str, report_name: str) -> bool:
         )
         response_json = response.json()
         logger.info(f"Email response for {report_name}: {response_json}")
+
+        if response_json.get('status') == 'error':
+            raise requests.exceptions.RequestException(response_json.get('message'))
+        
         return response_json.get('status') == 'success'
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to send email for {report_name}: {str(e)}")
