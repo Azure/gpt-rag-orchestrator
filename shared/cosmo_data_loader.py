@@ -1,7 +1,6 @@
 import json
 import os
 from azure.cosmos import CosmosClient, PartitionKey, exceptions
-from azure.identity import DefaultAzureCredential
 import uuid
 from datetime import datetime, timezone
 from dotenv import load_dotenv
@@ -15,20 +14,19 @@ logger = logging.getLogger(__name__)
 
 
 class CosmosDBLoader:
-    def __init__(self, container_name: str, 
-                db_uri: str, 
-                credential: str, 
-                database_name: str):
-
-        self.container_name = container_name
-        self.db_uri = db_uri
-        self.credential = credential
-        self.database_name = database_name
+    def __init__(self, container_name: str):
+        load_dotenv()  # Load environment variables from .env file
+        self.db_uri = os.getenv('AZURE_COSMOS_ENDPOINT')
+        self.credential = os.getenv('AZURE_COSMOS_KEY')
+        self.database_name = os.getenv('AZURE_DB_NAME')
+        self.container_name = container_name or os.getenv('AZURE_COSMOS_CONTAINER_NAME')
 
         if not all([self.db_uri, self.credential, self.database_name, self.container_name]):
             raise ValueError("Missing required environment variables for Cosmos DB connection")
 
-        self.client = CosmosClient(url=self.db_uri, credential= self.credential, consistency_level="Session")
+        self.client = CosmosClient(url=self.db_uri,
+                                   credential= self.credential, 
+                                   consistency_level="Session")
         self.database = self.client.get_database_client(self.database_name)
         self.container = self.database.get_container_client(self.container_name)
 
@@ -140,5 +138,27 @@ class CosmosDBLoader:
             logger.info(f"Successfully updated last run in Cosmos DB")
         except Exception as e:
             logger.error(f"Error updating last run in Cosmos DB: {str(e)}")
+
+if __name__ == "__main__":
+    # try:
+    #     loader = CosmosDBLoader(container_name="schedules")
+    #     loader.create_container()   
+    #     # Use the path to your generated JSON file
+    #     json_file_path = os.path.join(os.path.dirname(__file__), "data/companyID_schedules.json")
+    #     loader.upload_data(json_file_path)
+    # except ValueError as e:
+    #     logger.error(f"Configuration error: {str(e)}")
+    # except Exception as e:
+    #     logger.error(f"Unexpected error: {str(e)}")
+    
+    loader = CosmosDBLoader(container_name="subscription_emails")
+    loader.create_container(partition_key=["/id"])
+    loader.upload_data(os.path.join(os.path.dirname(__file__), "data/subscription_emails.json"))
+    # data = loader.get_data(frequency="twice_a_day")
+    # for item in data:
+    #     print(item)
+
+
+
 
     

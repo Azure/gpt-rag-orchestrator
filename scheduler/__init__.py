@@ -6,10 +6,7 @@ from datetime import datetime,timezone
 import azure.functions as func
 from shared.cosmos_db import was_summarized_today
 from shared.cosmo_data_loader import CosmosDBLoader
-from azure.identity import DefaultAzureCredential
 import requests
-
-process_and_summarize_url = f'{os.environ["WEB_APP_URL"]}/api/SECEdgar/financialdocuments/process-and-summarize'
 
 class LastRunUpdateError(Exception):
     """Custom exception for when the last run time update fails"""
@@ -18,7 +15,7 @@ class LastRunUpdateError(Exception):
         self.original_error = original_error
         super().__init__(f"Failed to update last run time for schedule {schedule_id}: {str(original_error)}")
 
-def trigger_document_fetch(schedule: dict, cosmos_data_loader: CosmosDBLoader) -> bool:
+def trigger_document_fetch(schedule: dict) -> bool:
     """
     Queue the document fetch task based on schedule configuration 
 
@@ -32,6 +29,8 @@ def trigger_document_fetch(schedule: dict, cosmos_data_loader: CosmosDBLoader) -
         LastRunUpdateError: If updating the last run time fails
     """
     # Move these outside the function if possible since they're used across multiple calls
+    cosmos_data_loader = CosmosDBLoader(os.getenv('SCHEDULES_CONTAINER'))
+    process_and_summarize_url = os.getenv('PROCESS_AND_SUMMARIZE_URL')
     
     start_time = datetime.now(timezone.utc).isoformat()
     
@@ -84,19 +83,17 @@ def trigger_document_fetch(schedule: dict, cosmos_data_loader: CosmosDBLoader) -
     return schedule['summarized_today']
 
 def main(timer: func.TimerRequest) -> None:
-    # Main scheduling logic
-    container_name = 'schedules'
-    db_uri = f"https://{os.getenv('AZURE_DB_ID')}.documents.azure.com:443/"
-    credential = DefaultAzureCredential()
-    database_name = os.getenv('AZURE_DB_NAME')
 
-    cosmos_data_loader = CosmosDBLoader(
-        container_name=container_name,
-        db_uri=db_uri,
-        credential=credential,
-        database_name=database_name
-    )
-    
+    # schedule cosmos attributes 
+    # id
+    # lastRun
+    # frequency
+    # companyId
+    # reportType
+    # isActive
+
+    # Main scheduling logic
+    cosmos_data_loader = CosmosDBLoader('schedules')
     success_count = 0
     try:
         # get all schedules that are active and have a frequency of twice_a_day
@@ -104,7 +101,7 @@ def main(timer: func.TimerRequest) -> None:
         for schedule in active_schedules:
             logging.info(f"Triggering fetch for schedule {schedule['id']}")
             try:
-                success = trigger_document_fetch(schedule, cosmos_data_loader)
+                success = trigger_document_fetch(schedule)
                 if success:
                     success_count += 1  
             except LastRunUpdateError as e:
