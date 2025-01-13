@@ -2,13 +2,13 @@
 # The Python Worker is managed by Azure Functions platform
 # Manually managing azure-functions-worker may cause unexpected issues
 
-azure-cosmos==4.5.1
+azure-cosmos==4.7
 azure-functions==1.17.0
 azure-identity==1.15.0
 azure-keyvault-secrets==4.7.0
 numpy==1.26.2
 openai==1.58.1
-semantic-kernel==1.17.1
+semantic-kernel[azure]==1.17.1
 requests==2.32.0
 tiktoken==0.5.2
 tenacity==8.2.3
@@ -17,3 +17,4 @@ beautifulsoup4==4.12.3
 pydantic==2.10.4
 nbstripout==0.8.1
 nbconvert==7.16.4
+azure-monitor-opentelemetry==1.6.4
