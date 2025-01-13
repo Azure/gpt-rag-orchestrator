@@ -59,7 +59,7 @@ class CosmosDBLoader:
 
             # Upload each schedule to Cosmos DB
             for item in data:
-                if item['id'] is None:
+                if item.get('id', None) is None:
                     item['id'] = str(uuid.uuid4())
 
                 item['lastRun'] = datetime.now(timezone.utc).isoformat()
@@ -142,3 +142,17 @@ class CosmosDBLoader:
             logger.error(f"Error updating last run in Cosmos DB: {str(e)}")
 
     
+if __name__ == "__main__":
+    # run the script to upload data to Cosmos DB
+    data_file_path = os.path.join(os.path.dirname(__file__), "data/companyID_schedules.json")
+    container_name = "schedules"
+    db_uri = f"https://{os.environ['AZURE_DB_ID']}.documents.azure.com:443/" if os.environ.get('AZURE_DB_ID') else None
+    credential = DefaultAzureCredential()
+    database_name = os.environ.get('AZURE_DB_NAME') if os.environ.get('AZURE_DB_NAME') else None
+
+
+    cosmos_db_loader = CosmosDBLoader(container_name=container_name, db_uri=db_uri, credential=credential, database_name=database_name)
+    # create the container if it doesn't exist
+    cosmos_db_loader.create_container()
+    # upload the data to the container
+    cosmos_db_loader.upload_data(data_file_path)
