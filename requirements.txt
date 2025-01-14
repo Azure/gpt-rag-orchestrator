@@ -1,4 +1,4 @@
-azure-cosmos==4.5.1
+azure-cosmos==4.6.0
 azure-functions==1.17.0
 azure-identity==1.15.0
 azure-keyvault-secrets==4.7.0
@@ -18,3 +18,5 @@ stripe==10.5.0
 tavily-python==0.5.0
 google_search_results==2.4.2
 langchain-openai < 0.2.5
+weasyprint==63.1
+python-dotenv

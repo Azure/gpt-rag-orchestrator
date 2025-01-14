@@ -1,0 +1,146 @@
+[
+    {
+        "companyId": "HD",
+        "reportType": "10-K",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "HD",
+        "reportType": "10-Q",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "HD",
+        "reportType": "8-K",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "HD",
+        "reportType": "DEF 14A",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "LOW",
+        "reportType": "10-K",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "LOW",
+        "reportType": "10-Q",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "LOW",
+        "reportType": "8-K",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "LOW",
+        "reportType": "DEF 14A",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "WMT",
+        "reportType": "10-K",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "WMT",
+        "reportType": "10-Q",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "WMT",
+        "reportType": "8-K",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "WMT",
+        "reportType": "DEF 14A",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "AMZN",
+        "reportType": "10-K",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "AMZN",
+        "reportType": "10-Q",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "AMZN",
+        "reportType": "8-K",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "AMZN",
+        "reportType": "DEF 14A",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "COST",
+        "reportType": "10-K",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "COST",
+        "reportType": "10-Q",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "COST",
+        "reportType": "8-K",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "COST",
+        "reportType": "DEF 14A",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "TGT",
+        "reportType": "10-K",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "TGT",
+        "reportType": "10-Q",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "TGT",
+        "reportType": "8-K",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    },
+    {
+        "companyId": "TGT",
+        "reportType": "DEF 14A",
+        "isActive": true,
+        "frequency": "twice_a_day"
+    }
+]

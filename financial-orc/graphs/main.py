@@ -23,7 +23,7 @@ from shared.cosmos_db import (
 )
 
 # tools
-from .tools.tavily_tool import conduct_tavily_search, format_tavily_results
+from .tools.tavily_tool import conduct_tavily_search_news, conduct_tavily_search_general, format_tavily_results
 from .tools.database_retriever import CustomRetriever, format_retrieved_content
 from datetime import datetime
 
@@ -116,17 +116,25 @@ def create_main_agent(checkpointer, documentName, verbose=True):
     ###################################################
     @tool
     def web_search(query: str) -> str:
-        """Conduct web search for user query that is not included in the report"""
+        """Conduct web search for user query that is not included in the report
+        This tool should be used when the question is about recent news or events."""
 
         # Step 2. Executing a context search query
-        result = conduct_tavily_search(query)
+        result = conduct_tavily_search_news(query)
         # format the results
         formatted_results = format_tavily_results(result)
 
         return formatted_results
     
+    @tool
+    def general_search(query: str) -> str:
+        """Conduct general web search for user query that is not included in the report
+        This tool should be used when the question is more general, and the requested information does not have to be up to date."""
+        result = conduct_tavily_search_general(query)
+        formatted_results = format_tavily_results(result)
+        return formatted_results
 
-    tools = [web_search]
+    tools = [web_search, general_search]
 
     ###################################################
     # define nodes and edges
@@ -215,7 +223,7 @@ def create_main_agent(checkpointer, documentName, verbose=True):
         Use available tools to answer queries if provided information is irrelevant. You should only use sources within the past 6 months.
         Consider conversation history for context in your responses if available. 
         If the context is already relevant, then do not use any tools.
-        Treat the report as a primary source of information, prioritize it over the web search results.
+        Treat the report as a primary source of information, **prioritize it over the tool call results**.
         
         ***Important***: 
         - If the tool is triggered, then mention in the response that external sources were used to supplement the information. You must also provide the URL of the source in the response.
