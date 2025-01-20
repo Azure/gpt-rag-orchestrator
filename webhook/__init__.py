@@ -6,7 +6,7 @@ import os
 import stripe
 
 
-from shared.util import update_organization_subscription, disable_organization_active_subscription, enable_organization_subscription
+from shared.util import update_organization_subscription, disable_organization_active_subscription, enable_organization_subscription, updateExpirationDate
 
 LOGLEVEL = os.environ.get("LOGLEVEL", "DEBUG").upper()
 logging.basicConfig(level=LOGLEVEL)
@@ -64,9 +64,12 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         print("🔔  Webhook received!", event["type"])
         subscriptionId = event["data"]["object"]["id"]
         status = event["data"]["object"]["status"]
+        expirationDate = event["data"]["object"]["current_period_end"]
         print(event)
+        print(f"expirationDate: => {expirationDate}")
         print(f"Subscription {subscriptionId} updated to status {status}")
         enable_organization_subscription(subscriptionId)
+        updateExpirationDate(subscriptionId, expirationDate)
     elif event["type"] == "customer.subscription.paused":
         print("🔔  Webhook received!", event["type"])
         subscriptionId = event["data"]["object"]["id"]

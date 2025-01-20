@@ -14,6 +14,8 @@ from azure.cosmos import CosmosClient
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
 from tenacity import retry, wait_random_exponential, stop_after_attempt
+from .exceptions import MissingRequiredFieldError
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
 
 
 # logging level
@@ -415,16 +417,26 @@ def get_conversations(user_id):
         formatted_conversations = [
             {
                 "id": con["id"],
-                "start_date": con["conversation_data"]["start_date"] if "start_date" in con["conversation_data"] else default_date,
+                "start_date": (
+                    con["conversation_data"]["start_date"]
+                    if "start_date" in con["conversation_data"]
+                    else default_date
+                ),
                 "content": con["conversation_data"]["history"][0]["content"],
-                "type": con["conversation_data"]["type"] if "type" in con["conversation_data"] else "default",
-            }   
+                "type": (
+                    con["conversation_data"]["type"]
+                    if "type" in con["conversation_data"]
+                    else "default"
+                ),
+            }
             for con in conversations
         ]
 
         return formatted_conversations
     except Exception as e:
-        logging.error(f"Error retrieving the conversations for user '{user_id}': {str(e)}")
+        logging.error(
+            f"Error retrieving the conversations for user '{user_id}': {str(e)}"
+        )
         return []
 
 
@@ -453,7 +465,11 @@ def get_conversation(conversation_id, user_id):
                 }
                 for message in conversation["conversation_data"]["history"]
             ],
-            "type": conversation["conversation_data"]["type"] if "type" in conversation["conversation_data"] else "default",
+            "type": (
+                conversation["conversation_data"]["type"]
+                if "type" in conversation["conversation_data"]
+                else "default"
+            ),
         }
         return formatted_conversation
     except Exception:
@@ -1004,6 +1020,53 @@ def get_organization(organization_id):
     return organization
 
 
+def updateExpirationDate(subscription_id, expiration_date):
+    if not subscription_id:
+        raise MissingRequiredFieldError("Subscription ID")
+    if not expiration_date:
+        raise MissingRequiredFieldError("Expiration Date")
+    logging.info(
+        "Subscription ID found. Updating expiration date for subscription: "
+        + subscription_id
+    )
+
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client("organizations")
+    try:
+        query = "SELECT * FROM c WHERE c.subscriptionId = @subscription_id"
+        parameters = [{"name": "@subscription_id", "value": subscription_id}]
+        result = list(
+            container.query_items(
+                query=query, parameters=parameters, enable_cross_partition_query=True
+            )
+        )
+        if result:
+            organization = result[0]
+            organization["subscriptionExpirationDate"] = expiration_date
+            container.replace_item(item=organization["id"], body=organization)
+            logging.info(
+                f"[updateExpirationDate] Successfully updated expiration date for organization {organization['id']}"
+            )
+            return {"success": "Successfully updated expiration date"}
+        else:
+            raise CosmosResourceNotFoundError(subscription_id)
+    except MissingRequiredFieldError as field:
+        logging.info(f"[updateExpirationDate] updateExpirationDate: {field} is missing")
+        return {"error": f"{field} is missing"}
+    except CosmosResourceNotFoundError as e:
+        logging.info(
+            f"[updateExpirationDate] updateExpirationDate: {subscription_id} not found"
+        )
+        return {"error": f"Something went wrong. {str(e)}"}
+    except Exception as e:
+        logging.info(
+            f"[updateExpirationDate] updateExpirationDate: something went wrong. {str(e)}"
+        )
+        return {"error": f"Something went wrong. {str(e)}"}
+
+
 def enable_organization_subscription(subscription_id):
     if not subscription_id:
         return {"error": "Subscription ID not found."}
@@ -1076,9 +1139,7 @@ def disable_organization_active_subscription(subscription_id):
         )
 
 
-def create_organization_without_subscription(
-    user_id, organization_name
-):
+def create_organization_without_subscription(user_id, organization_name):
     if not user_id:
         return {"error": "User ID not found."}
 
@@ -1098,10 +1159,10 @@ def create_organization_without_subscription(
             "owner": user_id,
             "sessionId": None,
             "subscriptionStatus": "inactive",
-            "subscriptionExpirationDate": None
+            "subscriptionExpirationDate": None,
         }
     )
-    
+
     logging.info(
         f"[util__module] Successfully created new organization, adding organizationId to user {user_id}"
     )
@@ -1216,7 +1277,7 @@ def create_invitation(invited_user_email, organization_id, role):
         user = user_container.query_items(
             query="SELECT * FROM c WHERE c.data.email = @invited_user_email",
             parameters=[{"name": "@invited_user_email", "value": invited_user_email}],
-            enable_cross_partition_query=True
+            enable_cross_partition_query=True,
         )
 
         for u in user:
@@ -1224,7 +1285,9 @@ def create_invitation(invited_user_email, organization_id, role):
                 u["data"]["organizationId"] = organization_id
                 u["data"]["role"] = role
                 user_container.replace_item(item=u["id"], body=u)
-                logging.info(f"[create_invitation] Updated user {invited_user_email} organizationId to {organization_id}")
+                logging.info(
+                    f"[create_invitation] Updated user {invited_user_email} organizationId to {organization_id}"
+                )
 
         invitation = {
             "id": str(uuid.uuid4()),
@@ -1243,12 +1306,14 @@ def create_invitation(invited_user_email, organization_id, role):
         )
     return invitation
 
+
 def get_invitations(organization_id):
     if not organization_id:
         return {"error": "Organization ID not found."}
 
     logging.info(
-        "Organization ID found. Getting invitations for organization: " + organization_id
+        "Organization ID found. Getting invitations for organization: "
+        + organization_id
     )
 
     invitations = []
@@ -1271,6 +1336,7 @@ def get_invitations(organization_id):
             f"[get_invitations] get_invitations: something went wrong. {str(e)}"
         )
     return invitations
+
 
 def get_invitation(invited_user_email):
     if not invited_user_email:
