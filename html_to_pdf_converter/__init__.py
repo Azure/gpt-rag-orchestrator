@@ -48,21 +48,21 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
                 status_code=400
             )
 
-        # Sanitize HTML content
-        sanitized_html_content = bleach.clean(html_content)
+        # # Sanitize HTML content
+        # sanitized_html_content = bleach.clean(html_content)
 
         # Basic HTML validation
-        if not sanitized_html_content.strip().startswith('<'):
+        if not html_content.strip().startswith('<'):
             return func.HttpResponse(
                 "Invalid HTML content",
                 status_code=400
             )
 
         # Log request (sanitized)
-        logging.info(f"Processing sanitized HTML content of length: {len(sanitized_html_content)}")
+        logging.info(f"Processing HTML content of length: {len(html_content)}")
 
         # Convert HTML to PDF bytes
-        pdf_bytes = html_to_pdf(sanitized_html_content)
+        pdf_bytes = html_to_pdf(html_content)
         
         return func.HttpResponse(
             body=pdf_bytes,
