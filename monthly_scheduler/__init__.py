@@ -8,6 +8,10 @@ import azure.functions as func
 from .exceptions import CompanyNameRequiredError
 from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
+from pydantic import BaseModel, Field 
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional, Dict, List
+from enum import Enum
 # logger setting 
 logging.basicConfig(level=logging.INFO) 
 logger = logging.getLogger(__name__)
@@ -142,37 +146,167 @@ def send_report_email(blob_link: str, report_name: str) -> bool:
         logger.error(f"Failed to send email for {report_name}: {str(e)}")
         return False
 
-def main(mytimer: func.TimerRequest) -> None: 
 
-    utc_timestamp = datetime.now(timezone.utc).isoformat()
-    logger.info(f"Monthly report generation started at {utc_timestamp}")
 
-    for report in MONTHLY_REPORTS:
-        if report == "Company_Analysis":
-            for company in COMPANY_NAME:
-                logger.info(f"Generating company report for {company} at {utc_timestamp}")
-                response_json = generate_report(report, company)
-        else:
-            logger.info(f"Generating report for {report} at {utc_timestamp}")
-            response_json = generate_report(report)
+class ReportType(str, Enum):
+    """Enum for report types to ensure type safety """
 
-        if not response_json or response_json.get('status') != 'success':
-            logger.error(f"Failed to generate report for {report} at {utc_timestamp}")
-            continue
+    MONTHLY_ECONOMICS = "Monthly_Economics"
+    ECOMMERCE = "Ecommerce"
+    HOME_IMPROVEMENT = "Home_Improvement"
+    COMPANY_ANALYSIS = "Company_Analysis"
+    WEEKLY_ECONOMICS = "Weekly_Economics"
 
-        # extract blob link and send email 
+class ReportConfig(BaseModel): 
+    """Configuration for report generation"""
+    
+    report_topic: ReportType
+    company_name: Optional[str] = None
+    timeout: int = Field(default = TIMEOUT_SECONDS)
+
+    def to_payload(self) -> Dict:
+        """Convert config to API payload"""
+
+        payload = {
+            "report_topic": self.report_topic
+        }
+        if self.company_name: 
+            payload['company_name'] = self.company_name
+        return payload
+    
+class ReportResult(BaseModel): 
+    """Model for report processing results"""
+    report_type: ReportType
+    company_name: Optional[str] = None
+    success: bool
+    error_message: Optional[str] = None
+    blob_link: Optional[str] = None
+    timestamp: datetime = Field(default_factory = lambda: datetime.now(timezone.utc))
+
+    @property 
+    def report_name(self) -> str: 
+        """Generate a formmated report name"""
+        return f"{self.report_type}_{self.company_name}" if self.company_name else str(self.report_type)
+    
+class EmailPayload(BaseModel): 
+    """Model for email request payload"""
+    blob_link: str
+    email_subject: str = "Sales Factory Monthly Report"
+    recipients: List[str]
+    save_email: str = "yes"
+
+def process_single_report(
+        report_type: ReportType, 
+        company_name: Optional[str] = None, 
+) -> ReportResult: 
+    """Process a single report generation and email sending"""
+    try: 
+        config = ReportConfig(
+            report_topic = report_type,
+            company_name = company_name
+        )
+
+        response_json = generate_report(
+            report_topic = config.report_topic, 
+            company_name = config.company_name
+        )
+
+        if not response_json or response_json.get('status') != 'success': 
+            return ReportResult(
+                report_type = report_type, 
+                company_name = company_name, 
+                success = False, 
+                error_message = response_json.get('message')
+            )
+
         blob_link = response_json.get('report_url')
+        if not blob_link: 
+            return ReportResult(
+                report_type = report_type, 
+                company_name = company_name, 
+                success = False, 
+                error_message = "Failed to extract blob link"
+            )
+        
+        # create email payload 
+        cosmos_db_manager = CosmoDBManager(
+            container_name = 'subscription_emails', 
+            db_uri = f"https://{os.environ['AZURE_DB_ID']}.documents.azure.com:443/", 
+            credential = DefaultAzureCredential(), 
+            database_name = os.environ.get('AZURE_DB_NAME')
+        )
 
-        if not blob_link:
-            logger.error(f"Failed to extract blob link for {report} at {utc_timestamp}")
-            continue 
+        email_payload = EmailPayload(
+            blob_link = blob_link,
+            recipients = cosmos_db_manager.get_email_list()
+        )
 
-        if send_report_email(blob_link, report):
-            logger.info(f"Report {report} sent successfully at {utc_timestamp}")
-        else:
-            logger.error(f"Failed to send email for {report} at {utc_timestamp}")
-            logger.error(f"Report with blob link {blob_link} was not sent")
+        report_name = f"{report_type}_{company_name}" if company_name else str(report_type)
+        email_success = send_report_email(email_payload.blob_link, report_name)
 
-    logger.info(f"Monthly report generation completed at {datetime.now(timezone.utc).isoformat()}")
+        return ReportResult(
+            report_type=report_type,
+            company_name=company_name,
+            blob_link=blob_link,
+            success=email_success,
+            error_message=None if email_success else "Failed to send email"
+        )
+
+    except Exception as e:
+        logger.exception(f"Error processing report {report_type}")
+        return ReportResult(
+            report_type=report_type,
+            company_name=company_name,
+            success=False,
+            error_message=str(e)
+        )
+    
+
+def process_company_reports(report_type: ReportType, 
+                            companies: List[str]) -> List[ReportResult]: 
+    """Process reports for multiple companies"""
+    with ThreadPoolExecutor() as executor: 
+        results = list(executor.map(lambda company: process_single_report(report_type, company), companies))
+    return results
+
+def main(mytimer: func.TimerRequest) -> None: 
+    """Main function to process monthly reports"""
+    start_time = datetime.now(timezone.utc)
+
+    logger.info(f"Monthly report generation started at {start_time}")
+
+    all_results: List[ReportResult] = []
+
+    try: 
+        for report in ReportType: 
+            if report == ReportType.COMPANY_ANALYSIS:
+                # process company reports in parallel 
+                company_results = process_company_reports(report, COMPANY_NAME)
+                all_results.extend(company_results)
+            else: 
+                # process regular reports 
+                result = process_single_report(report)
+                all_results.append(result)
+
+        # log summary of results 
+        successful_reports = [r for r in all_results if r.success]
+        failed_reports = [r for r in all_results if not r.success]
+
+        logger.info(f"Successfully processed {len(successful_reports)} reports")
+        for result in successful_reports: 
+            logger.info(f"Success: {result.report_name} - {result.blob_link}")
+
+        if failed_reports: 
+            logger.error(f"failed to process {len(failed_reports)} reports")
+            for result in failed_reports: 
+                logger.error(f"Failed: {result.report_name} - {result.error_message}")
+
+    except Exception as e: 
+        logger.exception("An error occurred during report processing")
+
+    finally: 
+        end_time = datetime.now(timezone.utc)
+        duration = end_time - start_time 
+        logger.info(f"Monthly report generation completed at {end_time}. Duration: {duration}")
 
 
