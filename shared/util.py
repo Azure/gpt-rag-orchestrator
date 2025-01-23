@@ -1315,6 +1315,7 @@ def update_subscription_logs(
             return {"error": "Subscription ID not found in organizations container."}
         
         organization = result[0]
+        organization_id = organization.get("id")
         organization_name = organization.get("name")
         organization_owner = organization.get("owner")
         if not organization_name or not organization_owner:
@@ -1325,6 +1326,7 @@ def update_subscription_logs(
         audit_log_entry = {
             "id": str(uuid.uuid4()),
             "organizationName": organization_name,
+            "organization_id": organization_id,
             "organizationOwner": organization_owner,
             "subscriptionId": subscription_id,
             "action": action,
@@ -1369,6 +1371,7 @@ def handle_subscription_logs(subscription_id, event_type):
             return {"error": "Subscription ID not found in organizations container."}
         
         organization = result[0]
+        organization_id = organization.get("id")
         organization_name = organization.get("name")
         organization_owner = organization.get("owner")
         if not organization_name or not organization_owner:
@@ -1379,6 +1382,7 @@ def handle_subscription_logs(subscription_id, event_type):
             "id": str(uuid.uuid4()),
             "subscriptionId": subscription_id,
             "organizationName": organization_name,
+            "organization_id": organization_id,
             "organizationOwner": organization_owner,
             "action": event_type,  # event_type: paused, resumed, deleted
             "changeTime": int(datetime.now(timezone.utc).timestamp()),

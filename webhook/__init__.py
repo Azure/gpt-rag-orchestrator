@@ -97,19 +97,30 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
                 status_financial_assistant = "inactive"
                 return "Financial Assistant Change", None, None, modified_by,modified_by_name, status_financial_assistant
             
-            # Detect subscription level change
-            if "plan" in previous_data and modification_type == "subscription_tier_change":
-                previous_plan = previous_data.get("plan", {}).get("nickname", None)
-                current_plan = data.get("plan", {}).get("nickname", None)
-                return "Subscription Tier Change", previous_plan, current_plan, modified_by,modified_by_name, None
+
+            if modification_type == "subscription_tier_change":
+                # Access plan info from subscription items in previous_data
+                previous_plan = None
+                if "items" in previous_data:
+                    for item in previous_data["items"].get("data", []):
+                        previous_plan = item.get("plan", {}).get("nickname", None)
+                        if previous_plan:
+                            break  # Exit once we find the plan
+        
+                current_plan = data.get("items", {}).get("data", [{}])[0].get("plan", {}).get("nickname", None)
+
+                return "Subscription Tier Change", previous_plan, current_plan, modified_by, modified_by_name, None
+
             # Unknown action
             return "Unknown action", None, None, modified_by,modified_by_name, None
         
         action, previous_plan, current_plan, modified_by, modified_by_name, status_financial_assistant = determine_action(event)
         print(f"Action determined: {action}")
 
+        enable_organization_subscription(subscriptionId)
+
         if action != "No action":
-            enable_organization_subscription(subscriptionId)
+            
             update_subscription_logs(subscriptionId, action, previous_plan, current_plan, modified_by, modified_by_name, status_financial_assistant)
             updateExpirationDate(subscriptionId, expirationDate)
 
