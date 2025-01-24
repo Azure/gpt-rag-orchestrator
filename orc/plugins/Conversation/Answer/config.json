@@ -12,7 +12,7 @@
     },
     "input_variables": [
         {
-          "name": "question",
+          "name": "ask",
           "description": "User question(i.e., How do I execute task A?)",
           "defaultValue": "",
           "required": true	
