@@ -8,7 +8,7 @@ azure-identity==1.15.0
 azure-keyvault-secrets==4.7.0
 numpy==1.26.2
 openai==1.58.1
-semantic-kernel[azure]==1.17.1
+semantic-kernel[azure,anthropic,aws,google,mistralai,ollama,onnx]==1.19.0
 requests==2.32.0
 tiktoken==0.5.2
 tenacity==8.2.3
