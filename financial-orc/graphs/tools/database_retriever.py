@@ -220,7 +220,8 @@ def format_retrieved_content(docs):
             """
 
             if doc.metadata.get('source'):
-                sas_token = get_secret('blobSasToken')
+                # sas_token = get_secret('blobSasToken')
+                sas_token = os.getenv("BLOB_SAS_TOKEN")
                 citation = f"{doc.metadata['source']}?{sas_token}"
             else:
                 citation = ""
