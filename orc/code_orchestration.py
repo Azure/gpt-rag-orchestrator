@@ -53,6 +53,7 @@ RETRIEVAL_PRIORITY = os.environ.get("RETRIEVAL_PRIORITY") or "search"
 SEVERITY_THRESHOLD = os.environ.get("SEVERITY_THRESHOLD") or 3
 APIM_ENABLED = os.environ.get("APIM_ENABLED") or "false"
 APIM_ENABLED = True if APIM_ENABLED.lower() == "true" else False
+MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER") or "aoai"
 if SECURITY_HUB_CHECK:
     SECURITY_HUB_THRESHOLDS=[get_possitive_int_or_default(os.environ.get("SECURITY_HUB_HATE_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SELFHARM_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SEXUAL_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_VIOLENCE_THRESHHOLD"), 0)]
 
@@ -118,13 +119,14 @@ async def get_answer(history, security_ids,conversation_id,chainedTokenCredentia
         #############################
         
         # AOAI Content filter validator
-        raiNativePlugin = await raiNativePluginTask
-        filterResult = await kernel.invoke(raiNativePlugin["ContentFliterValidator"], KernelArguments(input=ask,apim_key=apim_key))
-        if not (filterResult.value.passed):
-            logging.info(f"[code_orchest] filtered content found in question: {ask}.")
-            answer = get_message('BLOCKED_ANSWER')
-            answer_generated_by = 'content_filters_check'
-            bypass_nxt_steps = True
+        if MODEL_PROVIDER == "aoai":
+            raiNativePlugin = await raiNativePluginTask
+            filterResult = await kernel.invoke(raiNativePlugin["ContentFliterValidator"], KernelArguments(input=ask,apim_key=apim_key))
+            if not (filterResult.value.passed):
+                logging.info(f"[code_orchest] filtered content found in question: {ask}.")
+                answer = get_message('BLOCKED_ANSWER')
+                answer_generated_by = 'content_filters_check'
+                bypass_nxt_steps = True
 
         if BLOCKED_LIST_CHECK:
             logging.debug(f"[code_orchest] blocked list check.")

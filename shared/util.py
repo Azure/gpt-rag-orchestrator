@@ -15,9 +15,7 @@ import semantic_kernel as sk
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
 from bs4 import BeautifulSoup
 import aiohttp
-from semantic_kernel.connectors.ai.azure_ai_inference import AzureAIInferenceChatCompletion
-from azure.ai.inference.aio import ChatCompletionsClient
-from azure.core.credentials import AzureKeyCredential
+from .ai_service_factory import create_service
 # logging level
 logging.getLogger('azure').setLevel(logging.WARNING)
 LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
@@ -316,44 +314,12 @@ class DummyAsyncContextManager:
 
 async def create_kernel(service_id='aoai_chat_completion',apim_key=None,credential=None):
     kernel = sk.Kernel()
-    if APIM_ENABLED:
-        chatgpt_config =await get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
-        client=ChatCompletionsClient(
-                    endpoint=chatgpt_config['model_endpoint'],
-                    credential=AzureKeyCredential(apim_key),
-                )
-        kernel.add_service(
-            AzureAIInferenceChatCompletion(
-                service_id=service_id,
-                ai_model_id=chatgpt_config['deployment'],
-                client=client
-            )
-        )
-        logging.info(chatgpt_config['model_endpoint'])
-    elif AI_FOUNDRY_DEPLOYMENT:
-        client=DummyAsyncContextManager()
-        kernel.add_service(
-            AzureAIInferenceChatCompletion(
-                service_id=service_id,
-                ai_model_id=DEPLOYMENT_ID,
-                endpoint=DEPLOYMENT_ENDPOINT,
-                api_key=await get_secret("deploymentKey")
-            )
-        )
-    else:
-        chatgpt_config =await get_aoai_config(AZURE_OPENAI_CHATGPT_MODEL)
-        client=ChatCompletionsClient(
-                    endpoint=chatgpt_config['model_endpoint'],
-                    credential=credential,
-                    credential_scopes=["https://cognitiveservices.azure.com/.default"]
-                )
-        kernel.add_service(
-            AzureAIInferenceChatCompletion(
-                service_id=service_id,
-                ai_model_id=chatgpt_config['deployment'],
-                client=client
-            )
-        )
+    config=None
+    model_provider=os.getenv("MODEL_PROVIDER","aoai")
+    if model_provider == "aoai":
+        config=await get_aoai_config(os.getenv("AZURE_OPENAI_CHATGPT_MODEL"))
+    service,client=await create_service(model_provider,apim_key,credential,config)
+    kernel.add_service(service)
     return kernel,client
 
 def get_usage_tokens(function_result, token_type='total'):
