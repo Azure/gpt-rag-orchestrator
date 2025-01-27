@@ -4,7 +4,7 @@ from azure.cosmos import CosmosClient, PartitionKey, exceptions
 from azure.identity import DefaultAzureCredential
 import uuid
 from datetime import datetime, timezone
-from dotenv import load_dotenv
+from typing import List
 import logging
 
 logging.basicConfig(
@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 class CosmosDBLoader:
     def __init__(self, container_name: str, 
-                db_uri: str, 
-                credential: str, 
-                database_name: str):
+                db_uri: str = f"https://{os.environ['AZURE_DB_ID']}.documents.azure.com:443/" if os.environ.get('AZURE_DB_ID') else None, 
+                credential: str = DefaultAzureCredential(), 
+                database_name: str = os.environ.get('AZURE_DB_NAME') if os.environ.get('AZURE_DB_NAME') else None):
 
         self.container_name = container_name
         self.db_uri = db_uri
@@ -140,6 +140,46 @@ class CosmosDBLoader:
             logger.info(f"Successfully updated last run in Cosmos DB")
         except Exception as e:
             logger.error(f"Error updating last run in Cosmos DB: {str(e)}")
+
+    def get_organizations(self):
+        try:
+            query = "SELECT * FROM c"
+            items = self.container.query_items(query, enable_cross_partition_query=True)
+            organizations = []
+            for item in items:
+                if "name" in item and "id" in item and "subscriptionId" in item:
+                    organizations.append({
+                        "id": item["id"],
+                        "name": item["name"],
+                        "subscriptionId": item["subscriptionId"]
+                    })
+            return organizations
+        except Exception as e:
+            logger.error(f"Error getting organizations from Cosmos DB: {str(e)}")
+            return []
+
+    def get_users_by_organizations(self, organization_ids: List[str]) -> List[dict]:
+        """
+        Get the list of users from Cosmos DB
+        """
+        try:
+            if not organization_ids or len(organization_ids) == 0:
+                return []
+            formatted_organization_ids = "('" + "','".join(organization_ids) + "')"
+            query = f"SELECT * FROM c WHERE c.isReportEmailReceiver = 'true' AND c.data.organizationId IN {formatted_organization_ids}"
+            items = self.container.query_items(query, enable_cross_partition_query=True)
+            users_by_org = {}
+            for item in items:
+                if "data" in item and "email" in item["data"]:
+                    if "organizationId" in item["data"]:
+                        organization_id = item["data"]["organizationId"]
+                        if organization_id not in users_by_org:
+                            users_by_org[organization_id] = []
+                        users_by_org[organization_id].append(item["data"]["email"])
+            return users_by_org
+        except Exception as e:
+            logger.error(f"Error getting users from Cosmos DB: {str(e)}")
+            return []
 
     
 if __name__ == "__main__":
