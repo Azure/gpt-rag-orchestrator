@@ -5,6 +5,22 @@ import requests
 import json
 from collections import OrderedDict
 from langchain_core.documents import Document
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.secrets import SecretClient
+import logging
+LOGLEVEL = os.environ.get("LOGLEVEL", "INFO").upper()
+logging.basicConfig(level=LOGLEVEL)
+
+
+
+def get_secret(secretName):
+    keyVaultName = os.getenv("AZURE_KEY_VAULT_NAME")
+    KVUri = f"https://{keyVaultName}.vault.azure.net"
+    credential = DefaultAzureCredential()
+    client = SecretClient(vault_url=KVUri, credential=credential)
+    logging.info(f"[webbackend] retrieving {secretName} secret from {keyVaultName}.")
+    retrieved_secret = client.get_secret(secretName)
+    return retrieved_secret.value
 
 
 
@@ -204,7 +220,9 @@ def format_retrieved_content(docs):
             """
 
             if doc.metadata.get('source'):
-                citation = f"{doc.metadata['source']}?{os.environ.get('BLOB_SAS_TOKEN')}"
+                # sas_token = get_secret('blobSasToken')
+                sas_token = os.getenv("BLOB_SAS_TOKEN")
+                citation = f"{doc.metadata['source']}?{sas_token}"
             else:
                 citation = ""
             
@@ -219,3 +237,4 @@ def format_retrieved_content(docs):
         
     except Exception as e:
         return [Document(page_content=f"Error formatting documents: {str(e)}")]
+

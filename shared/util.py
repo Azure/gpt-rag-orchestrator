@@ -9,11 +9,13 @@ import tiktoken
 import time
 import urllib.parse
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from azure.cosmos import CosmosClient
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
 from tenacity import retry, wait_random_exponential, stop_after_attempt
+from .exceptions import MissingRequiredFieldError
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
 
 
 # logging level
@@ -415,16 +417,26 @@ def get_conversations(user_id):
         formatted_conversations = [
             {
                 "id": con["id"],
-                "start_date": con["conversation_data"]["start_date"] if "start_date" in con["conversation_data"] else default_date,
+                "start_date": (
+                    con["conversation_data"]["start_date"]
+                    if "start_date" in con["conversation_data"]
+                    else default_date
+                ),
                 "content": con["conversation_data"]["history"][0]["content"],
-                "type": con["conversation_data"]["type"] if "type" in con["conversation_data"] else "default",
-            }   
+                "type": (
+                    con["conversation_data"]["type"]
+                    if "type" in con["conversation_data"]
+                    else "default"
+                ),
+            }
             for con in conversations
         ]
 
         return formatted_conversations
     except Exception as e:
-        logging.error(f"Error retrieving the conversations for user '{user_id}': {str(e)}")
+        logging.error(
+            f"Error retrieving the conversations for user '{user_id}': {str(e)}"
+        )
         return []
 
 
@@ -453,7 +465,11 @@ def get_conversation(conversation_id, user_id):
                 }
                 for message in conversation["conversation_data"]["history"]
             ],
-            "type": conversation["conversation_data"]["type"] if "type" in conversation["conversation_data"] else "default",
+            "type": (
+                conversation["conversation_data"]["type"]
+                if "type" in conversation["conversation_data"]
+                else "default"
+            ),
         }
         return formatted_conversation
     except Exception:
@@ -1004,6 +1020,53 @@ def get_organization(organization_id):
     return organization
 
 
+def updateExpirationDate(subscription_id, expiration_date):
+    if not subscription_id:
+        raise MissingRequiredFieldError("Subscription ID")
+    if not expiration_date:
+        raise MissingRequiredFieldError("Expiration Date")
+    logging.info(
+        "Subscription ID found. Updating expiration date for subscription: "
+        + subscription_id
+    )
+
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+    container = db.get_container_client("organizations")
+    try:
+        query = "SELECT * FROM c WHERE c.subscriptionId = @subscription_id"
+        parameters = [{"name": "@subscription_id", "value": subscription_id}]
+        result = list(
+            container.query_items(
+                query=query, parameters=parameters, enable_cross_partition_query=True
+            )
+        )
+        if result:
+            organization = result[0]
+            organization["subscriptionExpirationDate"] = expiration_date
+            container.replace_item(item=organization["id"], body=organization)
+            logging.info(
+                f"[updateExpirationDate] Successfully updated expiration date for organization {organization['id']}"
+            )
+            return {"success": "Successfully updated expiration date"}
+        else:
+            raise CosmosResourceNotFoundError(subscription_id)
+    except MissingRequiredFieldError as field:
+        logging.info(f"[updateExpirationDate] updateExpirationDate: {field} is missing")
+        return {"error": f"{field} is missing"}
+    except CosmosResourceNotFoundError as e:
+        logging.info(
+            f"[updateExpirationDate] updateExpirationDate: {subscription_id} not found"
+        )
+        return {"error": f"Something went wrong. {str(e)}"}
+    except Exception as e:
+        logging.info(
+            f"[updateExpirationDate] updateExpirationDate: something went wrong. {str(e)}"
+        )
+        return {"error": f"Something went wrong. {str(e)}"}
+
+
 def enable_organization_subscription(subscription_id):
     if not subscription_id:
         return {"error": "Subscription ID not found."}
@@ -1076,9 +1139,7 @@ def disable_organization_active_subscription(subscription_id):
         )
 
 
-def create_organization_without_subscription(
-    user_id, organization_name
-):
+def create_organization_without_subscription(user_id, organization_name):
     if not user_id:
         return {"error": "User ID not found."}
 
@@ -1098,10 +1159,10 @@ def create_organization_without_subscription(
             "owner": user_id,
             "sessionId": None,
             "subscriptionStatus": "inactive",
-            "subscriptionExpirationDate": None
+            "subscriptionExpirationDate": None,
         }
     )
-    
+
     logging.info(
         f"[util__module] Successfully created new organization, adding organizationId to user {user_id}"
     )
@@ -1196,6 +1257,188 @@ def update_organization_subscription(
             )
 
 
+def get_organization_by_subscription_id(subscription_id, organizations_container):
+    query = "SELECT * FROM c WHERE c.subscriptionId = @subscription_id"
+    parameters = [{"name": "@subscription_id", "value": subscription_id}]
+    result = organizations_container.query_items(query=query, parameters=parameters, enable_cross_partition_query=True)
+    return list(result)
+
+def create_audit_log_entry(auditlogs_container, entry):
+    try:
+        auditlogs_container.create_item(body=entry)
+        logging.info(f"Audit log entry created: {entry}")
+        return {"success": True, "message": "Audit log created successfully."}
+    except Exception as e:
+        logging.error(f"Error creating audit log: {str(e)}")
+        return {"error": f"An error occurred: {str(e)}"}
+
+
+def update_subscription_logs(
+    subscription_id,
+    action,
+    previous_plan=None,
+    current_plan=None,
+    modified_by=None,
+    modified_by_name=None,
+    status_financial_assistant=None
+):
+    """
+        Logs subscription-related events to the audit container.
+
+        Parameters:
+        - subscription_id (str): ID of the subscription being modified.
+        - action (str): Action type (e.g., 'New Subscription', 'Subscription Tier Change').
+        - previous_plan (str, optional): The plan before a change (required for 'Subscription Tier Change').
+        - current_plan (str, optional): The plan after a change.
+        - modified_by (str, optional): User ID of the person making the change.
+        - modified_by_name (str, optional): Name of the person making the change.
+        - status_financial_assistant (str, optional): Status of the financial assistant feature.
+    """
+    if not subscription_id:
+        return {"error": "Subscription ID not provided."}
+
+    logging.info(f"Logging audit for subscription: {subscription_id}")
+
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+
+
+    organizations_container = db.get_container_client("organizations")
+    auditlogs_container = db.get_container_client("auditLogs")
+
+    try:
+        
+        result = get_organization_by_subscription_id(subscription_id, organizations_container)
+        if not result:
+            logging.warning(f"Subscription ID {subscription_id} not found.")
+            return {"error": "Subscription ID not found in organizations container."}
+        
+        organization = result[0]
+        organization_id = organization.get("id")
+        organization_name = organization.get("name")
+        organization_owner = organization.get("owner")
+        if not organization_name or not organization_owner:
+            logging.warning(f"Missing required fields in organization: {organization}")
+            return {"error": "Missing 'name' or 'owner' fields in organization data."}
+        
+    # Create audit log entry
+        audit_log_entry = {
+            "id": str(uuid.uuid4()),
+            "organizationName": organization_name,
+            "organization_id": organization_id,
+            "organizationOwner": organization_owner,
+            "subscriptionId": subscription_id,
+            "action": action,
+            "changeTime": int(datetime.now(timezone.utc).timestamp()),
+            "previous_plan": previous_plan,
+            "current_plan": current_plan,
+            "modified_by": modified_by,
+            "modified_by_name": modified_by_name,
+            "status_financial_assistant": status_financial_assistant,
+        }
+        return create_audit_log_entry(auditlogs_container, audit_log_entry)
+    except Exception as e:
+        logging.error(f"Error in update_subscription_logs: {str(e)}")
+        return {"error": f"An error occurred: {str(e)}"}
+    
+def handle_subscription_logs(subscription_id, event_type):
+    """
+        Logs subscription-related events to the audit container.
+
+        Parameters:
+        - subscription_id (str): Subscription ID.
+        - event_type (str): Event type (paused, resumed, deleted).
+    """
+    if not subscription_id:
+        return {"error": "Subscription ID not provided."}
+
+    logging.info(f"Logging audit for subscription: {subscription_id}")
+
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+
+
+    organizations_container = db.get_container_client("organizations")
+    auditlogs_container = db.get_container_client("auditLogs")
+
+    try:
+        
+        result = get_organization_by_subscription_id(subscription_id, organizations_container)
+        if not result:
+            logging.warning(f"Subscription ID {subscription_id} not found.")
+            return {"error": "Subscription ID not found in organizations container."}
+        
+        organization = result[0]
+        organization_id = organization.get("id")
+        organization_name = organization.get("name")
+        organization_owner = organization.get("owner")
+        if not organization_name or not organization_owner:
+            logging.warning(f"Missing required fields in organization: {organization}")
+            return {"error": "Missing 'name' or 'owner' fields in organization data."}
+
+        audit_log_entry = {
+            "id": str(uuid.uuid4()),
+            "subscriptionId": subscription_id,
+            "organizationName": organization_name,
+            "organization_id": organization_id,
+            "organizationOwner": organization_owner,
+            "action": event_type,  # event_type: paused, resumed, deleted
+            "changeTime": int(datetime.now(timezone.utc).timestamp()),
+        }
+
+        auditlogs_container.create_item(body=audit_log_entry)
+        logging.info(
+            f"[handleSubscriptionEvent] Audit log created for subscription {subscription_id}, action: {event_type}"
+        )
+
+        return {"success": True, "message": f"Audit log created for {event_type} event."}
+
+    except Exception as e:
+        logging.error(f"[handleSubscriptionEvent] Error creating audit log: {str(e)}")
+        return {"error": f"An error occurred: {str(e)}"}
+
+
+def handle_new_subscription_logs(userId, organizationId, userName, organizationName):
+    """
+        Logs events related to a new subscription to the audit container.
+
+        Parameters:
+        - userId (str): user ID.
+        - organizationId (str): organization ID.
+        - userName (str): user Name.
+        - organizationName (str): organization Name
+    """
+    credential = DefaultAzureCredential()
+    db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
+    db = db_client.get_database_client(database=AZURE_DB_NAME)
+
+    # Containers
+    auditlogs_container = db.get_container_client("auditLogs")
+
+    try:
+        audit_log_entry = {
+            "id": str(uuid.uuid4()),
+            "modified_by_name":userName,
+            "modified_by":userId,
+            "organizationName": organizationName,
+            "organizationId": organizationId,
+            "action": 'Subscription created',
+            "changeTime": int(datetime.now(timezone.utc).timestamp()),
+        }
+
+        auditlogs_container.create_item(body=audit_log_entry)
+        logging.info(
+            f"[handleSubscriptionEvent] Audit log created"
+        )
+
+        return {"success": True, "message": f"Audit log created"}
+
+    except Exception as e:
+        logging.error(f"[handleSubscriptionEvent] Error creating audit log: {str(e)}")
+        return {"error": f"An error occurred: {str(e)}"}
+
 def create_invitation(invited_user_email, organization_id, role):
     if not invited_user_email:
         return {"error": "User email is required."}
@@ -1216,7 +1459,7 @@ def create_invitation(invited_user_email, organization_id, role):
         user = user_container.query_items(
             query="SELECT * FROM c WHERE c.data.email = @invited_user_email",
             parameters=[{"name": "@invited_user_email", "value": invited_user_email}],
-            enable_cross_partition_query=True
+            enable_cross_partition_query=True,
         )
 
         for u in user:
@@ -1224,7 +1467,9 @@ def create_invitation(invited_user_email, organization_id, role):
                 u["data"]["organizationId"] = organization_id
                 u["data"]["role"] = role
                 user_container.replace_item(item=u["id"], body=u)
-                logging.info(f"[create_invitation] Updated user {invited_user_email} organizationId to {organization_id}")
+                logging.info(
+                    f"[create_invitation] Updated user {invited_user_email} organizationId to {organization_id}"
+                )
 
         invitation = {
             "id": str(uuid.uuid4()),
@@ -1243,12 +1488,14 @@ def create_invitation(invited_user_email, organization_id, role):
         )
     return invitation
 
+
 def get_invitations(organization_id):
     if not organization_id:
         return {"error": "Organization ID not found."}
 
     logging.info(
-        "Organization ID found. Getting invitations for organization: " + organization_id
+        "Organization ID found. Getting invitations for organization: "
+        + organization_id
     )
 
     invitations = []
@@ -1271,6 +1518,7 @@ def get_invitations(organization_id):
             f"[get_invitations] get_invitations: something went wrong. {str(e)}"
         )
     return invitations
+
 
 def get_invitation(invited_user_email):
     if not invited_user_email:

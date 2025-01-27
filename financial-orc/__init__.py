@@ -20,6 +20,7 @@ class ReportType(BaseModel):
         "monthly_economics",
         "weekly_economics", 
         "company_analysis",
+        "home_improvement",
         "ecommerce",
         "creative_brief"
     ] = Field(

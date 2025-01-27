@@ -3,6 +3,7 @@ import azure.functions as func
 import io
 import os
 import platform
+import bleach
 
 LOGLEVEL = os.environ.get("LOGLEVEL", "DEBUG").upper()
 logging.basicConfig(level=LOGLEVEL)
@@ -46,6 +47,9 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
                 "HTML content too large. Maximum size is 10MB",
                 status_code=400
             )
+
+        # # Sanitize HTML content
+        # sanitized_html_content = bleach.clean(html_content)
 
         # Basic HTML validation
         if not html_content.strip().startswith('<'):

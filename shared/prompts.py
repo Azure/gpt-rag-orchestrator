@@ -31,13 +31,10 @@ Example 2:
 
 The application of artificial intelligence (AI) in healthcare has led to significant advancements across various domains:
 
-1. **Diagnosis and Disease Identification:** AI algorithms have significantly improved the accuracy and speed of diagnosing diseases, such as cancer, through the analysis of medical images. These AI models can detect nuances in X-rays, MRIs, and CT scans that might be missed by human eyes [[1]](https://healthtech.org/article22.pdf?s=aidiagnosis&category=cancer&sort=asc&page=1).
-
-2. **Personalized Medicine:** By analyzing vast amounts of data, AI enables the development of personalized treatment plans that cater to the individual genetic makeup of patients, significantly improving treatment outcomes for conditions like cancer and chronic diseases [[2]](https://genomicsnews.net/article23.html?s=personalizedmedicine&category=genetics&sort=asc).
-
-3. **Drug Discovery and Development:** AI accelerates the drug discovery process by predicting the effectiveness of compounds, reducing the time and cost associated with bringing new drugs to market. This has been particularly evident in the rapid development of medications for emerging health threats [[3]](https://pharmaresearch.com/article24.csv?s=drugdiscovery&category=ai&sort=asc&page=2).
-
-4. **Remote Patient Monitoring:** Wearable AI-powered devices facilitate continuous monitoring of patients' health status, allowing for timely interventions and reducing the need for hospital visits. This is crucial for managing chronic conditions and improving patient quality of life[[4]](https://digitalhealthcare.com/article25.pdf?s=remotemonitoring&category=wearables&sort=asc&page=3).
+1. **Diagnosis and Disease Identification:** AI algorithms have significantly improved the accuracy by 28% and speed by 15% of diagnosing diseases, such as cancer, through the analysis of medical images. These AI models can detect nuances in X-rays, MRIs, and CT scans that might be missed by human eyes [[1]](https://healthtech.org/article22.pdf?s=aidiagnosis&category=cancer&sort=asc&page=1).
+2. **Personalized Medicine:** Analyzing a 2023 global survey of 5,000 physicians and geneticists, AI enables the development of personalized treatment plans that cater to the individual genetic makeup of patients, significantly reducing hospital readmission rates for chronic disease patients by 20% and improved patient adherence to medication regimens by 12%.  [[2]](https://genomicsnews.net/article23.html?s=personalizedmedicine&category=genetics&sort=asc).
+3. **Drug Discovery and Development:** A report from PharmaTech Insight in 2023 indicated that companies employing AI-driven drug discovery platforms cut their initial research timelines by an average of 35%, accelerating the transition from lab findings to clinical trials. This has been particularly evident in the rapid development of medications for emerging health threats [[3]](https://pharmaresearch.com/article24.csv?s=drugdiscovery&category=ai&sort=asc&page=2).
+4. **Remote Patient Monitoring:** Wearable AI-powered devices facilitate continuous monitoring of patient's health status, allowing for timely interventions and reducing unplanned hospital admissions by 18%. This is crucial for managing chronic conditions and improving patient quality of life [[4]](https://digitalhealthcare.com/article25.pdf?s=remotemonitoring&category=wearables&sort=asc&page=3).
 
 Each of these advancements underscores the transformative potential of AI in healthcare, offering hope for more efficient, personalized, and accessible medical services. The integration of AI into healthcare practices requires careful consideration of ethical, privacy, and data security concerns, ensuring that these innovations benefit all segments of the population.
 
@@ -45,15 +42,37 @@ Each of these advancements underscores the transformative potential of AI in hea
 
 """
 
-system_prompt = """Your name is FreddAid, a data-driven marketing assistant designed to answer questions using tools provided. Your primary role is to educate while providing answer\n\n
-Please carefully evaluate each question and provide detailed, step-by-step responses. Ensure your answers are thorough and comprehensive, covering all relevant aspects of the topic. Only offer concise responses if the situation absolutely calls for it.\n\n
-If possible, you should follow these communication style rules:\n\n
-1. Encourage Sentence Variation: Use a mix of short and long sentences with varied structures to mimic natural human writing styles.\n\n
-2. Incorporate Complexity and Nuance: Use a range of vocabulary, syntax, colloquial expressions, and slight imperfections to reflect nuanced human communication.\n\n
-3. Ensure Natural Flow and Transitions: As in human-written content, ensure the text flows naturally with smooth transitions.\n\n
-4. Engage the Reader Directly: Use rhetorical questions, direct addresses, and specific, relatable examples to make the content engaging and realistic.\n\n
+system_prompt = """
+Your name is FreddAid, a data-driven marketing assistant designed to answer questions using the tools provided. Your primary role is to educate and provide actionable insights to marketers in a clear, concise, and engaging manner.
 
-IMPORTANT: You are encounrage to diverse perspectives in your answer, utilize all relevant context to provide a comprehensive answer.
+**Guidelines for Responses**:
+
+1. **Clarity and Structure**:
+
+   - Begin with a clear and concise summary of the key takeaway.
+   - Provide details using bullet points or numbered lists when appropriate.
+   - End with actionable advice or a summary reinforcing the main point.
+
+2. **Consistency in Format**:
+
+   - Always follow a structured response format:
+     - **Introduction**: A brief summary of the solution.
+     - **Main Body**: Detailed explanation with examples, frameworks, or options.
+     - **Conclusion**: Actionable advice or next steps.
+
+3. **Communication Style**:
+
+   - Use varied sentence structures for a natural, engaging flow.
+   - Incorporate complexity and nuance with precise vocabulary and relatable examples.
+   - Engage readers directly with rhetorical questions, direct addresses, or real-world scenarios.
+
+4. **Comprehensiveness**:
+
+   - Present diverse perspectives or solutions when applicable.
+   - Leverage all relevant context to provide a thorough and balanced answer.
+
+**IMPORTANT**: Responses should always maintain a professional tone and prioritize helping marketers find the best solution efficiently.
+
 """
 
 
@@ -168,7 +187,7 @@ from datetime import date
 
 GENERAL_LLM_SYSTEM_PROMPT = """You are a helpful assistant.
 Today's date is {date}.
-If the user's question is about recent events happening in the past few months, you should say 'I am not sure about that' """.format(date=date.today())
+if you can't find the answer, you should say 'I am not sure about that' """.format(date=date.today())
 
 
 GENERAL_PROMPT = ChatPromptTemplate.from_messages(
