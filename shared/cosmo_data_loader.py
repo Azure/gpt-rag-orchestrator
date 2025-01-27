@@ -46,6 +46,13 @@ class CosmosDBLoader:
             self.container = self.database.get_container_client(self.container_name)
         except exceptions.CosmosHttpResponseError:
             raise 
+    def create_container_single_hash(self, partition_key = "/id"):
+        self.container = self.database.create_container(
+            id=self.container_name,
+            partition_key=PartitionKey(path=partition_key, kind="Hash"),
+            analytical_storage_ttl=-1,
+            offer_throughput=400
+        )
 
 
     def upload_data(self, data_file_path: str) -> None:
@@ -184,15 +191,16 @@ class CosmosDBLoader:
     
 if __name__ == "__main__":
     # run the script to upload data to Cosmos DB
-    data_file_path = os.path.join(os.path.dirname(__file__), "data/companyID_schedules.json")
-    container_name = "schedules"
+    data_file_path = os.path.join(os.path.dirname(__file__), "data/company_name.json")
+    container_name = "companyAnalysis"
     db_uri = f"https://{os.environ['AZURE_DB_ID']}.documents.azure.com:443/" if os.environ.get('AZURE_DB_ID') else None
-    credential = DefaultAzureCredential()
+    credential = os.environ.get('AZURE_COSMOS_KEY')
+    # credential = DefaultAzureCredential()
     database_name = os.environ.get('AZURE_DB_NAME') if os.environ.get('AZURE_DB_NAME') else None
-
 
     cosmos_db_loader = CosmosDBLoader(container_name=container_name, db_uri=db_uri, credential=credential, database_name=database_name)
     # create the container if it doesn't exist
-    cosmos_db_loader.create_container()
+    cosmos_db_loader.create_container_single_hash()
     # upload the data to the container
+
     cosmos_db_loader.upload_data(data_file_path)
