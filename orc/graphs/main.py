@@ -134,6 +134,13 @@ def create_main_agent(
                 print("---LESS THAN 3 CONVERSATIONS FOUND, NO SUMMARIZATION NEEDED---")
             return {"summary_decision": "no"}
 
+    class SummaryPoints(BaseModel):
+        summary_points_1: str = Field(description="First important point of the conversation")
+        summary_points_2: str = Field(description="Second important point of the conversation")
+        summary_points_3: str = Field(description="Third important point of the conversation")
+        summary_points_4: str = Field(description="Fourth important point of the conversation, leave blank if not applicable")
+        summary_points_5: str = Field(description="Fifth important point of the conversation, leave blank if not applicable")
+
     def summary_decision(state: EntryGraphState) -> Literal["summarization", "__end__"]:
         if state["summary_decision"] == "yes":
             return "summarization"
@@ -150,16 +157,27 @@ def create_main_agent(
             print("DECISION: SUMMARIZE CONVERSATION")
 
         if summary:
-            summary_prompt = f"Here is the conversation summary so far: {summary}\n\n Please take into account the above information to the summary and summarize all:"
+            summary_prompt = f"Here is the conversation summary so far: {summary}\n\n Please extract the 5 most important points from the entire conversation including the previous summary. For older summaries, you can group them together into few points"
         else:
-            summary_prompt = "Create a summary of the entire conversation so far:"
+            summary_prompt = "Extract the 5 most important points from the conversation so far:"
 
         new_messages = messages + [HumanMessage(content=summary_prompt)]
         new_messages = [m for m in new_messages if not isinstance(m, RemoveMessage)]
-        conversation_summary = model_mini_4o_temp_0.invoke(new_messages)
-
-        # Keep only the 6 most recent messages (3 AI, 3 human)
-        messages_to_keep = messages[-6:]
+        
+        # Use structured output to get summary points
+        structured_summary = model_mini_4o_temp_0.with_structured_output(SummaryPoints).invoke(new_messages)
+        
+        # Combine the points into a coherent summary
+        summary_points = [
+            structured_summary.summary_points_1,
+            structured_summary.summary_points_2,
+            structured_summary.summary_points_3,
+            structured_summary.summary_points_4,
+            structured_summary.summary_points_5
+        ]
+        
+        # Filter out empty points and join them
+        final_summary = "\n".join([point for point in summary_points if point.strip()])
 
         # Create sets of IDs for messages to remove
         combined_ids_to_remove = set(m.id for m in messages[:-4])
@@ -182,7 +200,7 @@ def create_main_agent(
         ]
 
         return {
-            "summary": conversation_summary.content,
+            "summary": final_summary,
             "retrieval_messages": retained_retrieval_messages,
             "general_model_messages": retained_general_model_messages,
             "combined_messages": retained_combined_messages,
