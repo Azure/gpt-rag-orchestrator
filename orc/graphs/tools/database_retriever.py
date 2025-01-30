@@ -100,22 +100,23 @@ class CustomRetriever(BaseRetriever):
         ordered_content = OrderedDict()
 
         for index, search_results in agg_search_results.items():
-            for result in search_results["value"]:
-                if (
-                    result["@search.rerankerScore"] > reranker_threshold
-                ):  # Range between 0 and 4
-                    content[result["id"]] = {
-                        "title": result["title"],
-                        "name": (result["name"] if "name" in result else ""),
-                        "chunk": (result["content"] if "content" in result else ""),
-                        "location": (
-                            result["filepath"] if "filepath" in result else ""
-                        ),
-                        "caption": result["@search.captions"][0]["text"],
-                        "score": result["@search.rerankerScore"],
-                        "index": index,
-                    }
+            # filter results first using list comprehension 
+            filtered_results = [
+                result 
+                for result in search_results.get("value",[])
+                if result['@search.rerankerScore'] > reranker_threshold
+            ]
 
+            for result in filtered_results: 
+                content[result['id']] = {
+                    "title": result.get('title', ''),
+                    "name": result.get('name', ''),
+                    "chunk": result.get('content', ''),
+                    "location": result.get("filepath", ''),
+                    "caption": result["@search.captions"][0]["text"] if "@search.captions" in result else "",
+                    "score": result["@search.rerankerScore"],
+                    "index": index,
+                }
         topk = k
 
         count = 0  # To keep track of the number of results added

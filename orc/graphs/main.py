@@ -48,8 +48,9 @@ class GraphBuilder:
         self.retriever = self._init_retriever()
         self.web_search = self._init_web_search()
 
-    def _init_llm(self, config: GraphConfig = GraphConfig()) -> AzureChatOpenAI:
+    def _init_llm(self) -> AzureChatOpenAI:
         """Configure Azure OpenAI instance."""
+        config = self.config
         try:
             return AzureChatOpenAI(
                 temperature=config.temperature,
@@ -62,18 +63,23 @@ class GraphBuilder:
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Azure OpenAI: {str(e)}")
     
-    def _init_retriever(self, config: GraphConfig = GraphConfig()) -> CustomRetriever:
+    def _init_retriever(self) -> CustomRetriever:
         try:    
+            config = self.config
+            index_name = os.getenv("AZURE_AI_SEARCH_INDEX_NAME")
+            if not index_name:
+                raise ValueError("AZURE_AI_SEARCH_INDEX_NAME is not set in the environment variables")
             return CustomRetriever(
-                indexes = [os.environ["AZURE_AI_SEARCH_INDEX_NAME"]],
+                indexes = [index_name],
                 topK = config.retriever_top_k,
                 reranker_threshold = config.reranker_threshold
             )
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Azure AI Search Retriever: {str(e)}")
         
-    def _init_web_search(self, config: GraphConfig = GraphConfig()): 
+    def _init_web_search(self): 
         try:
+            config = self.config
             return GoogleSearch(k=config.web_search_results)
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Google Search: {str(e)}")
@@ -166,16 +172,13 @@ class GraphBuilder:
 
     def _generate_response(self, state: ConversationState) -> dict:
         """Generate final response using context and query."""
-        # Combine all document content
         context = ""
         if state.context_docs:
-            context_parts = []
-            for doc in state.context_docs:
-                content = f"Content: \n\n{doc.page_content}"
-                if doc.metadata.get("source"):
-                    content += f"\n\nSource: {doc.metadata['source']}"
-                context_parts.append(content)
-            context = "\n\n==============================================\n\n".join(context_parts)
+            context = "\n\n==============================================\n\n".join([
+                f"\nContent: \n\n{doc.page_content}" + 
+                (f"\n\nSource: {doc.metadata['source']}" if doc.metadata.get("source") else "")
+                for doc in state.context_docs
+            ])
 
         system_prompt = MARKETING_ANSWER_PROMPT
         prompt = f"Context: {context}\nQuestion: {state.rewritten_query}\nProvide a detailed answer."
@@ -194,7 +197,7 @@ class GraphBuilder:
         }
 
 
-def create_conversation_graph(api_version: str = "2024-05-01-preview") -> StateGraph:
+def create_conversation_graph() -> StateGraph:
     """Create and return a configured conversation graph.
 
     Args:
@@ -203,5 +206,5 @@ def create_conversation_graph(api_version: str = "2024-05-01-preview") -> StateG
     Returns:
         Compiled StateGraph for conversation processing
     """
-    builder = GraphBuilder(api_version)
+    builder = GraphBuilder()
     return builder.build()
