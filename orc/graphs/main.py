@@ -113,7 +113,7 @@ class GraphBuilder:
 
         system_prompt = QUERY_REWRITING_PROMPT
 
-        prompt = f" Original Question: \n\n{question}. Please rewrite the question to be used for searching the database."
+        prompt = f" Original Question: \n\n{question}. Please rewrite the question to be used for searching the database." #TODO: take into account the historical context of the conversation
 
         rewritte_query = self.llm.invoke([SystemMessage(content = system_prompt), HumanMessage(content = prompt)])
 
