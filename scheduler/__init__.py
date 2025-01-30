@@ -108,9 +108,8 @@ def trigger_document_fetch(
         payload = {
             "equity_id": schedule["companyId"],
             "filing_type": schedule["reportType"],
-            "after_date": (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d"),
+            "after_date": datetime.now(timezone.utc).strftime('%Y-%m-%d'),
         }
-        # "after_date": datetime.now(timezone.utc).strftime('%Y-%m-%d')
 
         response = requests.post(
             PROCESS_AND_SUMMARIZE_ENDPOINT,
