@@ -22,6 +22,9 @@ LOGLEVEL = os.environ.get("LOGLEVEL", "DEBUG").upper()
 logging.basicConfig(level=LOGLEVEL)
 AZURE_STORAGE_ACCOUNT_URL = os.environ.get("AZURE_STORAGE_ACCOUNT_URL")
 
+if AZURE_STORAGE_ACCOUNT_URL == "":
+    raise ValueError(f"AZURE_STORAGE_ACCOUNT_URL is empty")
+
 
 async def run(conversation_id, ask, url, client_principal):
     try:
@@ -30,7 +33,6 @@ async def run(conversation_id, ask, url, client_principal):
             "[orchestrator] Starting conversation flow for user: %s",
             client_principal.get("id"),
         )
-
         # Create conversation_id if not provided
         if conversation_id is None or conversation_id == "":
             conversation_id = str(uuid.uuid4())
@@ -108,7 +110,7 @@ async def run(conversation_id, ask, url, client_principal):
 
                 # Clean up any sensitive URLs in the response
                 if AZURE_STORAGE_ACCOUNT_URL in text:
-                    regex = rf"(Source:\s?\/?)?(source:)?(https:\/\/)?({AZURE_STORAGE_ACCOUNT_URL})?(\/?documents\/?)?"
+                    regex = rf"(Source:\s?\/?)?(source:)?({re.escape(AZURE_STORAGE_ACCOUNT_URL)})\/documents\/?"
                     text = re.sub(regex, "", text)
                     response["combined_messages"][-1].content = text
                     logging.info(
