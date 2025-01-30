@@ -32,7 +32,7 @@ jobs:
           curl -fsSL https://aka.ms/install-azd.sh | bash
 
       - name: Verify azd installation
-        run: azd --version
+        run: azd version
 
       - name: Install Azure Function Core Tools and Dependencies
         run: |
