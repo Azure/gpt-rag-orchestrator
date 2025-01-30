@@ -33,7 +33,8 @@ check other way to use endpoint
 
 """
 
-COMPANY_NAME = ["Home Depot", "Lowes"]
+# get company name from cosmos db
+COMPANY_NAME = CosmosDBLoader(container_name="companyAnalysis").get_company_list()
 
 CURATION_REPORT_ENDPOINT = f'{os.environ["WEB_APP_URL"]}/api/reports/generate/curation'
 
