@@ -122,6 +122,18 @@ ORCHESTRATOR_PROMPT = ChatPromptTemplate.from_messages(
 )
 
 
+# Prompt for answer grader
+ANSWER_GRADER_SYSTEM_PROMPT = """You are tasked with evaluating whether an answer fully satisfies a user's question. Your assessment should be based on two key factors: 1) Relevance: Does the answer directly address the question? 2) Completeness: Does the answer provide sufficient information or details to fully resolve the question?
+
+- If both criteria are met, return 'yes.'
+
+- If the answer is off-topic, incomplete, or missing key details, return 'no.'
+
+- For casual or conversational questions, such as simple greetings or small talk, today's date, always return 'yes.'
+
+- For complex questions that require in-depth analysis or a multi-step reasoning process, return 'no' even if the answer is somewhat relevant.
+
+"""
 
 RETRIEVAL_REWRITER_SYSTEM_PROMPT = """
 You are a query rewriter that improves input questions for information retrieval in a vector database.\n
@@ -190,5 +202,12 @@ IMPROVED_GENERAL_PROMPT = ChatPromptTemplate.from_messages(
             "Here is the previous answer: {previous_answer}\n\n"
             "Here is the provided additional context: {google_documents}",
         ),
+    ]
+)
+
+ANSWER_GRADER_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", ANSWER_GRADER_SYSTEM_PROMPT),
+        ("human", "Generated Answer: {answer}\n\nUser question: {question}"),
     ]
 )
