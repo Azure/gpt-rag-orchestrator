@@ -6,8 +6,6 @@ from typing import List, Dict, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
 import azure.functions as func
 from .exceptions import CompanyNameRequiredError
-from azure.cosmos import CosmosClient
-from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel, Field
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict, List
@@ -36,12 +34,11 @@ check other way to use endpoint
 # get company name from cosmos db
 COMPANY_NAME = CosmosDBLoader(container_name="companyAnalysis").get_company_list()
 
-CURATION_REPORT_ENDPOINT = f'{os.environ["WEB_APP_URL"]}/api/reports/generate/curation'
-
-EMAIL_ENDPOINT = f'{os.environ["WEB_APP_URL"]}/api/reports/digest'
-
+WEB_APP_URL = os.getenv("WEB_APP_URL", None)
+CURATION_REPORT_ENDPOINT = f'{WEB_APP_URL}/api/reports/generate/curation'
+EMAIL_ENDPOINT = f'{WEB_APP_URL}/api/reports/digest'
 STRIPE_SUBSCRIPTION_ENDPOINT = (
-    f'{os.environ["WEB_APP_URL"]}/api/subscriptions/<subscription_id>/tiers'
+    f'{WEB_APP_URL}/api/subscriptions/<subscription_id>/tiers'
 )
 
 TIMEOUT_SECONDS = 300
@@ -317,6 +314,12 @@ def check_subscription_statuses(orgs: List[Dict]) -> List[Dict]:
 
 def main(mytimer: func.TimerRequest) -> None:
     """Main function to process monthly reports"""
+
+    # Check if the environment variable is set
+    if not WEB_APP_URL:
+        logger.error("WEB_APP_URL environment variable not set")
+        return
+
     start_time = datetime.now(timezone.utc)
 
     logger.info(f"Monthly report generation started at {start_time}")
