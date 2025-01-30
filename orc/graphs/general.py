@@ -10,7 +10,7 @@ from typing_extensions import TypedDict
 from langchain.schema import Document
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from langgraph.graph import END, StateGraph, START
-from shared.prompts import GENERAL_PROMPT, IMPROVED_GENERAL_PROMPT
+from shared.prompts import GENERAL_PROMPT, IMPROVED_GENERAL_PROMPT, ANSWER_GRADER_PROMPT
 from shared.util import get_secret
 from orc.graphs.tools import GoogleSearch
 
@@ -44,6 +44,8 @@ def create_general_graph(
     verbose: bool = False,
 ) -> CompiledGraph:
     general_chain_model = GENERAL_PROMPT | model
+    structured_llm_answer_grader = model.with_structured_output(GradeAnswer)
+    answer_grader = ANSWER_GRADER_PROMPT | structured_llm_answer_grader
     final_general_chain_model = IMPROVED_GENERAL_PROMPT | model
     
     # Initialize GoogleSearch tool
