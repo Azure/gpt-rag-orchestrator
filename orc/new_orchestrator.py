@@ -14,6 +14,7 @@ from shared.cosmos_db import (
     store_user_consumed_tokens,
 )
 
+
 # Configure logging
 logging.getLogger("azure").setLevel(logging.WARNING)
 logging.getLogger("azure.cosmos").setLevel(logging.WARNING)
@@ -74,7 +75,7 @@ class ConversationOrchestrator:
             memory = self._load_memory(conversation_data.get("memory_data", ""))
 
             # Process through agent
-            agent = create_conversation_graph()
+            agent = create_conversation_graph(memory = memory)
             config = {"configurable": {"thread_id": conversation_id}}
 
             with get_openai_callback() as cb:

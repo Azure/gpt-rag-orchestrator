@@ -6,9 +6,10 @@ from langchain.schema import Document
 from langgraph.graph import StateGraph, END, START
 from langchain_openai import AzureChatOpenAI
 from orc.graphs.tools import CustomRetriever, GoogleSearch
+from langgraph.checkpoint.memory import MemorySaver
 from shared.prompts import MARKETING_ORC_PROMPT, MARKETING_ANSWER_PROMPT, QUERY_REWRITING_PROMPT
 
-
+# initialize memory saver 
 @dataclass
 class ConversationState:
     """State container for conversation flow management.
@@ -21,11 +22,10 @@ class ConversationState:
     """
 
     question: str
-    messages: List[AIMessage | HumanMessage] = field(default_factory=list)
+    messages: List[AIMessage | HumanMessage] = field(default_factory=list) # track all messages in the conversation
     context_docs: List[Document] = field(default_factory=list)
     requires_web_search: bool = False
     rewritten_query: str = field(default_factory=str) # rewritten query for better search 
-    # conversation_history: List[AIMessage | HumanMessage] = field(default_factory=list) # TODO: Add conversation history, blank for now
     # conversation_summary: str = field(default_factory=str) # TODO: Add conversation summary, blank for now
 
 @dataclass
@@ -84,10 +84,15 @@ class GraphBuilder:
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Google Search: {str(e)}")
 
-    def build(self) -> StateGraph:
+    def build(self, memory) -> StateGraph:
         """Construct the conversation processing graph."""
-        graph = StateGraph(ConversationState)
+        
+        # set up memory saver         
+        # conversation_data = get_conversation_data(conversation_id)
+        # memory = ConversationOrchestrator()._load_memory(conversation_data.get("memory_data", ""))
 
+        # set up graph        
+        graph = StateGraph(ConversationState)
         # Add processing nodes
         graph.add_node("rewrite", self._rewrite_query)
         graph.add_node("route", self._route_query)
@@ -111,15 +116,29 @@ class GraphBuilder:
         graph.add_edge("search", "generate")
         graph.add_edge("generate", END)
 
-        return graph.compile()
-
+        return graph.compile(checkpointer=memory)
 
     def _rewrite_query(self, state: ConversationState) -> dict: 
         question = state.question 
 
+
         system_prompt = QUERY_REWRITING_PROMPT
 
-        prompt = f" Original Question: \n\n{question}. Please rewrite the question to be used for searching the database." #TODO: take into account the historical context of the conversation
+        prompt = f"""Original Question:
+        ```
+        {question}. 
+        ```
+        
+        Historical Conversation Context:
+        
+        ```
+        {state.messages}
+        ```
+
+        Please rewrite the question to be used for searching the database.
+        """
+
+
 
         rewritte_query = self.llm.invoke([SystemMessage(content = system_prompt), HumanMessage(content = prompt)])
 
@@ -189,7 +208,7 @@ class GraphBuilder:
         return {
             "messages": [
                 *current_messages,
-                HumanMessage(content=state.rewritten_query),
+                HumanMessage(content=state.rewritten_query), # saving the rewritten query instead of the original question
                 AIMessage(content=response.content),
             ],
             "context_docs": state.context_docs,
@@ -197,14 +216,12 @@ class GraphBuilder:
         }
 
 
-def create_conversation_graph() -> StateGraph:
+def create_conversation_graph(memory) -> StateGraph:
     """Create and return a configured conversation graph.
-
-    Args:
-        api_version: Azure API version to use
-
     Returns:
         Compiled StateGraph for conversation processing
     """
     builder = GraphBuilder()
-    return builder.build()
+    return builder.build(memory)
+
+

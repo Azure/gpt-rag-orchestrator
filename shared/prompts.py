@@ -81,6 +81,7 @@ Key Requirements:
 3. Avoid ambiguous phrasing or extraneous details that do not aid in retrieval.
 4. Where appropriate, include synonyms or alternative terms to capture broader results.
 5. Keep the rewritten query as brief as possible while ensuring completeness and accuracy.
+6. Take into account the historical context of the conversation when rewriting the query.
 
 **IMPORTANT**: THE RESULT MUST BE THE REWRITTEN QUERY ONLY, NO OTHER TEXT.
 """
