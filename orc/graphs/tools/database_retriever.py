@@ -37,7 +37,7 @@ class CustomRetriever(BaseRetriever):
     """
 
     topK: int
-    reranker_threshold: int
+    reranker_threshold: float
     indexes: List
 
     def get_search_results(
@@ -45,7 +45,7 @@ class CustomRetriever(BaseRetriever):
         query: str,
         indexes: list,
         k: int = 5,
-        reranker_threshold: float = 1.2,  # range between 0 and 4 (high to low)
+        reranker_threshold: float = 2.5,  # range between 0 and 4 (high to low)
     ) -> List[dict]:
         """Performs multi-index hybrid search and returns ordered dictionary with the combined results"""
 
@@ -130,7 +130,8 @@ class CustomRetriever(BaseRetriever):
     def _get_relevant_documents(self, query: str) -> List[Document]:
         """
         Modify the _get_relevant_documents methods in BaseRetriever so that it aligns with our previous settings
-        Retrieved Documents are sorted based on reranker score (semantic score)
+        Retrieved Documents are sorted based on reranker score (semantic score).
+        Filters out duplicate results with identical scores.
         """
         ordered_results = self.get_search_results(
             query,
@@ -140,13 +141,20 @@ class CustomRetriever(BaseRetriever):
         )
 
         top_docs = []
+        seen_scores = set()
 
         for key, value in ordered_results.items():
+            score = value["score"]
+            # Skip documents with duplicate scores, which are likely duplicates
+            if score in seen_scores:
+                continue
+            seen_scores.add(score)
+            
             location = value["location"] if value["location"] is not None else ""
             top_docs.append(
                 Document(
                     page_content=value["chunk"],
-                    metadata={"source": location, "score": value["score"]},
+                    metadata={"source": location, "score": score},
                 )
             )
 
