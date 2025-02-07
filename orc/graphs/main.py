@@ -82,8 +82,8 @@ class GraphConfig:
     retriever_top_k: int = 5
     reranker_threshold: float = 2.5
     web_search_results: int = 2
-    temperature: float = 0
-    max_tokens: int = 2000
+    temperature: float = 0.3
+    max_tokens: int = 5000
 class GraphBuilder:
     """Builds and manages the conversation flow graph."""
 
@@ -251,6 +251,16 @@ class GraphBuilder:
 
         system_prompt = MARKETING_ANSWER_PROMPT
         prompt = f"""
+        
+        Question: 
+        
+        <----------- USER QUESTION ------------>
+        REWRITTEN QUESTION: {state.rewritten_query}
+
+        ORIGINAL QUESTION: {state.question}
+        <----------- END OF USER QUESTION ------------>
+        
+        
         Context: (MUST PROVIDE CITATIONS FOR ALL SOURCES USED IN THE ANSWER)
         
         <----------- PROVIDED CONTEXT ------------>
@@ -268,13 +278,6 @@ class GraphBuilder:
         <----------- PROVIDED CHAT SUMMARY ------------>
         {state.chat_summary}
         <----------- END OF PROVIDED CHAT SUMMARY ------------>
-
-        Question: 
-        
-        <----------- USER QUESTION ------------>
-        {state.rewritten_query}
-        <----------- END OF USER QUESTION ------------>
-
 
         Provide a detailed answer.
         """
