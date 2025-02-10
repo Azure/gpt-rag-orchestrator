@@ -172,6 +172,16 @@ class ConversationOrchestrator:
 
         system_prompt = MARKETING_ANSWER_PROMPT
         prompt = f"""
+        
+        Question: 
+        
+        <----------- USER QUESTION ------------>
+        REWRITTEN QUESTION: {state.rewritten_query}
+
+        ORIGINAL QUESTION: {state.question}
+        <----------- END OF USER QUESTION ------------>
+        
+        
         Context: (MUST PROVIDE CITATIONS FOR ALL SOURCES USED IN THE ANSWER)
         
         <----------- PROVIDED CONTEXT ------------>
@@ -189,13 +199,6 @@ class ConversationOrchestrator:
         <----------- PROVIDED CHAT SUMMARY ------------>
         {state.chat_summary}
         <----------- END OF PROVIDED CHAT SUMMARY ------------>
-
-        Question: 
-        
-        <----------- USER QUESTION ------------>
-        {state.rewritten_query}
-        <----------- END OF USER QUESTION ------------>
-
 
         Provide a detailed answer.
         """
