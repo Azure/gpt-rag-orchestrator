@@ -129,6 +129,16 @@ class GraphBuilder:
             return GoogleSearch(k=config.web_search_results)
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Google Search: {str(e)}")
+        
+    def _return_state(self,state: ConversationState) -> dict:
+        return {
+            "messages": state.messages,
+            "context_docs": state.context_docs,
+            "chat_summary": state.chat_summary,
+            "token_count": state.token_count,
+            "requires_web_search": state.requires_web_search,
+            "rewritten_query": state.rewritten_query,
+        }
 
     def build(self, memory) -> StateGraph:
         """Construct the conversation processing graph."""
@@ -140,7 +150,8 @@ class GraphBuilder:
         graph.add_node("route", self._route_query)
         graph.add_node("retrieve", self._retrieve_context)
         graph.add_node("search", self._web_search)
-        graph.add_node("generate", self._generate_response)
+        graph.add_node("return", self._return_state)
+        #graph.add_node("generate", self._generate_response)
 
 
         # Define graph flow
@@ -149,19 +160,17 @@ class GraphBuilder:
         graph.add_conditional_edges(
             "route",
             self._route_decision,
-            {"retrieve": "retrieve", "generate": "generate"},
+            {"retrieve": "retrieve", "return": "return"},
         )
-
-
+        
         graph.add_conditional_edges(
             "retrieve",
             self._needs_web_search,
-            {"search": "search", "generate": "generate"},
+            {"search": "search", "return": "return"},
         )
-        graph.add_edge("search", "generate")
-        graph.add_edge("generate", END)
-
-
+        graph.add_edge("search",  "return")
+        graph.add_edge("return", END)
+        #graph.add_edge("generate", END)
 
         return graph.compile(checkpointer=memory)
 
@@ -217,7 +226,7 @@ class GraphBuilder:
 
     def _route_decision(self, state: ConversationState) -> str:
         """Route query based on knowledge requirement."""
-        return "retrieve" if state.requires_web_search else "generate"
+        return "retrieve" if state.requires_web_search else "return"
 
     def _retrieve_context(self, state: ConversationState) -> dict:
         """Get relevant documents from vector store."""
@@ -229,7 +238,7 @@ class GraphBuilder:
 
     def _needs_web_search(self, state: ConversationState) -> str:
         """Check if web search is needed based on retrieval results."""
-        return "search" if state.requires_web_search else "generate"
+        return "search" if state.requires_web_search else "return"
 
     def _web_search(self, state: ConversationState) -> dict:
         """Perform web search and combine with existing context."""

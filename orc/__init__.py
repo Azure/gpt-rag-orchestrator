@@ -25,7 +25,11 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
     }
 
     if question:
-        result = await new_orchestrator.run(conversation_id, question, url, client_principal)
+        result = await new_orchestrator.stream_run(conversation_id, question, url, client_principal)
+        result = {
+            'conversation_id': conversation_id,
+            'question': question,
+            'result': "Ok"}
 
         return func.HttpResponse(json.dumps(result), mimetype="application/json", status_code=200)
     else:
