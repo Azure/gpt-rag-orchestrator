@@ -1,4 +1,3 @@
-import time
 import azure.functions as func
 import logging
 from azurefunctions.extensions.http.fastapi import Request, StreamingResponse
@@ -14,15 +13,9 @@ async def stream_response(req: Request) -> StreamingResponse:
 
     req_body = await req.json()
     question = req_body.get('question')
-    if not question or question == '':
-        return func.HttpResponse(
-            "Please pass a question in the request body",
-            status_code=400
-        )
     conversation_id = req_body.get('conversation_id')
     client_principal_id = req_body.get('client_principal_id')
     client_principal_name = req_body.get('client_principal_name') 
-    url = req_body.get('url', '')
     if not client_principal_id or client_principal_id == '':
         client_principal_id = '00000000-0000-0000-0000-000000000000'
         client_principal_name = 'anonymous'    
@@ -31,8 +24,17 @@ async def stream_response(req: Request) -> StreamingResponse:
         'name': client_principal_name
     }
     
-    orchestrator = new_orchestrator.ConversationOrchestrator()
-    resources =  orchestrator.process_conversation(
-        conversation_id, question, client_principal
-    )
-    return StreamingResponse(orchestrator.generate_response(resources["conversation_id"],resources["state"], resources["conversation_data"], client_principal, resources["memory_data"], resources["start_time"]), media_type="text/event-stream")
+    if question:
+        orchestrator = new_orchestrator.ConversationOrchestrator()
+        try:
+            resources =  orchestrator.process_conversation(
+                conversation_id, question, client_principal
+            )
+        except Exception as e:
+            return StreamingResponse('{"error": "error in orchestrator"}', media_type="application/json")
+        try:
+            return StreamingResponse(orchestrator.generate_response(resources["conversation_id"],resources["state"], resources["conversation_data"], client_principal, resources["memory_data"], resources["start_time"]), media_type="text/event-stream")
+        except Exception as e:
+            return StreamingResponse('{"error": "error in response generation"}', media_type="application/json")
+    else:
+        return StreamingResponse('{"error": "no question found in json input"}', media_type="application/json")
