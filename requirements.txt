@@ -21,3 +21,4 @@ langchain-openai < 0.2.5
 weasyprint==63.1
 python-dotenv
 bleach==6.2.0
+azurefunctions-extensions-http-fastapi

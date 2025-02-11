@@ -115,7 +115,7 @@ class ConversationOrchestrator:
                 )
         return memory
 
-    async def process_conversation(
+    def process_conversation(
         self, conversation_id: str, question: str, user_info: dict
     ) -> dict:
         """
@@ -158,7 +158,7 @@ class ConversationOrchestrator:
             logging.error(f"[orchestrator] Error retrieving resources: {str(e)}")
             store_agent_error(user_info["id"], str(e), question)
             
-    async def generate_response(self,conversation_id: str, state: ConversationState, conversation_data: dict, user_info: dict, memory_data: str,start_time: float):
+    def generate_response(self,conversation_id: str, state: ConversationState, conversation_data: dict, user_info: dict, memory_data: str,start_time: float):
         """Generate final response using context and query."""
         logging.info(f"[orchestrator] Generating response for: {state.question}")
         context = ""
@@ -216,12 +216,17 @@ class ConversationOrchestrator:
             timeout=30,
             max_retries=3)
         
-        for token in response_llm.stream([SystemMessage(content=system_prompt), HumanMessage(content=prompt)]):
-            if token.content:
-                #TODO IMPLEMENT STRAMING WITH FAST API WITH YIELD STATEMENT
-                logging.info(token.content)
-                response["content"] += token.content
-                    
+        tokens = response_llm.stream([SystemMessage(content=system_prompt), HumanMessage(content=prompt)])
+           
+        while True:
+            try:
+                token = next(tokens)
+                if token:
+                    response["content"] += f"{token.content}"
+                    yield f"{token.content}"
+            except StopIteration:
+                break
+                        
         logging.info(f"[orchestrator] Response generated: {response['content']}")
         
         #####################################################################################
@@ -324,4 +329,4 @@ async def stream_run(conversation_id: str, ask: str, url: str, client_principal:
     resources =  await orchestrator.process_conversation(
         conversation_id, ask, client_principal
     )
-    return await orchestrator.generate_response(resources["conversation_id"],resources["state"], resources["conversation_data"], client_principal, resources["memory_data"], resources["start_time"])
+    return orchestrator.generate_response(resources["conversation_id"],resources["state"], resources["conversation_data"], client_principal, resources["memory_data"], resources["start_time"])
