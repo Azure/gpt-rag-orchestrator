@@ -9,6 +9,7 @@ import json
 from typing import Dict, List, Optional
 
 import aiohttp
+import tiktoken
 import requests
 from langchain_core.callbacks import (
     AsyncCallbackManagerForRetrieverRun,
@@ -18,6 +19,7 @@ from langchain_core.pydantic_v1 import Extra, root_validator
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.utils import get_from_dict_or_env, get_from_env
 from openai import AzureOpenAI
+from langgraph.graph.message import AnyMessage
 
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
@@ -50,7 +52,7 @@ HYBRID_SEARCH_APPROACH='hybrid'
 DEFAULT_URL_SUFFIX="search.windows.net"
 AZURE_SEARCH_APPROACH=HYBRID_SEARCH_APPROACH
 AZURE_SEARCH_USE_SEMANTIC="true"
-AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG = get_from_env("my-semantic-config", "AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG")
+AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG = get_from_env("my-semantic-config", "AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG", default="my-semantic-config")
 AZURE_STORAGE_ACCOUNT_URL=get_from_env("", "AZURE_STORAGE_ACCOUNT_URL")
 
 """Default URL Suffix for endpoint connection - commercial cloud"""
@@ -286,3 +288,15 @@ def use_retriever_chain_citation(model, query, retriever):
         "citations": [{"filepath": c.source_filepath, "quote": c.quote} for c in result["answer"].citations],
         "context": [doc.page_content for doc in result["context"]],
     }
+
+# convert list of messages to string
+def messages_to_string(messages: List[AnyMessage]) -> str:
+    return "\n".join([str(m) for m in messages])
+
+# count tokens
+def num_tokens_from_string(string: str, encoding_model: str = 'gpt-4o') -> int:
+
+    encoding = tiktoken.encoding_for_model(encoding_model)
+    num_tokens = len(encoding.encode(string))
+    return num_tokens
+
