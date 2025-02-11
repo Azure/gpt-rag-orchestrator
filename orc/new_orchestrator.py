@@ -217,15 +217,19 @@ class ConversationOrchestrator:
             max_retries=3)
         
         tokens = response_llm.stream([SystemMessage(content=system_prompt), HumanMessage(content=prompt)])
-           
-        while True:
-            try:
-                token = next(tokens)
-                if token:
-                    response["content"] += f"{token.content}"
-                    yield f"{token.content}"
-            except StopIteration:
-                break
+        try:
+            while True:
+                try:
+                    token = next(tokens)
+                    if token:
+                        response["content"] += f"{token.content}"
+                        yield f"{token.content}"
+                except StopIteration:
+                    break
+        except Exception as e:
+            logging.error(f"[orchestrator] Error generating response: {str(e)}")
+            response["content"] = "I'm sorry, I'm having trouble generating a response right now. Please try again later."
+            yield response["content"]
                         
         logging.info(f"[orchestrator] Response generated: {response['content']}")
         

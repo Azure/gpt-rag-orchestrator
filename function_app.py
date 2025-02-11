@@ -13,8 +13,13 @@ async def stream_response(req: Request) -> StreamingResponse:
     logging.info('Python HTTP trigger function processed a request.')
 
     req_body = await req.json()
-    conversation_id = req_body.get('conversation_id')
     question = req_body.get('question')
+    if not question or question == '':
+        return func.HttpResponse(
+            "Please pass a question in the request body",
+            status_code=400
+        )
+    conversation_id = req_body.get('conversation_id')
     client_principal_id = req_body.get('client_principal_id')
     client_principal_name = req_body.get('client_principal_name') 
     url = req_body.get('url', '')
