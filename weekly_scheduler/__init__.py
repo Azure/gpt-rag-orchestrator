@@ -128,7 +128,7 @@ def send_report_email(blob_link: str, report_name: str) -> bool:
         logger.error(f"Failed to send email for {report_name}: {str(e)}")
         return False
 
-def main(mytimer: func.TimerRequest) -> None: 
+def main(timer: func.TimerRequest) -> None:
 
     utc_timestamp = datetime.now(timezone.utc).isoformat()
     logger.info(f"Weekly report generation started at {utc_timestamp}")

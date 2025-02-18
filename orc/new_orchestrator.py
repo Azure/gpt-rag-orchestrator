@@ -4,6 +4,7 @@ import base64
 import uuid
 import time
 import re
+import json
 from langchain_community.callbacks import get_openai_callback
 from langgraph.checkpoint.memory import MemorySaver
 from orc.graphs.main import create_conversation_graph
@@ -161,6 +162,11 @@ class ConversationOrchestrator:
     def generate_response(self,conversation_id: str, state: ConversationState, conversation_data: dict, user_info: dict, memory_data: str,start_time: float):
         """Generate final response using context and query."""
         logging.info(f"[orchestrator] Generating response for: {state.question}")
+        data = {
+            "conversation_id": conversation_id,
+            "thoughts": [f"Tool name: agent_memory > Query sent: {state.rewritten_query}"]
+        }
+        yield json.dumps(data)
         context = ""
         max_tokens = 2000
         if state.context_docs:
