@@ -3,12 +3,14 @@ import logging
 import json
 import os
 import stripe
+import platform
 
 from azurefunctions.extensions.http.fastapi import Request, StreamingResponse, Response
 
 from scheduler import main as scheduler_main
 from weekly_scheduler import main as weekly_scheduler_main
 from monthly_scheduler import main as monthly_scheduler_main
+from html_to_pdf_converter import html_to_pdf
 
 from shared.util import handle_new_subscription_logs, handle_subscription_logs, update_organization_subscription, disable_organization_active_subscription, enable_organization_subscription, update_subscription_logs, updateExpirationDate
 
@@ -233,3 +235,71 @@ async def monthly_scheduler(timer: func.TimerRequest) -> None:
         monthly_scheduler_main(timer)
     except Exception as e:
         logging.error(f"Error in monthly scheduler: {e}")
+
+@app.function_name(name="html_to_pdf_converter")
+@app.route(route="html_to_pdf_converter", methods=[func.HttpMethod.POST])
+async def html2pdf_conversion(req: Request) -> Response:
+    logging.info('Python HTTP trigger function processed a request.')
+
+    try:
+        # Get request body
+        req_body = await req.json()
+        html_content = req_body.get('html')
+        
+        if not html_content:
+            return Response(
+                content="Please provide 'html' in the request body",
+                status_code=400
+            )
+
+        # Add size validation
+        if len(html_content) > 10 * 1024 * 1024:  # 10MB limit
+            return Response(
+                content="HTML content too large. Maximum size is 10MB",
+                status_code=400
+            )
+
+        # Basic HTML validation
+        if not html_content.strip().startswith('<'):
+            return Response(
+                content="Invalid HTML content",
+                status_code=400
+            )
+
+        # Log request (sanitized)
+        logging.info(f"Processing HTML content of length: {len(html_content)}")
+
+        # Convert HTML to PDF bytes
+        pdf_bytes = html_to_pdf(html_content)
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            status_code=200
+        )
+        
+    except ValueError as ve:
+        return Response(
+            content=f"Invalid request body: {str(ve)}",
+            status_code=400
+        )
+    except Exception as e:
+        error_message = str(e)
+
+        # windows error handling
+        if platform.system() == 'Windows':
+            error_message = f"""Error converting HTML to PDF: {str(e)}
+            
+            If you're experiencing WeasyPrint installation issues on Windows,
+            please check the solution here: https://github.com/assafelovic/gpt-researcher/issues/166
+            Common issues include GTK3 installation, missing dependencies, and path configuration."""
+
+        else: 
+            error_message = f"Error converting HTML to PDF: {str(e)}"
+
+        logging.error(error_message)
+        
+        return Response(
+            content=error_message,
+            status_code=500
+        )
