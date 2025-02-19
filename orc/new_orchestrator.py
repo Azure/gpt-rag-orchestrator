@@ -37,7 +37,6 @@ class ConversationState():
         context_docs: Retrieved documents from various sources
         requires_web_search: Flag indicating if web search is needed
     """
-
     question: str
     messages: List[AIMessage | HumanMessage] = field(default_factory=list) # track all messages in the conversation
     context_docs: List[Document] = field(default_factory=list)
@@ -312,27 +311,6 @@ class ConversationOrchestrator:
         update_conversation_data(conversation_id, conversation_data)
         #TODO: ENABLE CONSUME TOKENS FOR RESPONSE GENERATION
         #store_user_consumed_tokens(user_info["id"], cb)
-
-
-    
-async def run(conversation_id: str, ask: str, url: str, client_principal: dict) -> dict:
-    """
-    Main entry point for processing conversations.
-
-    Args:
-        conversation_id: Unique identifier for conversation
-        ask: User's question
-        url: Base URL for the service
-        client_principal: User information dictionary
-
-    Returns:
-        dict: Processed response from the orchestrator
-    """
-    orchestrator = ConversationOrchestrator()
-    return await orchestrator.process_conversation(
-        conversation_id, ask, client_principal
-    )
-
 
 async def stream_run(conversation_id: str, ask: str, url: str, client_principal: dict):
     orchestrator = ConversationOrchestrator()

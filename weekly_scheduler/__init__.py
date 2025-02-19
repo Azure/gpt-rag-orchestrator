@@ -1,14 +1,16 @@
 import logging
 import os
-import requests 
-from datetime import datetime, timezone 
+import requests
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
 import azure.functions as func
-from azure.cosmos import CosmosClient
-from azure.identity import DefaultAzureCredential
-# logger setting 
-logging.basicConfig(level=logging.INFO) 
+from shared.cosmo_data_loader import CosmosDBLoader
+from enum import Enum
+
+
+# logger setting
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 """ 
@@ -23,59 +25,44 @@ To do:
 """
 
 
-WEEKLY_REPORTS = ['Weekly_Economics'] 
+class ReportType(str, Enum):
+    """Enum for report types to ensure type safety"""
 
-CURATION_REPORT_ENDPOINT = f'{os.environ["WEB_APP_URL"]}/api/reports/generate/curation'
+    WEEKLY_ECONOMICS = "Weekly_Economics"
 
-EMAIL_ENDPOINT = f'{os.environ["WEB_APP_URL"]}/api/reports/digest'
+
+WEB_APP_URL = os.getenv("WEB_APP_URL", None)
+CURATION_REPORT_ENDPOINT = f'{WEB_APP_URL}/api/reports/generate/curation'
+EMAIL_ENDPOINT = f'{WEB_APP_URL}/api/reports/digest'
+STRIPE_SUBSCRIPTION_ENDPOINT = (
+    f'{WEB_APP_URL}/api/subscriptions/<subscription_id>/tiers'
+)
 
 TIMEOUT_SECONDS = 300
 
 MAX_RETRIES = 3
 
-class CosmoDBManager:
-    def __init__(self, container_name: str, 
-                 db_uri: str, 
-                 credential: str, 
-                 database_name: str):
-        self.container_name = container_name
-        self.db_uri = db_uri
-        self.credential = credential
-        self.database_name = database_name
 
-        if not all([self.container_name, self.db_uri, self.credential, self.database_name]):
-            raise ValueError("Missing required environment variables for Cosmos DB connection")
+def generate_report(report_topic: ReportType) -> Optional[Dict]:
+    """Generate a report and return the response if successful"""
 
-        self.client = CosmosClient(url=self.db_uri, credential=self.credential, consistency_level="Session")
-        self.database = self.client.get_database_client(self.database_name)
-        self.container = self.database.get_container_client(self.container_name)
-    
-    def get_email_list(self) -> List[str]:
-        query = "SELECT * FROM c where c.isActive = true"
-        items = self.container.query_items(query, enable_cross_partition_query=True)
-        email_list: List[str] = []
-        for item in items:
-            if "email" in item:
-                email_list.append(item['email'])
-        return email_list
-    
-def generate_report(report_topic: str) -> Optional[Dict]:
-    """Generate a report and return the response if successful """
+    payload = {"report_topic": report_topic}
 
-    payload = {
-        'report_topic': report_topic
-    }
-
-    @retry(stop = stop_after_attempt(MAX_RETRIES), wait = wait_exponential(multiplier=1, min=4, max=10))
+    @retry(
+        stop=stop_after_attempt(MAX_RETRIES),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+    )
     def _make_report_request():
         logger.debug(f"Sending request to generate report for {report_topic}")
         response = requests.post(
             CURATION_REPORT_ENDPOINT,
             headers={"Content-Type": "application/json"},
-            json=payload, 
-            timeout=TIMEOUT_SECONDS
+            json=payload,
+            timeout=TIMEOUT_SECONDS,
         )
-        logger.debug(f"Received response for report generation request for {report_topic}")
+        logger.debug(
+            f"Received response for report generation request for {report_topic}"
+        )
         return response.json()
 
     try:
@@ -86,44 +73,41 @@ def generate_report(report_topic: str) -> Optional[Dict]:
         logger.error(f"Failed to generate report for {report_topic}: {str(e)}")
         return None
 
-def send_report_email(blob_link: str, report_name: str) -> bool:
-    """Send email with report link and return success status """
 
-    container_name = 'subscription_emails'
-    db_uri = f"https://{os.environ['AZURE_DB_ID']}.documents.azure.com:443/" if os.environ.get('AZURE_DB_ID') else None
-    credential = DefaultAzureCredential()
-    database_name = os.environ.get('AZURE_DB_NAME') if os.environ.get('AZURE_DB_NAME') else None
+def send_report_email(
+    blob_link: str,
+    report_name: ReportType,
+    organization_name: str,
+    email_list: List[str],
+) -> bool:
+    """Send email with report link and return success status"""
 
-    cosmo_db_manager = CosmoDBManager(
-        container_name=container_name,
-        db_uri=db_uri,
-        credential=credential,
-        database_name=database_name
-    )
-    email_list = cosmo_db_manager.get_email_list()
+    email_subject = f"{organization_name} Weekly Report"
 
     email_payload = {
-        'blob_link': blob_link,
-        'email_subject': 'Sales Factory Weekly Report',
-        'recipients': email_list,
-        'save_email': 'yes'
+        "blob_link": blob_link,
+        "email_subject": email_subject,
+        "recipients": email_list,
+        "save_email": "yes",
     }
 
-    try: 
-        logger.debug(f"Sending email for report {report_name} with blob link {blob_link}")
+    try:
+        logger.debug(
+            f"Sending email for report {report_name} with blob link {blob_link}"
+        )
         response = requests.post(
             EMAIL_ENDPOINT,
             headers={"Content-Type": "application/json"},
             json=email_payload,
-            timeout=TIMEOUT_SECONDS
+            timeout=TIMEOUT_SECONDS,
         )
         response_json = response.json()
         logger.info(f"Email response for {report_name}: {response_json}")
 
-        if response_json.get('status') == 'error':
-            raise requests.exceptions.RequestException(response_json.get('message'))
+        if response_json.get("status") == "error":
+            raise requests.exceptions.RequestException(response_json.get("message"))
 
-        return response_json.get('status') == 'success'
+        return response_json.get("status") == "success"
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to send email for {report_name}: {str(e)}")
         return False
@@ -141,18 +125,126 @@ def main(timer: func.TimerRequest) -> None:
             logger.error(f"Failed to generate report for {report} at {utc_timestamp}")
             continue
 
-        # extract blob link and send email 
-        blob_link = response_json.get('report_url')
+def check_subscription_statuses(orgs: List[Dict]) -> List[Dict]:
+    """Check if the subscription is active and it has financial assistant tier"""
 
-        if not blob_link:
-            logger.error(f"Failed to extract blob link for {report} at {utc_timestamp}")
-            continue 
+    organizations = []
 
-        if send_report_email(blob_link, report):
-            logger.info(f"Report {report} sent successfully at {utc_timestamp}")
-        else:
-            logger.error(f"Failed to send email for {report} at {utc_timestamp}")
-            logger.error(f"Report with blob link {blob_link} was not sent")
+    if len(orgs) == 0:
+        logger.error("No active organizations found")
+        return organizations
 
-    logger.info(f"Weekly report generation completed at {datetime.now(timezone.utc).isoformat()}")
+    def check_subscription_status(subscription_id: str) -> dict:
+        try:
+            response = requests.get(
+                STRIPE_SUBSCRIPTION_ENDPOINT.replace(
+                    "<subscription_id>", subscription_id
+                ),
+                timeout=TIMEOUT_SECONDS,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-MS-CLIENT-PRINCIPAL-ID": "00000000-0000-0000-0000-000000000000",
+                },
+            )
+            response_json = response.json()
 
+            if "subscriptionData" not in response_json:
+                raise requests.exceptions.RequestException(
+                    "Subscription data not found in response"
+                )
+
+            if "status" not in response_json["subscriptionData"]:
+                raise requests.exceptions.RequestException(
+                    "Subscription status not found in response"
+                )
+
+            if response_json["subscriptionData"]["status"] != "active":
+                raise requests.exceptions.RequestException("Subscription is not active")
+
+            if "subscriptionTiers" not in response_json:
+                raise requests.exceptions.RequestException(
+                    "Subscription tiers not found in response"
+                )
+
+            return {
+                "subscription_id": subscription_id,
+                "tier": response_json["subscriptionTiers"],
+            }
+
+        except requests.exceptions.RequestException as e:
+            logger.error(
+                f"Failed to check subscription status for {subscription_id}: {str(e)}"
+            )
+            return {"subscription_id": subscription_id, "tier": []}
+
+    for org in orgs:
+        logger.info(f"Checking subscription status for {org['name']}")
+        sub_status = check_subscription_status(org["subscriptionId"])
+        if len(sub_status["tier"]) > 0 and (
+            "Financial Assistant" in sub_status["tier"]
+            or "Premium + Financial Assistant" in sub_status["tier"]
+        ):
+            organizations.append(org)
+
+    return organizations
+
+
+def main(mytimer: func.TimerRequest) -> None:
+    """ Main function to generate weekly reports and send emails """
+
+    # Check if the environment variable is set
+    if not WEB_APP_URL:
+        logger.error("WEB_APP_URL environment variable not set")
+        return
+    
+    start_time = datetime.now(timezone.utc)
+    logger.info(f"Weekly report generation started at {start_time}")
+
+    orgs_db_manager = CosmosDBLoader(container_name="organizations")
+    users_db_manager = CosmosDBLoader(container_name="users")
+
+    organizations = check_subscription_statuses(orgs_db_manager.get_organizations())
+    organization_ids = [org["id"] for org in organizations]
+    users_by_org = users_db_manager.get_users_by_organizations(organization_ids)
+
+    try:
+        for report in ReportType:
+            logger.info(f"Generating report {report}")
+            response_json = generate_report(report)
+
+            if not response_json or response_json.get("status") != "success":
+                logger.error(f"Failed to generate report for {report}")
+                continue
+
+            # extract blob link and send email
+            blob_link = response_json.get("report_url")
+
+            if not blob_link:
+                logger.error(f"Failed to extract blob link for {report}")
+                continue
+
+            for organization, email_list in users_by_org.items():
+                organization_name = next(
+                    org["name"] for org in organizations if org["id"] == organization
+                )
+                logger.info(
+                    f"Generating report {report} for organization: {organization_name}"
+                )
+                logger.info(
+                    f"Email list for organization {organization_name}: {email_list}"
+                )
+
+                if send_report_email(blob_link, report, organization_name, email_list):
+                    logger.info(f"Report {report} sent successfully")
+                else:
+                    logger.error(f"Failed to send email for {report}")
+                    logger.error(f"Report with blob link {blob_link} was not sent")
+    except Exception as e:
+        logger.exception("An error occurred during report processing")
+
+    finally:
+        end_time = datetime.now(timezone.utc)
+        duration = end_time - start_time 
+        logger.info(
+            f"Weekly report generation completed at {end_time}. Duration: {duration}"
+        )

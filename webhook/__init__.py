@@ -113,8 +113,9 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
 
                 return "Subscription Tier Change", previous_plan, current_plan, modified_by, modified_by_name, None
 
-            # Unknown action
-            return "Unknown action", None, None, modified_by,modified_by_name, None
+            # If modification_type does not match any of the above, do not take any action.
+            logging.info(f"Unknown modification type: {modification_type}. No action taken.")
+            return "No action", None, None, modified_by, modified_by_name, None
         
         action, previous_plan, current_plan, modified_by, modified_by_name, status_financial_assistant = determine_action(event)
         logging.info(f"Action determined: {action}")

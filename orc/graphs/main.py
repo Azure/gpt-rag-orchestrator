@@ -295,6 +295,7 @@ class GraphBuilder:
         # Generate response and update message history
         response = self.llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=prompt)])
 
+
         #####################################################################################
         # Summary and chat history work
         #####################################################################################   

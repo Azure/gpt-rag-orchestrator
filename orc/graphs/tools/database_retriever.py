@@ -43,7 +43,7 @@ class CustomRetriever(BaseRetriever):
     def get_search_results(
         self,
         query: str,
-        indexes: list,
+        indexes: str = ['ragindex'],
         k: int = 5,
         reranker_threshold: float = 2.5,  # range between 0 and 4 (high to low)
     ) -> List[dict]:
@@ -126,7 +126,7 @@ class CustomRetriever(BaseRetriever):
             if count >= topk:  # Stop after adding topK results
                 break
 
-        return ordered_content
+        return list(ordered_content.values())
 
     def _get_relevant_documents(self, query: str) -> List[Document]:
         """

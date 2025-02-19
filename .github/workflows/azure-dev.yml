@@ -27,8 +27,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install azd
-        uses: Azure/setup-azd@v1.0.0
+      - name: Install Azure Developer CLI manually
+        run: |
+          curl -fsSL https://aka.ms/install-azd.sh | bash
+
+      - name: Verify azd installation
+        run: azd version
 
       - name: Install Azure Function Core Tools and Dependencies
         run: |
