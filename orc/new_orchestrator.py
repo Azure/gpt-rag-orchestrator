@@ -106,7 +106,7 @@ class ConversationOrchestrator:
     def _load_memory(self, memory_data: str) -> MemorySaver:
         """Decode and load conversation memory from base64 string."""
         memory = MemorySaver()
-        if memory_data:
+        if memory_data != "":
             decoded_data = base64.b64decode(memory_data)
             json_data = memory.serde.loads(decoded_data)
             if json_data:
@@ -135,16 +135,21 @@ class ConversationOrchestrator:
 
         try:
             # Load conversation state
+            logging.info(f"[orchestrator] Loading conversation data")
             conversation_data = get_conversation_data(conversation_id)
+            logging.info(f"[orchestrator] Loading memory")
             memory = self._load_memory(conversation_data.get("memory_data", ""))
-
+            logging.info(f"[orchestrator] Memory loaded")
             # Process through agent
             agent = create_conversation_graph(memory = memory)
+            logging.info(f"[orchestrator] Agent created")
             config = {"configurable": {"thread_id": conversation_id}}
 
             with get_openai_callback() as cb:
                 # Get agent response
+                logging.info(f"[orchestrator] Invoking agent")
                 response = agent.invoke({"question": question}, config)
+                logging.info(f"[orchestrator] Agent response")
                 return {
                     "conversation_id": conversation_id,
                     "state": ConversationState(question, response["messages"], response["context_docs"], response["requires_web_search"], response["rewritten_query"], response["chat_summary"], response["token_count"]),

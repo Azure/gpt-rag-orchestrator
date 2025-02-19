@@ -181,7 +181,7 @@ class CustomRetriever(BaseRetriever):
         )
         top_docs = []
 
-        for key, value in ordered_results.items():
+        for key, value in ordered_results.items() if isinstance(ordered_results, dict) else enumerate(ordered_results):
             location = value["location"] if value["location"] is not None else ""
             top_docs.append(
                 Document(
@@ -209,7 +209,7 @@ def format_retrieved_content(docs):
     
     try:
         formatted_docs = []
-        for i, doc in enumerate(docs, 1):            
+        for i, doc in enumerate(docs, 1):
             formatted_doc = f"""
             Document {i}:
             ********************************************************************************

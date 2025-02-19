@@ -98,7 +98,6 @@ class CustomRetriever(BaseRetriever):
 
         content = dict()
         ordered_content = OrderedDict()
-
         for index, search_results in agg_search_results.items():
             # filter results first using list comprehension 
             filtered_results = [
@@ -143,8 +142,8 @@ class CustomRetriever(BaseRetriever):
 
         top_docs = []
         seen_scores = set()
-
-        for key, value in ordered_results.items():
+        
+        for key, value in ordered_results.items() if isinstance(ordered_results, dict) else enumerate(ordered_results):
             score = value["score"]
             # Skip documents with duplicate scores, which are likely duplicates
             if score in seen_scores:
