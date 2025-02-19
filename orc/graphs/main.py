@@ -1,255 +1,348 @@
-# Standard library imports
 import os
-from typing import Annotated, Literal, Optional, TypedDict
-
-# Third-party imports
-from langchain_core.language_models import LanguageModelLike
-from langchain_core.messages import HumanMessage, RemoveMessage
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.pydantic_v1 import BaseModel, Field
+from dataclasses import dataclass, field
+from typing import List
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, RemoveMessage
+from langchain.schema import Document
+from langgraph.graph import StateGraph, END, START
 from langchain_openai import AzureChatOpenAI
-from langgraph.checkpoint import BaseCheckpointSaver
-from langgraph.graph import END, START, StateGraph
-from langgraph.graph.graph import CompiledGraph
-from langgraph.graph.message import AnyMessage, add_messages
-from typing_extensions import TypedDict
+from orc.graphs.tools import CustomRetriever, GoogleSearch
+from langgraph.checkpoint.memory import MemorySaver
+from shared.tools import num_tokens_from_string, messages_to_string
+from shared.prompts import MARKETING_ORC_PROMPT, MARKETING_ANSWER_PROMPT, QUERY_REWRITING_PROMPT
+from langchain_core.runnables import RunnableParallel
 
-# Local imports
-from orc.graphs.general import create_general_graph
-from orc.graphs.rag import create_retrieval_graph
-from shared.prompts import ORCHESTRATOR_PROMPT
+# initialize memory saver 
+@dataclass
+class ConversationState():
+    """State container for conversation flow management.
 
+    Attributes:
+        question: Current user query
+        messages: Conversation history as a list of messages
+        context_docs: Retrieved documents from various sources
+        requires_web_search: Flag indicating if web search is needed
+    """
 
-class EntryGraphState(TypedDict):
-    """State for the entry graph containing conversation and routing information."""
     question: str
-    retrieval_messages: Annotated[list[AnyMessage], add_messages]
-    web_search: str
-    summary_decision: str
-    summary: str = ""
-    route: str
-    general_model_messages: Annotated[list[AnyMessage], add_messages]
-    combined_messages: Annotated[list[AnyMessage], add_messages]
+    messages: List[AIMessage | HumanMessage] = field(default_factory=list) # track all messages in the conversation
+    context_docs: List[Document] = field(default_factory=list)
+    requires_web_search: bool = field(default=False)
+    rewritten_query: str = field(default_factory=str) # rewritten query for better search 
+    chat_summary: str = field(default_factory=str)
+    token_count: int = field(default_factory=int)
 
 
-class Orchestrator(BaseModel):
-    """Determine whether the question is relevant to conversation history, marketing, retails, economics topics."""
+def _summarize_chat(token_count: int, 
+                        messages: List[AIMessage | HumanMessage], 
+                        chat_summary: str, 
+                        max_tokens: int, 
+                        llm: AzureChatOpenAI) -> dict:
+        """Summarize chat history if it exceeds token limit.
+        
 
-    route_assignment: Literal["RAG", "general_model"] = Field(
-        description="Categorize user question into one of the two categories"
-    )
-
-
-def create_main_agent(
-    checkpointer: Optional[BaseCheckpointSaver] = None,
-    verbose: bool = False,
-) -> CompiledGraph:
-
-    model_4o_temp_0 = AzureChatOpenAI(
-        temperature=0,
-        openai_api_version=os.environ.get(
-            "AZURE_OPENAI_API_VERSION", "2024-05-01-preview"
-        ),
-        azure_deployment="gpt-4o-orchestrator",
-        seed = 1,
-    )
-    model_4o_temp_03 = AzureChatOpenAI(
-        temperature=0.3,
-        openai_api_version=os.environ.get(
-            "AZURE_OPENAI_API_VERSION", "2024-05-01-preview"
-        ),
-        azure_deployment="gpt-4o-orchestrator",
-    )
-    model_mini_4o_temp_0 = AzureChatOpenAI(
-        temperature=0,
-        openai_api_version=os.environ.get(
-            "AZURE_OPENAI_API_VERSION", "2024-05-01-preview"
-        ),
-        azure_deployment="gpt-4o-mini-generalmodel",
-    )
-    model_mini_4o_temp_03 = AzureChatOpenAI(
-        temperature=0.3,
-        openai_api_version=os.environ.get(
-            "AZURE_OPENAI_API_VERSION", "2024-05-01-preview"
-        ),
-        azure_deployment="gpt-4o-mini-generalmodel",
-        seed = 1,
-    )
-
-    # ORCHESTRATOR
-    structured_llm_orchestrator = model_4o_temp_0.with_structured_output(Orchestrator)
-    orchestrator_agent = ORCHESTRATOR_PROMPT | structured_llm_orchestrator
-
-    # obtain orchestrator decision
-    def orchestrator_func(state):
-        question = state["question"]
-        conversation_summary = state.get("summary", "")
-        retrieval_messages = state.get("retrieval_messages", [])
-
-        route_decision = orchestrator_agent.invoke(
-            {
-                "question": question,
-                "conversation_summary": conversation_summary,
-                "retrieval_messages": retrieval_messages,
-            }
-        )
-
-        return {"route": route_decision.route_assignment}
-
-    # route condition
-    def route_decision(state):
-        if state["route"] == "RAG":
-            return "RAG"
-        else:
-            return "general_llm"
-
-    # summarization
-
-    def summary_check(state: EntryGraphState):
-        """Decide whether it's necessary to summarize the conversation
-            If the conversation has been more than 3 (3 humans 3 AI responses) then we should summarize it
         Args:
-            state: current state of messages
-
+            state: Current conversation state
+            
         Returns:
-            state: either summarize the conversation or end it
+            dict: Contains updated chat_summary and token_count
         """
 
-        # Count the number of human messages
-        if verbose:
-            print("---ASSESS CURRENT CONVERSATION LENGTH---")
+        if token_count > max_tokens:
+            try:
+                if chat_summary:
+                    messages = [
+                        SystemMessage(content="You are a helpful assistant that summarizes conversations."),
+                        HumanMessage(content=f"Previous summary:\n{chat_summary}\n\nNew messages to incorporate:\n{messages}\n\nPlease extend the summary. Return only the summary text.")
+                    ]
 
-        num_human_messages = sum(
-            1
-            for message in state["combined_messages"]
-            if isinstance(message, HumanMessage)
-        )
+                else:
+                    messages = [
+                        SystemMessage(content="You are a helpful assistant that summarizes conversations."),
+                        HumanMessage(content=f"Summarize this conversation history. Return only the summary text:\n{messages}")
+                    ]
 
-        if num_human_messages > 3:
-            if verbose:
-                print("MORE THAN 3 CONVERSATIONS FOUND")
-            return {"summary_decision": "yes"}
+                
+                new_summary = llm.invoke(messages)
+                            
+                return new_summary.content
+
+            except Exception as e:
+                # Log the error but continue with empty summary
+                print(f"Error summarizing chat: {str(e)}")
+                return chat_summary or ""
         else:
-            if verbose:
-                print("---LESS THAN 3 CONVERSATIONS FOUND, NO SUMMARIZATION NEEDED---")
-            return {"summary_decision": "no"}
+            return chat_summary or ""
 
-    class SummaryPoints(BaseModel):
-        summary_points_1: str = Field(description="First important point of the conversation")
-        summary_points_2: str = Field(description="Second important point of the conversation")
-        summary_points_3: str = Field(description="Third important point of the conversation")
-        summary_points_4: str = Field(description="Fourth important point of the conversation, leave blank if not applicable")
-        summary_points_5: str = Field(description="Fifth important point of the conversation, leave blank if not applicable")
 
-    def summary_decision(state: EntryGraphState) -> Literal["summarization", "__end__"]:
-        if state["summary_decision"] == "yes":
-            return "summarization"
-        else:
-            return "__end__"
+@dataclass
+class GraphConfig: 
+    "Config for the graph builder"
+    azure_api_version: str = "2024-05-01-preview"
+    azure_deployment: str = "gpt-4o-orchestrator"
+    retriever_top_k: int = 5
+    reranker_threshold: float = 2.5
+    web_search_results: int = 2
+    temperature: float = 0.3
+    max_tokens: int = 5000
+class GraphBuilder:
+    """Builds and manages the conversation flow graph."""
 
-    def summarization(state: EntryGraphState):
-        summary = state.get("summary", "")
-        messages = state["combined_messages"]
-        retrieval_messages = state["retrieval_messages"]
-        general_model_messages = state["general_model_messages"]
+    def __init__(self, config: GraphConfig = GraphConfig()):
+        """Initialize with with configuration"""
+        self.config = config
+        self.llm = self._init_llm()
+        self.retriever = self._init_retriever()
+        self.web_search = self._init_web_search()
 
-        if verbose:
-            print("DECISION: SUMMARIZE CONVERSATION")
-
-        if summary:
-            summary_prompt = f"Here is the conversation summary so far: {summary}\n\n Please extract the 5 most important points from the entire conversation including the previous summary. For older summaries, you can group them together into few points"
-        else:
-            summary_prompt = "Extract the 5 most important points from the conversation so far:"
-
-        new_messages = messages + [HumanMessage(content=summary_prompt)]
-        new_messages = [m for m in new_messages if not isinstance(m, RemoveMessage)]
+    def _init_llm(self) -> AzureChatOpenAI:
+        """Configure Azure OpenAI instance."""
+        config = self.config
+        try:
+            return AzureChatOpenAI(
+                temperature=config.temperature,
+                openai_api_version=config.azure_api_version,
+                azure_deployment=config.azure_deployment,
+                streaming=True,
+                timeout=30,
+                max_retries=3
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize Azure OpenAI: {str(e)}")
+    
+    def _init_retriever(self) -> CustomRetriever:
+        try:    
+            config = self.config
+            index_name = os.getenv("AZURE_AI_SEARCH_INDEX_NAME")
+            if not index_name:
+                raise ValueError("AZURE_AI_SEARCH_INDEX_NAME is not set in the environment variables")
+            return CustomRetriever(
+                indexes = [index_name],
+                topK = config.retriever_top_k,
+                reranker_threshold = config.reranker_threshold
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize Azure AI Search Retriever: {str(e)}")
         
-        # Use structured output to get summary points
-        structured_summary = model_mini_4o_temp_0.with_structured_output(SummaryPoints).invoke(new_messages)
+    def _init_web_search(self): 
+        try:
+            config = self.config
+            return GoogleSearch(k=config.web_search_results)
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize Google Search: {str(e)}")
         
-        # Combine the points into a coherent summary
-        summary_points = [
-            structured_summary.summary_points_1,
-            structured_summary.summary_points_2,
-            structured_summary.summary_points_3,
-            structured_summary.summary_points_4,
-            structured_summary.summary_points_5
-        ]
-        
-        # Filter out empty points and join them
-        final_summary = "\n".join([point for point in summary_points if point.strip()])
+    def _return_state(self,state: ConversationState) -> dict:
+        return {
+            "messages": state.messages,
+            "context_docs": state.context_docs,
+            "chat_summary": state.chat_summary,
+            "token_count": state.token_count,
+            "requires_web_search": state.requires_web_search,
+            "rewritten_query": state.rewritten_query,
+        }
 
-        # Create sets of IDs for messages to remove
-        combined_ids_to_remove = set(m.id for m in messages[:-4])
-        retrieval_ids_to_remove = (
-            set(m.id for m in retrieval_messages) & combined_ids_to_remove
+    def build(self, memory) -> StateGraph:
+        """Construct the conversation processing graph."""
+        # set up graph        
+        graph = StateGraph(ConversationState)
+        # Add processing nodes
+        
+        graph.add_node("rewrite", self._rewrite_query)
+        graph.add_node("route", self._route_query)
+        graph.add_node("retrieve", self._retrieve_context)
+        graph.add_node("search", self._web_search)
+        graph.add_node("return", self._return_state)
+        #graph.add_node("generate", self._generate_response)
+
+
+        # Define graph flow
+        graph.add_edge(START, "rewrite")
+        graph.add_edge("rewrite", "route")
+        graph.add_conditional_edges(
+            "route",
+            self._route_decision,
+            {"retrieve": "retrieve", "return": "return"},
         )
-        general_llm_ids_to_remove = (
-            set(m.id for m in general_model_messages) & combined_ids_to_remove
+        
+        graph.add_conditional_edges(
+            "retrieve",
+            self._needs_web_search,
+            {"search": "search", "return": "return"},
         )
+        graph.add_edge("search",  "return")
+        graph.add_edge("return", END)
+        #graph.add_edge("generate", END)
 
-        # Create RemoveMessage objects only for messages that exist in both lists
-        retained_combined_messages = [
-            RemoveMessage(id=m_id) for m_id in combined_ids_to_remove
-        ]
-        retained_retrieval_messages = [
-            RemoveMessage(id=m_id) for m_id in retrieval_ids_to_remove
-        ]
-        retained_general_model_messages = [
-            RemoveMessage(id=m_id) for m_id in general_llm_ids_to_remove
-        ]
+        return graph.compile(checkpointer=memory)
+
+    def _rewrite_query(self, state: ConversationState) -> dict: 
+        question = state.question 
+
+        system_prompt = QUERY_REWRITING_PROMPT
+
+        prompt = f"""Original Question:
+        ```
+        {question}. 
+        ```
+        
+        Historical Conversation Context:
+        
+        ```
+        {state.messages}
+        ```
+
+        Chat Summary:
+
+        ```
+        {state.chat_summary}
+        ```
+
+        Please rewrite the question to be used for searching the database.
+        """
+
+        rewritte_query = self.llm.invoke([SystemMessage(content = system_prompt), HumanMessage(content = prompt)])
 
         return {
-            "summary": final_summary,
-            "retrieval_messages": retained_retrieval_messages,
-            "general_model_messages": retained_general_model_messages,
-            "combined_messages": retained_combined_messages,
+            "rewritten_query": rewritte_query.content,
         }
-
-    # Create subgraphs
-    general_llm_subgraph = create_general_graph(
-        model=model_mini_4o_temp_03,
-        verbose=verbose
-    )
     
-    rag_subgraph = create_retrieval_graph(
-        model=model_4o_temp_03,
-        model_two=model_mini_4o_temp_0, 
-        verbose=verbose
-    )
 
-    # Initialize main graph
-    entry_builder = StateGraph(EntryGraphState)
+    def _route_query(self, state: ConversationState) -> dict:
+        """Determine if external knowledge is needed."""
 
-    # Add nodes for core functionality
-    entry_builder.add_node("orchestrator", orchestrator_func)
-    entry_builder.add_node("RAG", rag_subgraph)
-    entry_builder.add_node("general_llm", general_llm_subgraph)
+    
+        system_prompt = MARKETING_ORC_PROMPT
 
-    # Add nodes for conversation management
-    entry_builder.add_node("summary_check", summary_check)
-    entry_builder.add_node("summarization", summarization)
-
-    # Define graph flow
-    # Initial routing
-    entry_builder.add_edge(START, "orchestrator")
-    entry_builder.add_conditional_edges(
-        "orchestrator",
-        route_decision,
-        {
-            "RAG": "RAG",
-            "general_llm": "general_llm"
+        response = self.llm.invoke(
+            [
+                SystemMessage(content=system_prompt),
+                HumanMessage(
+                    content=f"How should I categorize this question: \n\n{state.rewritten_query}\n\nAnswer yes/no."
+                )
+            ]
+        )
+        return {
+            "requires_web_search": response.content.lower().startswith("y"),
         }
-    )
 
-    # Connect main paths to summary check
-    entry_builder.add_edge("RAG", "summary_check")
-    entry_builder.add_edge("general_llm", "summary_check")
+    def _route_decision(self, state: ConversationState) -> str:
+        """Route query based on knowledge requirement."""
+        return "retrieve" if state.requires_web_search else "return"
 
-    # Summary handling
-    entry_builder.add_conditional_edges("summary_check", summary_decision)
-    entry_builder.add_edge("summarization", END)
+    def _retrieve_context(self, state: ConversationState) -> dict:
+        """Get relevant documents from vector store."""
+        docs = self.retriever.invoke(state.rewritten_query)
+        return {
+            "context_docs": docs,
+            "requires_web_search": len(docs) < 3,
+        }
 
-    # Compile and return final graph
-    parent_graph = entry_builder.compile(checkpointer=checkpointer)
-    return parent_graph
+    def _needs_web_search(self, state: ConversationState) -> str:
+        """Check if web search is needed based on retrieval results."""
+        return "search" if state.requires_web_search else "return"
+
+    def _web_search(self, state: ConversationState) -> dict:
+        """Perform web search and combine with existing context."""
+        web_docs = self.web_search.search(state.rewritten_query)
+        return {
+            "context_docs": state.context_docs + web_docs,
+            "requires_web_search": state.requires_web_search,
+        }
+
+    def _generate_response(self, state: ConversationState) -> dict:
+        """Generate final response using context and query."""
+        context = ""
+        if state.context_docs:
+            context = "\n\n==============================================\n\n".join([
+                f"\nContent: \n\n{doc.page_content}" + 
+                (f"\n\nSource: {doc.metadata['source']}" if doc.metadata.get("source") else "")
+                for doc in state.context_docs
+            ])
+
+        system_prompt = MARKETING_ANSWER_PROMPT
+        prompt = f"""
+        
+        Question: 
+        
+        <----------- USER QUESTION ------------>
+        REWRITTEN QUESTION: {state.rewritten_query}
+
+        ORIGINAL QUESTION: {state.question}
+        <----------- END OF USER QUESTION ------------>
+        
+        
+        Context: (MUST PROVIDE CITATIONS FOR ALL SOURCES USED IN THE ANSWER)
+        
+        <----------- PROVIDED CONTEXT ------------>
+        {context}
+        <----------- END OF PROVIDED CONTEXT ------------>
+
+        Chat History:
+
+        <----------- PROVIDED CHAT HISTORY ------------>
+        {state.messages}
+        <----------- END OF PROVIDED CHAT HISTORY ------------>
+
+        Chat Summary:
+
+        <----------- PROVIDED CHAT SUMMARY ------------>
+        {state.chat_summary}
+        <----------- END OF PROVIDED CHAT SUMMARY ------------>
+
+        Provide a detailed answer.
+        """
+        
+
+        # Generate response and update message history
+        response = self.llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=prompt)])
+
+
+        #####################################################################################
+        # Summary and chat history work
+        #####################################################################################   
+        current_messages = state.messages if state.messages is not None else []
+
+        try:
+            # Try to count tokens, fallback to conservative estimate if it fails
+            pre_token_count = num_tokens_from_string(messages_to_string(current_messages)) if current_messages else 0
+            print(f"Pre token count: {pre_token_count}")
+
+            # Summarize chat history if it exceeds token limit
+            if pre_token_count > self.config.max_tokens:
+                chat_summary = _summarize_chat(pre_token_count, current_messages, state.chat_summary, self.config.max_tokens, self.llm)
+            else:
+                chat_summary = state.chat_summary
+
+            # Prepare new messages
+            new_messages = [HumanMessage(content=state.rewritten_query), AIMessage(content=response.content)]
+            total_messages = (current_messages + new_messages) if pre_token_count <= self.config.max_tokens else new_messages
+            post_token_count = num_tokens_from_string(messages_to_string(total_messages))
+            print(f"Post token count: {post_token_count}")
+        
+
+        except Exception as e:
+            print(f"Warning: Token counting failed: {str(e)}")
+            # Fallback to simple length-based estimate
+            pre_token_count = sum(len(str(m.content)) // 4 for m in current_messages)
+
+            total_messages = current_messages + [HumanMessage(content=state.rewritten_query), 
+                                              AIMessage(content=response.content)]
+
+            post_token_count = sum(len(str(m.content)) // 4 for m in total_messages)
+
+        return {
+            "messages": total_messages,
+            "context_docs": state.context_docs,
+            "token_count": post_token_count,
+            "chat_summary": chat_summary,
+        }
+
+
+def create_conversation_graph(memory) -> StateGraph:
+    """Create and return a configured conversation graph.
+    Returns:
+        Compiled StateGraph for conversation processing
+    """
+    builder = GraphBuilder()
+    return builder.build(memory)
+
+
