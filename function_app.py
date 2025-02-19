@@ -210,7 +210,7 @@ async def webhook(req: Request) -> Response:
     return Response(content=json.dumps({"success": True}), media_type="application/json")
 
 @app.function_name(name="scheduler")
-@app.schedule(schedule="0 */5 * * * *", arg_name="timer")
+@app.schedule(schedule="0 0 11,23 * * *", arg_name="timer")
 async def scheduler(timer: func.TimerRequest) -> None:
     # Your scheduler implementation
     try:
@@ -228,7 +228,7 @@ async def weekly_scheduler(timer: func.TimerRequest) -> None:
         logging.error(f"Error in weekly scheduler: {e}")
 
 @app.function_name(name="monthly_scheduler")
-@app.schedule(schedule="0 0 1 * *", arg_name="timer")
+@app.schedule(schedule="0 0 13 1 * *", arg_name="timer")
 async def monthly_scheduler(timer: func.TimerRequest) -> None:
     # Your monthly scheduler implementation
     try:
