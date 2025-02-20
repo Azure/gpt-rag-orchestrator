@@ -1,19 +1,29 @@
 import os
 from dataclasses import dataclass, field
 from typing import List
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, RemoveMessage
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+    RemoveMessage,
+)
 from langchain.schema import Document
 from langgraph.graph import StateGraph, END, START
 from langchain_openai import AzureChatOpenAI
 from orc.graphs.tools import CustomRetriever, GoogleSearch
 from langgraph.checkpoint.memory import MemorySaver
 from shared.tools import num_tokens_from_string, messages_to_string
-from shared.prompts import MARKETING_ORC_PROMPT, MARKETING_ANSWER_PROMPT, QUERY_REWRITING_PROMPT
+from shared.prompts import (
+    MARKETING_ORC_PROMPT,
+    MARKETING_ANSWER_PROMPT,
+    QUERY_REWRITING_PROMPT,
+)
 from langchain_core.runnables import RunnableParallel
 
-# initialize memory saver 
+
+# initialize memory saver
 @dataclass
-class ConversationState():
+class ConversationState:
     """State container for conversation flow management.
 
     Attributes:
@@ -24,59 +34,73 @@ class ConversationState():
     """
 
     question: str
-    messages: List[AIMessage | HumanMessage] = field(default_factory=list) # track all messages in the conversation
+    messages: List[AIMessage | HumanMessage] = field(
+        default_factory=list
+    )  # track all messages in the conversation
     context_docs: List[Document] = field(default_factory=list)
     requires_web_search: bool = field(default=False)
-    rewritten_query: str = field(default_factory=str) # rewritten query for better search 
+    rewritten_query: str = field(
+        default_factory=str
+    )  # rewritten query for better search
     chat_summary: str = field(default_factory=str)
     token_count: int = field(default_factory=int)
 
 
-def _summarize_chat(token_count: int, 
-                        messages: List[AIMessage | HumanMessage], 
-                        chat_summary: str, 
-                        max_tokens: int, 
-                        llm: AzureChatOpenAI) -> dict:
-        """Summarize chat history if it exceeds token limit.
-        
+def _summarize_chat(
+    token_count: int,
+    messages: List[AIMessage | HumanMessage],
+    chat_summary: str,
+    max_tokens: int,
+    llm: AzureChatOpenAI,
+) -> dict:
+    """Summarize chat history if it exceeds token limit.
 
-        Args:
-            state: Current conversation state
-            
-        Returns:
-            dict: Contains updated chat_summary and token_count
-        """
 
-        if token_count > max_tokens:
-            try:
-                if chat_summary:
-                    messages = [
-                        SystemMessage(content="You are a helpful assistant that summarizes conversations."),
-                        HumanMessage(content=f"Previous summary:\n{chat_summary}\n\nNew messages to incorporate:\n{messages}\n\nPlease extend the summary. Return only the summary text.")
-                    ]
+    Args:
+        state: Current conversation state
 
-                else:
-                    messages = [
-                        SystemMessage(content="You are a helpful assistant that summarizes conversations."),
-                        HumanMessage(content=f"Summarize this conversation history. Return only the summary text:\n{messages}")
-                    ]
+    Returns:
+        dict: Contains updated chat_summary and token_count
+    """
 
-                
-                new_summary = llm.invoke(messages)
-                            
-                return new_summary.content
+    if token_count > max_tokens:
+        try:
+            if chat_summary:
+                messages = [
+                    SystemMessage(
+                        content="You are a helpful assistant that summarizes conversations."
+                    ),
+                    HumanMessage(
+                        content=f"Previous summary:\n{chat_summary}\n\nNew messages to incorporate:\n{messages}\n\nPlease extend the summary. Return only the summary text."
+                    ),
+                ]
 
-            except Exception as e:
-                # Log the error but continue with empty summary
-                print(f"Error summarizing chat: {str(e)}")
-                return chat_summary or ""
-        else:
+            else:
+                messages = [
+                    SystemMessage(
+                        content="You are a helpful assistant that summarizes conversations."
+                    ),
+                    HumanMessage(
+                        content=f"Summarize this conversation history. Return only the summary text:\n{messages}"
+                    ),
+                ]
+
+            new_summary = llm.invoke(messages)
+
+            return new_summary.content
+
+        except Exception as e:
+            # Log the error but continue with empty summary
+            print(f"Error summarizing chat: {str(e)}")
             return chat_summary or ""
+    else:
+        return chat_summary or ""
 
 
 @dataclass
-class GraphConfig: 
+class GraphConfig:
     "Config for the graph builder"
+
     azure_api_version: str = "2024-05-01-preview"
     azure_deployment: str = "gpt-4o-orchestrator"
     retriever_top_k: int = 5
@@ -84,6 +108,8 @@ class GraphConfig:
     web_search_results: int = 2
     temperature: float = 0.3
     max_tokens: int = 5000
+
+
 class GraphBuilder:
     """Builds and manages the conversation flow graph."""
 
@@ -104,33 +130,37 @@ class GraphBuilder:
                 azure_deployment=config.azure_deployment,
                 streaming=True,
                 timeout=30,
-                max_retries=3
+                max_retries=3,
             )
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Azure OpenAI: {str(e)}")
-    
+
     def _init_retriever(self) -> CustomRetriever:
-        try:    
+        try:
             config = self.config
             index_name = os.getenv("AZURE_AI_SEARCH_INDEX_NAME")
             if not index_name:
-                raise ValueError("AZURE_AI_SEARCH_INDEX_NAME is not set in the environment variables")
+                raise ValueError(
+                    "AZURE_AI_SEARCH_INDEX_NAME is not set in the environment variables"
+                )
             return CustomRetriever(
-                indexes = [index_name],
-                topK = config.retriever_top_k,
-                reranker_threshold = config.reranker_threshold
+                indexes=[index_name],
+                topK=config.retriever_top_k,
+                reranker_threshold=config.reranker_threshold,
             )
         except Exception as e:
-            raise RuntimeError(f"Failed to initialize Azure AI Search Retriever: {str(e)}")
-        
-    def _init_web_search(self): 
+            raise RuntimeError(
+                f"Failed to initialize Azure AI Search Retriever: {str(e)}"
+            )
+
+    def _init_web_search(self):
         try:
             config = self.config
             return GoogleSearch(k=config.web_search_results)
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Google Search: {str(e)}")
-        
-    def _return_state(self,state: ConversationState) -> dict:
+
+    def _return_state(self, state: ConversationState) -> dict:
         return {
             "messages": state.messages,
             "context_docs": state.context_docs,
@@ -142,17 +172,16 @@ class GraphBuilder:
 
     def build(self, memory) -> StateGraph:
         """Construct the conversation processing graph."""
-        # set up graph        
+        # set up graph
         graph = StateGraph(ConversationState)
         # Add processing nodes
-        
+
         graph.add_node("rewrite", self._rewrite_query)
         graph.add_node("route", self._route_query)
         graph.add_node("retrieve", self._retrieve_context)
         graph.add_node("search", self._web_search)
         graph.add_node("return", self._return_state)
-        #graph.add_node("generate", self._generate_response)
-
+        # graph.add_node("generate", self._generate_response)
 
         # Define graph flow
         graph.add_edge(START, "rewrite")
@@ -162,20 +191,20 @@ class GraphBuilder:
             self._route_decision,
             {"retrieve": "retrieve", "return": "return"},
         )
-        
+
         graph.add_conditional_edges(
             "retrieve",
             self._needs_web_search,
             {"search": "search", "return": "return"},
         )
-        graph.add_edge("search",  "return")
+        graph.add_edge("search", "return")
         graph.add_edge("return", END)
-        #graph.add_edge("generate", END)
+        # graph.add_edge("generate", END)
 
         return graph.compile(checkpointer=memory)
 
-    def _rewrite_query(self, state: ConversationState) -> dict: 
-        question = state.question 
+    def _rewrite_query(self, state: ConversationState) -> dict:
+        question = state.question
 
         system_prompt = QUERY_REWRITING_PROMPT
 
@@ -199,17 +228,22 @@ class GraphBuilder:
         Please rewrite the question to be used for searching the database.
         """
 
-        rewritte_query = self.llm.invoke([SystemMessage(content = system_prompt), HumanMessage(content = prompt)])
+        rewritte_query = self.llm.invoke(
+            [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
+        )
+
+        if state.messages is None:
+            state.messages = []
 
         return {
             "rewritten_query": rewritte_query.content,
+            # save the original question to state
+            "messages": state.messages + [HumanMessage(content=question)],
         }
-    
 
     def _route_query(self, state: ConversationState) -> dict:
         """Determine if external knowledge is needed."""
 
-    
         system_prompt = MARKETING_ORC_PROMPT
 
         response = self.llm.invoke(
@@ -217,7 +251,7 @@ class GraphBuilder:
                 SystemMessage(content=system_prompt),
                 HumanMessage(
                     content=f"How should I categorize this question: \n\n{state.rewritten_query}\n\nAnswer yes/no."
-                )
+                ),
             ]
         )
         return {
@@ -252,11 +286,17 @@ class GraphBuilder:
         """Generate final response using context and query."""
         context = ""
         if state.context_docs:
-            context = "\n\n==============================================\n\n".join([
-                f"\nContent: \n\n{doc.page_content}" + 
-                (f"\n\nSource: {doc.metadata['source']}" if doc.metadata.get("source") else "")
-                for doc in state.context_docs
-            ])
+            context = "\n\n==============================================\n\n".join(
+                [
+                    f"\nContent: \n\n{doc.page_content}"
+                    + (
+                        f"\n\nSource: {doc.metadata['source']}"
+                        if doc.metadata.get("source")
+                        else ""
+                    )
+                    for doc in state.context_docs
+                ]
+            )
 
         system_prompt = MARKETING_ANSWER_PROMPT
         prompt = f"""
@@ -290,42 +330,62 @@ class GraphBuilder:
 
         Provide a detailed answer.
         """
-        
 
         # Generate response and update message history
-        response = self.llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=prompt)])
-
+        response = self.llm.invoke(
+            [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
+        )
 
         #####################################################################################
         # Summary and chat history work
-        #####################################################################################   
+        #####################################################################################
         current_messages = state.messages if state.messages is not None else []
 
         try:
             # Try to count tokens, fallback to conservative estimate if it fails
-            pre_token_count = num_tokens_from_string(messages_to_string(current_messages)) if current_messages else 0
+            pre_token_count = (
+                num_tokens_from_string(messages_to_string(current_messages))
+                if current_messages
+                else 0
+            )
             print(f"Pre token count: {pre_token_count}")
 
             # Summarize chat history if it exceeds token limit
             if pre_token_count > self.config.max_tokens:
-                chat_summary = _summarize_chat(pre_token_count, current_messages, state.chat_summary, self.config.max_tokens, self.llm)
+                chat_summary = _summarize_chat(
+                    pre_token_count,
+                    current_messages,
+                    state.chat_summary,
+                    self.config.max_tokens,
+                    self.llm,
+                )
             else:
                 chat_summary = state.chat_summary
 
             # Prepare new messages
-            new_messages = [HumanMessage(content=state.rewritten_query), AIMessage(content=response.content)]
-            total_messages = (current_messages + new_messages) if pre_token_count <= self.config.max_tokens else new_messages
-            post_token_count = num_tokens_from_string(messages_to_string(total_messages))
+            new_messages = [
+                HumanMessage(content=state.rewritten_query),
+                AIMessage(content=response.content),
+            ]
+            total_messages = (
+                (current_messages + new_messages)
+                if pre_token_count <= self.config.max_tokens
+                else new_messages
+            )
+            post_token_count = num_tokens_from_string(
+                messages_to_string(total_messages)
+            )
             print(f"Post token count: {post_token_count}")
-        
 
         except Exception as e:
             print(f"Warning: Token counting failed: {str(e)}")
             # Fallback to simple length-based estimate
             pre_token_count = sum(len(str(m.content)) // 4 for m in current_messages)
 
-            total_messages = current_messages + [HumanMessage(content=state.rewritten_query), 
-                                              AIMessage(content=response.content)]
+            total_messages = current_messages + [
+                HumanMessage(content=state.rewritten_query),
+                AIMessage(content=response.content),
+            ]
 
             post_token_count = sum(len(str(m.content)) // 4 for m in total_messages)
 
@@ -344,5 +404,3 @@ def create_conversation_graph(memory) -> StateGraph:
     """
     builder = GraphBuilder()
     return builder.build(memory)
-
-
