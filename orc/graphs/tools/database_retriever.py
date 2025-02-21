@@ -39,6 +39,7 @@ class CustomRetriever(BaseRetriever):
     topK: int
     reranker_threshold: float
     indexes: List
+    organization_id: str
 
     def get_search_results(
         self,
@@ -79,6 +80,7 @@ class CustomRetriever(BaseRetriever):
                 "answers": "extractive",
                 "count": "true",
                 "top": k,
+                "filter": f"organization_id eq '{self.organization_id}' or organization_id eq null",
             }
 
             AZURE_SEARCH_SERVICE = os.environ.get("AZURE_SEARCH_SERVICE")

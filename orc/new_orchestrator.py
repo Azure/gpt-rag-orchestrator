@@ -66,10 +66,11 @@ class ConversationState:
 class ConversationOrchestrator:
     """Manages conversation flow and state between user and AI agent."""
 
-    def __init__(self):
+    def __init__(self, organization_id: str = None):
         """Initialize orchestrator with storage URL."""
         self.storage_url = os.environ.get("AZURE_STORAGE_ACCOUNT_URL")
-
+        self.organization_id = organization_id
+        
     def _serialize_memory(self, memory: MemorySaver, config: dict) -> str:
         """Convert memory state to base64 encoded string for storage."""
         serialized = memory.serde.dumps(memory.get_tuple(config))
@@ -199,8 +200,7 @@ class ConversationOrchestrator:
             # Process through agent
 
             # insert conversation to the memory object
-
-            agent = create_conversation_graph(memory=memory)
+            agent = create_conversation_graph(memory = memory, organization_id = self.organization_id)
             logging.info(f"[orchestrator] Agent created")
             config = {"configurable": {"thread_id": conversation_id}}
 
@@ -428,9 +428,11 @@ class ConversationOrchestrator:
         # store_user_consumed_tokens(user_info["id"], cb)
 
 
-async def stream_run(conversation_id: str, ask: str, url: str, client_principal: dict):
-    orchestrator = ConversationOrchestrator()
-    resources = await orchestrator.process_conversation(
+async def stream_run(conversation_id: str, ask: str, url: str, client_principal: dict, organization_id: str = None):
+    orchestrator = ConversationOrchestrator(
+        organization_id=organization_id
+    )
+    resources =  await orchestrator.process_conversation(
         conversation_id, ask, client_principal
     )
     return orchestrator.generate_response(

@@ -12,7 +12,16 @@ from weekly_scheduler import main as weekly_scheduler_main
 from monthly_scheduler import main as monthly_scheduler_main
 from html_to_pdf_converter import html_to_pdf
 
-from shared.util import handle_new_subscription_logs, handle_subscription_logs, update_organization_subscription, disable_organization_active_subscription, enable_organization_subscription, update_subscription_logs, updateExpirationDate
+from shared.util import (
+    get_user,
+    handle_new_subscription_logs, 
+    handle_subscription_logs, 
+    update_organization_subscription, 
+    disable_organization_active_subscription, 
+    enable_organization_subscription, 
+    update_subscription_logs, 
+    updateExpirationDate
+)
 
 from orc import new_orchestrator
 
@@ -36,9 +45,17 @@ async def stream_response(req: Request) -> StreamingResponse:
         'id': client_principal_id,
         'name': client_principal_name
     }
+
+    organization_id = None
+    user = get_user(client_principal_id)
+    if "data" in user and "organizationId" in user["data"]:
+        organization_id = user["data"].get("organizationId")
+        logging.info(f"Retrieved organizationId: {organization_id} from user data")
     
     if question:
-        orchestrator = new_orchestrator.ConversationOrchestrator()
+        orchestrator = new_orchestrator.ConversationOrchestrator(
+            organization_id=organization_id
+        )
         try:
             resources =  orchestrator.process_conversation(
                 conversation_id, question, client_principal
