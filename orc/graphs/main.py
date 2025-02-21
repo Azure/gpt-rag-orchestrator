@@ -19,6 +19,7 @@ from shared.prompts import (
     QUERY_REWRITING_PROMPT,
 )
 from langchain_core.runnables import RunnableParallel
+from shared.cosmos_db import get_conversation_data
 
 
 # initialize memory saver
@@ -44,6 +45,34 @@ class ConversationState:
     )  # rewritten query for better search
     chat_summary: str = field(default_factory=str)
     token_count: int = field(default_factory=int)
+
+
+def clean_chat_history(chat_history: List[dict]) -> str:
+    """
+    Clean the chat history and format it as a string for LLM consumption.
+
+    Args:
+        chat_history (list): List of chat message dictionaries
+
+    Returns:
+        str: Formatted chat history string in the format:
+                Human: {message}
+                Assistant: {message}
+    """
+    formatted_history = []
+
+    for message in chat_history:
+        if not message.get("content"):
+            continue
+
+        role = message.get("role", "").lower()
+        content = message.get("content", "")
+
+        if role and content:
+            display_role = "Human" if role == "user" else "Assistant"
+            formatted_history.append(f"{display_role}: {content}")
+
+    return "\n\n".join(formatted_history)
 
 
 def _summarize_chat(
@@ -113,13 +142,19 @@ class GraphConfig:
 class GraphBuilder:
     """Builds and manages the conversation flow graph."""
 
-    def __init__(self, organization_id: str = None, config: GraphConfig = GraphConfig()):
+    def __init__(
+        self,
+        organization_id: str = None,
+        config: GraphConfig = GraphConfig(),
+        conversation_id: str = None,
+    ):
         """Initialize with with configuration"""
         self.organization_id = organization_id
         self.config = config
         self.llm = self._init_llm()
         self.retriever = self._init_retriever()
         self.web_search = self._init_web_search()
+        self.conversation_id = conversation_id
 
     def _init_llm(self) -> AzureChatOpenAI:
         """Configure Azure OpenAI instance."""
@@ -145,10 +180,10 @@ class GraphBuilder:
                     "AZURE_AI_SEARCH_INDEX_NAME is not set in the environment variables"
                 )
             return CustomRetriever(
-                indexes = [index_name],
-                topK = config.retriever_top_k,
-                reranker_threshold = config.reranker_threshold,
-                organization_id = self.organization_id
+                indexes=[index_name],
+                topK=config.retriever_top_k,
+                reranker_threshold=config.reranker_threshold,
+                organization_id=self.organization_id,
             )
         except Exception as e:
             raise RuntimeError(
@@ -210,22 +245,29 @@ class GraphBuilder:
 
         system_prompt = QUERY_REWRITING_PROMPT
 
-        prompt = f"""Original Question:
+        conversation_data = get_conversation_data(self.conversation_id)
+        history = conversation_data.get("history", [])
+
+        prompt = f"""Original Question: 
+        <-------------------------------->
         ```
         {question}. 
         ```
+        <-------------------------------->
         
         Historical Conversation Context:
-        
+        <-------------------------------->
         ```
-        {state.messages}
+        {clean_chat_history(history)}
         ```
+        <-------------------------------->
 
         Chat Summary:
-
+        <-------------------------------->  
         ```
         {state.chat_summary}
         ```
+        <-------------------------------->
 
         Please rewrite the question to be used for searching the database.
         """
@@ -284,126 +326,16 @@ class GraphBuilder:
             "requires_web_search": state.requires_web_search,
         }
 
-    def _generate_response(self, state: ConversationState) -> dict:
-        """Generate final response using context and query."""
-        context = ""
-        if state.context_docs:
-            context = "\n\n==============================================\n\n".join(
-                [
-                    f"\nContent: \n\n{doc.page_content}"
-                    + (
-                        f"\n\nSource: {doc.metadata['source']}"
-                        if doc.metadata.get("source")
-                        else ""
-                    )
-                    for doc in state.context_docs
-                ]
-            )
 
-        system_prompt = MARKETING_ANSWER_PROMPT
-        prompt = f"""
-        
-        Question: 
-        
-        <----------- USER QUESTION ------------>
-        REWRITTEN QUESTION: {state.rewritten_query}
-
-        ORIGINAL QUESTION: {state.question}
-        <----------- END OF USER QUESTION ------------>
-        
-        
-        Context: (MUST PROVIDE CITATIONS FOR ALL SOURCES USED IN THE ANSWER)
-        
-        <----------- PROVIDED CONTEXT ------------>
-        {context}
-        <----------- END OF PROVIDED CONTEXT ------------>
-
-        Chat History:
-
-        <----------- PROVIDED CHAT HISTORY ------------>
-        {state.messages}
-        <----------- END OF PROVIDED CHAT HISTORY ------------>
-
-        Chat Summary:
-
-        <----------- PROVIDED CHAT SUMMARY ------------>
-        {state.chat_summary}
-        <----------- END OF PROVIDED CHAT SUMMARY ------------>
-
-        Provide a detailed answer.
-        """
-
-        # Generate response and update message history
-        response = self.llm.invoke(
-            [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
-        )
-
-        #####################################################################################
-        # Summary and chat history work
-        #####################################################################################
-        current_messages = state.messages if state.messages is not None else []
-
-        try:
-            # Try to count tokens, fallback to conservative estimate if it fails
-            pre_token_count = (
-                num_tokens_from_string(messages_to_string(current_messages))
-                if current_messages
-                else 0
-            )
-            print(f"Pre token count: {pre_token_count}")
-
-            # Summarize chat history if it exceeds token limit
-            if pre_token_count > self.config.max_tokens:
-                chat_summary = _summarize_chat(
-                    pre_token_count,
-                    current_messages,
-                    state.chat_summary,
-                    self.config.max_tokens,
-                    self.llm,
-                )
-            else:
-                chat_summary = state.chat_summary
-
-            # Prepare new messages
-            new_messages = [
-                HumanMessage(content=state.rewritten_query),
-                AIMessage(content=response.content),
-            ]
-            total_messages = (
-                (current_messages + new_messages)
-                if pre_token_count <= self.config.max_tokens
-                else new_messages
-            )
-            post_token_count = num_tokens_from_string(
-                messages_to_string(total_messages)
-            )
-            print(f"Post token count: {post_token_count}")
-
-        except Exception as e:
-            print(f"Warning: Token counting failed: {str(e)}")
-            # Fallback to simple length-based estimate
-            pre_token_count = sum(len(str(m.content)) // 4 for m in current_messages)
-
-            total_messages = current_messages + [
-                HumanMessage(content=state.rewritten_query),
-                AIMessage(content=response.content),
-            ]
-
-            post_token_count = sum(len(str(m.content)) // 4 for m in total_messages)
-
-        return {
-            "messages": total_messages,
-            "context_docs": state.context_docs,
-            "token_count": post_token_count,
-            "chat_summary": chat_summary,
-        }
-
-
-def create_conversation_graph(memory, organization_id = None) -> StateGraph:
+def create_conversation_graph(
+    memory, organization_id=None, conversation_id=None
+) -> StateGraph:
     """Create and return a configured conversation graph.
     Returns:
         Compiled StateGraph for conversation processing
     """
     print(f"Creating conversation graph for organization: {organization_id}")
-    builder = GraphBuilder(organization_id=organization_id)
+    builder = GraphBuilder(
+        organization_id=organization_id, conversation_id=conversation_id
+    )
     return builder.build(memory)

@@ -200,7 +200,7 @@ class ConversationOrchestrator:
             # Process through agent
 
             # insert conversation to the memory object
-            agent = create_conversation_graph(memory = memory, organization_id = self.organization_id)
+            agent = create_conversation_graph(memory = memory, organization_id = self.organization_id, conversation_id = conversation_id)
             logging.info(f"[orchestrator] Agent created")
             config = {"configurable": {"thread_id": conversation_id}}
 
