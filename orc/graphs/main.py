@@ -57,7 +57,7 @@ def clean_chat_history(chat_history: List[dict]) -> str:
     Returns:
         str: Formatted chat history string in the format:
                 Human: {message}
-                Assistant: {message}
+                AI Message: {message}
     """
     formatted_history = []
 
@@ -69,7 +69,7 @@ def clean_chat_history(chat_history: List[dict]) -> str:
         content = message.get("content", "")
 
         if role and content:
-            display_role = "Human" if role == "user" else "Assistant"
+            display_role = "Human" if role == "user" else "AI Message"
             formatted_history.append(f"{display_role}: {content}")
 
     return "\n\n".join(formatted_history)

@@ -155,7 +155,7 @@ class ConversationOrchestrator:
         Returns:
             str: Formatted chat history string in the format:
                  Human: {message}
-                 Assistant: {message}
+                 AI: {message}
         """
         formatted_history = []
 
@@ -167,7 +167,7 @@ class ConversationOrchestrator:
             content = message.get("content", "")
 
             if role and content:
-                display_role = "Human" if role == "user" else "Assistant"
+                display_role = "Human" if role == "user" else "AI Message"
                 formatted_history.append(f"{display_role}: {content}")
 
         return "\n\n".join(formatted_history)
@@ -271,9 +271,9 @@ class ConversationOrchestrator:
         Question: 
         
         <----------- USER QUESTION ------------>
-        REWRITTEN QUESTION: {state.rewritten_query}
 
         ORIGINAL QUESTION: {state.question}
+
         <----------- END OF USER QUESTION ------------>
         
         
