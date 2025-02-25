@@ -23,13 +23,7 @@ import logging
 
 # Azure OpenAI Integration Settings
 AZURE_OPENAI_EMBEDDING_MODEL = os.environ.get("AZURE_OPENAI_EMBEDDING_MODEL")
-AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
-AZURE_OPENAI_CHATGPT_DEPLOYMENT = os.environ.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT")
-AZURE_OPENAI_RESOURCE = os.environ.get("AZURE_OPENAI_RESOURCE")
-AZURE_OPENAI_TEMPERATURE = os.getenv("AZURE_OPENAI_TEMPERATURE", "0.17")
-AZURE_OPENAI_APIVERSION = os.environ.get("AZURE_OPENAI_APIVERSION")
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
-AZURE_OPENAI_EMBEDDING_APIVERSION = os.environ.get("AZURE_OPENAI_EMBEDDING_APIVERSION")
 
 # Azure Search Integration Settings
 AZURE_SEARCH_SERVICE = os.environ.get("AZURE_SEARCH_SERVICE")
@@ -41,15 +35,8 @@ if AZURE_SEARCH_API_VERSION < '2023-10-01-Preview':  # query is using vectorQuer
 AZURE_SEARCH_TOP_K = os.environ.get("AZURE_SEARCH_TOP_K") or "3"
 AZURE_SEARCH_USE_SEMANTIC = os.environ.get("AZURE_SEARCH_USE_SEMANTIC") or "false"
 AZURE_SEARCH_APPROACH = os.environ.get("AZURE_SEARCH_APPROACH") or "hybrid"
-AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH = os.environ.get("AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH") or "false"
-AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH = True if AZURE_SEARCH_OYD_USE_SEMANTIC_SEARCH == "true" else False
 AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG = os.environ.get("AZURE_SEARCH_SEMANTIC_SEARCH_CONFIG") or "my-semantic-config"
-AZURE_SEARCH_ENABLE_IN_DOMAIN = os.environ.get("AZURE_SEARCH_ENABLE_IN_DOMAIN") or "true"
-AZURE_SEARCH_ENABLE_IN_DOMAIN = True if AZURE_SEARCH_ENABLE_IN_DOMAIN == "true" else False
-AZURE_SEARCH_CONTENT_COLUMNS = os.environ.get("AZURE_SEARCH_CONTENT_COLUMNS") or "content"
 AZURE_SEARCH_FILENAME_COLUMN = os.environ.get("AZURE_SEARCH_FILENAME_COLUMN") or "filepath"
-AZURE_SEARCH_TITLE_COLUMN = os.environ.get("AZURE_SEARCH_TITLE_COLUMN") or "title"
-AZURE_SEARCH_URL_COLUMN = os.environ.get("AZURE_SEARCH_URL_COLUMN") or "url"
 
 # Bing Search Integration Settings
 BING_SEARCH_TOP_K = os.environ.get("BING_SEARCH_TOP_K") or "3"
@@ -59,10 +46,6 @@ BING_SEARCH_MAX_TOKENS = os.environ.get("BING_SEARCH_MAX_TOKENS") or "1000"
 VECTOR_SEARCH_APPROACH="vector"
 TERM_SEARCH_APPROACH="term"
 HYBRID_SEARCH_APPROACH="hybrid"
-
-# General Settings
-TOP_K_DEFAULT = 3
-MAX_TOKENS_DEFAULT = 1000
 
 # Logging Settings
 LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
@@ -183,7 +166,6 @@ class Retrieval:
                             text=await response.text()
                             json=await response.json()
                             if status_code >= 400:
-                                error_on_search = True
                                 error_message = f'Status code: {status_code}.'
                                 if text != "": error_message += f" Error: {response.text}."
                                 logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
@@ -200,7 +182,6 @@ class Retrieval:
                             text=await response.text()
                             json=await response.json()    
                             if status_code >= 400:
-                                error_on_search = True
                                 error_message = f'Status code: {status_code}.'
                                 if text != "": error_message += f" Error: {response.text}."
                                 logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
