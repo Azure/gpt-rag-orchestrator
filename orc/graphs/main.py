@@ -218,7 +218,6 @@ class GraphBuilder:
         graph.add_node("retrieve", self._retrieve_context)
         graph.add_node("search", self._web_search)
         graph.add_node("return", self._return_state)
-        # graph.add_node("generate", self._generate_response)
 
         # Define graph flow
         graph.add_edge(START, "rewrite")
@@ -236,7 +235,6 @@ class GraphBuilder:
         )
         graph.add_edge("search", "return")
         graph.add_edge("return", END)
-        # graph.add_edge("generate", END)
 
         return graph.compile(checkpointer=memory)
 

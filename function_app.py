@@ -24,7 +24,7 @@ from shared.util import (
 )
 
 from orc import new_orchestrator
-from financial_orc import categorize_query, initialize_llm, orchestrator as financial_orchestrator
+from financial_orc import orchestrator as financial_orchestrator
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 @app.route(route="orc", methods=[func.HttpMethod.POST])
@@ -68,21 +68,21 @@ async def stream_response(req: Request) -> StreamingResponse:
     else:
         return StreamingResponse('{"error": "no question found in json input"}', media_type="application/json")
 
-@app.route(route="financial-orc", methods=[func.HttpMethod.GET])
-async def financial_orc(req: Request) -> Response:
+@app.route(route="financial-orc", methods=[func.HttpMethod.POST])
+async def financial_orc(req: Request) -> StreamingResponse:
+    """Endpoint to stream LLM responses to the client
+    input body should look like this:
+    {
+        "question": "string",
+        "conversation_id": "string",
+        "documentName": "string",
+        "client_principal_id": "string",
+        "client_principal_name": "string",
+    }
+    """
     logging.info("[financial-orc] Python HTTP trigger function processed a request.")
 
-    # request body should look like this:
-    # {
-    #     "question": "string",
-    #     "conversation_id": "string"
-    #     "documentName": "string",
-    #     "client_principal_id": "string",
-    #     "client_principal_name": "string",
-    # }
-
     req_body = await req.json()
-    logging.info(f"[financial-orc] Request body: {req_body}")
     conversation_id = req_body.get("conversation_id")
     question = req_body.get("question")
 
@@ -100,36 +100,17 @@ async def financial_orc(req: Request) -> Response:
 
     if not documentName or documentName == "":
         logging.error("[financial-orchestrator] no documentName found in json input")
-        return Response(
-            content=json.dumps({"error": "no documentName found in json input"}),
-            media_type="application/json",
-            status_code=400,
-        )
+        return StreamingResponse('{"error": "no documentName found in json input"}', media_type="application/json")
 
-    # validate documentName exists in a hardcoded list
-    # if not documentName in ['financial', 'feedback']:
-    #     return func.HttpResponse('{"error": "invalid documentName"}', mimetype="application/json", status_code=200)
-
-    llm = initialize_llm()
     if question:
+        financial_orc = financial_orchestrator.FinancialOrchestrator()
         if documentName  == "defaultDocument" or documentName == "":
             logging.info("[financial-orchestrator] categorizing query")
-            documentName = categorize_query(question, llm)
-        result = await financial_orchestrator.run(
-            conversation_id, question, documentName, client_principal
-        )
-        return Response(
-            content=json.dumps(result),
-            media_type="application/json",
-            status_code=200
-        )
+            documentName = financial_orc.categorize_query(question)
+        return StreamingResponse(financial_orc.generate_response(conversation_id, question, client_principal, documentName), media_type="text/event-stream")
     else:
         logging.error("[financial-orchestrator] no question found in json input")
-        return Response(
-            content=json.dumps({"error": "no question found in json input"}),
-            media_type="application/json",
-            status_code=400,
-        )
+        return StreamingResponse('{"error": "no question found in json input"}', media_type="application/json")
 
 @app.function_name(name="webhook")
 @app.route(route="webhook", methods=[func.HttpMethod.POST, func.HttpMethod.GET])
