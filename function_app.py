@@ -105,7 +105,7 @@ async def financial_orc(req: Request) -> StreamingResponse:
     if question:
         financial_orc = financial_orchestrator.FinancialOrchestrator()
         if documentName  == "defaultDocument" or documentName == "":
-            logging.info("[financial-orchestrator] categorizing query")
+            logging.info(f"[financial-orchestrator] categorizing query for {question}")
             documentName = financial_orc.categorize_query(question)
         return StreamingResponse(financial_orc.generate_response(conversation_id, question, client_principal, documentName), media_type="text/event-stream")
     else:
