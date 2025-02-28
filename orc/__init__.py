@@ -3,6 +3,7 @@ import azure.functions as func
 import json
 import os
 from . import new_orchestrator
+from shared.util import get_user
 
 LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
 logging.basicConfig(level=LOGLEVEL)
@@ -24,8 +25,18 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         'name': client_principal_name
     }
 
+    organization_id = None
+    user = get_user(client_principal_id)
+    if "data" in user and "organizationId" in user["data"]:
+        organization_id = user["data"].get("organizationId")
+        logging.info(f"Retrieved organizationId: {organization_id} from user data")
+
     if question:
-        result = await new_orchestrator.run(conversation_id, question, url, client_principal)
+        result = await new_orchestrator.stream_run(conversation_id, question, url, client_principal, organization_id)
+        result = {
+            'conversation_id': conversation_id,
+            'question': question,
+            'result': "Ok"}
 
         return func.HttpResponse(json.dumps(result), mimetype="application/json", status_code=200)
     else:

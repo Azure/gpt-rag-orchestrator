@@ -37,15 +37,16 @@ class CustomRetriever(BaseRetriever):
     """
 
     topK: int
-    reranker_threshold: int
+    reranker_threshold: float
     indexes: List
+    organization_id: str
 
     def get_search_results(
         self,
         query: str,
-        indexes: list,
+        indexes: str = ['ragindex'],
         k: int = 5,
-        reranker_threshold: float = 1.2,  # range between 0 and 4 (high to low)
+        reranker_threshold: float = 2.5,  # range between 0 and 4 (high to low)
     ) -> List[dict]:
         """Performs multi-index hybrid search and returns ordered dictionary with the combined results"""
 
@@ -79,6 +80,7 @@ class CustomRetriever(BaseRetriever):
                 "answers": "extractive",
                 "count": "true",
                 "top": k,
+                "filter": f"organization_id eq '{self.organization_id}' or organization_id eq null",
             }
 
             AZURE_SEARCH_SERVICE = os.environ.get("AZURE_SEARCH_SERVICE")
@@ -98,24 +100,24 @@ class CustomRetriever(BaseRetriever):
 
         content = dict()
         ordered_content = OrderedDict()
-
         for index, search_results in agg_search_results.items():
-            for result in search_results["value"]:
-                if (
-                    result["@search.rerankerScore"] > reranker_threshold
-                ):  # Range between 0 and 4
-                    content[result["id"]] = {
-                        "title": result["title"],
-                        "name": (result["name"] if "name" in result else ""),
-                        "chunk": (result["content"] if "content" in result else ""),
-                        "location": (
-                            result["filepath"] if "filepath" in result else ""
-                        ),
-                        "caption": result["@search.captions"][0]["text"],
-                        "score": result["@search.rerankerScore"],
-                        "index": index,
-                    }
+            # filter results first using list comprehension 
+            filtered_results = [
+                result 
+                for result in search_results.get("value",[])
+                if result['@search.rerankerScore'] > reranker_threshold
+            ]
 
+            for result in filtered_results: 
+                content[result['id']] = {
+                    "title": result.get('title', ''),
+                    "name": result.get('name', ''),
+                    "chunk": result.get('content', ''),
+                    "location": result.get("filepath", ''),
+                    "caption": result["@search.captions"][0]["text"] if "@search.captions" in result else "",
+                    "score": result["@search.rerankerScore"],
+                    "index": index,
+                }
         topk = k
 
         count = 0  # To keep track of the number of results added
@@ -125,12 +127,13 @@ class CustomRetriever(BaseRetriever):
             if count >= topk:  # Stop after adding topK results
                 break
 
-        return ordered_content
+        return list(ordered_content.values())
 
     def _get_relevant_documents(self, query: str) -> List[Document]:
         """
         Modify the _get_relevant_documents methods in BaseRetriever so that it aligns with our previous settings
-        Retrieved Documents are sorted based on reranker score (semantic score)
+        Retrieved Documents are sorted based on reranker score (semantic score).
+        Filters out duplicate results with identical scores.
         """
         ordered_results = self.get_search_results(
             query,
@@ -140,13 +143,20 @@ class CustomRetriever(BaseRetriever):
         )
 
         top_docs = []
-
-        for key, value in ordered_results.items():
+        seen_scores = set()
+        
+        for key, value in ordered_results.items() if isinstance(ordered_results, dict) else enumerate(ordered_results):
+            score = value["score"]
+            # Skip documents with duplicate scores, which are likely duplicates
+            if score in seen_scores:
+                continue
+            seen_scores.add(score)
+            
             location = value["location"] if value["location"] is not None else ""
             top_docs.append(
                 Document(
                     page_content=value["chunk"],
-                    metadata={"source": location, "score": value["score"]},
+                    metadata={"source": location, "score": score},
                 )
             )
 

@@ -31,12 +31,11 @@ class ReportType(str, Enum):
     WEEKLY_ECONOMICS = "Weekly_Economics"
 
 
-CURATION_REPORT_ENDPOINT = f'{os.environ["WEB_APP_URL"]}/api/reports/generate/curation'
-
-EMAIL_ENDPOINT = f'{os.environ["WEB_APP_URL"]}/api/reports/digest'
-
+WEB_APP_URL = os.getenv("WEB_APP_URL", None)
+CURATION_REPORT_ENDPOINT = f'{WEB_APP_URL}/api/reports/generate/curation'
+EMAIL_ENDPOINT = f'{WEB_APP_URL}/api/reports/digest'
 STRIPE_SUBSCRIPTION_ENDPOINT = (
-    f'{os.environ["WEB_APP_URL"]}/api/subscriptions/<subscription_id>/tiers'
+    f'{WEB_APP_URL}/api/subscriptions/<subscription_id>/tiers'
 )
 
 TIMEOUT_SECONDS = 300
@@ -113,6 +112,18 @@ def send_report_email(
         logger.error(f"Failed to send email for {report_name}: {str(e)}")
         return False
 
+def main(timer: func.TimerRequest) -> None:
+
+    utc_timestamp = datetime.now(timezone.utc).isoformat()
+    logger.info(f"Weekly report generation started at {utc_timestamp}")
+
+    for report in WEEKLY_REPORTS:
+        logger.info(f"Generating report for {report} at {utc_timestamp}")
+        response_json = generate_report(report)
+
+        if not response_json or response_json.get('status') != 'success':
+            logger.error(f"Failed to generate report for {report} at {utc_timestamp}")
+            continue
 
 def check_subscription_statuses(orgs: List[Dict]) -> List[Dict]:
     """Check if the subscription is active and it has financial assistant tier"""
@@ -179,6 +190,13 @@ def check_subscription_statuses(orgs: List[Dict]) -> List[Dict]:
 
 
 def main(mytimer: func.TimerRequest) -> None:
+    """ Main function to generate weekly reports and send emails """
+
+    # Check if the environment variable is set
+    if not WEB_APP_URL:
+        logger.error("WEB_APP_URL environment variable not set")
+        return
+    
     start_time = datetime.now(timezone.utc)
     logger.info(f"Weekly report generation started at {start_time}")
 

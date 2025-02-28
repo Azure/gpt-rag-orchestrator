@@ -1423,7 +1423,7 @@ def handle_new_subscription_logs(userId, organizationId, userName, organizationN
             "modified_by_name":userName,
             "modified_by":userId,
             "organizationName": organizationName,
-            "organizationId": organizationId,
+            "organization_id": organizationId,
             "action": 'Subscription created',
             "changeTime": int(datetime.now(timezone.utc).timestamp()),
         }

@@ -187,6 +187,20 @@ class CosmosDBLoader:
         except Exception as e:
             logger.error(f"Error getting users from Cosmos DB: {str(e)}")
             return []
+        
+    def get_company_list(self) -> List[str]:
+        """Get list of active companies"""
+        try:
+            query = "SELECT * FROM c where c.is_active = true"
+            items = self.container.query_items(query, enable_cross_partition_query=True)
+            company_list: List[str] = []
+            for item in items:
+                if "name" in item:
+                    company_list.append(item['name'])
+            return company_list
+        except Exception as e:
+            logger.error(f"Error retrieving company list: {str(e)}")
+            raise
 
     
 if __name__ == "__main__":

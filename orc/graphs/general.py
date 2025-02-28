@@ -10,7 +10,7 @@ from typing_extensions import TypedDict
 from langchain.schema import Document
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from langgraph.graph import END, StateGraph, START
-from shared.prompts import GENERAL_PROMPT, ANSWER_GRADER_PROMPT, IMPROVED_GENERAL_PROMPT
+from shared.prompts import GENERAL_PROMPT, IMPROVED_GENERAL_PROMPT, ANSWER_GRADER_PROMPT
 from shared.util import get_secret
 from orc.graphs.tools import GoogleSearch
 
