@@ -9,7 +9,6 @@ from typing_extensions import TypedDict
 from langgraph.graph.message import add_messages, AnyMessage
 
 
-
 class RetrievalState(TypedDict):
     """
     Represent the state of our graph
@@ -44,15 +43,19 @@ class CustomRetriever(BaseRetriever):
     def get_search_results(
         self,
         query: str,
-        indexes: str = ['ragindex'],
+        indexes: str = ["ragindex"],
         k: int = 5,
         reranker_threshold: float = 2.5,  # range between 0 and 4 (high to low)
     ) -> List[dict]:
         """Performs multi-index hybrid search and returns ordered dictionary with the combined results"""
 
+        print(f"[Database Retriever]: Starting search with query: {query}")
+        print(f"[Database Retriever]: Using indexes: {indexes}")
+        print(f"[Database Retriever]: Organization ID filter: {self.organization_id}")
+
         headers = {
             "Content-Type": "application/json",
-            "api-key": os.environ["AZURE_AI_SEARCH_API_KEY"],
+            "api-key": os.getenv("AZURE_AI_SEARCH_API_KEY"),
         }
         params = {"api-version": os.environ["AZURE_SEARCH_API_VERSION"]}
 
@@ -83,41 +86,72 @@ class CustomRetriever(BaseRetriever):
                 "filter": f"organization_id eq '{self.organization_id}' or organization_id eq null",
             }
 
-            AZURE_SEARCH_SERVICE = os.environ.get("AZURE_SEARCH_SERVICE")
+            print(
+                f"[Database Retriever]: Search payload for index {index}:",
+                json.dumps(search_payload, indent=2),
+            )
+
+            AZURE_SEARCH_SERVICE = os.getenv("AZURE_SEARCH_SERVICE")
             AZURE_SEARCH_ENDPOINT_SF = (
                 f"https://{AZURE_SEARCH_SERVICE}.search.windows.net"
             )
 
-            resp = requests.post(
-                AZURE_SEARCH_ENDPOINT_SF + "/indexes/" + index + "/docs/search",
-                data=json.dumps(search_payload),
-                headers=headers,
-                params=params,
-            )
+            search_url = AZURE_SEARCH_ENDPOINT_SF + "/indexes/" + index + "/docs/search"
+            print(f"[Database Retriever]: Making request to: {search_url}")
 
-            search_results = resp.json()
-            agg_search_results[index] = search_results
+            try:
+                resp = requests.post(
+                    search_url,
+                    data=json.dumps(search_payload),
+                    headers=headers,
+                    params=params,
+                )
+
+                print(f"Debug: Response status code: {resp.status_code}")
+                if resp.status_code != 200:
+                    print(f"Debug: Error response: {resp.text}")
+                    continue
+
+                search_results = resp.json()
+                print(
+                    f"Debug: Got {len(search_results.get('value', []))} results from index {index}"
+                )
+                agg_search_results[index] = search_results
+
+            except Exception as e:
+                print(f"Debug: Exception during search request: {str(e)}")
+                continue
 
         content = dict()
         ordered_content = OrderedDict()
-        for index, search_results in agg_search_results.items():
-            # filter results first using list comprehension 
-            filtered_results = [
-                result 
-                for result in search_results.get("value",[])
-                if result['@search.rerankerScore'] > reranker_threshold
-            ]
 
-            for result in filtered_results: 
-                content[result['id']] = {
-                    "title": result.get('title', ''),
-                    "name": result.get('name', ''),
-                    "chunk": result.get('content', ''),
-                    "location": result.get("filepath", ''),
-                    "caption": result["@search.captions"][0]["text"] if "@search.captions" in result else "",
+        print("Debug: Processing search results...")
+        for index, search_results in agg_search_results.items():
+            filtered_results = [
+                result
+                for result in search_results.get("value", [])
+                if result["@search.rerankerScore"] > reranker_threshold
+            ]
+            print(
+                f"Debug: After filtering by reranker score > {reranker_threshold}: {len(filtered_results)} results"
+            )
+
+            for result in filtered_results:
+                content[result["id"]] = {
+                    "title": result.get("title", ""),
+                    "name": result.get("name", ""),
+                    "chunk": result.get("content", ""),
+                    "location": result.get("filepath", ""),
+                    "caption": (
+                        result["@search.captions"][0]["text"]
+                        if "@search.captions" in result
+                        else ""
+                    ),
                     "score": result["@search.rerankerScore"],
                     "index": index,
                 }
+
+        print(f"Debug: Total unique documents found: {len(content)}")
         topk = k
 
         count = 0  # To keep track of the number of results added
@@ -144,14 +178,18 @@ class CustomRetriever(BaseRetriever):
 
         top_docs = []
         seen_scores = set()
-        
-        for key, value in ordered_results.items() if isinstance(ordered_results, dict) else enumerate(ordered_results):
+
+        for key, value in (
+            ordered_results.items()
+            if isinstance(ordered_results, dict)
+            else enumerate(ordered_results)
+        ):
             score = value["score"]
             # Skip documents with duplicate scores, which are likely duplicates
             if score in seen_scores:
                 continue
             seen_scores.add(score)
-            
+
             location = value["location"] if value["location"] is not None else ""
             top_docs.append(
                 Document(
