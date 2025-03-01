@@ -34,6 +34,7 @@ def send_report_email(
     report_name: str,
     organization_name: str,
     email_list: List[str],
+    summary: str = None,
 ) -> bool:
     """Send email with report link and return success status"""
 
@@ -45,6 +46,7 @@ def send_report_email(
         "recipients": email_list,
         "save_email": "yes",
         "is_summarization": True,
+        "summary": summary,
     }
 
     try:
@@ -273,9 +275,10 @@ def main(timer: func.TimerRequest) -> None:
 
                         blob_link = summarization["remote_blob_url"]
                         report_name = f"{summarization['equity_name']} {summarization['financial_type']}"
+                        summary = summarization["summary"]
 
                         if send_report_email(
-                            blob_link, report_name, organization_name, email_list
+                            blob_link, report_name, organization_name, email_list, summary
                         ):
                             logger.info(f"Report {report_name} sent successfully")
                         else:
