@@ -233,7 +233,9 @@ def check_subscription_statuses(orgs: List[Dict]) -> List[Dict]:
 
 
 def main(timer: func.TimerRequest) -> None:
-    """ Main entry point for the function """
+    """
+    This function is used to trigger the document fetch for the schedules that are active and have a frequency of twice_a_day
+    """
     
     # Check if the environment variable is set
     if not WEB_APP_URL:

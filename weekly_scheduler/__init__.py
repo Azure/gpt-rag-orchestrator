@@ -46,7 +46,7 @@ MAX_RETRIES = 3
 def generate_report(report_topic: ReportType) -> Optional[Dict]:
     """Generate a report and return the response if successful"""
 
-    payload = {"report_topic": report_topic}
+    payload = {"report_topic": report_topic,}
 
     @retry(
         stop=stop_after_attempt(MAX_RETRIES),
@@ -112,18 +112,6 @@ def send_report_email(
         logger.error(f"Failed to send email for {report_name}: {str(e)}")
         return False
 
-def main(timer: func.TimerRequest) -> None:
-
-    utc_timestamp = datetime.now(timezone.utc).isoformat()
-    logger.info(f"Weekly report generation started at {utc_timestamp}")
-
-    for report in WEEKLY_REPORTS:
-        logger.info(f"Generating report for {report} at {utc_timestamp}")
-        response_json = generate_report(report)
-
-        if not response_json or response_json.get('status') != 'success':
-            logger.error(f"Failed to generate report for {report} at {utc_timestamp}")
-            continue
 
 def check_subscription_statuses(orgs: List[Dict]) -> List[Dict]:
     """Check if the subscription is active and it has financial assistant tier"""
