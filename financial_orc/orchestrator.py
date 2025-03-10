@@ -178,7 +178,7 @@ class FinancialOrchestrator:
         try:
             # Load conversation state
             logging.info(f"[financial-orc] Loading conversation data")
-            conversation_data = get_conversation_data(conversation_id)
+            conversation_data = get_conversation_data(conversation_id, type="financial")
             logging.info(f"[financial-orc] Loading memory")
             memory = self._load_memory(
                 conversation_data.get("memory_data", ""))
