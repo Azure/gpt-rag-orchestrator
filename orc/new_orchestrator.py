@@ -242,7 +242,7 @@ class ConversationOrchestrator:
         """Helper function to get model response based on model deployment service.
             Azure OpenAI models are handled by the AzureChatOpenAI class while others are handled by the AzureInferenceSDK class.
             Thus, there's a need to handle streaming differently for the two cases.
-        
+
         Args:
             model_name: Deployment name of the model to use (may not be the actual model's name)
             system_prompt: System prompt for the model
@@ -254,7 +254,7 @@ class ConversationOrchestrator:
                 - accumulated_response is the complete response up to this point
         """
         complete_response = ""
-        
+
         if model_name == "gpt-4o-orchestrator":
             response_llm = AzureChatOpenAI(
                 temperature=0,
@@ -265,7 +265,10 @@ class ConversationOrchestrator:
                 max_retries=3,
             )
             tokens = response_llm.stream(
-                [LangchainSystemMessage(content=system_prompt), HumanMessage(content=prompt)]
+                [
+                    LangchainSystemMessage(content=system_prompt),
+                    HumanMessage(content=prompt),
+                ]
             )
             try:
                 while True:
@@ -284,18 +287,20 @@ class ConversationOrchestrator:
         else:
             endpoint = os.getenv("AZURE_INFERENCE_SDK_ENDPOINT")
             key = os.getenv("AZURE_INFERENCE_SDK_KEY")
-            client = ChatCompletionsClient(endpoint=endpoint, credential=AzureKeyCredential(key))
-            
+            client = ChatCompletionsClient(
+                endpoint=endpoint, credential=AzureKeyCredential(key)
+            )
+
             response = client.complete(
                 messages=[
                     SystemMessage(content=system_prompt),
-                    UserMessage(content=prompt)
+                    UserMessage(content=prompt),
                 ],
                 model=model_name,
                 max_tokens=10000,
-                stream=True
+                stream=True,
             )
-            
+
             try:
                 for update in response:
                     if update.choices and update.choices[0].delta:
@@ -306,7 +311,7 @@ class ConversationOrchestrator:
                 logging.error(f"[orchestrator] Error generating response: {str(e)}")
                 error_message = "I'm sorry, I'm having trouble generating a response right now. Please try again later."
                 yield error_message, error_message
-        
+
         return complete_response
 
     def generate_response(
@@ -391,21 +396,25 @@ class ConversationOrchestrator:
         complete_response = ""
 
         try:
-            for chunk, accumulated_response in self._get_model_response(model_name, system_prompt, prompt):
-                complete_response = accumulated_response  # Get the complete response at each step
+            for chunk, accumulated_response in self._get_model_response(
+                model_name, system_prompt, prompt
+            ):
+                complete_response = (
+                    accumulated_response  # Get the complete response at each step
+                )
                 yield chunk  # Still stream the chunks to the client
         except Exception as e:
             logging.error(f"[orchestrator] Error generating response: {str(e)}")
             error_message = "I'm sorry, I'm having trouble generating a response right now. Please try again later."
             complete_response = error_message
             yield error_message
-        
+
         logging.info(f"[orchestrator] Response generated: {complete_response}")
 
         #####################################################################################
         # Summary and chat history work
         #####################################################################################
-        
+
         # Use complete_response instead of response["content"]
         current_messages = state.messages if state.messages is not None else []
 
@@ -478,7 +487,6 @@ class ConversationOrchestrator:
 
             post_token_count = sum(len(str(m.content)) // 4 for m in total_messages)
 
-        
         answer = self._sanitize_response(complete_response)
 
         # Update conversation history
