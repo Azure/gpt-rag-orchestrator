@@ -2,6 +2,7 @@ import os
 import logging
 import base64
 import uuid
+import asyncio
 import time
 import re
 import json
@@ -282,8 +283,7 @@ class ConversationOrchestrator:
                         break
             except Exception as e:
                 logging.error(f"[orchestrator] Error generating response: {str(e)}")
-                error_message = "I'm sorry, I'm having trouble generating a response right now. Please try again later."
-                yield error_message, error_message
+                raise e
         else:
             endpoint = os.getenv("AZURE_INFERENCE_SDK_ENDPOINT")
             key = os.getenv("AZURE_INFERENCE_SDK_KEY")
@@ -309,8 +309,7 @@ class ConversationOrchestrator:
                         yield chunk, complete_response
             except Exception as e:
                 logging.error(f"[orchestrator] Error generating response: {str(e)}")
-                error_message = "I'm sorry, I'm having trouble generating a response right now. Please try again later."
-                yield error_message, error_message
+                raise e
 
         return complete_response
 
@@ -405,6 +404,7 @@ class ConversationOrchestrator:
                 yield chunk  # Still stream the chunks to the client
         except Exception as e:
             logging.error(f"[orchestrator] Error generating response: {str(e)}")
+            asyncio.sleep(3)
             error_message = "I'm sorry, I'm having trouble generating a response right now. Please try again later."
             complete_response = error_message
             yield error_message
