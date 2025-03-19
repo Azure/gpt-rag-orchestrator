@@ -96,18 +96,20 @@ async def financial_orc(req: Request) -> StreamingResponse:
 
     client_principal = {"id": client_principal_id, "name": client_principal_name}
 
+    # we did not rename this to document_id in order to avoid breaking changes, it is sent like this from the client
     documentName = req_body.get("documentName", "")
-
-    if not documentName or documentName == "":
-        logging.error("[financial-orchestrator] no documentName found in json input")
-        return StreamingResponse('{"error": "no documentName found in json input"}', media_type="application/json")
 
     if question:
         financial_orc = financial_orchestrator.FinancialOrchestrator()
-        if documentName  == "defaultDocument" or documentName == "":
-            logging.info(f"[financial-orchestrator] categorizing query for {question}")
-            documentName = financial_orc.categorize_query(question)
-        return StreamingResponse(financial_orc.generate_response(conversation_id, question, client_principal, documentName), media_type="text/event-stream")
+        document_type = financial_orc.categorize_query(question)
+
+        return StreamingResponse(financial_orc.generate_response(
+            conversation_id=conversation_id, 
+            question=question, 
+            user_info=client_principal, 
+            document_id=documentName,
+            document_type=document_type
+        ), media_type="text/event-stream")
     else:
         logging.error("[financial-orchestrator] no question found in json input")
         return StreamingResponse('{"error": "no question found in json input"}', media_type="application/json")
