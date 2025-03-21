@@ -2,7 +2,6 @@ import os
 import logging
 import base64
 import uuid
-import asyncio
 import time
 import re
 import json
@@ -192,16 +191,19 @@ class ConversationOrchestrator:
             dict: Response containing conversation_id, answer and thoughts
         """
         start_time = time.time()
-        logging.info(f"[orchestrator] Gathering resources for: {question}")
+        logging.info(
+            f"[orchestrator-process_conversation] Gathering resources for: {question}")
         conversation_id = conversation_id or str(uuid.uuid4())
 
         try:
             # Load conversation state
-            logging.info(f"[orchestrator] Loading conversation data")
+            logging.info(
+                f"[orchestrator-process_conversation] Loading conversation data")
             conversation_data = get_conversation_data(conversation_id)
-            logging.info(f"[orchestrator] Loading memory")
-            memory = self._load_memory(conversation_data.get("memory_data", ""))
-            logging.info(f"[orchestrator] Memory loaded")
+            logging.info(f"[orchestrator-process_conversation] Loading memory")
+            memory = self._load_memory(
+                conversation_data.get("memory_data", ""))
+            logging.info(f"[orchestrator-process_conversation] Memory loaded")
             # Process through agent
 
             # insert conversation to the memory object
@@ -210,14 +212,16 @@ class ConversationOrchestrator:
                 organization_id=self.organization_id,
                 conversation_id=conversation_id,
             )
-            logging.info(f"[orchestrator] Agent created")
+            logging.info(f"[orchestrator-process_conversation] Agent created")
             config = {"configurable": {"thread_id": conversation_id}}
 
             with get_openai_callback() as cb:
                 # Get agent response
-                logging.info(f"[orchestrator] Invoking agent")
+                logging.info(
+                    f"[orchestrator-process_conversation] Invoking agent")
                 response = agent.invoke({"question": question}, config)
-                logging.info(f"[orchestrator] Agent response")
+                logging.info(
+                    f"[orchestrator-process_conversation] Agent response")
                 return {
                     "conversation_id": conversation_id,
                     "state": ConversationState(
@@ -236,82 +240,9 @@ class ConversationOrchestrator:
                 }
 
         except Exception as e:
-            logging.error(f"[orchestrator] Error retrieving resources: {str(e)}")
+            logging.error(
+                f"[orchestrator-process_conversation] Error retrieving resources: {str(e)}")
             store_agent_error(user_info["id"], str(e), question)
-
-    def _get_model_response(self, model_name: str, system_prompt: str, prompt: str):
-        """Helper function to get model response based on model deployment service.
-            Azure OpenAI models are handled by the AzureChatOpenAI class while others are handled by the AzureInferenceSDK class.
-            Thus, there's a need to handle streaming differently for the two cases.
-
-        Args:
-            model_name: Deployment name of the model to use (may not be the actual model's name)
-            system_prompt: System prompt for the model
-            prompt: Prompt for the model
-
-        Yields:
-            tuple[str, str]: A tuple containing (chunk, accumulated_response) where:
-                - chunk is the current piece of the response
-                - accumulated_response is the complete response up to this point
-        """
-        complete_response = ""
-
-        if model_name == "gpt-4o-orchestrator":
-            response_llm = AzureChatOpenAI(
-                temperature=0,
-                openai_api_version="2024-05-01-preview",
-                azure_deployment=model_name,
-                streaming=True,
-                timeout=30,
-                max_retries=3,
-            )
-            tokens = response_llm.stream(
-                [
-                    LangchainSystemMessage(content=system_prompt),
-                    HumanMessage(content=prompt),
-                ]
-            )
-            try:
-                while True:
-                    try:
-                        token = next(tokens)
-                        if token:
-                            chunk = token.content
-                            complete_response += chunk
-                            yield chunk, complete_response
-                    except StopIteration:
-                        break
-            except Exception as e:
-                logging.error(f"[orchestrator] Error generating response: {str(e)}")
-                raise e
-        else:
-            endpoint = os.getenv("AZURE_INFERENCE_SDK_ENDPOINT")
-            key = os.getenv("AZURE_INFERENCE_SDK_KEY")
-            client = ChatCompletionsClient(
-                endpoint=endpoint, credential=AzureKeyCredential(key)
-            )
-
-            response = client.complete(
-                messages=[
-                    SystemMessage(content=system_prompt),
-                    UserMessage(content=prompt),
-                ],
-                model=model_name,
-                max_tokens=10000,
-                stream=True,
-            )
-
-            try:
-                for update in response:
-                    if update.choices and update.choices[0].delta:
-                        chunk = update.choices[0].delta.content or ""
-                        complete_response += chunk
-                        yield chunk, complete_response
-            except Exception as e:
-                logging.error(f"[orchestrator] Error generating response: {str(e)}")
-                raise e
-
-        return complete_response
 
     def generate_response(
         self,
@@ -324,7 +255,8 @@ class ConversationOrchestrator:
         model_name: str = "DeepSeek-V3",
     ):
         """Generate final response using context and query."""
-        logging.info(f"[orchestrator] Generating response for: {state.question}")
+        logging.info(
+            f"[orchestrator-generate_response] Generating response for: {state.question}")
         data = {
             "conversation_id": conversation_id,
             "thoughts": [
@@ -332,7 +264,6 @@ class ConversationOrchestrator:
             ],
         }
         yield json.dumps(data)
-        asyncio.sleep(3)
         context = ""
         max_tokens = 2000
         if state.context_docs:
@@ -391,26 +322,70 @@ class ConversationOrchestrator:
         Provide a detailed answer.
         """
 
-        logging.info(f"Prompt: {prompt}")
+        logging.info(f"[orchestrator-generate_response] Prompt: {prompt}")
         # Generate response and update message history
         complete_response = ""
 
         try:
-            for chunk, accumulated_response in self._get_model_response(
-                model_name, system_prompt, prompt
-            ):
-                complete_response = (
-                    accumulated_response  # Get the complete response at each step
+            if model_name == "gpt-4o-orchestrator":
+                logging.info(
+                    f"[orchestrator-generate_response] Streaming response from Azure Chat OpenAI")
+                response_llm = AzureChatOpenAI(
+                    temperature=0,
+                    openai_api_version="2024-05-01-preview",
+                    azure_deployment=model_name,
+                    streaming=True,
+                    timeout=30,
+                    max_retries=3,
                 )
-                yield chunk  # Still stream the chunks to the client
+                tokens = response_llm.stream(
+                    [
+                        LangchainSystemMessage(content=system_prompt),
+                        HumanMessage(content=prompt),
+                    ]
+                )
+                while True:
+                    try:
+                        token = next(tokens)
+                        if token:
+                            chunk = token.content
+                            complete_response += chunk
+                            yield chunk
+                    except StopIteration:
+                        break
+            else:
+                logging.info(
+                    f"[orchestrator-generate_response] Streaming response from Azure Inference SDK")
+                endpoint = os.getenv("AZURE_INFERENCE_SDK_ENDPOINT")
+                key = os.getenv("AZURE_INFERENCE_SDK_KEY")
+                client = ChatCompletionsClient(
+                    endpoint=endpoint, credential=AzureKeyCredential(key)
+                )
+
+                response = client.complete(
+                    messages=[
+                        SystemMessage(content=system_prompt),
+                        UserMessage(content=prompt),
+                    ],
+                    model=model_name,
+                    max_tokens=10000,
+                    stream=True,
+                )
+
+                for update in response:
+                    if update.choices and update.choices[0].delta:
+                        chunk = update.choices[0].delta.content or ""
+                        complete_response += chunk
+                        yield chunk
         except Exception as e:
-            logging.error(f"[orchestrator] Error generating response: {str(e)}")
-            asyncio.sleep(3)
+            logging.error(
+                f"[orchestrator-generate_response] Error generating response: {str(e)}")
+            store_agent_error(user_info["id"], str(e), state.question)
             error_message = "I'm sorry, I'm having trouble generating a response right now. Please try again later."
             complete_response = error_message
             yield error_message
 
-        logging.info(f"[orchestrator] Response generated: {complete_response}")
+        logging.info(f"[orchestrator-generate_response] Response generated: {complete_response}")
 
         #####################################################################################
         # Summary and chat history work
@@ -474,7 +449,8 @@ class ConversationOrchestrator:
         except Exception as e:
             print(f"Warning: Token counting failed: {str(e)}")
             # Fallback to simple length-based estimate
-            pre_token_count = sum(len(str(m.content)) // 4 for m in current_messages)
+            pre_token_count = sum(len(str(m.content)) //
+                                  4 for m in current_messages)
             if model_name == "gpt-4o-orchestrator":
                 total_messages = current_messages + [
                     HumanMessage(content=state.rewritten_query),
@@ -486,7 +462,8 @@ class ConversationOrchestrator:
                     AIMessage(content=complete_response),
                 ]
 
-            post_token_count = sum(len(str(m.content)) // 4 for m in total_messages)
+            post_token_count = sum(len(str(m.content)) //
+                                   4 for m in total_messages)
 
         answer = self._sanitize_response(complete_response)
 
@@ -519,6 +496,7 @@ class ConversationOrchestrator:
         update_conversation_data(conversation_id, conversation_data)
         # TODO: ENABLE CONSUME TOKENS FOR RESPONSE GENERATION
         # store_user_consumed_tokens(user_info["id"], cb)
+
 
 async def stream_run(
     conversation_id: str,
