@@ -520,7 +520,6 @@ class ConversationOrchestrator:
         # TODO: ENABLE CONSUME TOKENS FOR RESPONSE GENERATION
         # store_user_consumed_tokens(user_info["id"], cb)
 
-
 async def stream_run(
     conversation_id: str,
     ask: str,
