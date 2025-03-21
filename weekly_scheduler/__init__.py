@@ -244,3 +244,4 @@ def main(mytimer: func.TimerRequest) -> None:
         logger.info(
             f"Weekly report generation completed at {end_time}. Duration: {duration}"
         )
+        
