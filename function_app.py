@@ -56,12 +56,14 @@ async def stream_response(req: Request) -> StreamingResponse:
             organization_id=organization_id
         )
         try:
+            logging.info(f"processing conversation")
             resources =  orchestrator.process_conversation(
                 conversation_id, question, client_principal
             )
         except Exception as e:
             return StreamingResponse('{"error": "error in orchestrator"}', media_type="application/json")
         try:
+            logging.info(f"generating response")
             return StreamingResponse(orchestrator.generate_response(resources["conversation_id"],resources["state"], resources["conversation_data"], client_principal, resources["memory_data"], resources["start_time"]), media_type="text/event-stream")
         except Exception as e:
             return StreamingResponse('{"error": "error in response generation"}', media_type="application/json")
