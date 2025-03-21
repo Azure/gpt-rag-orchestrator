@@ -332,6 +332,7 @@ class ConversationOrchestrator:
             ],
         }
         yield json.dumps(data)
+        asyncio.sleep(3)
         context = ""
         max_tokens = 2000
         if state.context_docs:
