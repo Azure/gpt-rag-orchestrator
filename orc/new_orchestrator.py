@@ -369,6 +369,7 @@ class ConversationOrchestrator:
                     ],
                     model=model_name,
                     max_tokens=10000,
+                    temperature=0,
                     stream=True,
                 )
 
