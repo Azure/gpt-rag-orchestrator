@@ -8,6 +8,7 @@ import azure.functions as func
 from shared.cosmo_data_loader import CosmosDBLoader
 from enum import Enum
 
+from shared.util import trigger_indexer_run
 
 # logger setting
 logging.basicConfig(level=logging.INFO)
@@ -46,7 +47,7 @@ MAX_RETRIES = 3
 def generate_report(report_topic: ReportType) -> Optional[Dict]:
     """Generate a report and return the response if successful"""
 
-    payload = {"report_topic": report_topic}
+    payload = {"report_topic": report_topic,}
 
     @retry(
         stop=stop_after_attempt(MAX_RETRIES),
@@ -60,9 +61,16 @@ def generate_report(report_topic: ReportType) -> Optional[Dict]:
             json=payload,
             timeout=TIMEOUT_SECONDS,
         )
-        logger.debug(
-            f"Received response for report generation request for {report_topic}"
-        )
+        if response.status_code == 200:
+            logger.debug(f"Received response for report generation request for {report_topic}")
+            response_json = response.json()
+            # Trigger indexer run if report generation was successful
+            if response_json.get("status") == "success":
+                if trigger_indexer_run():
+                    logger.info(f"Successfully triggered indexer run after report generation for {report_topic}")
+                else:
+                    logger.error(f"Failed to trigger indexer run after report generation for {report_topic}")
+
         return response.json()
 
     try:
@@ -112,18 +120,6 @@ def send_report_email(
         logger.error(f"Failed to send email for {report_name}: {str(e)}")
         return False
 
-def main(timer: func.TimerRequest) -> None:
-
-    utc_timestamp = datetime.now(timezone.utc).isoformat()
-    logger.info(f"Weekly report generation started at {utc_timestamp}")
-
-    for report in WEEKLY_REPORTS:
-        logger.info(f"Generating report for {report} at {utc_timestamp}")
-        response_json = generate_report(report)
-
-        if not response_json or response_json.get('status') != 'success':
-            logger.error(f"Failed to generate report for {report} at {utc_timestamp}")
-            continue
 
 def check_subscription_statuses(orgs: List[Dict]) -> List[Dict]:
     """Check if the subscription is active and it has financial assistant tier"""
@@ -248,3 +244,4 @@ def main(mytimer: func.TimerRequest) -> None:
         logger.info(
             f"Weekly report generation completed at {end_time}. Duration: {duration}"
         )
+        

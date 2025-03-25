@@ -1556,3 +1556,37 @@ def get_invitation(invited_user_email):
     except Exception as e:
         logging.error(f"[get_invitation] something went wrong. {str(e)}")
     return invitation
+
+def trigger_indexer_run() -> bool:
+    """Trigger Azure AI Search indexer run to process new documents"""
+    try:
+        search_service = os.getenv("AZURE_SEARCH_SERVICE")
+        indexer_name = os.getenv("AZURE_FINANCIAL_SEARCH_INDEXER_NAME")
+        api_version = os.getenv("AZURE_SEARCH_API_VERSION", "2023-11-01")
+        api_key = os.getenv("AZURE_AI_SEARCH_API_KEY")
+
+        if not all([search_service, indexer_name, api_key]):
+            logging.error("Missing required environment variables for indexer run")
+            return False
+
+        headers = {
+            "Content-Type": "application/json",
+            "api-key": api_key
+        }
+
+        # Endpoint to run the indexer
+        indexer_endpoint = f"https://{search_service}.search.windows.net/indexers/{indexer_name}/run?api-version={api_version}"
+        
+        logging.info(f"Triggering indexer run for {indexer_name}")
+        response = requests.post(indexer_endpoint, headers=headers)
+        
+        if response.status_code == 202:  # 202 is the expected status code for indexer run
+            logging.info(f"Successfully triggered indexer run for {indexer_name}")
+            return True
+        else:
+            logging.error(f"Failed to trigger indexer run. Status code: {response.status_code}, Response: {response.text}")
+            return False
+
+    except Exception as e:
+        logging.error(f"Error triggering indexer run: {str(e)}")
+        return False

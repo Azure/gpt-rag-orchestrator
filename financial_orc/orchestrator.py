@@ -153,7 +153,7 @@ class FinancialOrchestrator:
         return "\n\n".join(formatted_history)
 
     def generate_response(
-        self, conversation_id: str, question: str, user_info: dict, documentName: str
+        self, conversation_id: str, question: str, user_info: dict, document_id: str, document_type: str
     ):
         """
         Process a conversation turn with the AI agent.
@@ -178,7 +178,7 @@ class FinancialOrchestrator:
         try:
             # Load conversation state
             logging.info(f"[financial-orc] Loading conversation data")
-            conversation_data = get_conversation_data(conversation_id)
+            conversation_data = get_conversation_data(conversation_id, type="financial")
             logging.info(f"[financial-orc] Loading memory")
             memory = self._load_memory(
                 conversation_data.get("memory_data", ""))
@@ -187,7 +187,12 @@ class FinancialOrchestrator:
 
             # insert conversation to the memory object
             agent = create_conversation_graph(
-                memory=memory, organization_id=self.organization_id, conversation_id=conversation_id, documentName=documentName)
+                memory=memory, 
+                organization_id=self.organization_id, 
+                conversation_id=conversation_id, 
+                document_id=document_id,
+                document_type=document_type
+            )
             logging.info(f"[financial-orc] Agent created")
             config = {"configurable": {"thread_id": conversation_id}}
 

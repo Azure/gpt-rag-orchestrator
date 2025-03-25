@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict, List
 from shared.cosmo_data_loader import CosmosDBLoader
 from enum import Enum
-
+from shared.util import trigger_indexer_run
 # logger setting
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -129,9 +129,15 @@ def generate_report(
             json=payload,
             timeout=TIMEOUT_SECONDS,
         )
-        logger.debug(
-            f"Received response for report generation request for {report_topic}"
-        )
+        if response.status_code == 200:
+            logger.debug(f"Received response for report generation request for {report_topic}")
+            response_json = response.json()
+            # Trigger indexer run if report generation was successful
+            if response_json.get("status") == "success":
+                if trigger_indexer_run():
+                    logger.info(f"Successfully triggered indexer run after report generation for {report_topic}")
+                else:
+                    logger.error(f"Failed to trigger indexer run after report generation for {report_topic}")
         return response.json()
 
     try:

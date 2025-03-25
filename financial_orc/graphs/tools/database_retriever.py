@@ -41,6 +41,7 @@ class CustomRetriever(BaseRetriever):
     index_name = "financial-index"
     indexes: List
     verbose: bool
+    document_id: str
 
     def get_search_results(
         self,
@@ -87,17 +88,20 @@ class CustomRetriever(BaseRetriever):
                 "top": k,
                 "vectorQueries": [
                     {
-                    "text": query,
-                    "fields": "text_vector",
-                    "kind": "text",
-                    "k": k,
-                    "threshold": {
-                        "kind": "vectorSimilarity",
-                        "value": vector_similarity_threshold,
+                        "text": query,
+                        "fields": "text_vector",
+                        "kind": "text",
+                        "k": k,
+                        "threshold": {
+                            "kind": "vectorSimilarity",
+                            "value": vector_similarity_threshold,
+                        },
                     },
-                }
-            ],
-        }
+                ],
+            }
+
+            if self.document_id:
+                search_payload["filter"] = f"document_id eq '{self.document_id}'"
 
         AZURE_SEARCH_SERVICE = os.environ.get("AZURE_SEARCH_SERVICE")
         search_endpoint = f"https://{AZURE_SEARCH_SERVICE}.search.windows.net/indexes/{index}/docs/search"
