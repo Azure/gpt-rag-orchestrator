@@ -68,11 +68,11 @@ class ConversationState:
     token_count: int = field(default_factory=int)
     query_category: str = field(default_factory=str)
 
+
 # Prompt for Tool Calling
-CATEGORY_PROMPT = { 
-    "Creative Brief": CREATIVE_BRIEF_PROMPT,
-    "Others": ""
-}
+CATEGORY_PROMPT = {"Creative Brief": CREATIVE_BRIEF_PROMPT, "Others": ""}
+
+
 class ConversationOrchestrator:
     """Manages conversation flow and state between user and AI agent."""
 
@@ -148,17 +148,18 @@ class ConversationOrchestrator:
         """
         start_time = time.time()
         logging.info(
-            f"[orchestrator-process_conversation] Gathering resources for: {question}")
+            f"[orchestrator-process_conversation] Gathering resources for: {question}"
+        )
         conversation_id = conversation_id or str(uuid.uuid4())
 
         try:
             # Load conversation state
             logging.info(
-                f"[orchestrator-process_conversation] Loading conversation data")
+                f"[orchestrator-process_conversation] Loading conversation data"
+            )
             conversation_data = get_conversation_data(conversation_id)
             logging.info(f"[orchestrator-process_conversation] Loading memory")
-            memory = self._load_memory(
-                conversation_data.get("memory_data", ""))
+            memory = self._load_memory(conversation_data.get("memory_data", ""))
             logging.info(f"[orchestrator-process_conversation] Memory loaded")
             # Process through agent
 
@@ -173,11 +174,9 @@ class ConversationOrchestrator:
 
             with get_openai_callback() as cb:
                 # Get agent response
-                logging.info(
-                    f"[orchestrator-process_conversation] Invoking agent")
+                logging.info(f"[orchestrator-process_conversation] Invoking agent")
                 response = agent.invoke({"question": question}, config)
-                logging.info(
-                    f"[orchestrator-process_conversation] Agent response")
+                logging.info(f"[orchestrator-process_conversation] Agent response")
                 return {
                     "conversation_id": conversation_id,
                     "state": ConversationState(
@@ -198,7 +197,8 @@ class ConversationOrchestrator:
 
         except Exception as e:
             logging.error(
-                f"[orchestrator-process_conversation] Error retrieving resources: {str(e)}")
+                f"[orchestrator-process_conversation] Error retrieving resources: {str(e)}"
+            )
             store_agent_error(user_info["id"], str(e), question)
 
     def generate_response(
@@ -213,7 +213,8 @@ class ConversationOrchestrator:
     ):
         """Generate final response using context and query."""
         logging.info(
-            f"[orchestrator-generate_response] Generating response for: {state.question}")
+            f"[orchestrator-generate_response] Generating response for: {state.question}"
+        )
         data = {
             "conversation_id": conversation_id,
             "thoughts": [
@@ -294,7 +295,8 @@ class ConversationOrchestrator:
         try:
             if model_name == "gpt-4o-orchestrator":
                 logging.info(
-                    f"[orchestrator-generate_response] Streaming response from Azure Chat OpenAI")
+                    f"[orchestrator-generate_response] Streaming response from Azure Chat OpenAI"
+                )
                 response_llm = AzureChatOpenAI(
                     temperature=0,
                     openai_api_version="2024-05-01-preview",
@@ -320,7 +322,8 @@ class ConversationOrchestrator:
                         break
             else:
                 logging.info(
-                    f"[orchestrator-generate_response] Streaming response from Azure Inference SDK")
+                    f"[orchestrator-generate_response] Streaming response from Azure Inference SDK"
+                )
                 endpoint = os.getenv("AZURE_INFERENCE_SDK_ENDPOINT")
                 key = os.getenv("AZURE_INFERENCE_SDK_KEY")
                 client = ChatCompletionsClient(
@@ -345,13 +348,16 @@ class ConversationOrchestrator:
                         yield chunk
         except Exception as e:
             logging.error(
-                f"[orchestrator-generate_response] Error generating response: {str(e)}")
+                f"[orchestrator-generate_response] Error generating response: {str(e)}"
+            )
             store_agent_error(user_info["id"], str(e), state.question)
             error_message = "I'm sorry, I'm having trouble generating a response right now. Please try again later."
             complete_response = error_message
             yield error_message
 
-        logging.info(f"[orchestrator-generate_response] Response generated: {complete_response}")
+        logging.info(
+            f"[orchestrator-generate_response] Response generated: {complete_response}"
+        )
 
         answer = self._sanitize_response(complete_response)
 

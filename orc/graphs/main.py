@@ -22,6 +22,8 @@ from langchain_core.runnables import RunnableParallel
 from shared.cosmos_db import get_conversation_data
 from typing_extensions import Literal
 from pydantic import BaseModel, Field
+
+
 # initialize memory saver
 @dataclass
 class ConversationState:
@@ -46,6 +48,7 @@ class ConversationState:
     chat_summary: str = field(default_factory=str)
     token_count: int = field(default_factory=int)
     query_category: str = field(default_factory=str)
+
 
 def clean_chat_history(chat_history: List[dict]) -> str:
     """
@@ -74,13 +77,15 @@ def clean_chat_history(chat_history: List[dict]) -> str:
 
     return "\n\n".join(formatted_history)
 
+
 class QueryCategory(BaseModel):
     """
     Decide the category of the query. Select the most appropriate category from the list. Only 1 category is allowed.
     """
-    query_category: Literal["Creative Brief", "Brand Position Statement", "Others"] = Field(
-            description="The name of the tool to use, only 1 tool name is allowed"
-        )
+
+    query_category: Literal["Creative Brief", "Brand Position Statement", "Others"] = (
+        Field(description="The name of the tool to use, only 1 tool name is allowed")
+    )
 
 
 @dataclass
@@ -242,7 +247,7 @@ class GraphBuilder:
             # save the original question to state
             "messages": state.messages + [HumanMessage(content=question)],
         }
-    
+
     def _categorize_query(self, state: ConversationState) -> dict:
         """Categorize the query."""
 
