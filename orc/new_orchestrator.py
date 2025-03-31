@@ -252,7 +252,7 @@ class ConversationOrchestrator:
         user_info: dict,
         memory_data: str,
         start_time: float,
-        model_name: str = "DeepSeek-V3",
+        model_name: str = "gpt-4o-orchestrator",
     ):
         """Generate final response using context and query."""
         logging.info(
