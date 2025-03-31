@@ -28,6 +28,7 @@ from shared.prompts import (
     MARKETING_ORC_PROMPT,
     MARKETING_ANSWER_PROMPT,
     QUERY_REWRITING_PROMPT,
+    CREATIVE_BRIEF_PROMPT,
 )
 from shared.tools import num_tokens_from_string, messages_to_string
 from dotenv import load_dotenv
@@ -65,8 +66,13 @@ class ConversationState:
     )  # rewritten query for better search
     chat_summary: str = field(default_factory=str)
     token_count: int = field(default_factory=int)
+    query_category: str = field(default_factory=str)
 
-
+# Prompt for Tool Calling
+CATEGORY_PROMPT = { 
+    "Creative Brief": CREATIVE_BRIEF_PROMPT,
+    "Others": ""
+}
 class ConversationOrchestrator:
     """Manages conversation flow and state between user and AI agent."""
 
@@ -86,56 +92,6 @@ class ConversationOrchestrator:
             regex = rf"(Source:\s?\/?)?(source:)?(https:\/\/)?({self.storage_url})?(\/?documents\/?)?"
             return re.sub(regex, "", text)
         return text
-
-    def _summarize_chat(
-        token_count: int,
-        messages: List[AIMessage | HumanMessage],
-        chat_summary: str,
-        max_tokens: int,
-        llm: AzureChatOpenAI,
-    ) -> dict:
-        """Summarize chat history if it exceeds token limit.
-
-
-        Args:
-            state: Current conversation state
-
-        Returns:
-            dict: Contains updated chat_summary and token_count
-        """
-
-        if token_count > max_tokens:
-            try:
-                if chat_summary:
-                    messages = [
-                        LangchainSystemMessage(
-                            content="You are a helpful assistant that summarizes conversations."
-                        ),
-                        HumanMessage(
-                            content=f"Previous summary:\n{chat_summary}\n\nNew messages to incorporate:\n{messages}\n\nPlease extend the summary. Return only the summary text."
-                        ),
-                    ]
-
-                else:
-                    messages = [
-                        LangchainSystemMessage(
-                            content="You are a helpful assistant that summarizes conversations."
-                        ),
-                        HumanMessage(
-                            content=f"Summarize this conversation history. Return only the summary text:\n{messages}"
-                        ),
-                    ]
-
-                new_summary = llm.invoke(messages)
-
-                return new_summary.content
-
-            except Exception as e:
-                # Log the error but continue with empty summary
-                print(f"Error summarizing chat: {str(e)}")
-                return chat_summary or ""
-        else:
-            return chat_summary or ""
 
     def _load_memory(self, memory_data: str) -> MemorySaver:
         """Decode and load conversation memory from base64 string."""
@@ -232,6 +188,7 @@ class ConversationOrchestrator:
                         response["rewritten_query"],
                         response["chat_summary"],
                         response["token_count"],
+                        response["query_category"],
                     ),
                     "conversation_data": conversation_data,
                     "memory_data": self._serialize_memory(memory, config),
@@ -260,7 +217,8 @@ class ConversationOrchestrator:
         data = {
             "conversation_id": conversation_id,
             "thoughts": [
-                f"Tool name: agent_memory > Query sent: {state.rewritten_query}"
+                f"""
+                Tool name: {state.query_category} / Query sent: {state.rewritten_query}"""
             ],
         }
         yield json.dumps(data)
@@ -299,15 +257,22 @@ class ConversationOrchestrator:
         {self._clean_chat_history(history)}
         <----------- END OF PROVIDED CHAT HISTORY ------------>
 
-        Chat Summary:
+        Query Category:
 
-        <----------- PROVIDED CHAT SUMMARY ------------>
-        {state.chat_summary}
-        <----------- END OF PROVIDED CHAT SUMMARY ------------>
+        <----------- PROVIDED QUERY CATEGORY ------------>
+        {state.query_category}
+        <----------- END OF PROVIDED QUERY CATEGORY ------------>
+
+        System prompt for tool calling (if applicable):
+
+        <----------- SYSTEM PROMPT FOR TOOL CALLING ------------>
         """
 
         # add additional context to the system prompt
         system_prompt += additional_context
+
+        if state.query_category in CATEGORY_PROMPT:
+            system_prompt += CATEGORY_PROMPT[state.query_category]
 
         prompt = f"""
         
@@ -387,84 +352,6 @@ class ConversationOrchestrator:
             yield error_message
 
         logging.info(f"[orchestrator-generate_response] Response generated: {complete_response}")
-
-        #####################################################################################
-        # Summary and chat history work
-        #####################################################################################
-
-        # Use complete_response instead of response["content"]
-        current_messages = state.messages if state.messages is not None else []
-
-        llm = AzureChatOpenAI(
-            temperature=0,
-            openai_api_version="2024-05-01-preview",
-            azure_deployment="gpt-4o-orchestrator",
-            streaming=True,
-            timeout=30,
-            max_retries=3,
-        )
-
-        try:
-            # Try to count tokens, fallback to conservative estimate if it fails
-            pre_token_count = (
-                num_tokens_from_string(messages_to_string(current_messages))
-                if current_messages
-                else 0
-            )
-            print(f"Pre token count: {pre_token_count}")
-
-            # Summarize chat history if it exceeds token limit
-            # TODO: THIS CHAT SUMMARY IS NOT BEING USED CHECK FOR WHAT IS WHAT USED ON THE GRAPH BEFORE
-            if pre_token_count > max_tokens:
-                chat_summary = self._summarize_chat(
-                    pre_token_count,
-                    current_messages,
-                    state.chat_summary,
-                    max_tokens,
-                    llm,
-                )
-            else:
-                chat_summary = state.chat_summary
-
-            # Prepare new messages
-            if model_name == "gpt-4o-orchestrator":
-                new_messages = [
-                    HumanMessage(content=state.rewritten_query),
-                    AIMessage(content=complete_response),
-                ]
-            else:
-                new_messages = [
-                    HumanMessage(content=state.rewritten_query),
-                    AIMessage(content=complete_response),
-                ]
-            total_messages = (
-                (current_messages + new_messages)
-                if pre_token_count <= max_tokens
-                else new_messages
-            )
-            post_token_count = num_tokens_from_string(
-                messages_to_string(total_messages)
-            )
-            print(f"Post token count: {post_token_count}")
-
-        except Exception as e:
-            print(f"Warning: Token counting failed: {str(e)}")
-            # Fallback to simple length-based estimate
-            pre_token_count = sum(len(str(m.content)) //
-                                  4 for m in current_messages)
-            if model_name == "gpt-4o-orchestrator":
-                total_messages = current_messages + [
-                    HumanMessage(content=state.rewritten_query),
-                    AIMessage(content=complete_response),
-                ]
-            else:
-                total_messages = current_messages + [
-                    HumanMessage(content=state.rewritten_query),
-                    AIMessage(content=complete_response),
-                ]
-
-            post_token_count = sum(len(str(m.content)) //
-                                   4 for m in total_messages)
 
         answer = self._sanitize_response(complete_response)
 
