@@ -369,7 +369,7 @@ async def html2pdf_conversion(req: Request) -> Response:
             status_code=500
         )
 
-@app.blob_trigger(arg_name="myblob", path="ragindex-test/{name}",
+@app.blob_trigger(arg_name="myblob", path="documents/{name}",
                                connection="AZURE_STORAGE_CONNECTION_STRING") 
 def BlobTrigger(myblob: func.InputStream):
     logging.info(f"Python blob trigger function processed blob"
