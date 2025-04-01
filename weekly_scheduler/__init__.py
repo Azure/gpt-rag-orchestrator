@@ -66,7 +66,7 @@ def generate_report(report_topic: ReportType) -> Optional[Dict]:
             response_json = response.json()
             # Trigger indexer run if report generation was successful
             if response_json.get("status") == "success":
-                if trigger_indexer_run():
+                if trigger_indexer_run(indexer_name = os.getenv("AZURE_FINANCIAL_SEARCH_INDEXER_NAME")):
                     logger.info(f"Successfully triggered indexer run after report generation for {report_topic}")
                 else:
                     logger.error(f"Failed to trigger indexer run after report generation for {report_topic}")
