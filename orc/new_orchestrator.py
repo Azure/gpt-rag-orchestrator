@@ -29,6 +29,7 @@ from shared.prompts import (
     MARKETING_ANSWER_PROMPT,
     QUERY_REWRITING_PROMPT,
     CREATIVE_BRIEF_PROMPT,
+    MARKETING_PLAN_PROMPT,
 )
 from shared.tools import num_tokens_from_string, messages_to_string
 from dotenv import load_dotenv
@@ -70,7 +71,7 @@ class ConversationState:
 
 
 # Prompt for Tool Calling
-CATEGORY_PROMPT = {"Creative Brief": CREATIVE_BRIEF_PROMPT, "Others": ""}
+CATEGORY_PROMPT = {"Creative Brief": CREATIVE_BRIEF_PROMPT, "Marketing Plan": MARKETING_PLAN_PROMPT, "Others": ""}
 
 
 class ConversationOrchestrator:

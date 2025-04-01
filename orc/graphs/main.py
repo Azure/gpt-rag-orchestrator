@@ -83,7 +83,7 @@ class QueryCategory(BaseModel):
     Decide the category of the query. Select the most appropriate category from the list. Only 1 category is allowed.
     """
 
-    query_category: Literal["Creative Brief", "Brand Position Statement", "Others"] = (
+    query_category: Literal["Creative Brief", "Brand Position Statement", "Marketing Plan", "Others"] = (
         Field(description="The name of the tool to use, only 1 tool name is allowed")
     )
 
