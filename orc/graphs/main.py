@@ -20,6 +20,8 @@ from shared.prompts import (
 )
 from langchain_core.runnables import RunnableParallel
 from shared.cosmos_db import get_conversation_data
+from typing_extensions import Literal
+from pydantic import BaseModel, Field
 
 
 # initialize memory saver
@@ -45,6 +47,7 @@ class ConversationState:
     )  # rewritten query for better search
     chat_summary: str = field(default_factory=str)
     token_count: int = field(default_factory=int)
+    query_category: str = field(default_factory=str)
 
 
 def clean_chat_history(chat_history: List[dict]) -> str:
@@ -75,55 +78,14 @@ def clean_chat_history(chat_history: List[dict]) -> str:
     return "\n\n".join(formatted_history)
 
 
-def _summarize_chat(
-    token_count: int,
-    messages: List[AIMessage | HumanMessage],
-    chat_summary: str,
-    max_tokens: int,
-    llm: AzureChatOpenAI,
-) -> dict:
-    """Summarize chat history if it exceeds token limit.
-
-
-    Args:
-        state: Current conversation state
-
-    Returns:
-        dict: Contains updated chat_summary and token_count
+class QueryCategory(BaseModel):
+    """
+    Decide the category of the query. Select the most appropriate category from the list. Only 1 category is allowed.
     """
 
-    if token_count > max_tokens:
-        try:
-            if chat_summary:
-                messages = [
-                    SystemMessage(
-                        content="You are a helpful assistant that summarizes conversations."
-                    ),
-                    HumanMessage(
-                        content=f"Previous summary:\n{chat_summary}\n\nNew messages to incorporate:\n{messages}\n\nPlease extend the summary. Return only the summary text."
-                    ),
-                ]
-
-            else:
-                messages = [
-                    SystemMessage(
-                        content="You are a helpful assistant that summarizes conversations."
-                    ),
-                    HumanMessage(
-                        content=f"Summarize this conversation history. Return only the summary text:\n{messages}"
-                    ),
-                ]
-
-            new_summary = llm.invoke(messages)
-
-            return new_summary.content
-
-        except Exception as e:
-            # Log the error but continue with empty summary
-            print(f"Error summarizing chat: {str(e)}")
-            return chat_summary or ""
-    else:
-        return chat_summary or ""
+    query_category: Literal["Creative Brief", "Brand Position Statement", "Marketing Plan", "Others"] = (
+        Field(description="The name of the tool to use, only 1 tool name is allowed")
+    )
 
 
 @dataclass
@@ -205,6 +167,7 @@ class GraphBuilder:
             "token_count": state.token_count,
             "requires_web_search": state.requires_web_search,
             "rewritten_query": state.rewritten_query,
+            "query_category": state.query_category,
         }
 
     def build(self, memory) -> StateGraph:
@@ -214,6 +177,7 @@ class GraphBuilder:
         # Add processing nodes
 
         graph.add_node("rewrite", self._rewrite_query)
+        graph.add_node("tool_choice", self._categorize_query)
         graph.add_node("route", self._route_query)
         graph.add_node("retrieve", self._retrieve_context)
         graph.add_node("search", self._web_search)
@@ -221,7 +185,8 @@ class GraphBuilder:
 
         # Define graph flow
         graph.add_edge(START, "rewrite")
-        graph.add_edge("rewrite", "route")
+        graph.add_edge("rewrite", "tool_choice")
+        graph.add_edge("tool_choice", "route")
         graph.add_conditional_edges(
             "route",
             self._route_decision,
@@ -281,6 +246,14 @@ class GraphBuilder:
             "rewritten_query": rewritte_query.content,
             # save the original question to state
             "messages": state.messages + [HumanMessage(content=question)],
+        }
+
+    def _categorize_query(self, state: ConversationState) -> dict:
+        """Categorize the query."""
+
+        structured_output = self.llm.with_structured_output(QueryCategory)
+        return {
+            "query_category": structured_output.invoke(state.question).query_category
         }
 
     def _route_query(self, state: ConversationState) -> dict:

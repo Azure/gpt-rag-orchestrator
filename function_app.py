@@ -20,7 +20,8 @@ from shared.util import (
     disable_organization_active_subscription, 
     enable_organization_subscription, 
     update_subscription_logs, 
-    updateExpirationDate
+    updateExpirationDate,
+    trigger_indexer_run
 )
 
 from orc import new_orchestrator
@@ -367,3 +368,13 @@ async def html2pdf_conversion(req: Request) -> Response:
             content=error_message,
             status_code=500
         )
+
+@app.blob_trigger(arg_name="myblob", path="documents/{name}",
+                               connection="AZURE_STORAGE_CONNECTION_STRING") 
+def BlobTrigger(myblob: func.InputStream):
+    logging.info(f"Python blob trigger function processed blob"
+                f"Name: {myblob.name}"
+                f"Blob Size: {myblob.length} bytes")
+    indexer_name = "ragindex-test-indexer-chunk-documents"
+    logging.info(f"Triggering indexer - {indexer_name}")
+    trigger_indexer_run(indexer_name = indexer_name)
