@@ -77,17 +77,6 @@ def clean_chat_history(chat_history: List[dict]) -> str:
 
     return "\n\n".join(formatted_history)
 
-
-class QueryCategory(BaseModel):
-    """
-    Decide the category of the query. Select the most appropriate category from the list. Only 1 category is allowed.
-    """
-
-    query_category: Literal["Creative Brief", "Brand Position Statement", "Marketing Plan", "Others"] = (
-        Field(description="The name of the tool to use, only 1 tool name is allowed")
-    )
-
-
 @dataclass
 class GraphConfig:
     "Config for the graph builder"
@@ -251,9 +240,44 @@ class GraphBuilder:
     def _categorize_query(self, state: ConversationState) -> dict:
         """Categorize the query."""
 
-        structured_output = self.llm.with_structured_output(QueryCategory)
+        conversation_data = get_conversation_data(self.conversation_id)
+        history = conversation_data.get("history", [])
+
+        category_prompt = f"""
+        You are a senior marketing strategist. Your task is to classify the user's question into one of the following categories:
+
+        ----------------------------------------
+        - Creative Brief
+        - Marketing Plan
+        - Brand Positioning Statement
+        - Others
+        ----------------------------------------
+
+        Use both the current question and the historical conversation context to make an informed decision. 
+        The context is crucial, as users may refer to previous topics, provide follow-ups, or respond to earlier prompts. 
+
+        ----------------------------------------
+        User's Question:
+        {state.question}
+        ----------------------------------------
+        Conversation History:
+        {clean_chat_history(history)}
+        ----------------------------------------
+
+        Reply with **only** the exact category name — no additional text, explanations, or formatting.
+        """
+
+
+        response = self.llm.invoke(
+            [
+                SystemMessage(content=category_prompt),
+                HumanMessage(content=state.question),
+            ],
+            temperature=0
+        )
+
         return {
-            "query_category": structured_output.invoke(state.question).query_category
+            "query_category": response.content
         }
 
     def _route_query(self, state: ConversationState) -> dict:
