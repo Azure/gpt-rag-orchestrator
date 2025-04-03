@@ -375,6 +375,6 @@ def BlobTrigger(myblob: func.InputStream):
     logging.info(f"Python blob trigger function processed blob"
                 f"Name: {myblob.name}"
                 f"Blob Size: {myblob.length} bytes")
-    indexer_name = "ragindex-test-indexer-chunk-documents"
+    indexer_name = "ragindex-indexer-chunk-documents"
     logging.info(f"Triggering indexer - {indexer_name}")
     trigger_indexer_run(indexer_name = indexer_name)
