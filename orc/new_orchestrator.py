@@ -371,7 +371,7 @@ class ConversationOrchestrator:
                     "role": "assistant",
                     "content": answer,
                     "thoughts": [
-                        f"Tool name: agent_memory > Query sent: {state.rewritten_query}"
+                        f"""Tool name: {state.query_category} / Query sent: {state.rewritten_query}"""
                     ],
                 },
             ]
