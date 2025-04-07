@@ -72,7 +72,7 @@ class ConversationState:
 
 
 # Prompt for Tool Calling
-CATEGORY_PROMPT = {"Creative Brief": CREATIVE_BRIEF_PROMPT, "Marketing Plan": MARKETING_PLAN_PROMPT, "Brand Positioning Statement": BRAND_POSITION_STATEMENT_PROMPT, "Others": ""}
+CATEGORY_PROMPT = {"Creative Brief": CREATIVE_BRIEF_PROMPT, "Marketing Plan": MARKETING_PLAN_PROMPT, "Brand Positioning Statement": BRAND_POSITION_STATEMENT_PROMPT, "General": ""}
 
 
 class ConversationOrchestrator:
@@ -133,6 +133,30 @@ class ConversationOrchestrator:
                 formatted_history.append(f"{display_role}: {content}")
 
         return "\n\n".join(formatted_history)
+
+    def _format_context(self, context_docs: List[Document], display_source: bool = True) -> str:
+        """Formats retrieved documents into a string for LLM consumption."""
+        if not context_docs:
+            return ""
+        if display_source:
+            return "\n\n==============================================\n\n".join(
+            [
+                f"\nContent: \n\n{doc.page_content}"
+                + (
+                        f"\n\nSource: {doc.metadata['source']}"
+                        if doc.metadata.get("source")
+                        else ""
+                    )
+                    for doc in context_docs
+                ]
+            )
+        else:
+            return "\n\n==============================================\n\n".join(
+                [
+                    f"\nContent: \n\n{doc.page_content}"
+                    for doc in context_docs
+                ]
+            )
 
     def process_conversation(
         self, conversation_id: str, question: str, user_info: dict
@@ -221,24 +245,14 @@ class ConversationOrchestrator:
             "conversation_id": conversation_id,
             "thoughts": [
                 f"""
-                Tool name: {state.query_category} / Query sent: {state.rewritten_query}"""
+                Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Web Search: {state.requires_web_search} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=False)}"""
             ],
         }
         yield json.dumps(data)
         context = ""
         max_tokens = 2000
         if state.context_docs:
-            context = "\n\n==============================================\n\n".join(
-                [
-                    f"\nContent: \n\n{doc.page_content}"
-                    + (
-                        f"\n\nSource: {doc.metadata['source']}"
-                        if doc.metadata.get("source")
-                        else ""
-                    )
-                    for doc in state.context_docs
-                ]
-            )
+            context = self._format_context(state.context_docs)
 
         history = conversation_data.get("history", [])
 
@@ -371,7 +385,7 @@ class ConversationOrchestrator:
                     "role": "assistant",
                     "content": answer,
                     "thoughts": [
-                        f"""Tool name: {state.query_category} / Query sent: {state.rewritten_query}"""
+                        f"""Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Web Search: {state.requires_web_search} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=False)}"""
                     ],
                 },
             ]

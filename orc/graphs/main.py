@@ -250,12 +250,12 @@ class GraphBuilder:
         - Creative Brief
         - Marketing Plan
         - Brand Positioning Statement
-        - Others
+        - General
         ----------------------------------------
 
         Use both the current question and the historical conversation context to make an informed decision. 
         The context is crucial, as users may refer to previous topics, provide follow-ups, or respond to earlier prompts. 
-
+        If the question or supported context is not related to any of the categories, always return "General".
         ----------------------------------------
         User's Question:
         {state.question}
