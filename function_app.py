@@ -284,7 +284,7 @@ async def scheduler(timer: func.TimerRequest) -> None:
         logging.error(f"Error in scheduler: {e}")
 
 @app.function_name(name="weekly_scheduler")
-@app.schedule(schedule="0 35 18 * * *", arg_name="timer")
+@app.schedule(schedule="0 02 19 * * *", arg_name="timer")
 async def weekly_scheduler(timer: func.TimerRequest) -> None:
     # Your weekly scheduler implementation
     try:
