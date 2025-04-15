@@ -246,16 +246,25 @@ class GraphBuilder:
         category_prompt = f"""
         You are a senior marketing strategist. Your task is to classify the user's question into one of the following categories:
 
-        ----------------------------------------
         - Creative Brief
         - Marketing Plan
         - Brand Positioning Statement
+        - Creative Copywriter
         - General
-        ----------------------------------------
 
         Use both the current question and the historical conversation context to make an informed decision. 
-        The context is crucial, as users may refer to previous topics, provide follow-ups, or respond to earlier prompts. 
-        If the question or supported context is not related to any of the categories, always return "General".
+        Context is crucial, as users may refer to previous topics, provide follow-ups, or respond to earlier prompts. 
+
+        To help you make an accurate decision, consider these cues for each category:
+
+        - **Creative Brief**: Look for project kickoffs, campaign overviews, client objectives, audience targeting, timelines, deliverables, or communication goals.
+        - **Marketing Plan**: Look for references to strategy, goals, budget, channels, timelines, performance metrics, or ROI.
+        - **Brand Positioning Statement**: Watch for messages about defining brand essence, values, personality, competitive differentiation, or target audience perception.
+        - **Creative Copywriter**: Use this category when the user asks for help creating or refining marketing text. This includes taglines, headlines, ad copy, email subject lines, social captions, website copy, or product descriptions. Trigger this if the user is brainstorming, writing, or editing text with a creative, promotional purpose.
+        - **General**: If the input lacks context, doesn’t relate to marketing deliverables, or is unclear or unrelated to the above.
+
+        If the question or context is not clearly related to any of the above categories, always return "General".
+
         ----------------------------------------
         User's Question:
         {state.question}
