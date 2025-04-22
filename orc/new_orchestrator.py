@@ -6,6 +6,7 @@ import time
 import re
 import json
 from langchain_community.callbacks import get_openai_callback
+from langsmith import traceable
 from langgraph.checkpoint.memory import MemorySaver
 from orc.graphs.main import create_conversation_graph
 from shared.cosmos_db import (
@@ -228,6 +229,7 @@ class ConversationOrchestrator:
             )
             store_agent_error(user_info["id"], str(e), question)
 
+    @traceable(run_type="llm")
     def generate_response(
         self,
         conversation_id: str,
@@ -310,17 +312,19 @@ class ConversationOrchestrator:
         complete_response = ""
 
         try:
-            if model_name == "gpt-4o-orchestrator":
+            if model_name == "gpt-4.1":
                 logging.info(
                     f"[orchestrator-generate_response] Streaming response from Azure Chat OpenAI"
                 )
                 response_llm = AzureChatOpenAI(
                     temperature=0,
-                    openai_api_version="2024-05-01-preview",
+                    openai_api_version="2025-01-01-preview",
                     azure_deployment=model_name,
                     streaming=True,
                     timeout=30,
                     max_retries=3,
+                    azure_endpoint=os.getenv("O1_ENDPOINT"),
+                    api_key=os.getenv("O1_KEY")
                 )
                 tokens = response_llm.stream(
                     [
