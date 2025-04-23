@@ -15,20 +15,23 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
     conversation_id = req_body.get('conversation_id')
     question = req_body.get('question')
     client_principal_id = req_body.get('client_principal_id')
-    client_principal_name = req_body.get('client_principal_name') 
+    client_principal_name = req_body.get('client_principal_name')
+    client_principal_organization= req_body.get('client_principal_organization') 
     url = req_body.get('url', '')
     if not client_principal_id or client_principal_id == '':
         client_principal_id = '00000000-0000-0000-0000-000000000000'
-        client_principal_name = 'anonymous'    
+        client_principal_name = 'anonymous'
+        client_principal_organization = '00000000-0000-0000-0000-000000000000'    
     client_principal = {
         'id': client_principal_id,
-        'name': client_principal_name
+        'name': client_principal_name,
+        'organization': client_principal_organization
     }
 
     organization_id = None
     user = get_user(client_principal_id)
-    if "data" in user and "organizationId" in user["data"]:
-        organization_id = user["data"].get("organizationId")
+    if "data" in user:
+        organization_id = client_principal_organization
         logging.info(f"Retrieved organizationId: {organization_id} from user data")
 
     if question:
