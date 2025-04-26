@@ -35,6 +35,7 @@ from shared.prompts import (
     CREATIVE_COPYWRITER_PROMPT,
 )
 from shared.tools import num_tokens_from_string, messages_to_string
+from shared.util import get_organization
 from dotenv import load_dotenv
 
 from azure.ai.inference import ChatCompletionsClient
@@ -283,6 +284,17 @@ class ConversationOrchestrator:
         {state.query_category}
         <----------- END OF PROVIDED QUERY CATEGORY ------------>
 
+        Org Description:
+
+        <----------- PROVIDED ORG DESCRIPTION ------------>
+        This is the organization that the user belongs to.
+        Whenever possible, incorporate organization description to tailor responses, ensuring that answers are highly relevant to the user's company, goals, and operational environment.        
+        Here is the organization description:
+
+        {get_organization(self.organization_id).get('orgDescription','')}
+
+        <----------- END OF PROVIDED ORG DESCRIPTION ------------>
+
         System prompt for tool calling (if applicable):
 
         <----------- SYSTEM PROMPT FOR TOOL CALLING ------------>
@@ -431,4 +443,5 @@ async def stream_run(
         client_principal,
         resources["memory_data"],
         resources["start_time"],
+        organization_id,
     )
