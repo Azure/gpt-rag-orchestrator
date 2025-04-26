@@ -21,7 +21,7 @@ from shared.util import (
     enable_organization_subscription, 
     update_subscription_logs, 
     updateExpirationDate,
-    trigger_indexer_run
+    trigger_indexer_run,
 )
 
 from orc import new_orchestrator
@@ -51,7 +51,15 @@ async def stream_response(req: Request) -> StreamingResponse:
     if "data" in user and "organizationId" in user["data"]:
         organization_id = user["data"].get("organizationId")
         logging.info(f"Retrieved organizationId: {organization_id} from user data")
-    
+
+    # print configuration settings for the user
+    settings = new_orchestrator.get_settings(client_principal)
+    logging.info(f"[function_app] Configuration settings: {settings}")
+
+    # validate settings
+    settings['temperature'] = settings.get('temperature') or 0.3
+    settings['model'] = settings.get('model') or "DeepSeek-V3-0324"
+    logging.info(f"[function_app] Validated settings: {settings}")
     if question:
         orchestrator = new_orchestrator.ConversationOrchestrator(
             organization_id=organization_id
@@ -65,7 +73,7 @@ async def stream_response(req: Request) -> StreamingResponse:
             return StreamingResponse('{"error": "error in orchestrator"}', media_type="application/json")
         try:
             logging.info(f"generating response")
-            return StreamingResponse(orchestrator.generate_response(resources["conversation_id"],resources["state"], resources["conversation_data"], client_principal, resources["memory_data"], resources["start_time"]), media_type="text/event-stream")
+            return StreamingResponse(orchestrator.generate_response(resources["conversation_id"],resources["state"], resources["conversation_data"], client_principal, resources["memory_data"], resources["start_time"], user_settings=settings), media_type="text/event-stream")
         except Exception as e:
             return StreamingResponse('{"error": "error in response generation"}', media_type="application/json")
     else:
