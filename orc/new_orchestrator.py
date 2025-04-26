@@ -24,6 +24,9 @@ from langchain_core.messages import (
     SystemMessage as LangchainSystemMessage,
     RemoveMessage,
 )
+
+from shared.util import get_setting
+
 from langchain.schema import Document
 from shared.prompts import (
     MARKETING_ORC_PROMPT,
@@ -239,7 +242,7 @@ class ConversationOrchestrator:
         user_info: dict,
         memory_data: str,
         start_time: float,
-        model_name: str = "DeepSeek-V3-0324",
+        user_settings: dict = None,
     ):
         """Generate final response using context and query."""
         logging.info(
@@ -324,14 +327,14 @@ class ConversationOrchestrator:
         complete_response = ""
 
         try:
-            if model_name == "gpt-4.1":
+            if user_settings['model'] == "gpt-4.1":
                 logging.info(
                     f"[orchestrator-generate_response] Streaming response from Azure Chat OpenAI"
                 )
                 response_llm = AzureChatOpenAI(
-                    temperature=0,
+                    temperature=user_settings['temperature'],
                     openai_api_version="2025-01-01-preview",
-                    azure_deployment=model_name,
+                    azure_deployment=user_settings['model'],
                     streaming=True,
                     timeout=30,
                     max_retries=3,
@@ -368,9 +371,9 @@ class ConversationOrchestrator:
                         SystemMessage(content=system_prompt),
                         UserMessage(content=prompt),
                     ],
-                    model=model_name,
+                    model=user_settings['model'],
                     max_tokens=10000,
-                    temperature=0,
+                    temperature=user_settings['temperature'],
                     stream=True,
                 )
 
@@ -424,6 +427,17 @@ class ConversationOrchestrator:
         # TODO: ENABLE CONSUME TOKENS FOR RESPONSE GENERATION
         # store_user_consumed_tokens(user_info["id"], cb)
 
+def get_settings(client_principal):
+    # use cosmos to get settings from the logged user
+    data = get_setting(client_principal)
+    temperature = None if "temperature" not in data else data["temperature"]
+    model = None if "model" not in data else data["model"]
+    settings = {
+        "temperature": temperature,
+        "model": model,
+    }
+    logging.info(f"[orchestrator] settings: {settings}")
+    return settings
 
 async def stream_run(
     conversation_id: str,
