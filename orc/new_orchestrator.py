@@ -287,15 +287,15 @@ class ConversationOrchestrator:
         {state.query_category}
         <----------- END OF PROVIDED QUERY CATEGORY ------------>
 
-        Org Description:
+        Brand Information:
 
-        <----------- PROVIDED ORG DESCRIPTION ------------>
-        This is the organization that the user belongs to.
-        Whenever possible, incorporate organization description to tailor responses, ensuring that answers are highly relevant to the user's company, goals, and operational environment.        
-        Here is the organization description:
+        <----------- PROVIDED Brand Information ------------>
+        This is the Brand information for the organization that the user belongs to.
+        Whenever possible, incorporate Brand information to tailor responses, ensuring that answers are highly relevant to the user's company, goals, and operational environment.        
+        Here is the Brand information:
 
         {get_organization(self.organization_id).get('brandInformation','')}
-        <----------- END OF PROVIDED ORG DESCRIPTION ------------>
+        <----------- END OF PROVIDED Brand Information ------------>
 
         <----------- PROVIDED INDUSTRY DEFINITION ------------>
         This is the industry definition for the organization. This helps to understand the context of the organization and tailor responses accordingly
@@ -315,6 +315,9 @@ class ConversationOrchestrator:
         <----------- END OF PROVIDED SEGMENT SYNONYMS ------------>
 
         System prompt for tool calling (if applicable):
+
+        NOTE: When using the tool calling prompt, you should try to incorporate all the provided information from the Chat History and Brand information to tailor the response.
+        You should also ask you to provide more information if needed.
 
         <----------- SYSTEM PROMPT FOR TOOL CALLING ------------>
         """
