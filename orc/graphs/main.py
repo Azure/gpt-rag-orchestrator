@@ -63,6 +63,10 @@ def clean_chat_history(chat_history: List[dict]) -> str:
                 AI Message: {message}
     """
     formatted_history = []
+    if len(chat_history) > 4:
+        chat_history = chat_history[-4:]
+    else:
+        chat_history = chat_history
 
     for message in chat_history:
         if not message.get("content"):
