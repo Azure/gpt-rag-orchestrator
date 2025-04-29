@@ -294,9 +294,25 @@ class ConversationOrchestrator:
         Whenever possible, incorporate organization description to tailor responses, ensuring that answers are highly relevant to the user's company, goals, and operational environment.        
         Here is the organization description:
 
-        {get_organization(self.organization_id).get('orgDescription','')}
-
+        {get_organization(self.organization_id).get('brandInformation','')}
         <----------- END OF PROVIDED ORG DESCRIPTION ------------>
+
+        <----------- PROVIDED INDUSTRY DEFINITION ------------>
+        This is the industry definition for the organization. This helps to understand the context of the organization and tailor responses accordingly
+        Here is the industry definition:
+
+        {get_organization(self.organization_id).get('industryInformation','')}
+
+        <----------- END OF PROVIDED INDUSTRY DEFINITION ------------>
+
+        <----------- PROVIDED SEGMENT SYNONYMS ------------>
+        This is the segment synonyms for the organization.
+        This is the table of synonyms for the consumer segment of the organization.
+        If you are provided with a list of segements names, use this table to map the segment names to the consumer segment of the organization.
+
+        {get_organization(self.organization_id).get('segmentSynonyms','')}
+
+        <----------- END OF PROVIDED SEGMENT SYNONYMS ------------>
 
         System prompt for tool calling (if applicable):
 
