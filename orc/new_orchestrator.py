@@ -275,7 +275,7 @@ class ConversationOrchestrator:
         {context}
         <----------- END OF PROVIDED CONTEXT ------------>
 
-        Chat History:
+        Chat History (IMPORTANT, USED AS A CONTENXT FOR ANSWER WHENEVER APPLICABLE):
 
         <----------- PROVIDED CHAT HISTORY ------------>
         {self._clean_chat_history(history)}
