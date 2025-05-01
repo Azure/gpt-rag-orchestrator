@@ -22,6 +22,7 @@ from langchain_core.runnables import RunnableParallel
 from shared.cosmos_db import get_conversation_data
 from typing_extensions import Literal
 from pydantic import BaseModel, Field
+from shared.util import get_organization
 
 
 # initialize memory saver
@@ -125,6 +126,14 @@ class GraphBuilder:
             )
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Azure OpenAI: {str(e)}")
+    
+    def _init_brand_information(self) -> str:
+        """Retrieve brand information."""
+        return get_organization(self.organization_id).get('brandInformation','')
+    
+    def _init_industry_information(self) -> str:
+        """Retrieve industry information."""
+        return get_organization(self.organization_id).get('industryInformation','')
 
     def _init_retriever(self) -> CustomRetriever:
         try:
@@ -222,6 +231,20 @@ class GraphBuilder:
         <-------------------------------->  
         ```
         {state.chat_summary}
+        ```
+        <-------------------------------->
+
+        Brand Information:
+        <-------------------------------->
+        ```
+        {self._init_brand_information()}
+        ```
+        <-------------------------------->
+
+        Industry Information:
+        <-------------------------------->
+        ```
+        {self._init_industry_information()}
         ```
         <-------------------------------->
 
