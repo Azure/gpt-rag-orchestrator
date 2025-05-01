@@ -234,20 +234,6 @@ class GraphBuilder:
         ```
         <-------------------------------->
 
-        Brand Information:
-        <-------------------------------->
-        ```
-        {self._init_brand_information()}
-        ```
-        <-------------------------------->
-
-        Industry Information:
-        <-------------------------------->
-        ```
-        {self._init_industry_information()}
-        ```
-        <-------------------------------->
-
         Please rewrite the question to be used for searching the database.
         """
 
