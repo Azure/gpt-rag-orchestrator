@@ -89,7 +89,7 @@ class GraphConfig:
     azure_api_version: str = "2024-05-01-preview"
     azure_deployment: str = "gpt-4o-orchestrator"
     retriever_top_k: int = 5
-    reranker_threshold: float = 2
+    reranker_threshold: float = 2.3
     web_search_results: int = 2
     temperature: float = 0.3
     max_tokens: int = 5000
