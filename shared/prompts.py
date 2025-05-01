@@ -123,6 +123,7 @@ Key Requirements:
 6. Consider the target audience (marketing industry) when rewriting the query.
 7. If user asks for elaboration on the previous answer or provide more details on any specific point, you should not rewrite the query, you should just return the original query.
 8. Rewrite the query to a statement instead of a question
+9. Embed available brand and industry information in the query where applicable to better align the query with business goals. However, do not mention the brand name in the query.
 
 
 **IMPORTANT**: THE RESULT MUST BE THE REWRITTEN QUERY ONLY, NO OTHER TEXT.
