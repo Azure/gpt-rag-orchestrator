@@ -23,10 +23,11 @@ async def main(req: func.HttpRequest) -> func.HttpResponse:
         'name': client_principal_name,
         'group_names': client_group_names        
     }
+    is_work_mode = req_body.get('is_work_mode', False)
 
     if question:
 
-        result = await orchestrator.run(conversation_id, question, client_principal)
+        result = await orchestrator.run(conversation_id, question, client_principal, is_work_mode)
 
         return func.HttpResponse(json.dumps(result), mimetype="application/json", status_code=200)
     else:
