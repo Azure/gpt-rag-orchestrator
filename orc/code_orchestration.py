@@ -59,14 +59,16 @@ async def get_answer(history, security_ids,conversation_id, is_work_mode):
     #############################
 
     # work mode:
-    #  true - prioritize search retrieval
-    # false - prioritize bing retrieval
+    #  true - prioritize search retrieval, turn off bing search
+    # false - prioritize bing retrieval, turn off search retrieval
     if is_work_mode:
-        if SEARCH_RETRIEVAL:
-            RETRIEVAL_PRIORITY = "search"
+        SEARCH_RETRIEVAL = True
+        RETRIEVAL_PRIORITY = "search"
+        BING_RETRIEVAL = False
     else:
         if BING_RETRIEVAL:
             RETRIEVAL_PRIORITY = "bing"
+        SEARCH_RETRIEVAL = False
 
     #initialize variables
     answer_dict = {}
