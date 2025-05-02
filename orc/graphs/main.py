@@ -86,8 +86,8 @@ def clean_chat_history(chat_history: List[dict]) -> str:
 class GraphConfig:
     "Config for the graph builder"
 
-    azure_api_version: str = "2024-05-01-preview"
-    azure_deployment: str = "gpt-4o-orchestrator"
+    azure_api_version: str = "2025-01-01-preview"
+    azure_deployment: str = "gpt-4.1"
     retriever_top_k: int = 5
     reranker_threshold: float = 2.1
     web_search_results: int = 2
@@ -120,9 +120,11 @@ class GraphBuilder:
                 temperature=config.temperature,
                 openai_api_version=config.azure_api_version,
                 azure_deployment=config.azure_deployment,
-                streaming=True,
+                streaming=False,
                 timeout=30,
                 max_retries=3,
+                azure_endpoint=os.getenv("O1_ENDPOINT"),
+                api_key=os.getenv("O1_KEY")
             )
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Azure OpenAI: {str(e)}")
