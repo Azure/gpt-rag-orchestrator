@@ -2,18 +2,25 @@
 # The Python Worker is managed by Azure Functions platform
 # Manually managing azure-functions-worker may cause unexpected issues
 
-azure-cosmos==4.5.1
-azure-functions==1.17.0
-azure-identity==1.15.0
-azure-keyvault-secrets==4.7.0
-numpy==1.26.2
-openai==1.58.1
-semantic-kernel==1.17.1
-requests==2.32.0
-tiktoken==0.5.2
-tenacity==8.2.3
+#azurefunctions-extensions-http-fastapi
+# Obtaining azurefunctions-extensions-http-fastapi 1.0.0b3 from github to get pydantic 2.10.1 support
+git+https://github.com/Azure/azure-functions-python-extensions.git@dev#egg=azurefunctions-extensions-http-fastapi&subdirectory=azurefunctions-extensions-http-fastapi
+
+azure-cosmos==4.9.0
+azure-functions==1.21.3
+azure-identity==1.19.0
+azure-keyvault-secrets==4.9.0
+azure-appconfiguration==1.7.1
+azure.appconfiguration.provider==2.0.1
+numpy==2.2.4
+openai==1.69.0
+semantic-kernel==1.29
+requests==2.32.3
+tiktoken==0.9.0
+tenacity==9.0.0
 azure-cognitiveservices-search-customsearch==0.3.1
-beautifulsoup4==4.12.3
-pydantic==2.10.4
+beautifulsoup4==4.13.3
+#pydantic==2.10.4
 nbstripout==0.8.1
-nbconvert==7.16.4
+nbconvert==7.16.6
+grpcio==1.71.0

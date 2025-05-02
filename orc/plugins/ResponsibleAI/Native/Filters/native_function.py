@@ -11,8 +11,12 @@ if sys.version_info >= (3, 9):
 else:
     from typing_extensions import Annotated, Tuple, NamedTuple
 
+from orc.configuration import Configuration
+
+config = Configuration()
+
 # Set up logging
-LOGLEVEL = os.environ.get('LOGLEVEL', 'DEBUG').upper()
+LOGLEVEL = config.get_value('LOGLEVEL', 'DEBUG').upper()
 logging.basicConfig(level=LOGLEVEL)
 
 class ValidationResult(NamedTuple):

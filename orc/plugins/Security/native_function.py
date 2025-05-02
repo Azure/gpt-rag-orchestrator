@@ -1,4 +1,3 @@
-from shared.util import get_secret
 # from semantic_kernel.skill_definition import sk_function
 from semantic_kernel.functions import kernel_function
 import logging
@@ -10,8 +9,13 @@ if sys.version_info >= (3, 9):
     from typing import Annotated
 else:
     from typing_extensions import Annotated
-SECURITY_HUB_ENDPOINT = os.environ["SECURITY_HUB_ENDPOINT"]
-APIM_ENABLED=os.environ.get("APIM_ENABLED", "false")
+
+from orc.configuration import Configuration
+
+config = Configuration()
+
+SECURITY_HUB_ENDPOINT = config.get_value("SECURITY_HUB_ENDPOINT")
+APIM_ENABLED=config.get_value("APIM_ENABLED", "false")
 APIM_ENABLED=True if APIM_ENABLED.lower() == "true" else False
 class Security:
     @kernel_function(
@@ -24,7 +28,7 @@ class Security:
         security_hub_key: Annotated[str, "The key to access the security hub"]
     ) -> Annotated[bool, "Passed security checks"]:
         if APIM_ENABLED:
-            security_hub_endpoint=os.environ["APIM_SECURITY_HUB_ENDPOINT"]
+            security_hub_endpoint=config.get_value("APIM_SECURITY_HUB_ENDPOINT")
         else:
             security_hub_endpoint=SECURITY_HUB_ENDPOINT
         try:
@@ -58,7 +62,7 @@ class Security:
         security_hub_key: Annotated[str, "The key to access the security hub"]
     ) -> Annotated[bool, "Passed security checks"]:
         if APIM_ENABLED:
-            security_hub_endpoint=os.environ["APIM_SECURITY_HUB_ENDPOINT"]
+            security_hub_endpoint=config.get_value("APIM_SECURITY_HUB_ENDPOINT")
         else:
             security_hub_endpoint=SECURITY_HUB_ENDPOINT
         try:
@@ -93,7 +97,7 @@ class Security:
         security_hub_key: str
     ) -> Dict:
         if APIM_ENABLED:
-            security_hub_endpoint=os.environ["APIM_SECURITY_HUB_ENDPOINT"]
+            security_hub_endpoint=config.get_value("APIM_SECURITY_HUB_ENDPOINT")
         else:
             security_hub_endpoint=SECURITY_HUB_ENDPOINT
         try:

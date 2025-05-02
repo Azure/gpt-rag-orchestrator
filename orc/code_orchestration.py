@@ -9,48 +9,52 @@ from orc.plugins.ResponsibleAI.wrapper import fairness
 from semantic_kernel.functions.kernel_arguments import KernelArguments
 from semantic_kernel.functions import KernelPlugin
 from shared.util import call_semantic_function, get_chat_history_as_messages, get_message, get_last_messages,get_possitive_int_or_default
-from shared.util import get_blocked_list, create_kernel, get_usage_tokens, escape_xml_characters,get_secret
+from shared.util import get_blocked_list, create_kernel, get_usage_tokens, escape_xml_characters
 import asyncio
 import xml.sax.saxutils as saxutils
+
+from orc.configuration import Configuration
+
+config = Configuration()
 
 # logging level
 
 logging.getLogger('azure').setLevel(logging.WARNING)
-LOGLEVEL = os.environ.get('LOGLEVEL', 'debug').upper()
+LOGLEVEL = config.get_value('LOGLEVEL', 'debug').upper()
 logging.basicConfig(level=LOGLEVEL)
 myLogger = logging.getLogger(__name__)
 
 # Env Variables
 
-BLOCKED_LIST_CHECK = os.environ.get("BLOCKED_LIST_CHECK") or "true"
+BLOCKED_LIST_CHECK = config.get_value("BLOCKED_LIST_CHECK") or "true"
 BLOCKED_LIST_CHECK = True if BLOCKED_LIST_CHECK.lower() == "true" else False
-GROUNDEDNESS_CHECK = os.environ.get("GROUNDEDNESS_CHECK") or "true"
+GROUNDEDNESS_CHECK = config.get_value("GROUNDEDNESS_CHECK") or "true"
 GROUNDEDNESS_CHECK = True if GROUNDEDNESS_CHECK.lower() == "true" else False
-RESPONSIBLE_AI_CHECK = os.environ.get("RESPONSIBLE_AI_CHECK") or "true"
+RESPONSIBLE_AI_CHECK = config.get_value("RESPONSIBLE_AI_CHECK") or "true"
 RESPONSIBLE_AI_CHECK = True if RESPONSIBLE_AI_CHECK.lower() == "true" else False
-SECURITY_HUB_CHECK = os.environ.get("SECURITY_HUB_CHECK") or "false"
+SECURITY_HUB_CHECK = config.get_value("SECURITY_HUB_CHECK", "false")
 SECURITY_HUB_CHECK = True if SECURITY_HUB_CHECK.lower() == "true" else False
-SECURITY_HUB_AUDIT = os.environ.get("SECURITY_HUB_AUDIT") or "false"
+SECURITY_HUB_AUDIT = config.get_value("SECURITY_HUB_AUDIT", "false")
 SECURITY_HUB_AUDIT = True if SECURITY_HUB_AUDIT.lower() == "true" else False
-CONVERSATION_METADATA = os.environ.get("CONVERSATION_METADATA") or "true"
+CONVERSATION_METADATA = config.get_value("CONVERSATION_METADATA") or "true"
 CONVERSATION_METADATA = True if CONVERSATION_METADATA.lower() == "true" else False
 
-AZURE_OPENAI_CHATGPT_MODEL = os.environ.get("AZURE_OPENAI_CHATGPT_MODEL")
-CONVERSATION_MAX_HISTORY = os.environ.get("CONVERSATION_MAX_HISTORY") or "3"
+AZURE_OPENAI_CHATGPT_MODEL = config.get_value("AZURE_OPENAI_CHATGPT_MODEL")
+CONVERSATION_MAX_HISTORY = config.get_value("CONVERSATION_MAX_HISTORY") or "3"
 CONVERSATION_MAX_HISTORY = int(CONVERSATION_MAX_HISTORY)
 ORCHESTRATOR_FOLDER = "orc"
 PLUGINS_FOLDER = f"{ORCHESTRATOR_FOLDER}/plugins"
 BOT_DESCRIPTION_FILE = f"{ORCHESTRATOR_FOLDER}/bot_description.prompt"
-BING_RETRIEVAL = os.environ.get("BING_RETRIEVAL") or "false"
+BING_RETRIEVAL = config.get_value("BING_RETRIEVAL") or "false"
 BING_RETRIEVAL = True if BING_RETRIEVAL.lower() == "true" else False
-SEARCH_RETRIEVAL = os.environ.get("SEARCH_RETRIEVAL") or "true"
+SEARCH_RETRIEVAL = config.get_value("SEARCH_RETRIEVAL") or "true"
 SEARCH_RETRIEVAL = True if SEARCH_RETRIEVAL.lower() == "true" else False
-RETRIEVAL_PRIORITY = os.environ.get("RETRIEVAL_PRIORITY") or "search"
-SEVERITY_THRESHOLD = os.environ.get("SEVERITY_THRESHOLD") or 3
-APIM_ENABLED = os.environ.get("APIM_ENABLED") or "false"
+RETRIEVAL_PRIORITY = config.get_value("RETRIEVAL_PRIORITY") or "search"
+SEVERITY_THRESHOLD = config.get_value("SEVERITY_THRESHOLD") or 3
+APIM_ENABLED = config.get_value("APIM_ENABLED") or "false"
 APIM_ENABLED = True if APIM_ENABLED.lower() == "true" else False
 if SECURITY_HUB_CHECK:
-    SECURITY_HUB_THRESHOLDS=[get_possitive_int_or_default(os.environ.get("SECURITY_HUB_HATE_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SELFHARM_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SEXUAL_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_VIOLENCE_THRESHHOLD"), 0)]
+    SECURITY_HUB_THRESHOLDS=[get_possitive_int_or_default(config.get_value("SECURITY_HUB_HATE_THRESHHOLD"), 0),get_possitive_int_or_default(config.get_value("SECURITY_HUB_SELFHARM_THRESHHOLD"), 0),get_possitive_int_or_default(config.get_value("SECURITY_HUB_SEXUAL_THRESHHOLD"), 0),get_possitive_int_or_default(config.get_value("SECURITY_HUB_VIOLENCE_THRESHHOLD"), 0)]
 
 async def get_answer(history, security_ids,conversation_id):
 
@@ -80,7 +84,7 @@ async def get_answer(history, security_ids,conversation_id):
     completion_tokens = 0
     apim_key=None
     if APIM_ENABLED:
-        apim_key = await get_secret("apimSubscriptionKey")
+        apim_key = config.get("APIM_SUBSCRIPTION_KEY")
     # get user question
     messages = get_chat_history_as_messages(history, include_last_turn=True)
     ask = messages[-1]['content']
@@ -140,7 +144,7 @@ async def get_answer(history, security_ids,conversation_id):
                 logging.info(f"[code_orchest] checking question with security hub. question: {ask[:50]}")
                 start_time = time.time()
                 arguments["answer"] = answer
-                security_hub_key=await get_secret("securityHubKey")
+                security_hub_key=await config.get("SECURITY_HUB_KEY")
                 securityPlugin = await securityPluginTask
                 security_check = await kernel.invoke(securityPlugin["QuestionSecurityCheck"], KernelArguments(question=ask,security_hub_key=security_hub_key))
                 check_results = security_check.value["results"]
@@ -232,8 +236,8 @@ async def get_answer(history, security_ids,conversation_id):
                     if APIM_ENABLED:
                         bing_api_key=apim_key
                     else:
-                        bing_api_key=await get_secret("bingapikey")
-                    bing_custom_config_id=await get_secret("bingCustomConfigID")
+                        bing_api_key=await config.get("BING_API_KEY")
+                    bing_custom_config_id=await config.get("BING_CUSTOM_CONFIG_ID")
                     bing_function_result= await kernel.invoke(retrievalPlugin["BingRetrieval"], KernelArguments(input=search_query, bing_api_key=bing_api_key, bing_custom_config_id=bing_custom_config_id))
                     formatted_sources = bing_function_result.value[:100].replace('\n', ' ')
                     escaped_sources = escape_xml_characters(bing_function_result.value)
@@ -359,7 +363,7 @@ async def get_answer(history, security_ids,conversation_id):
                         if name!="groundedness":
                             all_passed = False
                             break
-                        elif check_details.get("groundedness", {}).get("ungroundedPercentage", 1) > float(os.environ.get("SECURITY_HUB_UNGROUNDED_PERCENTAGE_THRESHHOLD",0)):
+                        elif check_details.get("groundedness", {}).get("ungroundedPercentage", 1) > float(config.get_value("SECURITY_HUB_UNGROUNDED_PERCENTAGE_THRESHHOLD",0)):
                             all_passed = False
                             break
                 all_below_threshold = all(category["severity"] <= SECURITY_HUB_THRESHOLDS[index] for index,category in check_details.get("categoriesAnalysis", []))
