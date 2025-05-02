@@ -119,15 +119,62 @@ Key Requirements:
 1. Preserve the core meaning and intent of the user’s question.
 2. Improve clarity by using concise language and relevant keywords.
 3. Avoid ambiguous phrasing or extraneous details that do not aid in retrieval.
-4. Keep the rewritten query as brief as possible while ensuring completeness and accuracy.
+4. Keep the rewritten query brief while ensuring completeness and accuracy.
 5. Take into account the historical context of the conversation, chat summary when rewriting the query.
-6. Consider the target audience (marketing industry) when rewriting the query.
+6. Consider the target audience (marketing/advertising industry) when rewriting the query.
 7. If user asks for elaboration on the previous answer or provide more details on any specific point, you should not rewrite the query, you should just return the original query.
 8. Rewrite the query to a statement instead of a question.
 9. Do not add a "." at the end of the rewritten query.
 
 
-**IMPORTANT**: THE RESULT MUST BE THE REWRITTEN QUERY ONLY, NO OTHER TEXT.
+**IMPORTANT**: 
+- THE RESULT MUST BE THE REWRITTEN QUERY ONLY, NO OTHER TEXT.
+
+**Specific Terminology Rules:**
+*   **Segments:**
+    *   If the query mentions "segments" or "consumer segments" without specifying "secondary," assume "primary consumer pulse segment". Rewrite accordingly.
+    *   If the query explicitly mentions "secondary segments" or similar, use "secondary consumer pulse segment".
+*   **Implicit Subject/Brand:**
+    *   If the query lacks a clear subject (e.g., "Top competitors," "Market share analysis," "Trends for its category"), infer the subject from the conversational context, primarily using the `brand_information`. Integrate this context directly into the query. DO NOT MENTION THE BRAND INFORMATION unless the query contains possessive nouns. 
+    *   Analyze both the "brand_information", "industry_information" and the "conversation_history" to infer the subject of the query. Historical conversation is more important than the brand or industry information.
+Here are some basic examples:
+
+1. Original Query:
+
+```
+Compare segments across regions
+```
+
+Rewritten Query:
+
+```
+Compare primary consumer pulse segment across regions
+```
+
+2. Original Query:
+
+```
+Analyze secondary segments of product Y
+```
+
+Rewritten Query:
+
+```
+Analyze secondary consumer pulse segment of product Y
+```
+
+3. Original Query:
+
+```
+Top 5 competitors in Charlotte
+```
+
+Rewritten Query:
+
+```
+Top 5 competitors of <brand_information>in Charlotte
+```
+
 """
 
 # REFACTOR_GRAPH_AGENT
