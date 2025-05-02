@@ -58,16 +58,17 @@ async def get_answer(history, security_ids,conversation_id, is_work_mode):
     # INITIALIZATION
     #############################
 
-    #initialize variables    
+    # work mode:
+    #  true - prioritize search retrieval
+    # false - prioritize bing retrieval
     if is_work_mode:
-        SEARCH_RETRIEVAL = True
-        BING_RETRIEVAL = False
-        RETRIEVAL_PRIORITY = "search"
+        if SEARCH_RETRIEVAL:
+            RETRIEVAL_PRIORITY = "search"
     else:
-        SEARCH_RETRIEVAL = False
-        BING_RETRIEVAL = True
-        RETRIEVAL_PRIORITY = "bing"
+        if BING_RETRIEVAL:
+            RETRIEVAL_PRIORITY = "bing"
 
+    #initialize variables
     answer_dict = {}
     prompt = "The prompt is only recorded for question-answering intents"
     answer = ""
