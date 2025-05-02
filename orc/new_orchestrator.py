@@ -24,6 +24,9 @@ from langchain_core.messages import (
     SystemMessage as LangchainSystemMessage,
     RemoveMessage,
 )
+
+from shared.util import get_setting
+
 from langchain.schema import Document
 from shared.prompts import (
     MARKETING_ORC_PROMPT,
@@ -35,6 +38,7 @@ from shared.prompts import (
     CREATIVE_COPYWRITER_PROMPT,
 )
 from shared.tools import num_tokens_from_string, messages_to_string
+from shared.util import get_organization
 from dotenv import load_dotenv
 
 from azure.ai.inference import ChatCompletionsClient
@@ -238,7 +242,7 @@ class ConversationOrchestrator:
         user_info: dict,
         memory_data: str,
         start_time: float,
-        model_name: str = "DeepSeek-V3-0324",
+        user_settings: dict = None,
     ):
         """Generate final response using context and query."""
         logging.info(
@@ -248,7 +252,7 @@ class ConversationOrchestrator:
             "conversation_id": conversation_id,
             "thoughts": [
                 f"""
-                Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Web Search: {state.requires_web_search} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=False)}"""
+                Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Web Search: {state.requires_web_search} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=False)}"""
             ],
         }
         yield json.dumps(data)
@@ -271,7 +275,7 @@ class ConversationOrchestrator:
         {context}
         <----------- END OF PROVIDED CONTEXT ------------>
 
-        Chat History:
+        Chat History (IMPORTANT, USED AS A CONTENXT FOR ANSWER WHENEVER APPLICABLE):
 
         <----------- PROVIDED CHAT HISTORY ------------>
         {self._clean_chat_history(history)}
@@ -283,7 +287,37 @@ class ConversationOrchestrator:
         {state.query_category}
         <----------- END OF PROVIDED QUERY CATEGORY ------------>
 
+        Brand Information:
+
+        <----------- PROVIDED Brand Information ------------>
+        This is the Brand information for the organization that the user belongs to.
+        Whenever possible, incorporate Brand information to tailor responses, ensuring that answers are highly relevant to the user's company, goals, and operational environment.        
+        Here is the Brand information:
+
+        {get_organization(self.organization_id).get('brandInformation','')}
+        <----------- END OF PROVIDED Brand Information ------------>
+
+        <----------- PROVIDED INDUSTRY DEFINITION ------------>
+        This is the industry definition for the organization. This helps to understand the context of the organization and tailor responses accordingly
+        Here is the industry definition:
+
+        {get_organization(self.organization_id).get('industryInformation','')}
+
+        <----------- END OF PROVIDED INDUSTRY DEFINITION ------------>
+
+        <----------- PROVIDED SEGMENT SYNONYMS ------------>
+        This is the segment synonyms for the organization.
+        This is the table of synonyms for the consumer segment of the organization.
+        If you are provided with a list of segements names, use this table to map the segment names to the consumer segment of the organization.
+
+        {get_organization(self.organization_id).get('segmentSynonyms','')}
+
+        <----------- END OF PROVIDED SEGMENT SYNONYMS ------------>
+
         System prompt for tool calling (if applicable):
+
+        NOTE: When using the tool calling prompt, you should try to incorporate all the provided information from the Chat History and Brand information to tailor the response.
+        You should also ask you to provide more information if needed.
 
         <----------- SYSTEM PROMPT FOR TOOL CALLING ------------>
         """
@@ -312,14 +346,14 @@ class ConversationOrchestrator:
         complete_response = ""
 
         try:
-            if model_name == "gpt-4.1":
+            if user_settings['model'] == "gpt-4.1":
                 logging.info(
                     f"[orchestrator-generate_response] Streaming response from Azure Chat OpenAI"
                 )
                 response_llm = AzureChatOpenAI(
-                    temperature=0,
+                    temperature=user_settings['temperature'],
                     openai_api_version="2025-01-01-preview",
-                    azure_deployment=model_name,
+                    azure_deployment=user_settings['model'],
                     streaming=True,
                     timeout=30,
                     max_retries=3,
@@ -356,9 +390,9 @@ class ConversationOrchestrator:
                         SystemMessage(content=system_prompt),
                         UserMessage(content=prompt),
                     ],
-                    model=model_name,
+                    model=user_settings['model'],
                     max_tokens=10000,
-                    temperature=0,
+                    temperature=user_settings['temperature'],
                     stream=True,
                 )
 
@@ -390,7 +424,7 @@ class ConversationOrchestrator:
                     "role": "assistant",
                     "content": answer,
                     "thoughts": [
-                        f"""Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Web Search: {state.requires_web_search} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=False)}"""
+                        f"""Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Web Search: {state.requires_web_search} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=False)}"""
                     ],
                 },
             ]
@@ -412,6 +446,17 @@ class ConversationOrchestrator:
         # TODO: ENABLE CONSUME TOKENS FOR RESPONSE GENERATION
         # store_user_consumed_tokens(user_info["id"], cb)
 
+def get_settings(client_principal):
+    # use cosmos to get settings from the logged user
+    data = get_setting(client_principal)
+    temperature = None if "temperature" not in data else data["temperature"]
+    model = None if "model" not in data else data["model"]
+    settings = {
+        "temperature": temperature,
+        "model": model,
+    }
+    logging.info(f"[orchestrator] settings: {settings}")
+    return settings
 
 async def stream_run(
     conversation_id: str,
@@ -431,4 +476,5 @@ async def stream_run(
         client_principal,
         resources["memory_data"],
         resources["start_time"],
+        organization_id,
     )

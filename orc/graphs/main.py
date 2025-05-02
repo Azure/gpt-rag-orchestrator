@@ -22,6 +22,7 @@ from langchain_core.runnables import RunnableParallel
 from shared.cosmos_db import get_conversation_data
 from typing_extensions import Literal
 from pydantic import BaseModel, Field
+from shared.util import get_organization
 
 
 # initialize memory saver
@@ -63,6 +64,10 @@ def clean_chat_history(chat_history: List[dict]) -> str:
                 AI Message: {message}
     """
     formatted_history = []
+    if len(chat_history) > 4:
+        chat_history = chat_history[-4:]
+    else:
+        chat_history = chat_history
 
     for message in chat_history:
         if not message.get("content"):
@@ -84,7 +89,7 @@ class GraphConfig:
     azure_api_version: str = "2024-05-01-preview"
     azure_deployment: str = "gpt-4o-orchestrator"
     retriever_top_k: int = 5
-    reranker_threshold: float = 2
+    reranker_threshold: float = 2.1
     web_search_results: int = 2
     temperature: float = 0.3
     max_tokens: int = 5000
@@ -121,6 +126,14 @@ class GraphBuilder:
             )
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Azure OpenAI: {str(e)}")
+    
+    def _init_brand_information(self) -> str:
+        """Retrieve brand information."""
+        return get_organization(self.organization_id).get('brandInformation','')
+    
+    def _init_industry_information(self) -> str:
+        """Retrieve industry information."""
+        return get_organization(self.organization_id).get('industryInformation','')
 
     def _init_retriever(self) -> CustomRetriever:
         try:
