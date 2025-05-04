@@ -15,3 +15,8 @@ RUN pip install -r /requirements.txt
 
 COPY orc /home/site/wwwroot/orc
 COPY shared /home/site/wwwroot/shared
+
+#COPY orc/host-keys.json /runtime/secrets/host.json
+
+#ENV FUNCTIONS_SECRETS_PATH=/runtime/secrets
+

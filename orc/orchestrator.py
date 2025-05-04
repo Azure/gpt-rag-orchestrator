@@ -6,7 +6,6 @@ from azure.cosmos.aio import CosmosClient
 from datetime import datetime
 from orc.configuration import Configuration
 from shared.util import format_answer
-from azure.identity.aio import ManagedIdentityCredential, AzureCliCredential, ChainedTokenCredential
 import orc.code_orchestration as code_orchestration
 from dotenv import load_dotenv
 
@@ -33,10 +32,8 @@ AZURE_OPENAI_STREAM = True if AZURE_OPENAI_STREAM.lower() == "true" else False
 
 ANSWER_FORMAT = "html" # html, markdown, none
 
-credential = ChainedTokenCredential(
-                ManagedIdentityCredential(),
-                AzureCliCredential()
-            )
+from orc.configuration import Configuration
+config = Configuration()
     
 def generate_security_ids(client_principal):
     security_ids = 'anonymous'
@@ -59,7 +56,7 @@ async def run(conversation_id, ask, client_principal):
     logging.info(f"[orchestrator] {conversation_id} starting conversation flow.")
 
     # get conversation
-    async with CosmosClient(AZURE_DB_URI, credential=credential) as db_client:
+    async with CosmosClient(AZURE_DB_URI, credential=config.credential) as db_client:
         db = db_client.get_database_client(database=AZURE_DB_NAME)
         container = db.get_container_client('conversations')
         try:

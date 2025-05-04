@@ -4,14 +4,15 @@
 
 #azurefunctions-extensions-http-fastapi
 # Obtaining azurefunctions-extensions-http-fastapi 1.0.0b3 from github to get pydantic 2.10.1 support
-git+https://github.com/Azure/azure-functions-python-extensions.git@dev#egg=azurefunctions-extensions-http-fastapi&subdirectory=azurefunctions-extensions-http-fastapi
+#git+https://github.com/Azure/azure-functions-python-extensions.git@dev#egg=azurefunctions-extensions-http-fastapi&subdirectory=azurefunctions-extensions-http-fastapi
 
 azure-cosmos==4.9.0
-azure-functions==1.21.3
-azure-identity==1.19.0
+azure-functions==1.23.0
+azure-functions-durable==1.2.10
+azure-identity==1.21.0
 azure-keyvault-secrets==4.9.0
 azure-appconfiguration==1.7.1
-azure.appconfiguration.provider==2.0.1
+azure.appconfiguration.provider==2.1.0
 numpy==2.2.4
 openai==1.69.0
 semantic-kernel==1.29
