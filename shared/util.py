@@ -179,6 +179,8 @@ async def chat_complete(messages, functions, params={}, function_call='auto',api
     response_time =  round(time.time() - start_time,2)
     logging.info(f"[util__module] called chat completion api in {response_time:.6f} seconds")
 
+    logging.info(f"[util__module] chat_complete: {response}")
+
     return response
 
 ##########################################################
