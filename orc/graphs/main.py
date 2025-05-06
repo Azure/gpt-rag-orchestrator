@@ -336,6 +336,19 @@ class GraphBuilder:
     def _retrieve_context(self, state: ConversationState) -> dict:
         """Get relevant documents from vector store."""
         docs = self.retriever.invoke(state.rewritten_query)
+        print(f"total number of docs: {len(docs)}")
+
+        if docs:
+            # print id of the first document in the list
+            print(f'Document ID of the top ranked doc: {docs[0].id}')
+            # get adjacent chunks
+            adjacent_chunks = self.retriever._search_adjacent_pages(docs[0].id)
+            # reformat adjacent chunks
+            if adjacent_chunks:
+                adjacent_chunks = [Document(page_content=chunk['content'], metadata={'source': chunk['filepath'], 'score': "adjacent chunk"}) for chunk in adjacent_chunks]
+                print(f"total number of docs before adding adjacent chunks: {len(docs)}")
+                docs.extend(adjacent_chunks)
+                print(f"total number of docs after adding adjacent chunks: {len(docs)}")
         return {
             "context_docs": docs,
             "requires_web_search": len(docs) < 3,
