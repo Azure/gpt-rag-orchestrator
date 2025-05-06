@@ -35,13 +35,29 @@ async def get_credentials():
             ) as credential:
         return credential
     
+#def generate_security_ids(client_principal):
+#    security_ids = 'anonymous'
+#    if client_principal is not None:
+#        group_names = client_principal['group_names']
+#        security_ids = f"{client_principal['id']}" + (f",{group_names}" if group_names else "")
+#    return security_ids    
+
+
 def generate_security_ids(client_principal):
     security_ids = 'anonymous'
     if client_principal is not None:
-        group_names = client_principal['group_names']
-        security_ids = f"{client_principal['id']}" + (f",{group_names}" if group_names else "")
-    return security_ids    
-    
+        raw_group_names = client_principal['group_names']
+        if isinstance(raw_group_names, str):
+            # Attempt to split the string into a list assuming it's comma-separated
+            group_list = [g.strip() for g in raw_group_names.split(',')]
+        else:
+            group_list = raw_group_names if isinstance(raw_group_names, list) else []
+        # Join the group names into a string, ignoring None values if desired
+        group_str = ', '.join(str(g) for g in group_list)
+        security_ids = f"{client_principal['id']}" + (f", {group_str}" if group_str else "")
+    return security_ids
+
+
 async def run(conversation_id, ask, client_principal):
     
     start_time = time.time()
