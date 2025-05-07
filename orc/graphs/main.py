@@ -129,6 +129,10 @@ class GraphBuilder:
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Azure OpenAI: {str(e)}")
     
+    def _init_segment_alias(self) -> str:
+        """Retrieve segment alias."""
+        return get_organization(self.organization_id).get('segmentSynonyms','')
+    
     def _init_brand_information(self) -> str:
         """Retrieve brand information."""
         return get_organization(self.organization_id).get('brandInformation','')
@@ -229,6 +233,12 @@ class GraphBuilder:
         ```
         <-------------------------------->
 
+        Alias-to-Segment Mappings:
+        <-------------------------------->
+        ```
+        {self._init_segment_alias()}
+        ```
+        <-------------------------------->
         Brand Information:
         <-------------------------------->
         ```
