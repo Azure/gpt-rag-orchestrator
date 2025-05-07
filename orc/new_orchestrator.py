@@ -270,6 +270,11 @@ class ConversationOrchestrator:
         additional_context = f"""
 
         Context: (MUST PROVIDE CITATIONS FOR ALL SOURCES USED IN THE ANSWER)
+
+        <----------- PROVIDED SEGMENT ALIAS (VERY CRITICAL, MUST FOLLOW) ------------>
+        Here is the segment alias:
+        {get_organization(self.organization_id).get('segmentSynonyms','')}
+        <----------- END OF PROVIDED SEGMENT ALIAS ------------>
         
         <----------- PROVIDED CONTEXT ------------>
         {context}
@@ -304,15 +309,6 @@ class ConversationOrchestrator:
         {get_organization(self.organization_id).get('industryInformation','')}
 
         <----------- END OF PROVIDED INDUSTRY DEFINITION ------------>
-
-        <----------- PROVIDED SEGMENT SYNONYMS ------------>
-        This is the segment synonyms for the organization.
-        This is the table of synonyms for the consumer segment of the organization.
-        If you are provided with a list of segements names, use this table to map the segment names to the consumer segment of the organization.
-
-        {get_organization(self.organization_id).get('segmentSynonyms','')}
-
-        <----------- END OF PROVIDED SEGMENT SYNONYMS ------------>
 
         System prompt for tool calling (if applicable):
 
