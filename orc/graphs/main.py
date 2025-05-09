@@ -129,6 +129,10 @@ class GraphBuilder:
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Azure OpenAI: {str(e)}")
     
+    def _init_segment_alias(self) -> str:
+        """Retrieve segment alias."""
+        return get_organization(self.organization_id).get('segmentSynonyms','')
+    
     def _init_brand_information(self) -> str:
         """Retrieve brand information."""
         return get_organization(self.organization_id).get('brandInformation','')
@@ -229,6 +233,21 @@ class GraphBuilder:
         ```
         <-------------------------------->
 
+        Alias-to-Segment Mappings:
+        <-------------------------------->
+
+        Critical Rule – Contextual Consistency with Alias Mapping:
+
+        When rewriting queries using historical conversation context, you MUST NOT directly use the segment name (A) from the alias mapping table if it was originally referred to using an alias (B). Instead:
+            •	Always check whether the segment reference in the historical context is an alias (B).
+            •	If so, map it to the official segment name (A) using the alias mapping table.
+            •	Only use the official name (A) in the rewritten query.
+
+        This ensures that both direct user input and any inferred historical references are consistently normalized to the canonical segment naming convention.
+        ```
+        {self._init_segment_alias()}
+        ```
+        <-------------------------------->
         Brand Information:
         <-------------------------------->
         ```
@@ -336,6 +355,19 @@ class GraphBuilder:
     def _retrieve_context(self, state: ConversationState) -> dict:
         """Get relevant documents from vector store."""
         docs = self.retriever.invoke(state.rewritten_query)
+        print(f"total number of docs: {len(docs)}")
+
+        if docs:
+            # print id of the first document in the list
+            print(f'Document ID of the top ranked doc: {docs[0].id}')
+            # get adjacent chunks
+            adjacent_chunks = self.retriever._search_adjacent_pages(docs[0].id)
+            # reformat adjacent chunks
+            if adjacent_chunks:
+                adjacent_chunks = [Document(page_content=chunk['content'], metadata={'source': chunk['filepath'], 'score': "adjacent chunk"}) for chunk in adjacent_chunks]
+                print(f"total number of docs before adding adjacent chunks: {len(docs)}")
+                docs.extend(adjacent_chunks)
+                print(f"total number of docs after adding adjacent chunks: {len(docs)}")
         return {
             "context_docs": docs,
             "requires_web_search": len(docs) < 3,
