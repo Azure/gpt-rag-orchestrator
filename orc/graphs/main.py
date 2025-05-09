@@ -235,6 +235,15 @@ class GraphBuilder:
 
         Alias-to-Segment Mappings:
         <-------------------------------->
+
+        Critical Rule – Contextual Consistency with Alias Mapping:
+
+        When rewriting queries using historical conversation context, you MUST NOT directly use the segment name (A) from the alias mapping table if it was originally referred to using an alias (B). Instead:
+            •	Always check whether the segment reference in the historical context is an alias (B).
+            •	If so, map it to the official segment name (A) using the alias mapping table.
+            •	Only use the official name (A) in the rewritten query.
+
+        This ensures that both direct user input and any inferred historical references are consistently normalized to the canonical segment naming convention.
         ```
         {self._init_segment_alias()}
         ```
