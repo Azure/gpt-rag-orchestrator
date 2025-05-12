@@ -9,10 +9,20 @@ from orc.configuration import Configuration
 config = Configuration()
 
 LOGLEVEL = config.get_value('LOGLEVEL', 'DEBUG').upper()
+if LOGLEVEL == 'DEBUG':
+    LOGLEVEL = logging.DEBUG
+elif LOGLEVEL == 'INFO':
+    LOGLEVEL = logging.INFO
+elif LOGLEVEL == 'WARNING':
+    LOGLEVEL = logging.WARNING
+elif LOGLEVEL == 'ERROR':
+    LOGLEVEL = logging.ERROR
+
 logging.basicConfig(level=LOGLEVEL)
 
+authType = config.get_value('FUNC_AUTH_TYPE', 'function').upper()
 # Create the Function App with the desired auth level.
-app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
+app = func.FunctionApp(http_auth_level=authType)
 
 async def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
