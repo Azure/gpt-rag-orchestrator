@@ -20,3 +20,4 @@ COPY shared /home/site/wwwroot/shared
 
 #ENV FUNCTIONS_SECRETS_PATH=/runtime/secrets
 
+EXPOSE 80

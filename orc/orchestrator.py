@@ -17,6 +17,7 @@ config = Configuration()
 logging.getLogger('azure').setLevel(logging.WARNING)
 logging.getLogger('azure.cosmos').setLevel(logging.WARNING)
 LOGLEVEL = config.get_value('LOGLEVEL', 'DEBUG').upper()
+LOGLEVEL = getattr(logging, LOGLEVEL, logging.INFO)
 logging.basicConfig(level=LOGLEVEL)
 
 # Constants set from environment variables (external services credentials and configuration)
