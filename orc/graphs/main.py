@@ -322,11 +322,39 @@ class GraphBuilder:
         Reply with **only** the exact category name — no additional text, explanations, or formatting.
         """
 
+        alias_instruction = f"""
+        Alias-to-Segment Mappings:
+        <-------------------------------->
+        alias to segment mappings typically look like this:
+        A -> B
+        
+        This mapping is mostly used in consumer segmentation context.
+        
+        Critical Rule – Contextual Consistency with Alias Mapping:
+    •	Always check whether the segment reference in the historical conversation is an alias (B). For example, historical conversation may mention "B" segment, but whenever you read the context in order to rewrite the query, you must map it to the official segment name "A" using the alias mapping table.
+    •	ALWAYS use the official name (A) in the rewritten query.
+    •	NEVER EVER use the alias (B) in the rewritten query. 
+
+        Here is the actual alias to segment mappings:
+        ```
+        {self._init_segment_alias()}
+        ```
+        <-------------------------------->
+        """
+
+        user_prompt = f"""
+        User's query:
+        {state.question}
+        ----------------------------------------
+        Below is the alias instruction. Your main focus is rewrite the user's query though. HOWEVER, you must follow the alias instruction at all cost. Pay attention to all user query that may contain a consumer segment and rewrite it using the alias mapping table.
+        {alias_instruction}
+        """
+
 
         response = self.llm.invoke(
             [
                 SystemMessage(content=category_prompt),
-                HumanMessage(content=state.question),
+                HumanMessage(content=user_prompt),
             ],
             temperature=0
         )
