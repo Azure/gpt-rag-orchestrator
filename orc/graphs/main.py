@@ -219,11 +219,8 @@ class GraphBuilder:
         conversation_data = get_conversation_data(self.conversation_id)
         history = conversation_data.get("history", [])
 
-        prompt = f"""Original Question: 
-        <-------------------------------->
-        ```
-        {question}. 
-        ```
+        # additional system prompt
+        additional_system_prompt = f"""
         <-------------------------------->
         
         Historical Conversation Context:
@@ -233,9 +230,9 @@ class GraphBuilder:
         ```
         <-------------------------------->
 
-        Alias-to-Segment Mappings:
+        **Alias segment mappings:**
         <-------------------------------->
-        alias to segment mappings typically look like this:
+        alias to segment mappings typically look like this (Official Name -> Alias):
         A -> B
         
         This mapping is mostly used in consumer segmentation context. 
@@ -246,10 +243,18 @@ class GraphBuilder:
     •	DO NOT use the alias (B) in the rewritten query. 
 
         Here is the actual alias to segment mappings:
+        
+        **Official Segment Name Mappings (Official Name -> Alias):**
         ```
         {self._init_segment_alias()}
         ```
 
+        For example, if the historical conversation mentions "B", and the original question also mentions "B", you must rewrite the question to use "A" instead of "B".
+
+        Look, if a mapping in the instruction is like this:
+        students -> young kids 
+
+        Though the historical conversation and the orignal question may mention "students", you must rewrite the question to use "young kids" instead of "students".
 
         <-------------------------------->
         Brand Information:
@@ -265,11 +270,20 @@ class GraphBuilder:
         {self._init_industry_information()}
         ```
         <-------------------------------->
-        
 
-        Please rewrite the question to be used for searching the database.
         """
+        # combine the system prompt with the additional system prompt
+        system_prompt = f"{system_prompt}\n\n{additional_system_prompt}"
 
+        prompt = f"""Original Question: 
+        <-------------------------------->
+        ```
+        {question}. 
+        ```
+        <-------------------------------->
+
+        Please rewrite the question to be used for searching the database. Make sure to follow the alias mapping instructions at all cost.
+        """
         rewritte_query = self.llm.invoke(
             [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
         )
@@ -321,40 +335,10 @@ class GraphBuilder:
 
         Reply with **only** the exact category name — no additional text, explanations, or formatting.
         """
-
-        alias_instruction = f"""
-        Alias-to-Segment Mappings:
-        <-------------------------------->
-        alias to segment mappings typically look like this:
-        A -> B
-        
-        This mapping is mostly used in consumer segmentation context.
-        
-        Critical Rule – Contextual Consistency with Alias Mapping:
-    •	Always check whether the segment reference in the historical conversation is an alias (B). For example, historical conversation may mention "B" segment, but whenever you read the context in order to rewrite the query, you must map it to the official segment name "A" using the alias mapping table.
-    •	ALWAYS use the official name (A) in the rewritten query.
-    •	NEVER EVER use the alias (B) in the rewritten query. 
-
-        Here is the actual alias to segment mappings:
-        ```
-        {self._init_segment_alias()}
-        ```
-        <-------------------------------->
-        """
-
-        user_prompt = f"""
-        User's query:
-        {state.question}
-        ----------------------------------------
-        Below is the alias instruction. Your main focus is rewrite the user's query though. HOWEVER, you must follow the alias instruction at all cost. Pay attention to all user query that may contain a consumer segment and rewrite it using the alias mapping table.
-        {alias_instruction}
-        """
-
-
         response = self.llm.invoke(
             [
                 SystemMessage(content=category_prompt),
-                HumanMessage(content=user_prompt),
+                HumanMessage(content=state.question),
             ],
             temperature=0
         )
