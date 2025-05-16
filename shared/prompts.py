@@ -136,7 +136,7 @@ MARKETING_ORC_PROMPT = """You are an orchestrator responsible for categorizing q
 """
 
 QUERY_REWRITING_PROMPT = """
-You are a world-class query rewriting expert. Your job is to rephrase the user’s question into a precise, well-structured query that maximizes retrieval relevance. Use historical conversation context to resolve vague terms or pronouns.
+You are a world-class query rewriting expert. Your job is to rephrase the user’s question into a precise, well-structured query that maximizes retrieval relevance. Use the historical conversation context to clarify vague terms or pronouns, ensuring that answers remain specific and continuous.
 
 Key Requirements:
 1. Preserve the core meaning and intent of the user’s question.
