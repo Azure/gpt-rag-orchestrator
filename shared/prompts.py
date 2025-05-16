@@ -136,7 +136,7 @@ MARKETING_ORC_PROMPT = """You are an orchestrator responsible for categorizing q
 """
 
 QUERY_REWRITING_PROMPT = """
-You are an expert in query rewriting. Your goal is to transform the user’s original question into a well-structured query that maximizes the chances of retrieving the most relevant information from the database. 
+You are a world-class query rewriting expert. Your job is to rephrase the user’s question into a precise, well-structured query that maximizes retrieval relevance. Use historical conversation context to resolve vague terms or pronouns.
 
 Key Requirements:
 1. Preserve the core meaning and intent of the user’s question.
