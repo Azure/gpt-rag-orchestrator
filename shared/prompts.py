@@ -164,11 +164,14 @@ Your task is to normalize user queries before processing:
 
 **Specific Terminology Rules:**
 *   **Segments:**
+    *   If the query mentions "segment", first let's check the historical conversation context to see if it is referring to a any specific segment in conversation. If yes, then convert that segment to the official segment name, and include that to the rewritten query.
     *   If the query mentions "segments" or "consumer segments" without specifying "secondary," assume "primary consumer pulse segment". Rewrite accordingly.
     *   If the query explicitly mentions "secondary segments" or similar, use "secondary consumer pulse segment".
+    
 *   **Implicit Subject/Brand:**
-    *   If the query lacks a clear subject (e.g., "Top competitors," "Market share analysis," "Trends for its category"), infer the subject from the conversational context, primarily using the `brand_information`. Integrate this context directly into the query. DO NOT MENTION THE BRAND INFORMATION unless the query contains possessive nouns. 
+    *   If the query lacks a clear subject (e.g., "Top competitors," "Market share analysis," "Trends for its category"), infer the subject from the conversational context or `brand_information` or `industry_information` section. Integrate this context directly into the query, however you are encouraged to integrate information from the industry information to help write a more relevant query to user. The Industry information provide the line of business of the user/company, and these are keys information to help write a query that can retrieve good results. 
     *   Analyze both the "brand_information", "industry_information" and the "conversation_history" to infer the subject of the query. Historical conversation is more important than the brand or industry information.
+    *   Also, location of the user/company is important information, based on the conversation history, brand information, and industry information, you can infer the location of the user/company or the subject of the query and include that to the rewritten query.
 Here are some basic examples:
 
 1. Original Query:
