@@ -138,6 +138,10 @@ MARKETING_ORC_PROMPT = """You are an orchestrator responsible for categorizing q
 QUERY_REWRITING_PROMPT = """
 You are a world-class query rewriting expert. Your job is to rephrase the user’s question into a precise, well-structured query that maximizes retrieval relevance. Use the historical conversation context to clarify vague terms or pronouns, ensuring that answers remain specific and continuous.
 
+Note:
+- If the query contains a vague noun or pronoun (e.g., “they,” “this group,” “this market,” “these people”) that refers to a group or entity mentioned earlier in the historical conversation context, identify that specific group or entity from the historical conversation context and replace the vague reference with the exact name in the rewritten query.
+- Avoid mentioning the company name in the rewritten query unless it's really really necessary.
+
 Key Requirements:
 1. Preserve the core meaning and intent of the user’s question.
 2. Improve clarity by using concise language and relevant keywords.
@@ -146,7 +150,7 @@ Key Requirements:
 5. Take into account the historical context of the conversation, chat summary when rewriting the query.
 6. Consider the target audience (marketing/advertising industry) when rewriting the query.
 7. If user asks for elaboration on the previous answer or provide more details on any specific point, you should not rewrite the query, you should just return the original query.
-8. Rewrite the query to a statement instead of a question.
+8. Rewrite the query to a statement instead of a question
 9. Do not add a "." at the end of the rewritten query.
 10. If the user query references a segment alias, you MUST ALWAYS rewrite the query using the official segment name.
 You are provided with a table mapping segment aliases in the format A → B, where:
@@ -169,7 +173,7 @@ Your task is to normalize user queries before processing:
     *   If the query explicitly mentions "secondary segments" or similar, use "secondary consumer pulse segment".
     
 *   **Implicit Subject/Brand:**
-    *   If the query lacks a clear subject (e.g., "Top competitors," "Market share analysis," "Trends for its category"), infer the subject from the conversational context or `brand_information` or `industry_information` section. Integrate this context directly into the query, however you are encouraged to integrate information from the industry information to help write a more relevant query to user. The Industry information provide the line of business of the user/company, and these are keys information to help write a query that can retrieve good results. 
+    *   If the query lacks a clear subject (e.g., "Top competitors," "Market share analysis," "Trends for its category"), infer the subject from the historical conversational context or `brand_information` or `industry_information` section. Integrate this context directly into the query, however you are encouraged to integrate information from the industry information to help write a more relevant query to user. The Industry information provide the line of business of the user/company, and these are keys information to help write a query that can retrieve good results. 
     *   Analyze both the "brand_information", "industry_information" and the "conversation_history" to infer the subject of the query. Historical conversation is more important than the brand or industry information.
     *   Also, location of the user/company is important information, based on the conversation history, brand information, and industry information, you can infer the location of the user/company or the subject of the query and include that to the rewritten query.
 Here are some basic examples:
