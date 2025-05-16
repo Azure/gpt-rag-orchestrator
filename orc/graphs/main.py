@@ -91,7 +91,7 @@ class GraphConfig:
     retriever_top_k: int = 5
     reranker_threshold: float = 2.1
     web_search_results: int = 2
-    temperature: float = 0.3
+    temperature: float = 0.4
     max_tokens: int = 5000
 
 
@@ -283,6 +283,8 @@ class GraphBuilder:
         <-------------------------------->
 
         Please rewrite the question to be used for searching the database. Make sure to follow the alias mapping instructions at all cost.
+        ALSO, THE HISTORICAL CONVERSATION CONTEXT IS VERY VERY IMPORTANT TO THE USER'S FOLLOW UP QUESTIONS, $10,000 WILL BE DEDUCTED FROM YOUR ACCOUNT IF YOU DO NOT USE THE HISTORICAL CONVERSATION CONTEXT.
+        Please also consider the line of business/industry of my company when rewriting the query. Don't be too verbose. 
         """
         rewritte_query = self.llm.invoke(
             [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
