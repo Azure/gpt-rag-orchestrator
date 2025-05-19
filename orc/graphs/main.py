@@ -91,7 +91,7 @@ class GraphConfig:
     retriever_top_k: int = 5
     reranker_threshold: float = 2.1
     web_search_results: int = 2
-    temperature: float = 0.3
+    temperature: float = 0.4
     max_tokens: int = 5000
 
 
@@ -219,11 +219,8 @@ class GraphBuilder:
         conversation_data = get_conversation_data(self.conversation_id)
         history = conversation_data.get("history", [])
 
-        prompt = f"""Original Question: 
-        <-------------------------------->
-        ```
-        {question}. 
-        ```
+        # additional system prompt
+        additional_system_prompt = f"""
         <-------------------------------->
         
         Historical Conversation Context:
@@ -233,20 +230,32 @@ class GraphBuilder:
         ```
         <-------------------------------->
 
-        Alias-to-Segment Mappings:
+        **Alias segment mappings:**
         <-------------------------------->
-
+        alias to segment mappings typically look like this (Official Name -> Alias):
+        A -> B
+        
+        This mapping is mostly used in consumer segmentation context. 
+        
         Critical Rule – Contextual Consistency with Alias Mapping:
+    •	Always check whether the segment reference in the historical conversation is an alias (B). For example, historical conversation may mention "B" segment, but whenever you read the context in order to rewrite the query, you must map it to the official segment name "A" using the alias mapping table.
+    •	ALWAYS use the official name (A) in the rewritten query.
+    •	DO NOT use the alias (B) in the rewritten query. 
 
-        When rewriting queries using historical conversation context, you MUST NOT directly use the segment name (A) from the alias mapping table if it was originally referred to using an alias (B). Instead:
-            •	Always check whether the segment reference in the historical context is an alias (B).
-            •	If so, map it to the official segment name (A) using the alias mapping table.
-            •	Only use the official name (A) in the rewritten query.
-
-        This ensures that both direct user input and any inferred historical references are consistently normalized to the canonical segment naming convention.
+        Here is the actual alias to segment mappings:
+        
+        **Official Segment Name Mappings (Official Name -> Alias):**
         ```
         {self._init_segment_alias()}
         ```
+
+        For example, if the historical conversation mentions "B", and the original question also mentions "B", you must rewrite the question to use "A" instead of "B".
+
+        Look, if a mapping in the instruction is like this:
+        students -> young kids 
+
+        Though the historical conversation and the orignal question may mention "students", you must rewrite the question to use "young kids" instead of "students".
+
         <-------------------------------->
         Brand Information:
         <-------------------------------->
@@ -261,11 +270,22 @@ class GraphBuilder:
         {self._init_industry_information()}
         ```
         <-------------------------------->
-        
 
-        Please rewrite the question to be used for searching the database.
         """
+        # combine the system prompt with the additional system prompt
+        system_prompt = f"{system_prompt}\n\n{additional_system_prompt}"
 
+        prompt = f"""Original Question: 
+        <-------------------------------->
+        ```
+        {question}. 
+        ```
+        <-------------------------------->
+
+        Please rewrite the question to be used for searching the database. Make sure to follow the alias mapping instructions at all cost.
+        ALSO, THE HISTORICAL CONVERSATION CONTEXT IS VERY VERY IMPORTANT TO THE USER'S FOLLOW UP QUESTIONS, $10,000 WILL BE DEDUCTED FROM YOUR ACCOUNT IF YOU DO NOT USE THE HISTORICAL CONVERSATION CONTEXT.
+        Please also consider the line of business/industry of my company when rewriting the query. Don't be too verbose. 
+        """
         rewritte_query = self.llm.invoke(
             [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
         )
@@ -317,8 +337,6 @@ class GraphBuilder:
 
         Reply with **only** the exact category name — no additional text, explanations, or formatting.
         """
-
-
         response = self.llm.invoke(
             [
                 SystemMessage(content=category_prompt),
