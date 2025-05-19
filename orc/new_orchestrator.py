@@ -315,6 +315,14 @@ class ConversationOrchestrator:
         NOTE: When using the tool calling prompt, you should try to incorporate all the provided information from the Chat History and Brand information to tailor the response.
         You should also ask you to provide more information if needed.
 
+        <----------- Important User Instructions ------------>
+        This is the important user instructions for the response.
+        You should follow these instructions strictly as it sets the tone of the response user is expecting.
+        Here are the instructions:
+
+        {get_organization(self.organization_id).get('additionalInstructions','')}
+        <----------- END OF Important User Instructions ------------>
+
         <----------- SYSTEM PROMPT FOR TOOL CALLING ------------>
         """
 
