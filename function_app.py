@@ -61,7 +61,8 @@ async def stream_response(req: Request) -> StreamingResponse:
     logging.info(f"[function_app] Configuration settings: {settings}")
 
     # validate settings
-    settings['temperature'] = settings.get('temperature') or 0.3
+    temp_setting = settings.get('temperature')
+    settings['temperature'] = float(temp_setting) if temp_setting is not None else 0.3
     settings['model'] = settings.get('model') or "DeepSeek-V3-0324"
     logging.info(f"[function_app] Validated settings: {settings}")
     if question:
@@ -286,32 +287,32 @@ async def webhook(req: Request) -> Response:
 
     return Response(content=json.dumps({"success": True}), media_type="application/json")
 
-@app.function_name(name="scheduler")
-@app.schedule(schedule="0 0 11,23 * * *", arg_name="timer", run_on_startup=False)
-async def scheduler(timer: func.TimerRequest) -> None:
-    # Your scheduler implementation
-    try:
-        scheduler_main(timer)
-    except Exception as e:
-        logging.error(f"Error in scheduler: {e}")
+# @app.function_name(name="scheduler")
+# @app.schedule(schedule="0 0 11,23 * * *", arg_name="timer", run_on_startup=False)
+# async def scheduler(timer: func.TimerRequest) -> None:
+#     # Your scheduler implementation
+#     try:
+#         scheduler_main(timer)
+#     except Exception as e:
+#         logging.error(f"Error in scheduler: {e}")
 
-@app.function_name(name="weekly_scheduler")
-@app.schedule(schedule="0 20 19 * * *", arg_name="timer", run_on_startup=False)
-async def weekly_scheduler(timer: func.TimerRequest) -> None:
-    # Your weekly scheduler implementation
-    try:
-        weekly_scheduler_main(timer)
-    except Exception as e:
-        logging.error(f"Error in weekly scheduler: {e}")
+# @app.function_name(name="weekly_scheduler")
+# @app.schedule(schedule="0 20 19 * * *", arg_name="timer", run_on_startup=False)
+# async def weekly_scheduler(timer: func.TimerRequest) -> None:
+#     # Your weekly scheduler implementation
+#     try:
+#         weekly_scheduler_main(timer)
+#     except Exception as e:
+#         logging.error(f"Error in weekly scheduler: {e}")
 
-@app.function_name(name="monthly_scheduler")
-@app.schedule(schedule="0 0 13 1 * *", arg_name="timer")
-async def monthly_scheduler(timer: func.TimerRequest) -> None:
-    # Your monthly scheduler implementation
-    try:
-        monthly_scheduler_main(timer)
-    except Exception as e:
-        logging.error(f"Error in monthly scheduler: {e}")
+# @app.function_name(name="monthly_scheduler")
+# @app.schedule(schedule="0 0 13 1 * *", arg_name="timer")
+# async def monthly_scheduler(timer: func.TimerRequest) -> None:
+#     # Your monthly scheduler implementation
+#     try:
+#         monthly_scheduler_main(timer)
+#     except Exception as e:
+#         logging.error(f"Error in monthly scheduler: {e}")
 
 @app.function_name(name="html_to_pdf_converter")
 @app.route(route="html_to_pdf_converter", methods=[func.HttpMethod.POST])

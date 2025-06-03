@@ -23,3 +23,4 @@ python-dotenv
 bleach==6.2.0
 azurefunctions-extensions-http-fastapi
 azure-ai-inference==1.0.0b9
+langchain-anthropic
