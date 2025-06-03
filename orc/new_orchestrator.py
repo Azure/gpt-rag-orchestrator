@@ -16,6 +16,7 @@ from shared.cosmos_db import (
     store_user_consumed_tokens,
 )
 from langchain_openai import AzureChatOpenAI
+from langchain_anthropic import ChatAnthropic
 from dataclasses import dataclass, field
 from typing import List
 from langchain_core.messages import (
@@ -47,9 +48,9 @@ from azure.ai.inference.models import SystemMessage, UserMessage
 
 load_dotenv()
 # Configure logging
-logging.getLogger("azure").setLevel(logging.WARNING)
-logging.getLogger("azure.cosmos").setLevel(logging.WARNING)
-logging.basicConfig(level=os.environ.get("LOGLEVEL", "DEBUG").upper())
+logging.getLogger("azure").setLevel(logging.INFO)
+logging.getLogger("azure.cosmos").setLevel(logging.INFO)
+logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO").upper())
 
 
 @dataclass
@@ -379,9 +380,29 @@ class ConversationOrchestrator:
                             yield chunk
                     except StopIteration:
                         break
-            else:
+            elif user_settings['model'] == "Claude-4-Sonnet":
                 logging.info(
-                    f"[orchestrator-generate_response] Streaming response from Azure Inference SDK"
+                    f"[orchestrator-generate_response] Streaming response from Claude 4 Sonnet"
+                )
+                response_llm = ChatAnthropic(model="claude-sonnet-4-20250514", temperature=0, streaming=True, api_key=os.getenv("ANTHROPIC_API_KEY"), max_tokens=5000)
+                tokens = response_llm.stream(
+                    [
+                        LangchainSystemMessage(content=system_prompt),
+                        HumanMessage(content=prompt),
+                    ]
+                )
+                while True:
+                    try:
+                        token = next(tokens)
+                        if token:
+                            chunk = token.content
+                            complete_response += chunk
+                            yield chunk
+                    except StopIteration:
+                        break
+            elif user_settings['model'] == "DeepSeek-V3-0324":
+                logging.info(
+                    f"[orchestrator-generate_response] Streaming response from DeepSeek V3"
                 )
                 endpoint = os.getenv("AZURE_INFERENCE_SDK_ENDPOINT")
                 key = os.getenv("AZURE_INFERENCE_SDK_KEY")
