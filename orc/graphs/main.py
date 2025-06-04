@@ -144,7 +144,8 @@ class GraphBuilder:
     def _init_retriever(self) -> CustomRetriever:
         try:
             config = self.config
-            index_name = os.getenv("AZURE_AI_SEARCH_INDEX_NAME")
+            # index_name = os.getenv("AZURE_AI_SEARCH_INDEX_NAME")
+            index_name = "ragindex-test"
             if not index_name:
                 raise ValueError(
                     "AZURE_AI_SEARCH_INDEX_NAME is not set in the environment variables"

@@ -219,9 +219,11 @@ class CustomRetriever(BaseRetriever):
         print(f"[Adjacent Search]: Received request for ID: {doc_id}")
 
         # 1. Parse base ID and page number using regex
-        match = re.search(r"^(.*_pages_)(\d+)$", doc_id)
+        # match = re.search(r"^(.*_pages_)(\d+)$", doc_id)
+        match = re.search(r"^(.*_chunks_)(\d+)$", doc_id)
         if not match:
-            print(f"[Adjacent Search]: Invalid ID format: {doc_id}. Does not match '.*_pages_\\d+'. Skipping.")
+            # print(f"[Adjacent Search]: Invalid ID format: {doc_id}. Does not match '.*_pages_\\d+'. Skipping.")
+            print(f"[Adjacent Search]: Invalid ID format: {doc_id}. Does not match '.*_chunks_\\d+'. Skipping.")
             return []
 
         base_id_part = match.group(1)
