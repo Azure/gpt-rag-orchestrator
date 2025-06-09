@@ -64,7 +64,8 @@ def create_retrieval_graph(
     
     web_search_tool = GoogleSearch(k=3)
     rag_chain = DOCSEARCH_PROMPT | model | StrOutputParser()
-    index_name = os.environ["AZURE_AI_SEARCH_INDEX_NAME"]
+    # index_name = os.environ["AZURE_AI_SEARCH_INDEX_NAME"]
+    index_name = "ragindex-test"
     indexes = [index_name]
 
     retriever = CustomRetriever(
