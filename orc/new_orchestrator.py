@@ -25,6 +25,7 @@ from langchain_core.messages import (
     SystemMessage as LangchainSystemMessage,
     RemoveMessage,
 )
+from urllib.parse import unquote
 
 from shared.util import get_setting
 
@@ -79,7 +80,13 @@ class ConversationState:
 
 
 # Prompt for Tool Calling
-CATEGORY_PROMPT = {"Creative Brief": CREATIVE_BRIEF_PROMPT, "Marketing Plan": MARKETING_PLAN_PROMPT, "Brand Positioning Statement": BRAND_POSITION_STATEMENT_PROMPT, "Creative Copywriter": CREATIVE_COPYWRITER_PROMPT, "General": ""}
+CATEGORY_PROMPT = {
+    "Creative Brief": CREATIVE_BRIEF_PROMPT,
+    "Marketing Plan": MARKETING_PLAN_PROMPT,
+    "Brand Positioning Statement": BRAND_POSITION_STATEMENT_PROMPT,
+    "Creative Copywriter": CREATIVE_COPYWRITER_PROMPT,
+    "General": "",
+}
 
 
 class ConversationOrchestrator:
@@ -141,16 +148,48 @@ class ConversationOrchestrator:
 
         return "\n\n".join(formatted_history)
 
-    def _format_context(self, context_docs: List[Document], display_source: bool = True) -> str:
+    def _format_source_path(self, source_path: str) -> str:
+        """
+        Formats a source path by extracting relevant parts and URL decoding.
+
+        Args:
+            source_path: The raw source path from document metadata
+
+        Returns:
+            str: A clean, readable file path
+        """
+        if not source_path:
+            return ""
+
+        try:
+            # Split the path and take elements from index 3 onwards
+            path_parts = source_path.split("/")[3:]
+
+            # URL decode each part to convert %20 to spaces, etc.
+            decoded_parts = [unquote(part) for part in path_parts]
+
+            # Join with forward slashes to create a clean path
+            clean_path = "/".join(decoded_parts)
+
+            return clean_path
+
+        except (IndexError, Exception) as e:
+            # Fallback to original path if processing fails
+            logging.warning(f"Failed to format source path '{source_path}': {e}")
+            return source_path
+
+    def _format_context(
+        self, context_docs: List[Document], display_source: bool = True
+    ) -> str:
         """Formats retrieved documents into a string for LLM consumption."""
         if not context_docs:
             return ""
         if display_source:
             return "\n\n==============================================\n\n".join(
-            [
-                f"\nContent: \n\n{doc.page_content}"
-                + (
-                        f"\n\nSource: {doc.metadata['source']}"
+                [
+                    f"\nContent: \n\n{doc.page_content}"
+                    + (
+                        f"\n\nSource: {self._format_source_path(doc.metadata['source'])}"
                         if doc.metadata.get("source")
                         else ""
                     )
@@ -159,10 +198,7 @@ class ConversationOrchestrator:
             )
         else:
             return "\n\n==============================================\n\n".join(
-                [
-                    f"\nContent: \n\n{doc.page_content}"
-                    for doc in context_docs
-                ]
+                [f"\nContent: \n\n{doc.page_content}" for doc in context_docs]
             )
 
     def process_conversation(
@@ -253,7 +289,7 @@ class ConversationOrchestrator:
             "conversation_id": conversation_id,
             "thoughts": [
                 f"""
-                Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Web Search: {state.requires_web_search} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=False)}"""
+                Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Web Search: {state.requires_web_search} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
             ],
         }
         yield json.dumps(data)
@@ -351,19 +387,19 @@ class ConversationOrchestrator:
         complete_response = ""
 
         try:
-            if user_settings['model'] == "gpt-4.1":
+            if user_settings["model"] == "gpt-4.1":
                 logging.info(
                     f"[orchestrator-generate_response] Streaming response from Azure Chat OpenAI"
                 )
                 response_llm = AzureChatOpenAI(
-                    temperature=user_settings['temperature'],
+                    temperature=user_settings["temperature"],
                     openai_api_version="2025-01-01-preview",
-                    azure_deployment=user_settings['model'],
+                    azure_deployment=user_settings["model"],
                     streaming=True,
                     timeout=30,
                     max_retries=3,
                     azure_endpoint=os.getenv("O1_ENDPOINT"),
-                    api_key=os.getenv("O1_KEY")
+                    api_key=os.getenv("O1_KEY"),
                 )
                 tokens = response_llm.stream(
                     [
@@ -380,11 +416,17 @@ class ConversationOrchestrator:
                             yield chunk
                     except StopIteration:
                         break
-            elif user_settings['model'] == "Claude-4-Sonnet":
+            elif user_settings["model"] == "Claude-4-Sonnet":
                 logging.info(
                     f"[orchestrator-generate_response] Streaming response from Claude 4 Sonnet"
                 )
-                response_llm = ChatAnthropic(model="claude-sonnet-4-20250514", temperature=0, streaming=True, api_key=os.getenv("ANTHROPIC_API_KEY"), max_tokens=5000)
+                response_llm = ChatAnthropic(
+                    model="claude-sonnet-4-20250514",
+                    temperature=0,
+                    streaming=True,
+                    api_key=os.getenv("ANTHROPIC_API_KEY"),
+                    max_tokens=5000,
+                )
                 tokens = response_llm.stream(
                     [
                         LangchainSystemMessage(content=system_prompt),
@@ -400,7 +442,7 @@ class ConversationOrchestrator:
                             yield chunk
                     except StopIteration:
                         break
-            elif user_settings['model'] == "DeepSeek-V3-0324":
+            elif user_settings["model"] == "DeepSeek-V3-0324":
                 logging.info(
                     f"[orchestrator-generate_response] Streaming response from DeepSeek V3"
                 )
@@ -415,9 +457,9 @@ class ConversationOrchestrator:
                         SystemMessage(content=system_prompt),
                         UserMessage(content=prompt),
                     ],
-                    model=user_settings['model'],
+                    model=user_settings["model"],
                     max_tokens=10000,
-                    temperature=user_settings['temperature'],
+                    temperature=user_settings["temperature"],
                     stream=True,
                 )
 
@@ -449,7 +491,7 @@ class ConversationOrchestrator:
                     "role": "assistant",
                     "content": answer,
                     "thoughts": [
-                        f"""Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Web Search: {state.requires_web_search} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=False)}"""
+                        f"""Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Web Search: {state.requires_web_search} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
                     ],
                 },
             ]
@@ -471,6 +513,7 @@ class ConversationOrchestrator:
         # TODO: ENABLE CONSUME TOKENS FOR RESPONSE GENERATION
         # store_user_consumed_tokens(user_info["id"], cb)
 
+
 def get_settings(client_principal):
     # use cosmos to get settings from the logged user
     data = get_setting(client_principal)
@@ -482,6 +525,7 @@ def get_settings(client_principal):
     }
     logging.info(f"[orchestrator] settings: {settings}")
     return settings
+
 
 async def stream_run(
     conversation_id: str,
