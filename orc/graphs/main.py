@@ -10,7 +10,7 @@ from langchain_core.messages import (
 from langchain.schema import Document
 from langgraph.graph import StateGraph, END, START
 from langchain_openai import AzureChatOpenAI
-from orc.graphs.tools import CustomRetriever, GoogleSearch
+from orc.graphs.tools import CustomRetriever, GoogleSearch, TavilySearch
 from langgraph.checkpoint.memory import MemorySaver
 from shared.tools import num_tokens_from_string, messages_to_string
 from shared.prompts import (
@@ -164,9 +164,10 @@ class GraphBuilder:
     def _init_web_search(self):
         try:
             config = self.config
-            return GoogleSearch(k=config.web_search_results)
+            # return GoogleSearch(k=config.web_search_results)
+            return TavilySearch(max_results=config.web_search_results)
         except Exception as e:
-            raise RuntimeError(f"Failed to initialize Google Search: {str(e)}")
+            raise RuntimeError(f"Failed to initialize Web Search: {str(e)}")
 
     def _return_state(self, state: ConversationState) -> dict:
         return {
