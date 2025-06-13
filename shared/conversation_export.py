@@ -1,9 +1,13 @@
 import json
 import logging
 import os
-import uuid
-from datetime import datetime, timedelta
-from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions, ContentSettings
+from datetime import datetime, timedelta, timezone
+from azure.storage.blob import (
+    BlobServiceClient, 
+    ContentSettings, 
+    generate_blob_sas,
+    BlobSasPermissions
+)
 from azure.identity import DefaultAzureCredential
 from shared.cosmos_db import get_conversation_data
 from shared.util import get_conversation
@@ -52,7 +56,7 @@ def format_conversation_as_html(conversation_data):
                 background: #e3f2fd;
                 margin-left: 20px;
             }}
-            .assistant-message {{
+            .freddaid-message {{
                 background: #f3e5f5;
                 margin-right: 20px;
             }}
@@ -102,15 +106,14 @@ def format_conversation_as_html(conversation_data):
     </html>
     """
     
-    # Format messages - get_conversation returns 'messages' not 'history'
     messages_html = ""
     messages = conversation_data.get('messages', [])
     for message in messages:
         role = message.get('role', 'unknown')
         content = message.get('content', '')
         
-        css_class = 'user-message' if role == 'user' else 'assistant-message'
-        role_display = '👤 User' if role == 'user' else '🤖 Assistant'
+        css_class = 'user-message' if role == 'user' else 'freddaid-message'
+        role_display = '👤 User' if role == 'user' else '🤖 Freddaid'
         
         messages_html += f"""
         <div class="message {css_class}">
@@ -137,7 +140,6 @@ def format_conversation_as_json(conversation_data):
     Returns:
         str: JSON formatted conversation
     """
-    # Remove sensitive data for sharing - get_conversation returns 'messages' not 'history'
     messages = conversation_data.get('messages', [])
     export_data = {
         "conversation_id": conversation_data.get('id'),
@@ -157,7 +159,7 @@ def format_conversation_as_json(conversation_data):
     
     return json.dumps(export_data, indent=2, ensure_ascii=False)
 
-def upload_to_blob_storage(content, filename, content_type="text/html"):
+def upload_to_blob_storage(content, filename, user_id, content_type="text/html"):
     """
     Upload content to Azure Blob Storage and return shareable URL.
     
@@ -165,7 +167,7 @@ def upload_to_blob_storage(content, filename, content_type="text/html"):
         content: File content to upload
         filename: Name of the file
         content_type: MIME type of the content
-        
+        user_id: path to the user's folder in the blob storage
     Returns:
         str: Shareable URL to the uploaded file
     """
@@ -194,7 +196,7 @@ def upload_to_blob_storage(content, filename, content_type="text/html"):
         # Upload the file
         blob_client = blob_service_client.get_blob_client(
             container=container_name, 
-            blob=filename
+            blob=f"{user_id}/{filename}"
         )
         
         blob_client.upload_blob(
@@ -203,10 +205,29 @@ def upload_to_blob_storage(content, filename, content_type="text/html"):
             content_settings=ContentSettings(content_type=content_type)
         )
         
-        # Return the blob URL (SAS token generation requires storage account key)
-        blob_url = f"{storage_account_url}/{container_name}/{filename}"
+        # Get a user delegation key to sign the SAS token, valid for 7 days
+        delegation_key_start_time = datetime.now(timezone.utc)
+        delegation_key_expiry_time = delegation_key_start_time + timedelta(days=7)
         
-        return blob_url
+        user_delegation_key = blob_service_client.get_user_delegation_key(
+            key_start_time=delegation_key_start_time,
+            key_expiry_time=delegation_key_expiry_time
+        )
+        
+        # Generate a user-delegation SAS token for the blob
+        sas_token = generate_blob_sas(
+            account_name=blob_service_client.account_name,
+            container_name=container_name,
+            blob_name=f"{user_id}/{filename}",
+            user_delegation_key=user_delegation_key,
+            permission=BlobSasPermissions(read=True),
+            expiry=delegation_key_expiry_time
+        )
+        
+        # Construct the full URL with SAS token
+        blob_url_with_sas = f"{blob_client.url}?{sas_token}"
+        
+        return blob_url_with_sas
         
     except Exception as e:
         logging.error(f"Error uploading to blob storage: {str(e)}")
@@ -250,7 +271,7 @@ def export_conversation(conversation_id, user_id, export_format="html"):
             raise ValueError(f"Unsupported export format: {export_format}")
         
         # Upload to blob storage
-        share_url = upload_to_blob_storage(content, filename, content_type)
+        share_url = upload_to_blob_storage(content, filename, user_id, content_type)
         
         return {
             "success": True,
