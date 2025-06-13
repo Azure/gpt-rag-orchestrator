@@ -22,10 +22,14 @@ from shared.util import (
     update_subscription_logs, 
     updateExpirationDate,
     trigger_indexer_run,
+    get_conversations,
+    get_conversation,
+    delete_conversation
 )
 
 from orc import new_orchestrator
 from financial_orc import orchestrator as financial_orchestrator
+from shared.conversation_export import export_conversation
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 @app.route(route="orc", methods=[func.HttpMethod.POST])
@@ -391,3 +395,93 @@ def BlobTrigger(myblob: func.InputStream):
     indexer_name = "ragindex-indexer-chunk-documents"
     logging.info(f"Triggering indexer - {indexer_name}")
     trigger_indexer_run(indexer_name = indexer_name)
+
+@app.route(route="conversations", methods=[func.HttpMethod.GET, func.HttpMethod.POST, func.HttpMethod.DELETE])
+async def conversations(req: Request) -> Response:
+    logging.info('Python HTTP trigger function processed a request for conversations.')
+
+    id = req.query_params.get('id')
+
+    if req.method == "GET":
+        try:
+            user_id = req.query_params.get('user_id')
+            if not user_id:
+                return Response(json.dumps({"error": "user_id query parameter is required"}), media_type="application/json", status_code=400)
+            
+            if not id:
+                conversations = get_conversations(user_id)
+            else:
+                conversations = get_conversation(id, user_id)
+            return Response(json.dumps(conversations), media_type="application/json", status_code=200)
+        except Exception as e:
+            logging.error(f"Error in GET /conversations: {str(e)}")
+            return Response(json.dumps({"error": "Internal server error"}), media_type="application/json", status_code=500)
+
+    elif req.method == "POST":
+        try:
+            req_body = await req.json()
+            id_from_body = req_body.get('id')
+            if not id_from_body:
+                return Response("Missing conversation ID for export", status_code=400)
+
+            user_id = req_body.get('user_id')
+            export_format = req_body.get('format', 'html')
+            
+            if not user_id:
+                return Response("Missing user_id in request body", status_code=400)
+            
+            if export_format not in ['html', 'json']:
+                return Response("Invalid export format. Supported formats: html, json", status_code=400)
+            
+            result = export_conversation(id_from_body, user_id, export_format)
+            
+            if result['success']:
+                return Response(
+                    json.dumps(result), 
+                    media_type="application/json", 
+                    status_code=200
+                )
+            else:
+                return Response(
+                    json.dumps({"error": result['error']}), 
+                    media_type="application/json", 
+                    status_code=500
+                )
+                
+        except json.JSONDecodeError:
+            return Response("Invalid JSON in request body", status_code=400)
+        except Exception as e:
+            logging.error(f"Error in conversation export: {str(e)}")
+            return Response(
+                json.dumps({"error": "Internal server error"}), 
+                media_type="application/json", 
+                status_code=500
+            )
+    # need to double check if this one is working 
+    elif req.method == "DELETE":
+        try:
+            req_body = await req.json()
+            user_id = req_body.get('user_id')
+            if not user_id:
+                return Response("Missing user_id in request body", status_code=400)
+            if id:
+                try:
+                    delete_conversation(id, user_id)
+                    return Response("Conversation deleted successfully", status_code=200)
+                except Exception as e:
+                    logging.error(f"Error deleting conversation: {str(e)}")
+                    return Response("Error deleting conversation", status_code=500)
+            else:
+                return Response("Missing conversation ID", status_code=400)
+        except json.JSONDecodeError:
+            return Response("Invalid JSON in request body", status_code=400)
+        except Exception as e:
+            logging.error(f"Error in DELETE /conversations: {str(e)}")
+            return Response(
+                json.dumps({"error": "Internal server error"}), 
+                media_type="application/json", 
+                status_code=500
+            )
+
+    else:
+        return Response("Method not allowed", status_code=405)
