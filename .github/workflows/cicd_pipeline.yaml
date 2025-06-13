@@ -1,0 +1,68 @@
+name: CI/CD Dev Pipeline
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: dev
+
+    # Pull all four dev-environment variables and your SP secrets
+    env:
+      AZURE_ENV_NAME:        ${{ vars.AZURE_ENV_NAME }}
+      AZURE_LOCATION:        ${{ vars.AZURE_LOCATION }}
+      AZURE_RESOURCE_GROUP:  ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET:   ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Azure Developer CLI (latest)
+        uses: Azure/setup-azd@v2
+
+      - name: Verify azd version
+        run: |
+          azd version 
+
+      - name: Login to Azure CLI
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set Azure subscription
+        run: |
+          az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Login to Azure Developer CLI 
+        shell: bash
+        run: |
+          echo "Logging to Azure Developer CLI..."
+          AZURE_CREDENTIALS=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .)
+          CLIENT_ID=$(echo $AZURE_CREDENTIALS | jq -r .clientId)
+          CLIENT_SECRET=$(echo $AZURE_CREDENTIALS | jq -r .clientSecret)
+          TENANT_ID=$(echo $AZURE_CREDENTIALS | jq -r .tenantId)
+          azd auth login --client-id $CLIENT_ID --client-secret $CLIENT_SECRET --tenant-id $TENANT_ID
+
+      - name: Initialize & deploy with azd
+        run: |
+          azd init \
+            -e "$AZURE_ENV_NAME" \
+            -l "$AZURE_LOCATION" \
+            -s "$AZURE_SUBSCRIPTION_ID" \
+            --no-prompt
+
+          azd env set AZURE_RESOURCE_GROUP "$AZURE_RESOURCE_GROUP" --no-prompt
+          azd env refresh --no-prompt
+          azd deploy --no-prompt

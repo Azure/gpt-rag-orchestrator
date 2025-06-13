@@ -1,59 +1,50 @@
-# Enterprise RAG Orchestrator
+Part of [GPT‑RAG](https://aka.ms/gpt-rag)
 
-This Orchestrator is part of the **Enterprise RAG (GPT-RAG)** Solution Accelerator.
+<!-- 
+page_type: sample
+languages:
+- azdeveloper
+- powershell
+- bicep
+products:
+- azure
+- azure-ai-foundry
+- azure-openai
+- azure-ai-search
+urlFragment: GPT-RAG
+name: Multi-repo ChatGPT and Enterprise data with Azure OpenAI and AI Search
+description: GPT-RAG core is a Retrieval-Augmented Generation pattern running in Azure, using Azure AI Search for retrieval and Azure OpenAI large language models to power ChatGPT-style and Q&A experiences.
+-->
+# GPT-RAG Orchestrator
 
-To learn more about the Enterprise RAG, please go to [https://aka.ms/gpt-rag](https://aka.ms/gpt-rag).
+Part of the [GPT-RAG](https://github.com/Azure/gpt-rag) solution.
 
-### Cloud Deployment
+The **GPT-RAG Orchestrator** service is a modular orchestration system built on Azure AI Foundry Agent Service and the Semantic Kernel framework. It enables agent-based RAG workflows by coordinating multiple specialized agents—each with a defined role—to collaboratively generate accurate, context-aware responses for complex user queries.
 
-To deploy the orchestrator in the cloud for the first time, please follow the deployment instructions provided in the [Enterprise RAG repo](https://github.com/Azure/GPT-RAG?tab=readme-ov-file#getting-started).  
-   
-These instructions include the necessary infrastructure templates to provision the solution in the cloud.  
-   
-Once the infrastructure is provisioned, you can redeploy just the orchestrator component using the instructions below:
 
-First, please confirm that you have met the prerequisites:
+### How the Orchestrator Works
 
- - Azure Developer CLI: [Download azd for Windows](https://azdrelease.azureedge.net/azd/standalone/release/1.5.0/azd-windows-amd64.msi), [Other OS's](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/install-azd).
- - Git: [Download Git](https://git-scm.com/downloads)
- - Python 3.10: [Download Python](https://www.python.org/downloads/release/python-31011/)
+_This section will be updated soon to include a detailed explanation of the orchestration flow, agent interactions, and underlying logic. For now, please refer to the source code and comments for insights into how the orchestrator coordinates multi-agent RAG workflows._
 
-Then just clone this repository and reproduce the following commands within the gpt-rag-orchestrator directory:  
+## Prerequisites
 
-```
-azd auth login  
-azd env refresh  
-azd deploy  
-```
+Before deploying the web application, you must provision the infrastructure as described in the [GPT-RAG](https://github.com/azure/gpt-rag/tree/feature/vnext-architecture) repo. This includes creating all necessary Azure resources required to support the application runtime.
 
-> Note: when running the ```azd env refresh```, use the same environment name, subscription, and region used in the initial provisioning of the infrastructure.
 
-### Running Locally with VS Code  
-   
-[How can I test the solution locally in VS Code?](docs/LOCAL_DEPLOYMENT.md)
+## How to deploy the web app
 
-### Evaluating
+```shell
+azd env refresh
+azd deploy 
+````
+> [!IMPORTANT]
+> When running `azd env refresh`, make sure to use the **same subscription**, **resource group**, and **environment name** that you used during the infrastructure deployment. This ensures consistency across components.
 
-[How to test the orchestrator performance?](docs/LOADTEST.md)
 
-## Contributing
+## 🤝 Contributing
 
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
-Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
-the rights to use your contribution. For details, visit https://cla.opensource.microsoft.com.
-
-When you submit a pull request, a CLA bot will automatically determine whether you need to provide
-a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
-provided by the bot. You will only need to do this once across all repos using our CLA.
-
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
-For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
-contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+We appreciate contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines on the Contributor License Agreement (CLA), code of conduct, and submitting pull requests.
 
 ## Trademarks
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
-trademarks or logos is subject to and must follow
-[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
-Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
-Any use of third-party trademarks or logos are subject to those third-party's policies.
+This project may contain trademarks or logos. Authorized use of Microsoft trademarks or logos must follow [Microsoft’s Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general). Modified versions must not imply sponsorship or cause confusion. Third-party trademarks are subject to their own policies.
