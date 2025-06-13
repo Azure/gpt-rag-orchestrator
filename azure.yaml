@@ -8,10 +8,10 @@ infra:
 hooks:
   preprovision:
     posix:
-      run: scripts/hooks/preProvision.sh
+      run: hooks/preProvision.sh
       interactive: true
     windows:
-      run: scripts/hooks/preProvision.ps1
+      run: hooks/preProvision.ps1
       interactive: true      
 services:
   orchestrator:
