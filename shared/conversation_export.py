@@ -30,60 +30,192 @@ def format_conversation_as_html(conversation_data):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Shared Conversation</title>
         <style>
-            body {{
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                max-width: 800px;
-                margin: 0 auto;
-                padding: 20px;
-                background-color: #f5f5f5;
-                color: #333;
+            * {{
+                box-sizing: border-box;
             }}
+            
+            body {{
+                font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                max-width: 900px;
+                margin: 0 auto;
+                padding: 32px;
+                background-color: #fafbfc;
+                color: #1f2937;
+                line-height: 1.6;
+                min-height: 100vh;
+            }}
+            
             .conversation-header {{
                 background: white;
-                padding: 20px;
-                border-radius: 8px;
-                margin-bottom: 20px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                padding: 32px;
+                border-radius: 16px;
+                margin-bottom: 32px;
+                border: 1px solid #e5e7eb;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
             }}
+            
+            .conversation-header h1 {{
+                margin: 0 0 20px 0;
+                font-size: 28px;
+                font-weight: 600;
+                color: #111827;
+                letter-spacing: -0.025em;
+            }}
+            
+            .conversation-header p {{
+                margin: 8px 0;
+                color: #6b7280;
+                font-size: 15px;
+                font-weight: 500;
+            }}
+            
+            .conversation-header strong {{
+                color: #374151;
+                font-weight: 600;
+            }}
+            
             .message {{
                 background: white;
-                margin: 10px 0;
-                padding: 15px;
-                border-radius: 8px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                margin: 20px 0;
+                padding: 24px;
+                border-radius: 12px;
+                border: 1px solid #e5e7eb;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             }}
+            
+            .message:hover {{
+                border-color: #d1d5db;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+                transform: translateY(-1px);
+            }}
+            
             .user-message {{
-                background: #e3f2fd;
-                margin-left: 20px;
+                background: #f8fafc;
+                border-left: 3px solid #3b82f6;
+                margin-left: 32px;
             }}
+            
             .freddaid-message {{
-                background: #f3e5f5;
-                margin-right: 20px;
+                background: #f9fafb;
+                border-left: 3px solid #6b7280;
+                margin-right: 32px;
             }}
+            
             .role {{
-                font-weight: bold;
-                color: #1976d2;
-                margin-bottom: 8px;
+                font-weight: 600;
+                font-size: 13px;
+                margin-bottom: 12px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                letter-spacing: 0.025em;
+                color: #374151;
                 text-transform: uppercase;
-                font-size: 12px;
             }}
+            
+            .role::before {{
+                content: '';
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+                background: #9ca3af;
+            }}
+            
+            .user-message .role::before {{
+                background: #3b82f6;
+            }}
+            
+            .freddaid-message .role::before {{
+                background: #6b7280;
+            }}
+            
             .content {{
-                line-height: 1.6;
+                line-height: 1.7;
                 white-space: pre-wrap;
+                color: #1f2937;
+                font-size: 15px;
+                font-weight: 400;
             }}
+            
             .timestamp {{
-                color: #666;
+                color: #9ca3af;
                 font-size: 12px;
-                margin-top: 10px;
+                margin-top: 16px;
+                font-weight: 500;
             }}
             
             .export-info {{
-                background: #fff3cd;
-                padding: 10px;
-                border-radius: 4px;
-                margin-bottom: 20px;
-                font-size: 12px;
-                color: #856404;
+                background: #f3f4f6;
+                padding: 16px 20px;
+                border-radius: 12px;
+                margin-bottom: 32px;
+                font-size: 14px;
+                color: #4b5563;
+                border: 1px solid #e5e7eb;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-weight: 500;
+            }}
+            
+            .messages {{
+                animation: fadeIn 0.6s ease-out;
+            }}
+            
+            @keyframes fadeIn {{
+                from {{ opacity: 0; transform: translateY(20px); }}
+                to {{ opacity: 1; transform: translateY(0); }}
+            }}
+            
+            /* Clean scrollbar */
+            ::-webkit-scrollbar {{
+                width: 6px;
+            }}
+            
+            ::-webkit-scrollbar-track {{
+                background: #f1f5f9;
+            }}
+            
+            ::-webkit-scrollbar-thumb {{
+                background: #cbd5e1;
+                border-radius: 3px;
+            }}
+            
+            ::-webkit-scrollbar-thumb:hover {{
+                background: #94a3b8;
+            }}
+            
+            @media (max-width: 768px) {{
+                body {{
+                    padding: 20px;
+                }}
+                
+                .conversation-header {{
+                    padding: 24px;
+                }}
+                
+                .message {{
+                    padding: 20px;
+                }}
+                
+                .user-message {{
+                    margin-left: 16px;
+                }}
+                
+                .freddaid-message {{
+                    margin-right: 16px;
+                }}
+            }}
+            
+            @media (max-width: 480px) {{
+                .user-message {{
+                    margin-left: 8px;
+                }}
+                
+                .freddaid-message {{
+                    margin-right: 8px;
+                }}
             }}
         </style>
     </head>
@@ -113,7 +245,7 @@ def format_conversation_as_html(conversation_data):
         content = message.get('content', '')
         
         css_class = 'user-message' if role == 'user' else 'freddaid-message'
-        role_display = '👤 User' if role == 'user' else '🤖 Freddaid'
+        role_display = 'User' if role == 'user' else 'Freddaid'
         
         messages_html += f"""
         <div class="message {css_class}">
