@@ -7,8 +7,9 @@
     - Parses App Configuration name from endpoint.
     - Checks Azure CLI login.
     - Fetches required keys (containerRegistryName, containerRegistryLoginServer, resourceGroupName, orchestratorApp) from Azure App Configuration with label "gpt-rag".
-    - Logs into ACR, builds Docker image (tag from git short HEAD unless $env:tag is set), pushes image, and updates the Container App.
-
+      If a key is not found with original casing, tries uppercase.
+    - Logs into ACR, builds Docker image (tag from git short HEAD unless $env:tag is set). If local Docker is unavailable, uses `az acr build`.
+    - Pushes image and updates the Container App.
 .NOTES
     - Requires Azure CLI installed and logged in.
     - Running in PowerShell 5.1+ or PowerShell Core.
@@ -30,7 +31,6 @@ function Write-ErrorColored($msg) {
 #endregion
 
 #region Debug toggle
-# If environment variable DEBUG is "true", enable verbose output
 if ($env:DEBUG -eq 'true') {
     $VerbosePreference = 'Continue'
     Write-Verbose "DEBUG mode is ON"
@@ -47,14 +47,12 @@ if ($null -ne $env:APP_CONFIG_ENDPOINT -and $env:APP_CONFIG_ENDPOINT.Trim() -ne 
     $APP_CONFIG_ENDPOINT = $env:APP_CONFIG_ENDPOINT.Trim()
 } else {
     Write-Blue "🔍 Fetching APP_CONFIG_ENDPOINT from azd env…"
-    # Try to get azd env values; ignore errors
     try {
         $envValues = azd env get-values 2>$null
     } catch {
         $envValues = $null
     }
     if ($envValues) {
-        # Parse lines like KEY="value" or KEY=value
         foreach ($line in $envValues -split "`n") {
             if ($line -match '^\s*APP_CONFIG_ENDPOINT\s*=\s*"?([^"]+)"?\s*$') {
                 $APP_CONFIG_ENDPOINT = $Matches[1].Trim()
@@ -65,8 +63,8 @@ if ($null -ne $env:APP_CONFIG_ENDPOINT -and $env:APP_CONFIG_ENDPOINT.Trim() -ne 
 }
 if (-not $APP_CONFIG_ENDPOINT) {
     Write-Yellow "⚠️  Missing APP_CONFIG_ENDPOINT."
-    Write-Host "  • `Set it with: azd env set APP_CONFIG_ENDPOINT <your-endpoint>`"
-    Write-Host "  • Or export in shell: `$env:APP_CONFIG_ENDPOINT = '<your-endpoint>'` before running this script."
+    Write-Host "  • Set it with: azd env set APP_CONFIG_ENDPOINT <your-endpoint>"
+    Write-Host "  • Or in PowerShell: `$env:APP_CONFIG_ENDPOINT = '<your-endpoint>'` before running."
     exit 1
 }
 Write-Green "✅ APP_CONFIG_ENDPOINT: $APP_CONFIG_ENDPOINT"
@@ -74,12 +72,10 @@ Write-Host ""
 #endregion
 
 #region Parse configName from endpoint
-# Remove leading https:// and trailing .azconfig.io
-# Use regex replace
 $configName = $APP_CONFIG_ENDPOINT -replace '^https?://', ''
 $configName = $configName -replace '\.azconfig\.io/?$', ''
 if (-not $configName) {
-    Write-Yellow "⚠️  Could not parse config name from endpoint '$APP_CONFIG_ENDPOINT'."
+    Write-Yellow ("⚠️ Could not parse config name from endpoint '{0}'." -f $APP_CONFIG_ENDPOINT)
     exit 1
 }
 Write-Green "✅ App Configuration name: $configName"
@@ -107,9 +103,8 @@ function Get-ConfigValue {
     param(
         [Parameter(Mandatory=$true)][string]$Key
     )
-    Write-Blue "🛠️  Retrieving '$Key' (label=$label) from App Configuration…"
+    Write-Blue ("🛠️  Retrieving '{0}' (label={1}) from App Configuration…" -f $Key, $label)
     try {
-        # az appconfig kv show returns JSON; with -o tsv --query value, it outputs plain value or error.
         $val = az appconfig kv show `
             --name $configName `
             --key $Key `
@@ -122,48 +117,54 @@ function Get-ConfigValue {
         $exitCode = 1
     }
     if ($exitCode -ne 0 -or [string]::IsNullOrWhiteSpace($val)) {
-        Write-Yellow "⚠️  Failed to retrieve key '$Key'. CLI output: $val"
+        Write-Yellow ("⚠️  Key '{0}' not found or empty. CLI output: {1}" -f $Key, $val)
         return $null
     }
     return $val.Trim()
 }
 
-# keys to fetch
-$keys = @{
-    containerRegistryName = $null
-    containerRegistryLoginServer = $null
-    resourceGroupName = $null
-    orchestratorApp = $null
-}
+# Define required keys
+$keyNames = @('containerRegistryName', 'containerRegistryLoginServer', 'resourceGroupName', 'orchestratorApp')
+$values = @{}
 $missing = @()
-foreach ($k in $keys.Keys) {
+
+foreach ($k in $keyNames) {
     $v = Get-ConfigValue -Key $k
+    if ($null -eq $v) {
+        # try uppercase fallback
+        $upperKey = $k.ToUpper()
+        if ($upperKey -ne $k) {
+            Write-Blue ("🔍 Trying uppercase key '{0}'…" -f $upperKey)
+            $v = Get-ConfigValue -Key $upperKey
+        }
+    }
     if ($null -eq $v) {
         $missing += $k
     } else {
-        $keys[$k] = $v
+        $values[$k] = $v
     }
 }
 if ($missing.Count -gt 0) {
-    Write-Yellow "⚠️  Missing or invalid App Config keys: $($missing -join ', ')"
+    Write-Yellow ("⚠️  Missing or invalid App Config keys: {0}" -f ($missing -join ', '))
     exit 1
 }
 
 Write-Green "✅ All App Configuration values retrieved:"
-Write-Host "   containerRegistryName = $($keys.containerRegistryName)"
-Write-Host "   containerRegistryLoginServer = $($keys.containerRegistryLoginServer)"
-Write-Host "   resourceGroupName = $($keys.resourceGroupName)"
-Write-Host "   orchestratorApp = $($keys.orchestratorApp)"
+Write-Host ("   containerRegistryName = {0}" -f $values.containerRegistryName)
+Write-Host ("   containerRegistryLoginServer = {0}" -f $values.containerRegistryLoginServer)
+Write-Host ("   resourceGroupName = {0}" -f $values.resourceGroupName)
+Write-Host ("   orchestratorApp = {0}" -f $values.orchestratorApp)
 Write-Host ""
 #endregion
 
 #region Login to ACR
-Write-Green "🔐 Logging into ACR ($($keys.containerRegistryName))…"
+Write-Green ("🔐 Logging into ACR ({0})…" -f $values.containerRegistryName)
 try {
-    az acr login --name $keys.containerRegistryName
+    az acr login --name $values.containerRegistryName
     Write-Green "✅ Logged into ACR."
 } catch {
-    Write-Yellow "⚠️  Failed to login to ACR: $_"
+    $errMsg = $_.Exception.Message
+    Write-Yellow ("⚠️  Failed to login to ACR: {0}" -f $errMsg)
     exit 1
 }
 Write-Host ""
@@ -173,7 +174,7 @@ Write-Host ""
 Write-Blue "🛢️ Defining tag…"
 if ($env:tag) {
     $tag = $env:tag.Trim()
-    Write-Verbose "Using tag from environment: $tag"
+    Write-Verbose ("Using tag from environment: {0}" -f $tag)
 } else {
     try {
         $gitTag = & git rev-parse --short HEAD 2>$null
@@ -184,50 +185,75 @@ if ($env:tag) {
             exit 1
         }
     } catch {
-        Write-Yellow "⚠️  Error running git: $_"
+        $errMsg = $_.Exception.Message
+        Write-Yellow ("⚠️  Error running git: {0}" -f $errMsg)
         exit 1
     }
 }
-Write-Green "✅ tag set to: $tag"
+Write-Green ("✅ tag set to: {0}" -f $tag)
 Write-Host ""
 #endregion
 
-#region Build Docker image
+#region Build or ACR build image
+$fullImageName = "$($values.containerRegistryLoginServer)/azure-gpt-rag/orchestrator-build:$tag"
 Write-Green "🛠️  Building Docker image…"
-$fullImageName = "$($keys.containerRegistryLoginServer)/azure-gpt-rag/orchestrator-build:$tag"
-try {
-    docker build -t $fullImageName .
-    Write-Green "✅ Docker build succeeded."
-} catch {
-    Write-Yellow "⚠️  Docker build failed: $_"
-    exit 1
+if (Get-Command docker -ErrorAction SilentlyContinue) {
+    try {
+        docker build -t $fullImageName .
+        Write-Green "✅ Docker build succeeded."
+    } catch {
+        $errMsg = $_.Exception.Message
+        Write-Yellow ("⚠️  Docker build failed: {0}" -f $errMsg)
+        exit 1
+    }
+} else {
+    Write-Blue "⚠️  Docker CLI not found locally. Falling back to 'az acr build'."
+    try {
+        az acr build `
+            --registry $values.containerRegistryName `
+            --image "azure-gpt-rag/orchestrator-build:$tag" `
+            --file Dockerfile `
+            .
+        Write-Green "✅ ACR cloud build succeeded."
+    } catch {
+        $errMsg = $_.Exception.Message
+        Write-Yellow ("⚠️  ACR build failed: {0}" -f $errMsg)
+        exit 1
+    }
 }
 Write-Host ""
 #endregion
 
-#region Push Docker image
-Write-Host ""
-Write-Green "📤 Pushing image…"
-try {
-    docker push $fullImageName
-    Write-Green "✅ Image pushed."
-} catch {
-    Write-Yellow "⚠️  Docker push failed: $_"
-    exit 1
+#region Push Docker image (if local build used)
+if (Get-Command docker -ErrorAction SilentlyContinue) {
+    Write-Green "📤 Pushing image…"
+    try {
+        docker push $fullImageName
+        Write-Green "✅ Image pushed."
+    } catch {
+        $errMsg = $_.Exception.Message
+        Write-Yellow ("⚠️  Docker push failed: {0}" -f $errMsg)
+        exit 1
+    }
+    Write-Host ""
+} else {
+    # If using az acr build, image is already in ACR
+    Write-Green "ℹ️  Image built in ACR; no local push needed."
+    Write-Host ""
 }
-Write-Host ""
 #endregion
 
 #region Update Container App
 Write-Green "🔄 Updating container app…"
 try {
     az containerapp update `
-        --name $keys.orchestratorApp `
-        --resource-group $keys.resourceGroupName `
+        --name $values.orchestratorApp `
+        --resource-group $values.resourceGroupName `
         --image $fullImageName
     Write-Green "✅ Container app updated."
 } catch {
-    Write-Yellow "⚠️  Failed to update container app: $_"
+    $errMsg = $_.Exception.Message
+    Write-Yellow ("⚠️  Failed to update container app: {0}" -f $errMsg)
     exit 1
 }
 #endregion
