@@ -25,3 +25,4 @@ azurefunctions-extensions-http-fastapi
 azure-ai-inference==1.0.0b9
 langchain-anthropic
 azure-storage-blob
+markdown

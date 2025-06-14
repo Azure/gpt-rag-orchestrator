@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import re
+import html
 from datetime import datetime, timedelta, timezone
 from azure.storage.blob import (
     BlobServiceClient, 
@@ -11,6 +13,36 @@ from azure.storage.blob import (
 from azure.identity import DefaultAzureCredential
 from shared.cosmos_db import get_conversation_data
 from shared.util import get_conversation
+import markdown
+from markdown.extensions import fenced_code, tables, toc
+
+def parse_markdown_to_html(text):
+    """
+    Convert markdown text to HTML with proper formatting.
+    Falls back to basic formatting if markdown library is not available.
+    
+    Args:
+        text: Raw text that may contain markdown
+        
+    Returns:
+        str: HTML formatted text
+    """
+    if not text:
+        return ""
+    
+    # Escape HTML first to prevent XSS
+    text = html.escape(text)
+
+    # Use markdown library with extensions for better formatting
+    md = markdown.Markdown(extensions=[
+        'fenced_code',
+        'tables', 
+        'toc',
+        'nl2br',  # Convert newlines to <br>
+        'sane_lists'
+    ])
+    return md.convert(text)
+
 
 def format_conversation_as_html(conversation_data):
     """
@@ -132,10 +164,138 @@ def format_conversation_as_html(conversation_data):
             
             .content {{
                 line-height: 1.7;
-                white-space: pre-wrap;
                 color: #1f2937;
                 font-size: 15px;
                 font-weight: 400;
+            }}
+            
+            /* Markdown formatting styles */
+            .content h1, .content h2, .content h3, .content h4, .content h5, .content h6 {{
+                margin: 20px 0 12px 0;
+                font-weight: 600;
+                color: #111827;
+                line-height: 1.3;
+            }}
+            
+            .content h1 {{ font-size: 24px; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px; }}
+            .content h2 {{ font-size: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }}
+            .content h3 {{ font-size: 18px; }}
+            .content h4 {{ font-size: 16px; }}
+            .content h5 {{ font-size: 15px; }}
+            .content h6 {{ font-size: 14px; }}
+            
+            .content p {{
+                margin: 12px 0;
+            }}
+            
+            .content strong {{
+                font-weight: 600;
+                color: #111827;
+            }}
+            
+            .content em {{
+                font-style: italic;
+                color: #374151;
+            }}
+            
+            .content code {{
+                background-color: #f3f4f6;
+                color: #dc2626;
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+                font-size: 13px;
+                border: 1px solid #e5e7eb;
+            }}
+            
+            .content pre {{
+                background-color: #1f2937;
+                color: #f9fafb;
+                padding: 16px;
+                border-radius: 8px;
+                overflow-x: auto;
+                margin: 16px 0;
+                border: 1px solid #374151;
+            }}
+            
+            .content pre code {{
+                background: none;
+                color: inherit;
+                padding: 0;
+                border: none;
+                font-size: 14px;
+            }}
+            
+            .content ul, .content ol {{
+                margin: 12px 0;
+                padding-left: 24px;
+            }}
+            
+            .content li {{
+                margin: 6px 0;
+                line-height: 1.6;
+            }}
+            
+            .content ul li {{
+                list-style-type: disc;
+            }}
+            
+            .content ol li {{
+                list-style-type: decimal;
+            }}
+            
+            .content blockquote {{
+                border-left: 4px solid #d1d5db;
+                padding-left: 16px;
+                margin: 16px 0;
+                font-style: italic;
+                color: #6b7280;
+                background-color: #f9fafb;
+                padding: 12px 16px;
+                border-radius: 4px;
+            }}
+            
+            .content a {{
+                color: #3b82f6;
+                text-decoration: none;
+                border-bottom: 1px solid transparent;
+                transition: border-color 0.2s;
+            }}
+            
+            .content a:hover {{
+                border-bottom-color: #3b82f6;
+            }}
+            
+            .content table {{
+                border-collapse: collapse;
+                width: 100%;
+                margin: 16px 0;
+                border: 1px solid #e5e7eb;
+                border-radius: 6px;
+                overflow: hidden;
+            }}
+            
+            .content th, .content td {{
+                border: 1px solid #e5e7eb;
+                padding: 8px 12px;
+                text-align: left;
+            }}
+            
+            .content th {{
+                background-color: #f9fafb;
+                font-weight: 600;
+                color: #374151;
+            }}
+            
+            .content tr:nth-child(even) {{
+                background-color: #f9fafb;
+            }}
+            
+            .content hr {{
+                border: none;
+                height: 1px;
+                background-color: #e5e7eb;
+                margin: 24px 0;
             }}
             
             .timestamp {{
@@ -244,13 +404,16 @@ def format_conversation_as_html(conversation_data):
         role = message.get('role', 'unknown')
         content = message.get('content', '')
         
+        # Parse markdown content to HTML
+        formatted_content = parse_markdown_to_html(content)
+        
         css_class = 'user-message' if role == 'user' else 'freddaid-message'
         role_display = 'User' if role == 'user' else 'Freddaid'
         
         messages_html += f"""
         <div class="message {css_class}">
             <div class="role">{role_display}</div>
-            <div class="content">{content}</div>
+            <div class="content">{formatted_content}</div>
         </div>
         """
     
