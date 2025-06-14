@@ -9,13 +9,9 @@ jobs:
   evaluations:
     runs-on: ubuntu-latest
     environment:
-      name: develop
+      name: dev
 
     env:
-      AZURE_ENV_NAME:        ${{ vars.AZURE_ENV_NAME }}
-      AZURE_LOCATION:        ${{ vars.AZURE_LOCATION }}
-      AZURE_RESOURCE_GROUP:  ${{ vars.AZURE_RESOURCE_GROUP }}
-      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       AZURE_CLIENT_SECRET:   ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
       AZURE_TENANT_ID:       ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
       AZURE_CLIENT_ID:       ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}

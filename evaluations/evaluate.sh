@@ -27,16 +27,16 @@ echo -e "${GREEN}✅ All required azd env values are set.${NC}"
 echo
 
 echo -e "${BLUE}📦 Creating temporary virtual environment…${NC}"
-python -m venv evaluation/.venv_temp
-chmod a+r evaluation/.venv_temp/bin/activate
-source evaluation/.venv_temp/bin/activate
+python -m venv evaluations/.venv_temp
+chmod a+r evaluations/.venv_temp/bin/activate
+source evaluations/.venv_temp/bin/activate
 echo -e "${BLUE}⬇️  Installing requirements…${NC}"
 pip install --upgrade pip
-pip install -r evaluation/requirements.txt
+pip install -r evaluations/requirements.txt
 
 
 echo -e "${BLUE}🚀 Running evaluate.py…${NC}"
-python -m evaluation.evaluate
+python -m evaluations.evaluate
 echo -e "${GREEN}✅ Finished evaluation.${NC}"
 
 # clean up venv only if we created it
@@ -44,5 +44,5 @@ if [[ -n "${AZURE_APP_CONFIG_ENDPOINT:-}" ]]; then
   echo
   echo -e "${BLUE}🧹 Cleaning up…${NC}"
   deactivate
-  rm -rf evaluation/.venv_temp
+  rm -rf evaluations/.venv_temp
 fi

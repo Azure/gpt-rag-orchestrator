@@ -31,9 +31,6 @@ class DebugModeFilter(logging.Filter):
         return logging.getLogger().getEffectiveLevel() == logging.DEBUG
 http_logger.addFilter(DebugModeFilter())
     
-# ----------------------------------------
-# Load feature flags and settings from App Configuration
-# ----------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Placeholder for future startup logic
