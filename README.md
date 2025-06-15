@@ -19,21 +19,21 @@ description: GPT-RAG core is a Retrieval-Augmented Generation pattern running in
 
 Part of the [GPT-RAG](https://github.com/Azure/gpt-rag) solution.
 
-The **GPT-RAG Orchestrator** service is a modular orchestration system built on Azure AI Foundry Agent Service and the Semantic Kernel framework. It enables agent-based RAG workflows by coordinating multiple specialized agents—each with a defined role—to collaboratively generate accurate, context-aware responses for complex user queries.
+The **GPT-RAG Orchestrator** service is an agentic orchestration layer built on Azure AI Foundry Agent Service and the Semantic Kernel framework. It enables agent-based RAG workflows by coordinating multiple specialized agents—each with a defined role—to collaboratively generate accurate, context-aware responses for complex user queries.
 
 
 ### How the Orchestrator Works
 
 The orchestrator uses Azure AI Foundry Agent Service for single-agent and connected-agent flows, leveraging its managed runtime for agent lifecycle, state, and tool orchestration. For multi-agent scenarios, it integrates the Semantic Kernel Agent Framework to compose and coordinate specialized agents collaborating on tasks. Custom agent strategies allow developers to plug domain-specific logic without modifying core orchestration code.
 
-Developers can extend the orchestrator by creating a new subclass of `BaseAgentStrategy`, implementing the required `initiate_agent_flow` method and any additional helpers, then registering it in `AgentStrategyFactory.get_strategy` under a unique key. The base class provides shared logic (e.g., prompt loading via `_read_prompt`, credential setup) so extensions focus only on custom behavior. The factory centralizes instantiation, letting you plug in new strategies without altering core orchestration code.
+Developers can extend the orchestrator by creating a new subclass of `BaseAgentStrategy`, implementing the required `initiate_agent_flow` method and any additional helpers, then registering it in `AgentStrategyFactory.get_strategy` under a unique key. The base class provides shared logic (e.g., prompt loading via `_read_prompt`, credential setup) so extensions focus only on custom behavior. 
 
 ## Prerequisites
 
-Provision the infrastructure first by following the GPT-RAG repository instructions [GPT-RAG](https://github.com/azure/gpt-rag/tree/feature/vnext-architecture). This ensures all required Azure resources (e.g., App Service, Storage, AI Search are in place before deploying the web application.
+Provision the infrastructure first by following the GPT-RAG repository instructions [GPT-RAG](https://github.com/azure/gpt-rag/tree/feature/vnext-architecture). This ensures all required Azure resources (e.g., App Service, Storage, AI Search) are in place before deploying the web application.
 
 <details markdown="block">
-<summary>Click to view software prerequisites</summary>
+<summary>Click to view <strong>software</strong> prerequisites</summary>
 <br>
 The machine used to customize and or deploy the service should have:
 
@@ -42,11 +42,12 @@ The machine used to customize and or deploy the service should have:
 * Git: [Download Git](https://git-scm.com/downloads)
 * Python 3.12: [Download Python 3.12](https://www.python.org/downloads/release/python-3120/)
 * Docker CLI: [Install Docker](https://docs.docker.com/get-docker/)
-
+* VS Code (recommended): [Download VS Code](https://code.visualstudio.com/download)
 </details>
-<br>
+
+
 <details markdown="block">
-<summary>Click to view permissions requirements</summary>
+<summary>Click to view <strong>permissions</strong> requirements</summary>
 <br>
 To customize the service, your user should have the following roles:
 
