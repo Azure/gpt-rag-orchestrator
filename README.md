@@ -24,22 +24,93 @@ The **GPT-RAG Orchestrator** service is a modular orchestration system built on 
 
 ### How the Orchestrator Works
 
-_This section will be updated soon to include a detailed explanation of the orchestration flow, agent interactions, and underlying logic. For now, please refer to the source code and comments for insights into how the orchestrator coordinates multi-agent RAG workflows._
+The orchestrator uses Azure AI Foundry Agent Service for single-agent flows, leveraging its managed runtime for agent lifecycle, state, and tool orchestration. For multi-agent scenarios, it integrates the Semantic Kernel Agent Framework to compose and coordinate specialized agents collaborating on tasks. Custom agent strategies allow developers to plug domain-specific logic without modifying core orchestration code.
+
+Developers can extend the orchestrator by creating a new subclass of `BaseAgentStrategy`, implementing the required `initiate_agent_flow` method and any additional helpers, then registering it in `AgentStrategyFactory.get_strategy` under a unique key. The base class provides shared logic (e.g., prompt loading via `_read_prompt`, credential setup) so extensions focus only on custom behavior. The factory centralizes instantiation, letting you plug in new strategies without altering core orchestration code, and you can add extension methods or override protected helpers to customize lifecycle, tools, or error handling as needed.
 
 ## Prerequisites
 
+<details markdown="block">
+<summary>Click to view software prerequisites</summary>
 Before deploying the web application, you must provision the infrastructure as described in the [GPT-RAG](https://github.com/azure/gpt-rag/tree/feature/vnext-architecture) repo. This includes creating all necessary Azure resources required to support the application runtime.
 
+The machine used to customize and or deploy the service should have:
 
-## How to deploy the web app
+* Azure CLI: [Install Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli)
+* Azure Developer CLI (optional, if using azd): [Install azd](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/install-azd)
+* Git: [Download Git](https://git-scm.com/downloads)
+* Python 3.12: [Download Python 3.12](https://www.python.org/downloads/release/python-3120/)
+* Docker CLI (recommended): [Install Docker](https://do
+cs.docker.com/get-docker/) (if absent, deploy scripts use `az acr build` remotely)
 
-```shell
+</details>
+<br>
+<details markdown="block">
+<summary>Click to view permissions requirements</summary>
+
+To customize the service, your user should have the following roles:
+
+| Resource                | Role                                | Description                                 |
+| :---------------------- | :---------------------------------- | :------------------------------------------ |
+| App Configuration Store | App Configuration Data Owner        | Full control over configuration settings    |
+| Container Registry      | AcrPush                             | Push and pull container images              |
+| Key Vault               | Key Vault Contributor               | Manage Key Vault Secrets                    |
+| AI Search Service       | Search Service Contributor          | Create or update search service components  |
+| AI Search Service       | Search Index Data Contributor       | Read and write index data                   |
+| Storage Account         | Storage Blob Data Contributor       | Read and write blob data                    |
+| AI Foundry Project      | Azure AI Project User               | Access and work with the AI Foundry project |
+| Cosmos DB               | Cosmos DB Built-in Data Contributor | Read and write documents in Cosmos DB       |
+
+
+To deploy the service, assign these roles to your user or service principal:
+
+| Resource                                   | Role                             | Description           |
+| :----------------------------------------- | :------------------------------- | :-------------------- |
+| App Configuration Store                    | App Configuration Data Reader    | Read config           |
+| Container Registry                         | AcrPush                          | Push images           |
+| Azure Container App                        | Azure Container Apps Contributor | Manage Container Apps |
+
+Ensure the identity used by your script or deployment pipeline has these role assignments in the appropriate scope (e.g., subscription or resource group).
+
+</details>
+
+## How to deploy the orchestrator service
+
+Make sure you're logged in to Azure before anything else:
+
+```bash
+az login
+```
+
+### If you used `azd provision`
+
+Just run:
+
+```bash
 azd env refresh
-azd deploy 
-````
-> [!IMPORTANT]
-> When running `azd env refresh`, make sure to use the **same subscription**, **resource group**, and **environment name** that you used during the infrastructure deployment. This ensures consistency across components.
+azd deploy
+```
 
+> [!IMPORTANT]
+> Make sure you use the **same** subscription, resource group, environment name, and location from `azd provision`.
+
+### If you did **not** use `azd provision`
+
+You need to set the App Configuration endpoint and run the deploy script.
+
+#### Bash (Linux/macOS):
+
+```bash
+export APP_CONFIG_ENDPOINT="https://<your-app-config-name>.azconfig.io"
+./scripts/deploy.sh
+```
+
+#### PowerShell (Windows):
+
+```powershell
+$env:APP_CONFIG_ENDPOINT = "https://<your-app-config-name>.azconfig.io"
+.\scripts\deploy.ps1
+```
 
 ## 🤝 Contributing
 
