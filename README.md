@@ -112,7 +112,7 @@ $env:APP_CONFIG_ENDPOINT = "https://<your-app-config-name>.azconfig.io"
 .\scripts\deploy.ps1
 ```
 
-## 🤝 Contributing
+## Contributing
 
 We appreciate contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines on the Contributor License Agreement (CLA), code of conduct, and submitting pull requests.
 
