@@ -26,3 +26,4 @@ azure-ai-inference==1.0.0b9
 langchain-anthropic
 azure-storage-blob
 markdown
+python-docx==1.1.0
