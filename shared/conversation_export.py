@@ -11,10 +11,13 @@ from azure.storage.blob import (
     BlobSasPermissions
 )
 from azure.identity import DefaultAzureCredential
-from shared.cosmos_db import get_conversation_data
 from shared.util import get_conversation
 import markdown
-from markdown.extensions import fenced_code, tables, toc
+from docx import Document
+from docx.shared import Inches, Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.style import WD_STYLE_TYPE
+import io
 
 def parse_markdown_to_html(text):
     """
@@ -454,6 +457,198 @@ def format_conversation_as_json(conversation_data):
     
     return json.dumps(export_data, indent=2, ensure_ascii=False)
 
+def parse_markdown_to_docx_content(text, paragraph):
+    """
+    Parse simple markdown content and apply basic formatting to a Word paragraph.
+    This handles basic markdown like **bold**, *italic*, and `code`.
+    
+    Args:
+        text: Text that may contain markdown
+        paragraph: Word document paragraph object to add content to
+    """
+    if not text:
+        return
+    
+    # Simple regex patterns for basic markdown
+    # This is a simplified approach - for complex markdown, you'd want a proper parser
+    
+    # Split by markdown patterns while preserving the patterns
+    
+    # Pattern to match **bold**, *italic*, `code`, and plain text
+    pattern = r'(\*\*.*?\*\*|\*.*?\*|`.*?`)'
+    parts = re.split(pattern, text)
+    
+    for part in parts:
+        if not part:
+            continue
+            
+        if part.startswith('**') and part.endswith('**'):
+            # Bold text
+            run = paragraph.add_run(part[2:-2])
+            run.bold = True
+        elif part.startswith('*') and part.endswith('*') and not part.startswith('**'):
+            # Italic text
+            run = paragraph.add_run(part[1:-1])
+            run.italic = True
+        elif part.startswith('`') and part.endswith('`'):
+            # Code text
+            run = paragraph.add_run(part[1:-1])
+            run.font.name = 'Courier New'
+            run.font.size = Pt(10)
+        else:
+            # Plain text
+            paragraph.add_run(part)
+
+def process_message_content(doc, content, role, user_style, assistant_style):
+    """
+    Process message content and add it to the document with proper formatting.
+    Handles headers, regular text, and inline formatting.
+    
+    Args:
+        doc: Word document object
+        content: Message content text
+        role: Message role ('user' or 'assistant')
+        user_style: Style for user messages
+        assistant_style: Style for assistant messages
+    """
+    if not content:
+        return
+    
+    
+    # Split content by lines to handle multi-line messages
+    content_lines = content.split('\n')
+    
+    for line_idx, line in enumerate(content_lines):
+        line = line.strip()
+        if not line:
+            # Add empty paragraph for spacing
+            doc.add_paragraph()
+            continue
+        
+        # Check if line is a header (starts with #)
+        header_match = re.match(r'^(#{1,6})\s+(.+)$', line)
+        if header_match:
+            # This is a header
+            header_level = len(header_match.group(1))  # Number of # symbols
+            header_text = header_match.group(2)
+            
+            # Add header to document (level 1-6 maps to Word heading levels 1-6)
+            header_paragraph = doc.add_heading(header_text, level=min(header_level, 6))
+            header_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        else:
+            # Regular paragraph
+            p = doc.add_paragraph()
+            parse_markdown_to_docx_content(line, p)
+            try:
+                if role == 'user':
+                    p.style = user_style
+                else:
+                    p.style = assistant_style
+            except:
+                pass  # Use default style if custom style fails
+
+def format_conversation_as_docx(conversation_data):
+    """
+    Convert conversation data to a Word document (.docx).
+    
+    Args:
+        conversation_data: The conversation data from Cosmos DB
+        
+    Returns:
+        bytes: Word document as bytes
+    """
+    
+    # Create a new Word document
+    doc = Document()
+    
+    # Set up document styles
+    doc.styles['Normal'].font.name = 'Calibri'
+    doc.styles['Normal'].font.size = Pt(11)
+    
+    # Create custom styles for user and assistant messages
+    try:
+        user_style = doc.styles.add_style('UserMessage', WD_STYLE_TYPE.PARAGRAPH)
+        user_style.base_style = doc.styles['Normal']
+        user_style.font.name = 'Calibri'
+        user_style.font.size = Pt(11)
+        user_style.paragraph_format.left_indent = Inches(0.5)
+        user_style.paragraph_format.space_after = Pt(6)
+    except:
+        user_style = doc.styles['Normal']  # Fallback if style exists
+    
+    try:
+        assistant_style = doc.styles.add_style('AssistantMessage', WD_STYLE_TYPE.PARAGRAPH)
+        assistant_style.base_style = doc.styles['Normal']
+        assistant_style.font.name = 'Calibri'
+        assistant_style.font.size = Pt(11)
+        assistant_style.paragraph_format.right_indent = Inches(0.5)
+        assistant_style.paragraph_format.space_after = Pt(6)
+    except:
+        assistant_style = doc.styles['Normal']  # Fallback if style exists
+    
+    # Add document header
+    header = doc.add_heading('Conversation Export', 0)
+    header.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Add conversation metadata
+    doc.add_paragraph(f"Export Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    doc.add_paragraph(f"Conversation ID: {conversation_data.get('id', 'Unknown')}")
+    doc.add_paragraph(f"Started: {conversation_data.get('start_date', 'Unknown')}")
+    doc.add_paragraph(f"Total Messages: {len(conversation_data.get('messages', []))}")
+    
+    # Add a separator
+    doc.add_paragraph("=" * 50)
+    doc.add_paragraph()
+    
+    # Add messages
+    messages = conversation_data.get('messages', [])
+    for i, message in enumerate(messages):
+        role = message.get('role', 'unknown')
+        content = message.get('content', '')
+        
+        role_display = 'User' if role == 'user' else 'Freddaid'
+        
+        # Check if content starts with a header or if it's a short single-line message
+        content_lines = content.split('\n')
+        first_line = content_lines[0].strip() if content_lines else ''
+        is_first_line_header = re.match(r'^#{1,6}\s+', first_line)
+        
+        if role == 'user' and not is_first_line_header and len(content_lines) == 1 and len(first_line) < 100:
+            # For short user messages, put on same line as "User:"
+            role_paragraph = doc.add_paragraph()
+            role_run = role_paragraph.add_run(f"{role_display}: ")
+            role_run.bold = True
+            role_run.font.size = Pt(12)
+            
+            # Add the content on the same line
+            parse_markdown_to_docx_content(first_line, role_paragraph)
+            
+            # Don't apply user_style for inline messages to avoid indentation
+            # Instead, apply basic formatting without indentation
+            role_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            role_paragraph.paragraph_format.left_indent = Inches(0)
+            role_paragraph.paragraph_format.space_after = Pt(6)
+        else:
+            # For longer messages or messages with headers, use separate lines
+            role_paragraph = doc.add_heading(f"{role_display}:", level=2)
+            role_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            
+            # Process the content with proper header handling
+            process_message_content(doc, content, role, user_style, assistant_style)
+        
+        # Add spacing between messages
+        if i < len(messages) - 1:  # Don't add extra space after last message
+            doc.add_paragraph()
+            doc.add_paragraph("-" * 30)
+            doc.add_paragraph()
+    
+    # Save document to bytes
+    doc_bytes = io.BytesIO()
+    doc.save(doc_bytes)
+    doc_bytes.seek(0)
+    
+    return doc_bytes.getvalue()
+
 def upload_to_blob_storage(content, filename, user_id, content_type="text/html"):
     """
     Upload content to Azure Blob Storage and return shareable URL.
@@ -562,6 +757,9 @@ def export_conversation(conversation_id, user_id, export_format="html"):
         elif export_format.lower() == "json":
             content = format_conversation_as_json(conversation_data)
             content_type = "application/json"
+        elif export_format.lower() == "docx":
+            content = format_conversation_as_docx(conversation_data)
+            content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         else:
             raise ValueError(f"Unsupported export format: {export_format}")
         
