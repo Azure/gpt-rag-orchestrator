@@ -7,8 +7,8 @@ from azure.core.exceptions import AzureError
 class AppConfigClient:
     def __init__(self):
         """
-        Bulk-loads all keys labeled 'orchestrator' and 'gpt-rag' into an in-memory dict,
-        giving precedence to 'orchestrator' where a key exists in both.
+        Bulk-loads all keys labeled 'gpt-rag-orchestrator' and 'gpt-rag' into an in-memory dict,
+        giving precedence to 'gpt-rag-orchestrator' where a key exists in both.
         """
         endpoint = os.getenv("APP_CONFIG_ENDPOINT")
         if not endpoint:
@@ -19,12 +19,12 @@ class AppConfigClient:
 
         self._settings: Dict[str, str] = {}
 
-        # 1) Load everything labeled “orchestrator”
+        # 1) Load everything labeled “gpt-rag-orchestrator”
         try:
-            for setting in client.list_configuration_settings(label_filter="orchestrator"):
+            for setting in client.list_configuration_settings(label_filter="gpt-rag-orchestrator"):
                 self._settings[setting.key] = setting.value
         except AzureError as e:
-            raise RuntimeError(f"Failed to bulk-load 'orchestrator' settings: {e}")
+            raise RuntimeError(f"Failed to bulk-load 'gpt-rag-orchestrator' settings: {e}")
 
         # 2) Load “gpt-rag” ones only if not already present
         try:
