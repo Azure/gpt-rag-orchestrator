@@ -6,7 +6,7 @@
     - Checks for APP_CONFIG_ENDPOINT in environment; if missing, tries to fetch from `azd env get-values`.
     - Parses App Configuration name from endpoint.
     - Checks Azure CLI login.
-    - Fetches required keys (containerRegistryName, containerRegistryLoginServer, resourceGroupName, orchestratorApp) from Azure App Configuration with label "gpt-rag".
+    - Fetches required keys (CONTAINER_REGISTRY_NAME, CONTAINER_REGISTRY_LOGIN_SERVER, RESOURCE_GROUP_NAME, ORCHESTRATOR_APP_NAME) from Azure App Configuration with label "gpt-rag".
       If a key is not found with original casing, tries uppercase.
     - Logs into ACR, builds Docker image (tag from git short HEAD unless $env:tag is set). If local Docker is unavailable, uses `az acr build`.
     - Pushes image and updates the Container App.
@@ -124,7 +124,7 @@ function Get-ConfigValue {
 }
 
 # Define required keys
-$keyNames = @('containerRegistryName', 'containerRegistryLoginServer', 'resourceGroupName', 'orchestratorApp')
+$keyNames = @('CONTAINER_REGISTRY_NAME', 'CONTAINER_REGISTRY_LOGIN_SERVER', 'RESOURCE_GROUP_NAME', 'ORCHESTRATOR_APP_NAME')
 $values = @{}
 $missing = @()
 
@@ -150,17 +150,17 @@ if ($missing.Count -gt 0) {
 }
 
 Write-Green "✅ All App Configuration values retrieved:"
-Write-Host ("   containerRegistryName = {0}" -f $values.containerRegistryName)
-Write-Host ("   containerRegistryLoginServer = {0}" -f $values.containerRegistryLoginServer)
-Write-Host ("   resourceGroupName = {0}" -f $values.resourceGroupName)
-Write-Host ("   orchestratorApp = {0}" -f $values.orchestratorApp)
+Write-Host ("   CONTAINER_REGISTRY_NAME = {0}" -f $values.CONTAINER_REGISTRY_NAME)
+Write-Host ("   CONTAINER_REGISTRY_LOGIN_SERVER = {0}" -f $values.CONTAINER_REGISTRY_LOGIN_SERVER)
+Write-Host ("   RESOURCE_GROUP_NAME = {0}" -f $values.RESOURCE_GROUP_NAME)
+Write-Host ("   ORCHESTRATOR_APP_NAME = {0}" -f $values.ORCHESTRATOR_APP_NAME)
 Write-Host ""
 #endregion
 
 #region Login to ACR
-Write-Green ("🔐 Logging into ACR ({0})…" -f $values.containerRegistryName)
+Write-Green ("🔐 Logging into ACR ({0})…" -f $values.CONTAINER_REGISTRY_NAME)
 try {
-    az acr login --name $values.containerRegistryName
+    az acr login --name $values.CONTAINER_REGISTRY_NAME
     Write-Green "✅ Logged into ACR."
 } catch {
     $errMsg = $_.Exception.Message
@@ -195,7 +195,7 @@ Write-Host ""
 #endregion
 
 #region Build or ACR build image
-$fullImageName = "$($values.containerRegistryLoginServer)/azure-gpt-rag/orchestrator-build:$tag"
+$fullImageName = "$($values.CONTAINER_REGISTRY_LOGIN_SERVER)/azure-gpt-rag/orchestrator-build:$tag"
 Write-Green "🛠️  Building Docker image…"
 if (Get-Command docker -ErrorAction SilentlyContinue) {
     try {
@@ -210,7 +210,7 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     Write-Blue "⚠️  Docker CLI not found locally. Falling back to 'az acr build'."
     try {
         az acr build `
-            --registry $values.containerRegistryName `
+            --registry $values.CONTAINER_REGISTRY_NAME `
             --image "azure-gpt-rag/orchestrator-build:$tag" `
             --file Dockerfile `
             .
@@ -247,8 +247,8 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 Write-Green "🔄 Updating container app…"
 try {
     az containerapp update `
-        --name $values.orchestratorApp `
-        --resource-group $values.resourceGroupName `
+        --name $values.ORCHESTRATOR_APP_NAME `
+        --resource-group $values.RESOURCE_GROUP_NAME `
         --image $fullImageName
     Write-Green "✅ Container app updated."
 } catch {

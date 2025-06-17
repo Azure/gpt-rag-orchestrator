@@ -55,10 +55,10 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
         self.tool_resources = {}
 
         # --- Initialize BingGroundingTool (if configured) ---
-        bing_conn = self.cfg.get("bingConnectionId")
+        bing_conn = self.cfg.get("BING_CONNECTION_ID")
         if not bing_conn:
             logging.warning(
-                "bingConnectionId not set in App Config variables. "
+                "BING_CONNECTION_ID not set in App Config variables. "
                 "BingGroundingTool will not be available."
             )
         else:
@@ -69,11 +69,11 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
 
         # --- Initialize AzureAISearchTool ---
         
-        azure_ai_conn_id = self.cfg.get("seachConnectionId") 
-        index_name = self.cfg.get("searchRagIndexName") 
+        azure_ai_conn_id = self.cfg.get("SEARCH_CONNECTION_ID") 
+        index_name = self.cfg.get("SEARCH_RAG_INDEX_NAME") 
 
         logging.debug(f"seachConnectionId (cfg)  = {azure_ai_conn_id}")
-        logging.debug(f"searchRagIndexName (cfg) = {index_name}")
+        logging.debug(f"SEARCH_RAG_INDEX_NAME (cfg) = {index_name}")
         if not azure_ai_conn_id:
             logging.warning(
                 "seachConnectionId undefined (cfg). "
@@ -81,7 +81,7 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
             )
         if not index_name:
             logging.warning(
-                "searchRagIndexName undefined (cfg). "
+                "SEARCH_RAG_INDEX_NAME undefined (cfg). "
                 "AzureAISearchTool will be unavailable."
             )
 

@@ -18,8 +18,8 @@ class CosmosDBClient:
         Initializes the Cosmos DB client with credentials and endpoint.
         """
         # Get Azure Cosmos DB configuration
-        self.database_account_name = self.cfg.get("databaseAccountName")
-        self.database_name = self.cfg.get("databaseName")
+        self.database_account_name = self.cfg.get("DATABASE_ACCOUNT_NAME")
+        self.database_name = self.cfg.get("DATABASE_NAME")
         self.db_uri = f"https://{self.database_account_name}.documents.azure.com:443/"
         # App configuration
         self.cfg = AppConfigClient()

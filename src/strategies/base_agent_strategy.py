@@ -17,14 +17,14 @@ class BaseAgentStrategy(ABC):
         """
         # App configuration
         self.cfg = AppConfigClient()        
-        self.project_endpoint = self.cfg.get("aiFoundryProjectEndpoint") 
-        self.model_name = self.cfg.get("chatDeploymentName")
+        self.project_endpoint = self.cfg.get("AI_FOUNDRY_PROJECT_ENDPOINT") 
+        self.model_name = self.cfg.get("CHAT_DEPLOYMENT_NAME")
         logging.debug(f"[base_agent_strategy] Project endpoint: {self.project_endpoint}")
         logging.debug(f"[base_agent_strategy] Model name: {self.model_name}")
 
         if not self.project_endpoint or not self.model_name:
             raise EnvironmentError(
-                "Both aiFoundryProjectEndpoint and chatDeploymentName must be set"
+                "Both AI_FOUNDRY_PROJECT_ENDPOINT and CHAT_DEPLOYMENT_NAME must be set"
             )
         
         # Build chained token credential: CLI first, then managed identity

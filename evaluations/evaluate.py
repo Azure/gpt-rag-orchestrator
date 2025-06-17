@@ -34,13 +34,13 @@ client = TestClient(app)
 
 # 4) Prepare your AI Project client and SimilarityEvaluator
 project = AIProjectClient.from_connection_string(
-    conn_str= cfg.get("aiFoundryProjectEndpoint"),
+    conn_str= cfg.get("AI_FOUNDRY_PROJECT_ENDPOINT"),
     credential=cred
 )
 evaluator_model = {
-    "azure_endpoint": cfg.get("aiFoundryAccountEndpoint"),
-    "azure_deployment": cfg.get("chatDeploymentName"),
-    "api_version": cfg.get("openaiAPIVersion", "2024-06-01")
+    "azure_endpoint": cfg.get("AI_FOUNDRY_ACCOUNT_ENDPOINT"),
+    "azure_deployment": cfg.get("CHAT_DEPLOYMENT_NAME"),
+    "api_version": cfg.get("OPENAI_API_VERSION", "2024-06-01")
 }
 similarity = SimilarityEvaluator(evaluator_model)
 

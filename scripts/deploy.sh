@@ -89,17 +89,17 @@ resourceGroupName=""
 orchestratorApp=""
 missing_keys=()
 
-if ! containerRegistryName="$(get_config_value "containerRegistryName")"; then
-  missing_keys+=("containerRegistryName")
+if ! containerRegistryName="$(get_config_value "CONTAINER_REGISTRY_NAME")"; then
+  missing_keys+=("CONTAINER_REGISTRY_NAME")
 fi
-if ! containerRegistryLoginServer="$(get_config_value "containerRegistryLoginServer")"; then
-  missing_keys+=("containerRegistryLoginServer")
+if ! containerRegistryLoginServer="$(get_config_value "CONTAINER_REGISTRY_LOGIN_SERVER")"; then
+  missing_keys+=("CONTAINER_REGISTRY_LOGIN_SERVER")
 fi
-if ! resourceGroupName="$(get_config_value "resourceGroupName")"; then
-  missing_keys+=("resourceGroupName")
+if ! resourceGroupName="$(get_config_value "RESOURCE_GROUP_NAME")"; then
+  missing_keys+=("RESOURCE_GROUP_NAME")
 fi
-if ! orchestratorApp="$(get_config_value "orchestratorApp")"; then
-  missing_keys+=("orchestratorApp")
+if ! orchestratorApp="$(get_config_value "ORCHESTRATOR_APP_NAME")"; then
+  missing_keys+=("ORCHESTRATOR_APP_NAME")
 fi
 
 if [[ ${#missing_keys[@]} -gt 0 ]]; then

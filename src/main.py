@@ -18,7 +18,7 @@ cfg = AppConfigClient()
 # ----------------------------------------
 # Logging configuration
 # ----------------------------------------
-log_level = cfg.get("logLevel", "INFO")
+log_level = cfg.get("LOG_LEVEL", "INFO")
 logging.basicConfig(  
     level=getattr(logging, log_level, logging.INFO),
     format="%(asctime)s [%(levelname)s] %(message)s",
