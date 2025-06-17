@@ -18,14 +18,14 @@ class Orchestrator:
         
         # database
         self.database_client = CosmosDBClient()
-        self.database_container = self.cfg("CONVERSATIONS_CONTAINER", "conversations")
+        self.database_container = self.cfg("CONVERSATIONS_DATABASE_CONTAINER", "conversations")
 
 
         # agentic strategy
         agentic_strategy_name = self.cfg.get("AGENT_STRATEGY", "single_agent_rag")
         self.agentic_strategy = AgentStrategyFactory.get_strategy(agentic_strategy_name)
         if not self.agentic_strategy or not self.database_container:
-            raise EnvironmentError("AGENT_STRATEGY and COSMOS_DB_CONTAINER must be set")        
+            raise EnvironmentError("AGENT_STRATEGY and CONVERSATIONS_DATABASE_CONTAINER must be set")        
 
     async def stream_response(self, ask: str):
         logging.debug(f"Starting conversation {self.conversation_id}")
