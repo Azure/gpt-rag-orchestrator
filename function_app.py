@@ -24,7 +24,8 @@ from shared.util import (
     trigger_indexer_run,
     get_conversations,
     get_conversation,
-    delete_conversation
+    delete_conversation,
+    trigger_indexer_with_retry,
 )
 
 from orc import new_orchestrator
@@ -388,13 +389,42 @@ async def html2pdf_conversion(req: Request) -> Response:
 
 @app.blob_trigger(arg_name="myblob", path="documents/{name}",
                                connection="AZURE_STORAGE_CONNECTION_STRING") 
-def BlobTrigger(myblob: func.InputStream):
-    logging.info(f"Python blob trigger function processed blob"
-                f"Name: {myblob.name}"
-                f"Blob Size: {myblob.length} bytes")
-    indexer_name = "ragindex-indexer-chunk-documents"
-    logging.info(f"Triggering indexer - {indexer_name}")
-    trigger_indexer_run(indexer_name = indexer_name)
+def blob_trigger(myblob: func.InputStream):
+    """
+    Azure Blob Storage trigger that processes uploaded documents and triggers search index updates.
+    
+    Args:
+        myblob (func.InputStream): The uploaded blob file stream
+    """
+    try:
+        # Extract file information
+        blob_name = myblob.name
+        file_extension = os.path.splitext(blob_name)[1].lower() if blob_name else ""
+        
+        logging.info(f"[blob_trigger] Processing blob: {blob_name}, Extension: {file_extension}")
+        
+        # Define supported file types for indexing
+        supported_extensions = {'.pdf', '.docx', '.doc', '.txt', '.md', '.html','.pptx'}
+        
+        if file_extension not in supported_extensions:
+            logging.info(f"[blob_trigger] File type {file_extension} not supported for indexing. Supported types: {supported_extensions}")
+            return
+        
+        # Get indexer name from environment or use default
+        indexer_name = f'{os.getenv("AZURE_AI_SEARCH_INDEX_NAME")}-indexer-chunk-documents'
+        
+        logging.info(f"[blob_trigger] Triggering indexer '{indexer_name}' for supported document: {blob_name}")
+        
+        # Trigger the indexer with retry logic for concurrent runs
+        indexer_success = trigger_indexer_with_retry(indexer_name, blob_name)
+        
+        if indexer_success:
+            logging.info(f"[blob_trigger] Successfully triggered indexer '{indexer_name}' for blob: {blob_name}")
+        else:
+            logging.warning(f"[blob_trigger] Could not trigger indexer '{indexer_name}' for blob: {blob_name}. File will be indexed in next scheduled run.")
+            
+    except Exception as e:
+        logging.error(f"[blob_trigger] Unexpected error processing blob {myblob.name if myblob else 'unknown'}: {str(e)}")
 
 @app.route(route="conversations", methods=[func.HttpMethod.GET, func.HttpMethod.POST, func.HttpMethod.DELETE])
 async def conversations(req: Request) -> Response:

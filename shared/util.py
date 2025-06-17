@@ -2,6 +2,7 @@
 
 import re
 import json
+import asyncio
 import logging
 import os
 import requests
@@ -1594,3 +1595,56 @@ def trigger_indexer_run(indexer_name: str) -> bool:
     except Exception as e:
         logging.error(f"Error triggering indexer run: {str(e)}")
         return False
+
+
+async def trigger_indexer_with_retry_async(indexer_name: str, blob_name: str) -> bool:
+    """
+    Trigger indexer with async retry logic to handle concurrent execution conflicts.
+    Uses fixed intervals: 1 minute, 5 minutes, and 10 minutes.
+    More efficient as it doesn't block the thread while waiting.
+    
+    Args:
+        indexer_name (str): Name of the indexer to trigger
+        blob_name (str): Name of the blob being processed (for logging)
+        
+    Returns:
+        bool: True if indexer was triggered successfully, False otherwise
+    """
+    
+    # Define retry intervals: 1 min, 5 min, 10 min
+    retry_intervals = [60, 300, 600]  # seconds
+    total_attempts = len(retry_intervals) + 1  # Initial attempt + 3 retries
+    
+    for attempt in range(total_attempts):
+        success = trigger_indexer_run(indexer_name)
+        
+        if success:
+            if attempt > 0:
+                logging.info(f"[blob_trigger] Indexer '{indexer_name}' triggered successfully on attempt {attempt + 1} for blob: {blob_name}")
+            return True
+        
+        if attempt < len(retry_intervals):
+            wait_seconds = retry_intervals[attempt]
+            wait_minutes = wait_seconds // 60
+            logging.info(f"[blob_trigger] Indexer busy, retrying in {wait_minutes} minute(s) (attempt {attempt + 1}/{total_attempts}) for blob: {blob_name}")
+            await asyncio.sleep(wait_seconds)  # Non-blocking async sleep
+    
+    logging.warning(f"[blob_trigger] Failed to trigger indexer '{indexer_name}' after {total_attempts} attempts over 26 minutes for blob: {blob_name}")
+    return False
+
+def trigger_indexer_with_retry(indexer_name: str, blob_name: str) -> bool:
+    """
+    Synchronous wrapper for async retry function to maintain compatibility.
+    Uses fixed retry intervals: 1 minute, 5 minutes, and 10 minutes.
+    """
+    
+    # Run the async function in a new event loop
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(trigger_indexer_with_retry_async(indexer_name, blob_name))
+    except Exception as e:
+        logging.error(f"[blob_trigger] Error in async retry logic: {str(e)}")
+        return False
+    finally:
+        loop.close()
