@@ -411,7 +411,7 @@ def blob_trigger(myblob: func.InputStream):
             return
         
         # Get indexer name from environment or use default
-        indexer_name = f'{os.getenv("AZURE_AI_SEARCH_INDEX_NAME")}-indexer-chunk-documents'
+        indexer_name = f'{os.getenv("AZURE_AI_SEARCH_INDEX_NAME")}-test-indexer' # TODO: change to the actual indexer name once moved to prod
         
         logging.info(f"[blob_trigger] Triggering indexer '{indexer_name}' for supported document: {blob_name}")
         
