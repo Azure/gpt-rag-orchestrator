@@ -92,7 +92,7 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
             index_connection_id=azure_ai_conn_id,
             index_name=index_name,
             query_type=AzureAISearchQueryType.SIMPLE, 
-            top_k=3,
+            top_k=self.cfg.get("SEARCH_TOP_K") or 5,
             filter="",  # Optional filter for search results
         )
 
