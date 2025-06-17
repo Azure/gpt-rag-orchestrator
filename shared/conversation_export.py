@@ -747,9 +747,9 @@ def export_conversation(conversation_id, user_id, export_format="html"):
         
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_conv_id = conversation_id[:8]  # First 8 chars of conversation ID
-        filename = f"conversation_{safe_conv_id}_{timestamp}.{export_format}"
-        
+        safe_conv_id = conversation_id  # First 8 chars of conversation ID
+        filename = f"{safe_conv_id}/Freddaid_{timestamp}.{export_format}"
+
         # Format content based on requested format
         if export_format.lower() == "html":
             content = format_conversation_as_html(conversation_data)
