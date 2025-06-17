@@ -40,7 +40,7 @@ project = AIProjectClient.from_connection_string(
 evaluator_model = {
     "azure_endpoint": cfg.get("AI_FOUNDRY_ACCOUNT_ENDPOINT"),
     "azure_deployment": cfg.get("CHAT_DEPLOYMENT_NAME"),
-    "api_version": cfg.get("OPENAI_API_VERSION", "2024-06-01")
+    "api_version": cfg.get("OPENAI_API_VERSION", "2024-10-21")
 }
 similarity = SimilarityEvaluator(evaluator_model)
 
