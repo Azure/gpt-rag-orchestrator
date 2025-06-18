@@ -16,9 +16,9 @@ class BaseAgentStrategy(ABC):
         Initializes endpoint, model name, credentials, and default event handler.
         """
         # App configuration
-        self.cfg = AppConfigClient()        
-        self.project_endpoint = self.cfg.get("AI_FOUNDRY_PROJECT_ENDPOINT") 
-        self.model_name = self.cfg.get("CHAT_DEPLOYMENT_NAME")
+        cfg = AppConfigClient()        
+        self.project_endpoint = cfg.get("AI_FOUNDRY_PROJECT_ENDPOINT") 
+        self.model_name = cfg.get("CHAT_DEPLOYMENT_NAME")
         logging.debug(f"[base_agent_strategy] Project endpoint: {self.project_endpoint}")
         logging.debug(f"[base_agent_strategy] Model name: {self.model_name}")
 

@@ -1,5 +1,4 @@
 import logging
-import os
 from typing import Any, Optional
 
 from azure.ai.agents.models import (
@@ -18,6 +17,8 @@ from azure.ai.agents.models import (
 
 from .base_agent_strategy import BaseAgentStrategy
 from .agent_strategies import AgentStrategies
+
+from connectors.appconfig import AppConfigClient
 
 # -----------------------------------------------------------------------------
 # Be sure to configure the root logger at DEBUG level somewhere early in your app,
@@ -41,7 +42,7 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
         Initialize base credentials and tools.
         """
         super().__init__()
-
+ 
         # Force all logs at DEBUG or above to appear
         logging.debug("Initializing SingleAgentRAGStrategy...")
 
@@ -49,13 +50,21 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
         self.strategy_type = AgentStrategies.SINGLE_AGENT_RAG
         self.event_handler = EventHandler()
 
+        cfg = AppConfigClient()
+
+        # Agent Tools Initialization Section
+        # =========================================================
+        
+        # Allow the user to specify an existing agent ID
+        self.existing_agent_id = cfg.get("AGENT_ID") or None
+
         # Agent Tools Initialization Section
         # =========================================================
         self.tools_list = []
         self.tool_resources = {}
 
         # --- Initialize BingGroundingTool (if configured) ---
-        bing_conn = self.cfg.get("BING_CONNECTION_ID")
+        bing_conn = cfg.get("BING_CONNECTION_ID")
         if not bing_conn:
             logging.warning(
                 "BING_CONNECTION_ID not set in App Config variables. "
@@ -69,8 +78,8 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
 
         # --- Initialize AzureAISearchTool ---
         
-        azure_ai_conn_id = self.cfg.get("SEARCH_CONNECTION_ID") 
-        index_name = self.cfg.get("SEARCH_RAG_INDEX_NAME") 
+        azure_ai_conn_id = cfg.get("SEARCH_CONNECTION_ID") 
+        index_name = cfg.get("SEARCH_RAG_INDEX_NAME") 
 
         logging.debug(f"seachConnectionId (cfg)  = {azure_ai_conn_id}")
         logging.debug(f"SEARCH_RAG_INDEX_NAME (cfg) = {index_name}")
@@ -92,7 +101,7 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
             index_connection_id=azure_ai_conn_id,
             index_name=index_name,
             query_type=AzureAISearchQueryType.SIMPLE, 
-            top_k=self.cfg.get("SEARCH_TOP_K") or 5,
+            top_k=cfg.get("SEARCH_TOP_K") or 5,
             filter="",  # Optional filter for search results
         )
 
@@ -117,15 +126,14 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
         """
         logging.debug(f"invoke_stream called with user_message: {user_message!r}")
         conv = self.conversation
-        agent_id = conv.get("agent_id")
         thread_id = conv.get("thread_id")
-        logging.debug(f"Current conversation state: agent_id={agent_id}, thread_id={thread_id}")
+        logging.debug(f"Current conversation state: thread_id={thread_id}")
 
         async with self.project_client as project_client:
             # ------------------------
-            # 1) Create or reuse agent
+            # 1) Create agent
             # ------------------------
-            if agent_id:
+            if self.existing_agent_id:
                 logging.debug("agent_id exists; calling update_agent(...)")
                 agent = await project_client.agents.update_agent(
                     model=self.model_name,
@@ -136,7 +144,7 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
                 )
                 logging.info(f"Reused agent with ID: {agent.id}")
             else:
-                logging.debug("agent_id not found; calling create_agent(...)")
+                logging.debug("creating agent(...)")
                 agent = await project_client.agents.create_agent(
                     model=self.model_name,
                     name="gpt-rag-agent",
@@ -144,11 +152,11 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
                     tools=self.tools_list,
                     tool_resources=self.tool_resources
                 )
+                create_agent = True
                 logging.info(f"Created new agent with ID: {agent.id}")
 
             conv["agent_id"] = agent.id
-            logging.debug(f"Stored conv['agent_id'] = {agent.id}")
-
+            
             # --------------------------
             # 2) Create or reuse thread
             # --------------------------
@@ -219,15 +227,15 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
                         "role": msg.role,
                         "text": text_val
                     })
-
             logging.debug(f"Final conversation messages: {conv['messages']}")
 
             # --------------------------------------------------
-            # 6) (OPTIONAL) Clean up the agent if desired
+            # 6) (OPTIONAL) Clean up the agent if a new one was created
             # --------------------------------------------------
-            # logging.debug(f"Deleting agent with ID: {agent.id}")
-            # await project_client.agents.delete_agent(agent.id)
-            # logging.debug("Agent deletion complete.")
+            if create_agent:
+                logging.debug(f"Deleting agent with ID: {agent.id}")
+                await project_client.agents.delete_agent(agent.id)
+                logging.debug("Agent deletion complete.")
 
 
 class EventHandler(AsyncAgentEventHandler[str]):

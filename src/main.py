@@ -6,8 +6,6 @@ from fastapi import FastAPI
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse
 
-from azure.identity import ChainedTokenCredential, ManagedIdentityCredential, AzureCliCredential
-
 from orchestration.orchestrator import Orchestrator
 
 from connectors.appconfig import AppConfigClient

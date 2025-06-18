@@ -14,15 +14,15 @@ class Orchestrator:
         self.conversation_id = conversation_id
 
         # app configuration
-        self.cfg = AppConfigClient()
+        cfg = AppConfigClient()
         
         # database
         self.database_client = CosmosDBClient()
-        self.database_container = self.cfg("CONVERSATIONS_DATABASE_CONTAINER", "conversations")
+        self.database_container = cfg.get("CONVERSATIONS_DATABASE_CONTAINER", "conversations")
 
 
         # agentic strategy
-        agentic_strategy_name = self.cfg.get("AGENT_STRATEGY", "single_agent_rag")
+        agentic_strategy_name = cfg.get("AGENT_STRATEGY", "single_agent_rag")
         self.agentic_strategy = AgentStrategyFactory.get_strategy(agentic_strategy_name)
         if not self.agentic_strategy or not self.database_container:
             raise EnvironmentError("AGENT_STRATEGY and CONVERSATIONS_DATABASE_CONTAINER must be set")        
