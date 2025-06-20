@@ -4,7 +4,7 @@ import logging
 from connectors.cosmosdb import CosmosDBClient
 from connectors.appconfig import AppConfigClient
 from strategies.agent_strategy_factory import AgentStrategyFactory
-
+from dependencies import get_config
 
 class Orchestrator:
     def __init__(self, conversation_id: str):
@@ -14,12 +14,11 @@ class Orchestrator:
         self.conversation_id = conversation_id
 
         # app configuration
-        cfg = AppConfigClient()
+        cfg = get_config()
         
         # database
         self.database_client = CosmosDBClient()
         self.database_container = cfg.get("CONVERSATIONS_DATABASE_CONTAINER", "conversations")
-
 
         # agentic strategy
         agentic_strategy_name = cfg.get("AGENT_STRATEGY", "single_agent_rag")

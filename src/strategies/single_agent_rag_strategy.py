@@ -19,6 +19,7 @@ from .base_agent_strategy import BaseAgentStrategy
 from .agent_strategies import AgentStrategies
 
 from connectors.appconfig import AppConfigClient
+from dependencies import get_config
 
 # -----------------------------------------------------------------------------
 # Be sure to configure the root logger at DEBUG level somewhere early in your app,
@@ -50,7 +51,7 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
         self.strategy_type = AgentStrategies.SINGLE_AGENT_RAG
         self.event_handler = EventHandler()
 
-        cfg = AppConfigClient()
+        cfg = get_config()
 
         # Agent Tools Initialization Section
         # =========================================================

@@ -15,7 +15,8 @@ openai==1.76.2
 prompty==0.1.50
 
 # Semantic Kernel dependencies
-semantic-kernel==1.29.0
+semantic-kernel==1.33.0
+mcp
 aiohttp==3.10.11
 pydantic==2.11.4
 

@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from azure.identity.aio import ChainedTokenCredential, AzureCliCredential, ManagedIdentityCredential
 from azure.ai.projects.aio import AIProjectClient
 from connectors.appconfig import AppConfigClient
+from dependencies import get_config
 
 class BaseAgentStrategy(ABC):
     """
@@ -16,9 +17,11 @@ class BaseAgentStrategy(ABC):
         Initializes endpoint, model name, credentials, and default event handler.
         """
         # App configuration
-        cfg = AppConfigClient()        
+        cfg : AppConfigClient = get_config()
         self.project_endpoint = cfg.get("AI_FOUNDRY_PROJECT_ENDPOINT") 
         self.model_name = cfg.get("CHAT_DEPLOYMENT_NAME")
+        self.prompt_source = cfg.get("PROMPT_SOURCE", "file")
+
         logging.debug(f"[base_agent_strategy] Project endpoint: {self.project_endpoint}")
         logging.debug(f"[base_agent_strategy] Model name: {self.model_name}")
 
@@ -27,10 +30,12 @@ class BaseAgentStrategy(ABC):
                 "Both AI_FOUNDRY_PROJECT_ENDPOINT and CHAT_DEPLOYMENT_NAME must be set"
             )
         
+        client_id = os.environ.get("AZURE_CLIENT_ID") 
+        
         # Build chained token credential: CLI first, then managed identity
         self.credential = ChainedTokenCredential(
             AzureCliCredential(),
-            ManagedIdentityCredential()
+            ManagedIdentityCredential(client_id=client_id)
         )
 
         # AIProjectClient 
@@ -148,5 +153,5 @@ class BaseAgentStrategy(ABC):
             """
             if not hasattr(self, 'strategy_type'):
                 raise ValueError("strategy_type is not defined")        
-            prompts_dir = "src/prompts/" + self.strategy_type.value
+            prompts_dir = "prompts/" + self.strategy_type.value
             return prompts_dir

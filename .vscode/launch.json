@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "Python: FastAPI (Uvicorn)",
-      "type": "python",
+      "type": "debugpy",
       "request": "launch",
       "module": "uvicorn",
       "args": [
@@ -13,8 +13,10 @@
         "--reload"
       ],
       "env": {
-        "APP_CONFIG_ENDPOINT": "https://appcs-wvxk4btei6myq.azconfig.io"
+        "APP_CONFIG_ENDPOINT": "https://appconfig-2dkxelm5py5us.azconfig.io"
       },
+      "cwd": "${workspaceFolder}/src",
+      "python": "${command:python.interpreterPath}",
       "jinja": true,
       "justMyCode": true
     }
