@@ -17,6 +17,13 @@ class AppConfigClient:
         """
         
         client_id = os.getenv("AZURE_CLIENT_ID")
+
+        self.allow_env_vars = False
+        
+        if "allow_environment_variables" in os.environ:
+            allow_env_vars = bool(os.environ[
+                "allow_environment_variables"
+                ])
        
         endpoint = os.getenv("APP_CONFIG_ENDPOINT")
         if not endpoint:
@@ -42,10 +49,26 @@ class AppConfigClient:
         except AzureError as e:
             raise RuntimeError(f"Failed to bulk-load 'gpt-rag' settings: {e}")
 
-    def get(self, key: str, default: Any = None) -> Any:
+    def get(self, key: str, default: Any = None, type: type = str) -> Any:
         """
         Returns the in-memory value for the given key.
 
         If the key was not found under either label, returns `default`.
         """
-        return self._settings.get(key, default)
+        value = self._settings.get(key, default)
+
+        if self.allow_env_vars is True:
+            value = os.environ.get(key)
+
+        if value is not None:
+            if type is not None:
+                if type is bool:
+                    if isinstance(value, str):
+                        value = value.lower() in ['true', '1', 'yes']
+                else:
+                    try:
+                        value = type(value)
+                    except ValueError as e:
+                        raise Exception(f'Value for {key} could not be converted to {type.__name__}. Error: {e}')
+            
+        return value

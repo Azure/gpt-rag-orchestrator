@@ -62,6 +62,14 @@ class BaseAgentStrategy(ABC):
         """
 
     async def _read_prompt(self, prompt_name, placeholders=None):
+        
+        if self.prompt_source == 'file':
+            return await self._read_prompt_file(prompt_name, placeholders)
+        
+        elif self.prompt_source == 'cosmos':
+            return await self._read_prompt_cosmos(prompt_name, placeholders)
+
+    async def _read_prompt_file(self, prompt_name, placeholders=None):
         """
         Load and process a prompt file, applying strategy-based variants and placeholder replacements.
 
@@ -141,6 +149,33 @@ class BaseAgentStrategy(ABC):
                     )
             return prompt
 
+    async def _read_prompt_cosmos(self, prompt_name, placeholders=None):
+ 
+        logging.info(f"[base_agent_strategy] Using cosmo prompt : {self.strategy_type.value} : {prompt_name}")
+
+        prompt_json = self.cosmos.get_document("prompts", f"{self.strategy_type.value}_{prompt_name}")
+        prompt = prompt_json.get("content", "")
+            
+        # Replace placeholders provided in the 'placeholders' dictionary
+        if placeholders:
+            for key, value in placeholders.items():
+                prompt = prompt.replace(f"{{{{{key}}}}}", value)
+        
+        # Find any remaining placeholders in the prompt
+        pattern = r"\{\{([^}]+)\}\}"
+        matches = re.findall(pattern, prompt)
+        
+        # Process each unmatched placeholder
+        for placeholder_name in set(matches):
+            # Skip if placeholder was already replaced
+            if placeholders and placeholder_name in placeholders:
+                continue
+            
+            placeholder_content = self.cosmos.get_document("prompts", f"placeholder_{placeholder_name}")
+            prompt = prompt.replace(f"{{{{{placeholder_name}}}}}", placeholder_content)
+            
+        return prompt
+    
     def _prompt_dir(self):
             """
             Returns the directory path for prompts based on the strategy type.

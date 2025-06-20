@@ -80,7 +80,7 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
         # --- Initialize AzureAISearchTool ---
         
         azure_ai_conn_id = cfg.get("SEARCH_CONNECTION_ID") 
-        index_name = cfg.get("SEARCH_RAG_INDEX_NAME") 
+        index_name = cfg.get("SEARCH_RAG_INDEX_NAME", "ragindex") 
 
         logging.debug(f"seachConnectionId (cfg)  = {azure_ai_conn_id}")
         logging.debug(f"SEARCH_RAG_INDEX_NAME (cfg) = {index_name}")
@@ -102,7 +102,7 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
             index_connection_id=azure_ai_conn_id,
             index_name=index_name,
             query_type=AzureAISearchQueryType.SIMPLE, 
-            top_k=cfg.get("SEARCH_TOP_K") or 5,
+            top_k=cfg.get("SEARCH_TOP_K", 5, int),
             filter="",  # Optional filter for search results
         )
 

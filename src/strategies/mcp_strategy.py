@@ -115,8 +115,8 @@ class McpStrategy(BaseAgentStrategy):
  
         self.kernel.add_service(AzureChatCompletion(
             service_id="chat",
-            deployment_name=cfg.get("AZURE_OPENAI_CHATGPT_DEPLOYMENT"),
-            endpoint=cfg.get("AZURE_OPENAI_ENDPOINT"),
+            deployment_name=cfg.get("CHAT_DEPLOYMENT_NAME"),
+            endpoint=cfg.get("AI_FOUNDRY_PROJECT_ENDPOINT"),
             ad_token_provider= token_provider
         ))
 
