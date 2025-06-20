@@ -71,10 +71,10 @@ class McpStrategy(BaseAgentStrategy):
         self.tool_resources = {}
 
         # Add an MCP Server tool if configured
-        mcp_server_url = cfg.get("AZURE_MCP_SERVER_URL", default="http://localhost:5000")
-        mcp_server_timeout = cfg.get("AZURE_MCP_CLIENT_TIMEOUT", default=600)
-        mcp_server_api_key = cfg.get("AZURE_MCP_SERVER_APIKEY", default=None)
-        mcp_server_transport = cfg.get("AZURE_MCP_SERVER_TRANSPORT", default="sse")
+        mcp_server_url = cfg.get("MCP_APP_ENDPOINT", default="http://localhost:5000")
+        mcp_server_timeout = cfg.get("MCP_CLIENT_TIMEOUT", default=600)
+        mcp_server_api_key = cfg.get("MCP_SERVER_APIKEY", default=None)
+        mcp_server_transport = cfg.get("MCP_SERVER_TRANSPORT", default="sse")
 
         if mcp_server_url:
             logging.debug(f"Adding MCP Server tool with URL: {mcp_server_url}")
