@@ -121,7 +121,7 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
 
         async with self.project_client as project_client:
             # ------------------------
-            # 1) Create agent
+            # 1) Create or reuse agent
             # ------------------------
             if self.existing_agent_id:
                 logging.debug("agent_id exists; calling update_agent(...)")
