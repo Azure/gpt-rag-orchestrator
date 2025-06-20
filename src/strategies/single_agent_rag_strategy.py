@@ -20,16 +20,6 @@ from .agent_strategies import AgentStrategies
 
 from connectors.appconfig import AppConfigClient
 
-# -----------------------------------------------------------------------------
-# Be sure to configure the root logger at DEBUG level somewhere early in your app,
-# e.g. in your main entrypoint:
-#
-#    logging.basicConfig(level=logging.DEBUG, 
-#                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-#
-# That way, all of the logging.debug(...) calls below will actually show up.
-# -----------------------------------------------------------------------------
-
 class SingleAgentRAGStrategy(BaseAgentStrategy):
     """
     Implements a single-agent Retrieval-Augmented Generation (RAG) strategy
@@ -135,13 +125,7 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
             # ------------------------
             if self.existing_agent_id:
                 logging.debug("agent_id exists; calling update_agent(...)")
-                agent = await project_client.agents.update_agent(
-                    model=self.model_name,
-                    name="gpt-rag-agent",
-                    instructions=await self._read_prompt("main"),
-                    tools=self.tools_list,
-                    tool_resources=self.tool_resources
-                )
+                agent = await project_client.agents.get_agent(self.existing_agent_id)
                 logging.info(f"Reused agent with ID: {agent.id}")
             else:
                 logging.debug("creating agent(...)")
