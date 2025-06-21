@@ -22,7 +22,7 @@ cfg = AppConfigClient()
 # 1) Bring in your FastAPI app
 from src.main import app  
 
-# 2) Load Azure App Configuration (label="orchestrator") into env
+# 2) Load Azure App Configuration (label="gpt-rag-orchestrator") into env
 cred = ChainedTokenCredential(
     EnvironmentCredential(),
     AzureCliCredential(),
