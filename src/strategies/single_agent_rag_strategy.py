@@ -123,6 +123,7 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
             # ------------------------
             # 1) Create or reuse agent
             # ------------------------
+            create_agent = False
             if self.existing_agent_id:
                 logging.debug("agent_id exists; calling update_agent(...)")
                 agent = await project_client.agents.get_agent(self.existing_agent_id)
