@@ -515,3 +515,81 @@ async def conversations(req: Request) -> Response:
 
     else:
         return Response("Method not allowed", status_code=405)
+
+@app.route(route="scrape-pages", methods=[func.HttpMethod.POST])
+async def scrape_pages(req: Request) -> Response:
+    """
+    Endpoint to scrape multiple web pages in parallel.
+    
+    Expected payload:
+    {
+        "urls": ["http://example.com", "http://example2.com"]
+    }
+    
+    Returns:
+        JSON response with scraping results and optional blob storage results
+    """
+    logging.info('[scrape-pages] Python HTTP trigger function processed a request.')
+    
+    try:
+
+        req_body = await req.json()
+        
+        # Validate payload
+        if not req_body or 'urls' not in req_body:
+            return Response(
+                content=json.dumps({
+                    "status": "error", 
+                    "message": "Request body must contain 'urls' array"
+                }),
+                media_type="application/json",
+                status_code=400
+            )
+        
+        urls = req_body['urls']
+        if not isinstance(urls, list) or len(urls) == 0:
+            return Response(
+                content=json.dumps({
+                    "status": "error", 
+                    "message": "urls must be a non-empty array"
+                }),
+                media_type="application/json",
+                status_code=400
+            )
+        
+        # Use the new refactored scraping functionality
+        from webscrapping import scrape_urls_standalone
+        
+        # Extract request ID from headers if provided
+        request_id = req.headers.get("x-request-id")
+        
+        result_data = scrape_urls_standalone(urls, request_id)
+        
+        # Determine response status code based on result
+        status_code = 200 if result_data.get("status") == "completed" else 500
+        
+        return Response(
+            content=json.dumps(result_data),
+            media_type="application/json",
+            status_code=status_code
+        )
+        
+    except json.JSONDecodeError:
+        return Response(
+            content=json.dumps({
+                "status": "error", 
+                "message": "Invalid JSON format"
+            }),
+            media_type="application/json",
+            status_code=400
+        )
+    except Exception as e:
+        logging.error(f"Error in scrape-pages endpoint: {str(e)}")
+        return Response(
+            content=json.dumps({
+                "status": "error", 
+                "message": f"Internal server error: {str(e)}"
+            }),
+            media_type="application/json",
+            status_code=500
+        )
