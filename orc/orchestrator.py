@@ -42,7 +42,7 @@ def generate_security_ids(client_principal):
         security_ids = f"{client_principal['id']}" + (f",{group_names}" if group_names else "")
     return security_ids    
     
-async def run(conversation_id, ask, client_principal):
+async def run(conversation_id, ask, client_principal, is_work_mode):
     
     start_time = time.time()
 
@@ -84,7 +84,7 @@ async def run(conversation_id, ask, client_principal):
 
             logging.info(f"[orchestrator] executing RAG retrieval using code orchestration")
             security_ids = generate_security_ids(client_principal)
-            answer_dict = await code_orchestration.get_answer(history, security_ids,conversation_id)
+            answer_dict = await code_orchestration.get_answer(history, security_ids,conversation_id,is_work_mode)
 
             # 3) update and save conversation (containing history and conversation data)
             

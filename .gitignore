@@ -66,3 +66,4 @@ __queuestorage__
 __azurite_db*__.json
 
 .azure
+.history/

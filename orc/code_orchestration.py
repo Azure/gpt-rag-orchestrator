@@ -52,13 +52,28 @@ APIM_ENABLED = True if APIM_ENABLED.lower() == "true" else False
 if SECURITY_HUB_CHECK:
     SECURITY_HUB_THRESHOLDS=[get_possitive_int_or_default(os.environ.get("SECURITY_HUB_HATE_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SELFHARM_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_SEXUAL_THRESHHOLD"), 0),get_possitive_int_or_default(os.environ.get("SECURITY_HUB_VIOLENCE_THRESHHOLD"), 0)]
 
-async def get_answer(history, security_ids,conversation_id):
+async def get_answer(history, security_ids,conversation_id, is_work_mode):
 
     #############################
     # INITIALIZATION
     #############################
 
     #initialize variables    
+    global BING_RETRIEVAL
+    global SEARCH_RETRIEVAL
+    global RETRIEVAL_PRIORITY 
+
+    # work mode:
+    #  true - prioritize search retrieval, turn off bing search
+    # false - prioritize bing retrieval, turn off search retrieval
+    if is_work_mode:
+        SEARCH_RETRIEVAL = True
+        RETRIEVAL_PRIORITY = "search"
+        BING_RETRIEVAL = False
+    else:
+        if BING_RETRIEVAL:
+            RETRIEVAL_PRIORITY = "bing"
+        SEARCH_RETRIEVAL = False
 
     answer_dict = {}
     prompt = "The prompt is only recorded for question-answering intents"
