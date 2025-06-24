@@ -27,13 +27,14 @@ from .parallel_processor import process_urls_parallel
 _logger = logging.getLogger(__name__)
 
 
-def scrape_urls_standalone(urls: List[str], request_id: str = None) -> Dict[str, Any]:
+def scrape_urls_standalone(urls: List[str], request_id: str = None, organization_id: str = None) -> Dict[str, Any]:
     """
     Standalone function to scrape URLs without Azure Functions dependency.
     
     Args:
         urls: List of URLs to scrape
         request_id: Optional request identifier
+        organization_id: Optional organization identifier for metadata
         
     Returns:
         Dictionary with scraping results
@@ -42,9 +43,10 @@ def scrape_urls_standalone(urls: List[str], request_id: str = None) -> Dict[str,
     request_id = request_id or generate_request_id()
     
     _logger.info(
-        "[Orchestrator] Starting standalone scraping - request_id: %s, url_count: %d",
+        "[Orchestrator] Starting standalone scraping - request_id: %s, url_count: %d, organization_id: %s",
         request_id,
         len(urls),
+        organization_id or "None",
     )
 
     try:
@@ -63,7 +65,7 @@ def scrape_urls_standalone(urls: List[str], request_id: str = None) -> Dict[str,
 
         # Process URLs in parallel
         results, blob_storage_results = process_urls_parallel(
-            validated_urls, crawler_manager, request_id
+            validated_urls, crawler_manager, request_id, organization_id=organization_id
         )
 
         # Calculate metrics
