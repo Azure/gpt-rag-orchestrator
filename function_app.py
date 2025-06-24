@@ -22,10 +22,15 @@ from shared.util import (
     update_subscription_logs, 
     updateExpirationDate,
     trigger_indexer_run,
+    get_conversations,
+    get_conversation,
+    delete_conversation,
+    trigger_indexer_with_retry,
 )
 
 from orc import new_orchestrator
 from financial_orc import orchestrator as financial_orchestrator
+from shared.conversation_export import export_conversation
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 @app.route(route="orc", methods=[func.HttpMethod.POST])
@@ -384,10 +389,207 @@ async def html2pdf_conversion(req: Request) -> Response:
 
 @app.blob_trigger(arg_name="myblob", path="documents/{name}",
                                connection="AZURE_STORAGE_CONNECTION_STRING") 
-def BlobTrigger(myblob: func.InputStream):
-    logging.info(f"Python blob trigger function processed blob"
-                f"Name: {myblob.name}"
-                f"Blob Size: {myblob.length} bytes")
-    indexer_name = "ragindex-indexer-chunk-documents"
-    logging.info(f"Triggering indexer - {indexer_name}")
-    trigger_indexer_run(indexer_name = indexer_name)
+def blob_trigger(myblob: func.InputStream):
+    """
+    Azure Blob Storage trigger that processes uploaded documents and triggers search index updates.
+    
+    Args:
+        myblob (func.InputStream): The uploaded blob file stream
+    """
+    try:
+        # Extract file information
+        blob_name = myblob.name
+        file_extension = os.path.splitext(blob_name)[1].lower() if blob_name else ""
+        
+        logging.info(f"[blob_trigger] Processing blob: {blob_name}, Extension: {file_extension}")
+        
+        # Define supported file types for indexing
+        supported_extensions = {'.pdf', '.docx', '.doc', '.txt', '.md', '.html','.pptx'}
+        
+        if file_extension not in supported_extensions:
+            logging.info(f"[blob_trigger] File type {file_extension} not supported for indexing. Supported types: {supported_extensions}")
+            return
+        
+        # Get indexer name from environment or use default
+        indexer_name = f'{os.getenv("AZURE_AI_SEARCH_INDEX_NAME")}-test-indexer' # TODO: change to the actual indexer name once moved to prod
+        
+        logging.info(f"[blob_trigger] Triggering indexer '{indexer_name}' for supported document: {blob_name}")
+        
+        # Trigger the indexer with retry logic for concurrent runs
+        indexer_success = trigger_indexer_with_retry(indexer_name, blob_name)
+        
+        if indexer_success:
+            logging.info(f"[blob_trigger] Successfully triggered indexer '{indexer_name}' for blob: {blob_name}")
+        else:
+            logging.warning(f"[blob_trigger] Could not trigger indexer '{indexer_name}' for blob: {blob_name}. File will be indexed in next scheduled run.")
+            
+    except Exception as e:
+        logging.error(f"[blob_trigger] Unexpected error processing blob {myblob.name if myblob else 'unknown'}: {str(e)}")
+
+@app.route(route="conversations", methods=[func.HttpMethod.GET, func.HttpMethod.POST, func.HttpMethod.DELETE])
+async def conversations(req: Request) -> Response:
+    logging.info('Python HTTP trigger function processed a request for conversations.')
+
+    id = req.query_params.get('id')
+
+    if req.method == "GET":
+        try:
+            user_id = req.query_params.get('user_id')
+            if not user_id:
+                return Response(json.dumps({"error": "user_id query parameter is required"}), media_type="application/json", status_code=400)
+            
+            if not id:
+                conversations = get_conversations(user_id)
+            else:
+                conversations = get_conversation(id, user_id)
+            return Response(json.dumps(conversations), media_type="application/json", status_code=200)
+        except Exception as e:
+            logging.error(f"Error in GET /conversations: {str(e)}")
+            return Response(json.dumps({"error": "Internal server error"}), media_type="application/json", status_code=500)
+
+    elif req.method == "POST":
+        try:
+            req_body = await req.json()
+            id_from_body = req_body.get('id')
+            if not id_from_body:
+                return Response("Missing conversation ID for export", status_code=400)
+
+            user_id = req_body.get('user_id')
+            export_format = req_body.get('format', 'html')
+            
+            if not user_id:
+                return Response("Missing user_id in request body", status_code=400)
+            
+            if export_format not in ['html', 'json', 'docx']:
+                return Response("Invalid export format. Supported formats: html, json, docx", status_code=400)
+            
+            result = export_conversation(id_from_body, user_id, export_format)
+            
+            if result['success']:
+                return Response(
+                    json.dumps(result), 
+                    media_type="application/json", 
+                    status_code=200
+                )
+            else:
+                return Response(
+                    json.dumps({"error": result['error']}), 
+                    media_type="application/json", 
+                    status_code=500
+                )
+                
+        except json.JSONDecodeError:
+            return Response("Invalid JSON in request body", status_code=400)
+        except Exception as e:
+            logging.error(f"Error in conversation export: {str(e)}")
+            return Response(
+                json.dumps({"error": "Internal server error"}), 
+                media_type="application/json", 
+                status_code=500
+            )
+    # need to double check if this one is working 
+    elif req.method == "DELETE":
+        try:
+            req_body = await req.json()
+            user_id = req_body.get('user_id')
+            if not user_id:
+                return Response("Missing user_id in request body", status_code=400)
+            if id:
+                try:
+                    delete_conversation(id, user_id)
+                    return Response("Conversation deleted successfully", status_code=200)
+                except Exception as e:
+                    logging.error(f"Error deleting conversation: {str(e)}")
+                    return Response("Error deleting conversation", status_code=500)
+            else:
+                return Response("Missing conversation ID", status_code=400)
+        except json.JSONDecodeError:
+            return Response("Invalid JSON in request body", status_code=400)
+        except Exception as e:
+            logging.error(f"Error in DELETE /conversations: {str(e)}")
+            return Response(
+                json.dumps({"error": "Internal server error"}), 
+                media_type="application/json", 
+                status_code=500
+            )
+
+    else:
+        return Response("Method not allowed", status_code=405)
+
+@app.route(route="scrape-pages", methods=[func.HttpMethod.POST])
+async def scrape_pages(req: Request) -> Response:
+    """
+    Endpoint to scrape multiple web pages in parallel.
+    
+    Expected payload:
+    {
+        "urls": ["http://example.com", "http://example2.com"]
+    }
+    
+    Returns:
+        JSON response with scraping results and optional blob storage results
+    """
+    logging.info('[scrape-pages] Python HTTP trigger function processed a request.')
+    
+    try:
+
+        req_body = await req.json()
+        
+        # Validate payload
+        if not req_body or 'urls' not in req_body:
+            return Response(
+                content=json.dumps({
+                    "status": "error", 
+                    "message": "Request body must contain 'urls' array"
+                }),
+                media_type="application/json",
+                status_code=400
+            )
+        
+        urls = req_body['urls']
+        if not isinstance(urls, list) or len(urls) == 0:
+            return Response(
+                content=json.dumps({
+                    "status": "error", 
+                    "message": "urls must be a non-empty array"
+                }),
+                media_type="application/json",
+                status_code=400
+            )
+        
+        # Use the new refactored scraping functionality
+        from webscrapping import scrape_urls_standalone
+        
+        # Extract request ID from headers if provided
+        request_id = req.headers.get("x-request-id")
+        
+        result_data = scrape_urls_standalone(urls, request_id)
+        
+        # Determine response status code based on result
+        status_code = 200 if result_data.get("status") == "completed" else 500
+        
+        return Response(
+            content=json.dumps(result_data),
+            media_type="application/json",
+            status_code=status_code
+        )
+        
+    except json.JSONDecodeError:
+        return Response(
+            content=json.dumps({
+                "status": "error", 
+                "message": "Invalid JSON format"
+            }),
+            media_type="application/json",
+            status_code=400
+        )
+    except Exception as e:
+        logging.error(f"Error in scrape-pages endpoint: {str(e)}")
+        return Response(
+            content=json.dumps({
+                "status": "error", 
+                "message": f"Internal server error: {str(e)}"
+            }),
+            media_type="application/json",
+            status_code=500
+        )

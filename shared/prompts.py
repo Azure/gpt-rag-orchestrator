@@ -143,7 +143,8 @@ Key Requirements:
 7. If user asks for elaboration on the previous answer or provide more details on any specific point, you should not rewrite the query, you should just return the original query.
 8. Rewrite the query to a statement instead of a question
 9. Do not add a "." at the end of the rewritten query.
-10. If the user query references a segment alias, you MUST ALWAYS rewrite the query using the official segment name.
+10. **Remove action requests**: Strip phrases like "Can you create", "Help me craft", "I want to", "Please help me", "What should we do" - focus on the data/information being sought.
+11. If the user query references a segment alias, you MUST ALWAYS rewrite the query using the official segment name.
 You are provided with a table mapping segment aliases in the format A → B, where:
 	•	A is the official (canonical) segment name.
 	•	B is an alias used informally or in historical data.
@@ -203,6 +204,42 @@ Rewritten Query:
 
 ```
 Top 5 competitors of <brand_information>in Charlotte
+```
+
+4. Original Query:
+
+```
+Can you help me create a marketing strategy for our new eco-friendly product?
+```
+
+Rewritten Query:
+
+```
+Marketing strategy for new eco-friendly product in the context of marketing and advertising services
+```
+
+5. Original Query:
+
+```
+I want to launch a new shampoo that targets dandruff. Which consumer segment should I focus on?
+```
+
+Rewritten Query:
+
+```
+Primary consumer pulse segment most interested in anti-dandruff shampoo launch
+```
+
+6. Original Query:
+
+```
+What should we do if we want to open an marketing agency in Manhattan, NY
+```
+
+Rewritten Query:
+
+```
+Recommended steps for a marketing agency to open an office in Manhattan, NY
 ```
 
 """
