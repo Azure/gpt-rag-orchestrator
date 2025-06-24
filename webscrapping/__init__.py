@@ -26,7 +26,7 @@ from webscrapping.blob_manager import WebCrawlerManager
 from webscrapping.orchestrator import main as azure_function_main
 """
 
-from .orchestrator import scrape_urls_standalone, handle_azure_function_request
+from .orchestrator import scrape_urls_standalone
 from .scraper import WebScraper  
 from .html_parser import HtmlParser
 from .blob_manager import WebCrawlerManager, create_crawler_manager_from_env
@@ -38,7 +38,6 @@ from .config import CrawlerConfig, Document, Storage, Html, HtmlParserConfig
 __all__ = [
     # Main functions
     'scrape_urls_standalone',
-    'handle_azure_function_request',
     
     # Core classes
     'WebScraper',
