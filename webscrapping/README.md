@@ -28,6 +28,10 @@ from webscrapping import scrape_urls_standalone
 urls = ['http://example.com', 'http://example2.com']
 result = scrape_urls_standalone(urls)
 
+# With organization tracking
+urls = ['http://example.com', 'http://example2.com']
+result = scrape_urls_standalone(urls, organization_id="your-org-id")
+
 print(f"Status: {result['status']}")
 print(f"Processed {result['summary']['total_urls']} URLs")
 print(f"Success rate: {result['summary']['successful_scrapes']}/{result['summary']['total_urls']}")
@@ -42,6 +46,30 @@ from webscrapping.orchestrator import main
 def main(req: func.HttpRequest) -> func.HttpResponse:
     return main(req)
 ```
+
+#### With User Credentials and Organization Tracking
+
+The `scrape-pages` Azure Function endpoint automatically extracts organization information from user credentials. Send requests with the following payload structure:
+
+```json
+{
+    "urls": ["http://example.com", "http://example2.com"],
+    "client_principal_id": "user-uuid"
+}
+```
+
+**How Organization ID is Extracted:**
+1. **From User Database**: The system looks up the user by `client_principal_id` and extracts `organizationId` from their user profile
+2. **Anonymous Fallback**: For anonymous users (no `client_principal_id` provided), no organization_id is included in blob metadata
+
+**Blob Metadata Includes:**
+- `organization_id`: The user's organization identifier (when available)
+- `title`: Page title
+- `original_content_type`: Original HTTP Content-Type
+- `stored_content_type`: Always "text/plain" after processing
+- `content_length`: Size of the content
+- `scraped_at`: Timestamp when scraped
+- `request_id`: Unique request identifier for tracing
 
 ### Using Individual Components
 
@@ -74,6 +102,15 @@ results, blob_results = process_urls_parallel(
     crawler_manager=crawler_manager,
     max_workers=5
 )
+
+# Process URLs with organization tracking
+urls = ['http://example.com', 'http://example2.com']
+results, blob_results = process_urls_parallel(
+    urls, 
+    crawler_manager=crawler_manager,
+    max_workers=5,
+    organization_id="your-org-id"
+)
 ```
 
 ## 🔧 Features
@@ -95,6 +132,7 @@ results, blob_results = process_urls_parallel(
 - Content deduplication using MD5 checksums
 - Metadata preservation and enrichment
 - Automatic container management
+- **Organization tracking**: Include organization_id in blob metadata for multi-tenant scenarios
 
 ### Error Handling & Logging
 - Comprehensive error handling for each processing stage

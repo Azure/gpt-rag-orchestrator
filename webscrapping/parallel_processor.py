@@ -31,6 +31,7 @@ class ParallelScrapingProcessor:
         urls: List[str],
         crawler_manager: Optional[WebCrawlerManager] = None,
         request_id: str = None,
+        organization_id: str = None,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Process multiple URLs in parallel with optional blob storage.
@@ -39,6 +40,7 @@ class ParallelScrapingProcessor:
             urls: List of URLs to process
             crawler_manager: Optional WebCrawlerManager for blob storage
             request_id: Optional request identifier for logging
+            organization_id: Optional organization identifier for metadata
 
         Returns:
             Tuple of (scraping_results, blob_storage_results)
@@ -61,6 +63,7 @@ class ParallelScrapingProcessor:
                         url,
                         crawler_manager,
                         request_id,
+                        organization_id,
                     ): url
                     for url in urls
                 }
@@ -144,7 +147,7 @@ class ParallelScrapingProcessor:
         return self.scraper.scrape_page(url, request_id)
 
     def _process_single_url_with_blob_storage(
-        self, url: str, crawler_manager: WebCrawlerManager, request_id: str
+        self, url: str, crawler_manager: WebCrawlerManager, request_id: str, organization_id: str
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Process a single URL with blob storage."""
         try:
@@ -163,7 +166,7 @@ class ParallelScrapingProcessor:
 
             # Format content for blob storage
             blob_data = WebScraper.format_content_for_blob_storage(
-                scrape_result, request_id
+                scrape_result, request_id, organization_id
             )
 
             if not blob_data:
@@ -284,6 +287,7 @@ def process_urls_parallel(
     crawler_manager: Optional[WebCrawlerManager] = None,
     request_id: str = None,
     max_workers: int = 10,
+    organization_id: str = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Convenience function for parallel URL processing.
@@ -293,9 +297,10 @@ def process_urls_parallel(
         crawler_manager: Optional WebCrawlerManager for blob storage
         request_id: Optional request identifier for logging
         max_workers: Maximum number of concurrent workers
+        organization_id: Optional organization identifier for metadata
 
     Returns:
         Tuple of (scraping_results, blob_storage_results)
     """
     processor = ParallelScrapingProcessor(max_workers=max_workers)
-    return processor.process_urls(urls, crawler_manager, request_id) 
+    return processor.process_urls(urls, crawler_manager, request_id, organization_id) 
