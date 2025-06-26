@@ -1,5 +1,6 @@
 from .single_agent_rag_strategy import SingleAgentRAGStrategy
 from .agent_strategies import AgentStrategies
+from .mcp_strategy import McpStrategy
 
 class AgentStrategyFactory:
     @staticmethod
@@ -11,8 +12,8 @@ class AgentStrategyFactory:
             return SingleAgentRAGStrategy()
         # if key == AgentStrategies.MULTIAGENT.value:
             # return ...
-        # if key == AgentStrategies.MCP.value:
-            # return ...
+        if key == AgentStrategies.MCP.value:
+            return McpStrategy()
         # if key == AgentStrategies.MULTIMODAL.value:
             # return ...
         # if key == AgentStrategies.NL2SQL.value:
