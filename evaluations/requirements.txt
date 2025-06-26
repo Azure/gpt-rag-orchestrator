@@ -1,40 +1,29 @@
-# Azure SDK dependencies
-azure-keyvault-secrets==4.8.0
-azure-cosmos==4.5.1
-azure-identity==1.21.0
-azure-mgmt-web==8.0.0
-azure-mgmt-storage==22.1.1
-azure-storage-blob==12.25.1
-azure-appconfiguration==1.7.1
-azure-ai-projects==1.0.0b10
-azure-search-documents==11.5.2
-openai==1.69.0
-
-# Evaluation
-azure-ai-inference[prompts]
-pandas
-python-dotenv
-opentelemetry-api
-azure-ai-evaluation[remote]
-
-# AI and NLP dependencies
-tiktoken==0.7.0
-prompty==0.1.50
-
-# Semantic Kernel dependencies
-semantic-kernel==1.29.0
-aiohttp==3.10.11
-pydantic==2.11.4
-
-# Utility dependencies
-tenacity
-
-# For evaluation
-requests==2.32.3
-python-dotenv==1.1.0
-
-# fastapi
+# — FastAPI & TestClient (for calling your app in-memory)
 fastapi==0.115.12
-uvicorn==0.34.1
+requests==2.32.3
 
+# — Data handling & reporting
 pandas
+
+# — Azure App Configuration & Identity (AppConfigClient)
+azure-identity==1.21.0
+azure-appconfiguration==1.7.1
+
+# — Cosmos DB (async client used by your CosmosDBClient)
+azure-cosmos==4.5.1
+
+# — Azure AI Search (used by generate_eval_input.py)
+azure-search-documents==11.5.2
+
+# — Azure AI Projects & Agents (used by your strategies & evaluate.py)
+azure-ai-projects==1.0.0b11
+azure-ai-agents
+
+# — Azure AI Evaluation SDK
+azure-ai-evaluation
+
+# - Key Vault (if you use it for secrets)
+azure-keyvault-secrets==4.7.0
+
+# (Optional) If you ever load from a .env in this venv:
+# python-dotenv

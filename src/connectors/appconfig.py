@@ -37,10 +37,10 @@ class AppConfigClient:
 
         # 1) Load everything labeled “orchestrator”
         try:
-            for setting in client.list_configuration_settings(label_filter="orchestrator"):
+            for setting in client.list_configuration_settings(label_filter="gpt-rag-orchestrator"):
                 self._settings[setting.key] = setting.value
         except AzureError as e:
-            raise RuntimeError(f"Failed to bulk-load 'orchestrator' settings: {e}")
+            raise RuntimeError(f"Failed to bulk-load 'gpt-rag-orchestrator' settings: {e}")
 
         # 2) Load “gpt-rag” ones only if not already present
         try:

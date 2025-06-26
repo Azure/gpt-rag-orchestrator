@@ -1,48 +1,55 @@
+#!/usr/bin/env bash
 set -euo pipefail
 
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-GREEN='\033[0;32m'
-NC='\033[0m' # No Color
+# Default: run evaluation
+SKIP_EVAL=false
 
-echo "🔍 Validating required environment variables…"
+# Parse command-line arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --skip-eval)
+      SKIP_EVAL=true
+      shift
+      ;;
+    *)
+      echo "❌ Error: Unknown argument: $1"
+      echo "Usage: $0 [--skip-eval]"
+      exit 1
+      ;;
+  esac
+done
 
-# Check for missing env vars
-missing=()
-[[ -z "${APP_CONFIG_ENDPOINT:-}" ]] && missing+=("APP_CONFIG_ENDPOINT")
-
-if [[ ${#missing[@]} -gt 0 ]]; then
-  echo -e "${YELLOW}⚠️  Missing required environment variables:${NC}"
-  for var in "${missing[@]}"; do
-    echo "    • $var"
-  done
-  echo
-  echo "Please set them before running this script, e.g.:"
-  echo "  export APP_CONFIG_ENDPOINT=<your-value>"
-  echo "Or use: azd env set APP_CONFIG_ENDPOINT <your-value>"
+# 1) Validate
+if [ -z "${APP_CONFIG_ENDPOINT:-}" ]; then
+  echo "❌  Error: APP_CONFIG_ENDPOINT is not set"
   exit 1
 fi
 
-echo -e "${GREEN}✅ All required azd env values are set.${NC}"
-echo
+# 2) Create & activate venv
+python -m venv evaluations/.venv
+source evaluations/.venv/bin/activate
 
-echo -e "${BLUE}📦 Creating temporary virtual environment…${NC}"
-python -m venv evaluations/.venv_temp
-chmod a+r evaluations/.venv_temp/bin/activate
-source evaluations/.venv_temp/bin/activate
-echo -e "${BLUE}⬇️  Installing requirements…${NC}"
+# 3) Install dependencies
 pip install --upgrade pip
 pip install -r evaluations/requirements.txt
 
+# 4) Ensure Python can see your src/ package
+export PYTHONPATH="$(pwd):$(pwd)/src"
 
-echo -e "${BLUE}🚀 Running evaluate.py…${NC}"
-python -m evaluations.evaluate
-echo -e "${GREEN}✅ Finished evaluation.${NC}"
+# 5) Generate eval-input
+echo "▶ Generating eval input…"
+python evaluations/generate_eval_input.py
 
-# clean up venv only if we created it
-if [[ -n "${AZURE_APP_CONFIG_ENDPOINT:-}" ]]; then
-  echo
-  echo -e "${BLUE}🧹 Cleaning up…${NC}"
-  deactivate
-  rm -rf evaluations/.venv_temp
+# 6) Conditionally run evaluation
+if [ "$SKIP_EVAL" = false ]; then
+  echo "▶ Running evaluation…"
+  python evaluations/evaluate.py
+else
+  echo "▶ Skipping evaluation as requested (--skip-eval)."
 fi
+
+# 7) Teardown
+deactivate
+rm -rf evaluations/.venv
+
+echo "✅  All done."

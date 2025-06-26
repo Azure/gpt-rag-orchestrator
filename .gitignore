@@ -1,14 +1,19 @@
+# Local
+local/
+.local/
+.vscode/
+
+# Evaluations
+eval-input.jsonl 
+eval-results.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 __blobstorage__/
 *.py[cod]
 *$py.class
-local/
-.local/
 local.settings.json
 __*/*
-*.custom.txt
-*.custom.json
 *.bkp
 *.xlsx
 *.custom.*
@@ -21,18 +26,6 @@ __azurite_db*__.json
 __blobstorage__
 __queuestorage__
 local.settings.json
-test
-.venv
-local
-.local
-evaluation-results.json
-
-# Evaluations
-qa_flow_quality_eval.jsonl
-responses.jsonl
-prompty-answer-score-eval.xlsx
-evaluations/input/
-evaluations/output/
 
 # C extensions
 *.so
