@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from azure.identity.aio import ChainedTokenCredential, AzureCliCredential, ManagedIdentityCredential
 from azure.ai.projects.aio import AIProjectClient
 from connectors.appconfig import AppConfigClient
+from dependencies import get_config
 
 class BaseAgentStrategy(ABC):
     """
@@ -16,9 +17,11 @@ class BaseAgentStrategy(ABC):
         Initializes endpoint, model name, credentials, and default event handler.
         """
         # App configuration
-        cfg = AppConfigClient()        
+        cfg : AppConfigClient = get_config()
         self.project_endpoint = cfg.get("AI_FOUNDRY_PROJECT_ENDPOINT") 
         self.model_name = cfg.get("CHAT_DEPLOYMENT_NAME")
+        self.prompt_source = cfg.get("PROMPT_SOURCE", "file")
+
         logging.debug(f"[base_agent_strategy] Project endpoint: {self.project_endpoint}")
         logging.debug(f"[base_agent_strategy] Model name: {self.model_name}")
 
@@ -27,10 +30,12 @@ class BaseAgentStrategy(ABC):
                 "Both AI_FOUNDRY_PROJECT_ENDPOINT and CHAT_DEPLOYMENT_NAME must be set"
             )
         
+        client_id = os.environ.get("AZURE_CLIENT_ID") 
+        
         # Build chained token credential: CLI first, then managed identity
         self.credential = ChainedTokenCredential(
             AzureCliCredential(),
-            ManagedIdentityCredential()
+            ManagedIdentityCredential(client_id=client_id)
         )
 
         # AIProjectClient 
@@ -57,6 +62,14 @@ class BaseAgentStrategy(ABC):
         """
 
     async def _read_prompt(self, prompt_name, placeholders=None):
+        
+        if self.prompt_source == 'file':
+            return await self._read_prompt_file(prompt_name, placeholders)
+        
+        elif self.prompt_source == 'cosmos':
+            return await self._read_prompt_cosmos(prompt_name, placeholders)
+
+    async def _read_prompt_file(self, prompt_name, placeholders=None):
         """
         Load and process a prompt file, applying strategy-based variants and placeholder replacements.
 
@@ -136,6 +149,33 @@ class BaseAgentStrategy(ABC):
                     )
             return prompt
 
+    async def _read_prompt_cosmos(self, prompt_name, placeholders=None):
+ 
+        logging.info(f"[base_agent_strategy] Using cosmo prompt : {self.strategy_type.value} : {prompt_name}")
+
+        prompt_json = self.cosmos.get_document("prompts", f"{self.strategy_type.value}_{prompt_name}")
+        prompt = prompt_json.get("content", "")
+            
+        # Replace placeholders provided in the 'placeholders' dictionary
+        if placeholders:
+            for key, value in placeholders.items():
+                prompt = prompt.replace(f"{{{{{key}}}}}", value)
+        
+        # Find any remaining placeholders in the prompt
+        pattern = r"\{\{([^}]+)\}\}"
+        matches = re.findall(pattern, prompt)
+        
+        # Process each unmatched placeholder
+        for placeholder_name in set(matches):
+            # Skip if placeholder was already replaced
+            if placeholders and placeholder_name in placeholders:
+                continue
+            
+            placeholder_content = self.cosmos.get_document("prompts", f"placeholder_{placeholder_name}")
+            prompt = prompt.replace(f"{{{{{placeholder_name}}}}}", placeholder_content)
+            
+        return prompt
+    
     def _prompt_dir(self):
             """
             Returns the directory path for prompts based on the strategy type.
@@ -148,5 +188,5 @@ class BaseAgentStrategy(ABC):
             """
             if not hasattr(self, 'strategy_type'):
                 raise ValueError("strategy_type is not defined")        
-            prompts_dir = "src/prompts/" + self.strategy_type.value
+            prompts_dir = "prompts/" + self.strategy_type.value
             return prompts_dir

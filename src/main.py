@@ -1,17 +1,19 @@
 import os
 import logging
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
 
-from fastapi import FastAPI, Request, HTTPException
+from typing import Optional
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 
 from orchestration.orchestrator import Orchestrator
 
 from connectors.appconfig import AppConfigClient
+from dependencies import get_config, validate_api_key_header
 
 # app configuration
-cfg = AppConfigClient()
+cfg : AppConfigClient = get_config()
 
 # ----------------------------------------
 # Logging configuration
@@ -38,12 +40,17 @@ async def lifespan(app: FastAPI):
 # ----------------------------------------
 # Create FastAPI app with lifespan
 # ----------------------------------------
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+        title="GPT RAG Orchestrator",
+        description="GPT RAG Orchestrator FastAPI",
+        version="1.0.0",
+        lifespan=lifespan
+    )
 
 # ----------------------------------------
 # Streaming endpoint
 # ----------------------------------------
-@app.post("/orchestrator")
+@app.post("/orchestrator", dependencies=[Depends(validate_api_key_header)])
 async def orchestrator_endpoint(request: Request):
     """
     Accepts JSON payload {"ask": "...", optional "conversation_id": "..."},
