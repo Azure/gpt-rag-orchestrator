@@ -4,7 +4,7 @@
 
 azure-cosmos==4.5.1
 azure-functions==1.17.0
-azure-identity==1.15.0
+azure-identity==1.16.1
 azure-keyvault-secrets==4.7.0
 numpy==1.26.2
 openai==1.58.1
