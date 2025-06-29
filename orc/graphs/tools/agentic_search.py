@@ -169,29 +169,31 @@ class AgenticSearchManager:
     def _build_activity_query_map(self, agentic_results) -> Dict[str, str]:
         """
         Build a mapping of activity IDs to their corresponding search queries.
-        
+
         Args:
             agentic_results: The result object from agentic_retrieval containing activity data
-            
+
         Returns:
             Dict[str, str]: Mapping of activity_id -> search_query
         """
         activity_query_map = {}
-        
+
         if hasattr(agentic_results, "activity"):
             for activity in agentic_results.activity:
                 try:
                     activity_dict = activity.as_dict()
                     if activity_dict.get("type") == "AzureSearchQuery":
                         activity_id = activity_dict.get("id")
-                        search_query = activity_dict.get("query", {}).get("search", "N/A")
+                        search_query = activity_dict.get("query", {}).get(
+                            "search", "N/A"
+                        )
                         if activity_id:  # Only add if activity_id exists
                             activity_query_map[activity_id] = search_query
                 except Exception as e:
                     # Log the error but continue processing other activities
                     print(f"Error processing activity: {str(e)}")
                     continue
-        
+
         return activity_query_map
 
     def retrieve_document_by_id(
@@ -311,16 +313,16 @@ class AgenticSearchManager:
     ) -> List[Document]:
         """
         Convert agentic search results to LangChain Document objects.
-        
+
         Args:
             agentic_results: The result object from agentic_retrieval containing references
             use_enriched_data (bool): Whether to enrich results with additional metadata (default: True)
-        
+
         Returns:
             List[Document]: List of de-duplicated LangChain Document objects with content and metadata
         """
         documents = []
-        
+
         try:
             # Get enriched results if requested, otherwise use raw results
             if use_enriched_data:
@@ -331,10 +333,10 @@ class AgenticSearchManager:
                     results = [r.as_dict() for r in agentic_results.references]
                 else:
                     results = agentic_results
-            
+
             # Create activity query mapping for additional context
             activity_query_map = self._build_activity_query_map(agentic_results)
-            
+
             for result in results:
                 # Extract core content for page_content
                 source_data = result.get("source_data", {})
@@ -342,11 +344,11 @@ class AgenticSearchManager:
                 doc_key = result.get("doc_key")
                 # Build comprehensive metadata
                 metadata = {}
-                
+
                 title = source_data.get("title")
                 if title:
                     metadata["title"] = title
-                
+
                 if doc_key:
                     metadata["doc_key"] = doc_key
 
@@ -356,7 +358,7 @@ class AgenticSearchManager:
                     metadata["search_query"] = activity_query_map[activity_source_id]
                 elif activity_source_id:
                     metadata["activity_source"] = activity_source_id
-                
+
                 # Add enriched data if available and requested
                 if use_enriched_data and "enriched_data" in result:
                     enriched = result["enriched_data"]
@@ -365,56 +367,59 @@ class AgenticSearchManager:
                         if enriched.get("source"):
                             metadata["source"] = enriched["source"]
                         if enriched.get("date_last_modified"):
-                            metadata["date_last_modified"] = enriched["date_last_modified"]
+                            metadata["date_last_modified"] = enriched[
+                                "date_last_modified"
+                            ]
                         if enriched.get("organization_id"):
                             metadata["organization_id"] = enriched["organization_id"]
                         if enriched.get("content_length"):
                             metadata["content_length"] = enriched["content_length"]
                     else:
                         metadata["enrichment_error"] = enriched["error"]
-                
+
                 # Create Document object
-                document = Document(
-                    page_content=content,
-                    metadata=metadata
-                )
-                
+                document = Document(page_content=content, metadata=metadata)
+
                 documents.append(document)
-                
+
         except Exception as e:
-            print(f"Error converting agentic search results to Document objects: {str(e)}")
+            print(
+                f"Error converting agentic search results to Document objects: {str(e)}"
+            )
             return []
-        
+
         # De-duplicate documents based on doc_key before returning
         deduplicated_documents = self.deduplicate_documents_by_doc_key(documents)
-        
+
         return deduplicated_documents
 
-    def deduplicate_documents_by_doc_key(self, documents: List[Document]) -> List[Document]:
+    def deduplicate_documents_by_doc_key(
+        self, documents: List[Document]
+    ) -> List[Document]:
         """
         Remove duplicate Document objects based on their doc_key metadata.
-        
+
         Args:
             documents (List[Document]): List of Document objects to de-duplicate
-        
+
         Returns:
             List[Document]: De-duplicated list of Document objects
         """
         if not documents:
             return documents
-        
+
         seen_doc_keys = set()
         deduplicated_docs = []
         duplicate_count = 0
-        
+
         for doc in documents:
             doc_key = doc.metadata.get("doc_key")
-            
+
             # If doc_key is None or empty, always include the document
             if not doc_key:
                 deduplicated_docs.append(doc)
                 continue
-            
+
             # Check if we've seen this doc_key before
             if doc_key not in seen_doc_keys:
                 seen_doc_keys.add(doc_key)
@@ -423,12 +428,16 @@ class AgenticSearchManager:
                 duplicate_count += 1
                 # Optionally log the duplicate (for debugging)
                 title = doc.metadata.get("title", "Unknown")
-                print(f"Removing duplicate document: '{title}' with doc_key: {doc_key[:50]}...")
-        
+                print(
+                    f"Removing duplicate document: '{title}' with doc_key: {doc_key[:50]}..."
+                )
+
         if duplicate_count > 0:
-            print(f"De-duplication complete: Removed {duplicate_count} duplicate document(s). "
-                  f"Returning {len(deduplicated_docs)} unique documents.")
-        
+            print(
+                f"De-duplication complete: Removed {duplicate_count} duplicate document(s). "
+                f"Returning {len(deduplicated_docs)} unique documents."
+            )
+
         return deduplicated_docs
 
     def agentic_retriever(
@@ -613,13 +622,17 @@ def create_default_agentic_search_manager(organization_id: str) -> AgenticSearch
     config = AgenticSearchConfig()
     return AgenticSearchManager(config, organization_id)
 
-def retrieve_and_convert_to_document_format(conversation_history: List[Dict], organization_id: str) -> List[Document]:
+
+def retrieve_and_convert_to_document_format(
+    conversation_history: List[Dict], organization_id: str
+) -> List[Document]:
     """
     Retrieve documents and convert them to LangChain Document objects.
     """
     manager = create_default_agentic_search_manager(organization_id)
     agent_messages_simple = manager.agentic_retriever(conversation_history)
     return manager.convert_to_documents(agent_messages_simple, use_enriched_data=True)
+
 
 # Test/example code - only runs when script is executed directly
 if __name__ == "__main__":
@@ -638,7 +651,9 @@ if __name__ == "__main__":
     try:
         # Perform agentic retrieval (will auto-create agent if needed)
         print("\nPerforming agentic retrieval...")
-        agent_messages_simple = retrieve_and_convert_to_document_format(simple_messages, organization_id="123")
+        agent_messages_simple = retrieve_and_convert_to_document_format(
+            simple_messages, organization_id="123"
+        )
 
         print(agent_messages_simple)
 
