@@ -8,7 +8,6 @@ from azure.search.documents.indexes.models import (
 from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents import SearchClient
 import os
-import json
 from azure.search.documents.agent import KnowledgeAgentRetrievalClient
 from azure.search.documents.agent.models import (
     KnowledgeAgentRetrievalRequest,
