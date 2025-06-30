@@ -39,8 +39,7 @@ class AgenticSearchConfig:
         self.azure_openai_endpoint = azure_openai_endpoint or os.getenv(
             "AZURE_OPENAI_ENDPOINT"
         )
-        self.azure_search_endpoint = azure_search_endpoint or os.getenv(
-            "AZURE_SEARCH_ENDPOINT"
+        self.azure_search_endpoint = azure_search_endpoint or f"https://{os.getenv('AZURE_SEARCH_SERVICE')}.search.windows.net"
         )
         self.azure_openai_gpt_deployment = azure_openai_gpt_deployment
         self.azure_openai_gpt_model = azure_openai_gpt_model
