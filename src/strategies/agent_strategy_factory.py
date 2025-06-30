@@ -4,16 +4,16 @@ from .mcp_strategy import McpStrategy
 
 class AgentStrategyFactory:
     @staticmethod
-    def get_strategy(key: str):
+    async def get_strategy(key: str):
         """
         Return an instance of the strategy class corresponding to the given key.
         """
         if key == AgentStrategies.SINGLE_AGENT_RAG.value:
-            return SingleAgentRAGStrategy()
+            return await SingleAgentRAGStrategy.create()
         # if key == AgentStrategies.MULTIAGENT.value:
             # return ...
         if key == AgentStrategies.MCP.value:
-            return McpStrategy()
+            return await McpStrategy.create()
         # if key == AgentStrategies.MULTIMODAL.value:
             # return ...
         # if key == AgentStrategies.NL2SQL.value:
