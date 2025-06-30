@@ -177,41 +177,22 @@ class Retrieval:
                     search_endpoint = f"https://{AZURE_SEARCH_SERVICE}.search.windows.net/indexes/{AZURE_SEARCH_INDEX}/docs/search?api-version={AZURE_SEARCH_API_VERSION}"
                 start_time = time.time()
                 async with aiohttp.ClientSession() as session:
-                    if APIM_ENABLED:
-                        async with session.get(search_endpoint, headers=headers, json=body) as response:
-                            status_code = response.status
-                            text=await response.text()
-                            json=await response.json()
-                            if status_code >= 400:
-                                error_on_search = True
-                                error_message = f'Status code: {status_code}.'
-                                if text != "": error_message += f" Error: {response.text}."
-                                logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
+                    async with session.post(search_endpoint, headers=headers, json=body) as response:
+                        status_code = response.status
+                        text=await response.text()
+                        json=await response.json()
+                        if status_code >= 400:
+                            error_message = f'Status code: {status_code}.'
+                            if text != "": error_message += f" Error: {response.text}."
+                            logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
+                        else:
+                            if json['value']:
+                                logging.info(f"[sk_retrieval] {len(json['value'])} documents retrieved")                                    
+                                for doc in json['value']:
+                                    search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
                             else:
-                                if json['value']:
-                                    logging.info(f"[sk_retrieval] {len(json['value'])} documents retrieved")                                    
-                                    for doc in json['value']:
-                                        search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
-                                else:
-                                    logging.info(f"[sk_retrieval] No documents retrieved")                                        
-                    else:                
-                        async with session.post(search_endpoint, headers=headers, json=body) as response:
-                            status_code = response.status
-                            text=await response.text()
-                            json=await response.json()    
-                            if status_code >= 400:
-                                error_on_search = True
-                                error_message = f'Status code: {status_code}.'
-                                if text != "": error_message += f" Error: {response.text}."
-                                logging.error(f"[sk_retrieval] error {status_code} when searching documents. {error_message}")
-                            else:
-                                if json['value']:
-                                    logging.info(f"[sk_retrieval] {len(json['value'])} documents retrieved")
-                                    for doc in json['value']:
-                                        search_results.append(doc['filepath'] + ": " + doc['content'].strip() + "\n")
-                                else:
-                                    logging.info(f"[sk_retrieval] No documents retrieved")
-
+                                logging.info(f"[sk_retrieval] No documents retrieved")
+                               
                 response_time = round(time.time() - start_time, 2)
                 logging.info(f"[sk_retrieval] finished querying azure ai search. {response_time} seconds")
         except Exception as e:
