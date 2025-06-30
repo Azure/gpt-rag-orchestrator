@@ -27,13 +27,14 @@ from .parallel_processor import process_urls_parallel
 _logger = logging.getLogger(__name__)
 
 
-def scrape_urls_standalone(urls: List[str], request_id: str = None) -> Dict[str, Any]:
+def scrape_urls_standalone(urls: List[str], request_id: str = None, organization_id: str = None) -> Dict[str, Any]:
     """
     Standalone function to scrape URLs without Azure Functions dependency.
     
     Args:
         urls: List of URLs to scrape
         request_id: Optional request identifier
+        organization_id: Optional organization identifier for metadata
         
     Returns:
         Dictionary with scraping results
@@ -42,9 +43,10 @@ def scrape_urls_standalone(urls: List[str], request_id: str = None) -> Dict[str,
     request_id = request_id or generate_request_id()
     
     _logger.info(
-        "[Orchestrator] Starting standalone scraping - request_id: %s, url_count: %d",
+        "[Orchestrator] Starting standalone scraping - request_id: %s, url_count: %d, organization_id: %s",
         request_id,
         len(urls),
+        organization_id or "None",
     )
 
     try:
@@ -63,7 +65,7 @@ def scrape_urls_standalone(urls: List[str], request_id: str = None) -> Dict[str,
 
         # Process URLs in parallel
         results, blob_storage_results = process_urls_parallel(
-            validated_urls, crawler_manager, request_id
+            validated_urls, crawler_manager, request_id, organization_id=organization_id
         )
 
         # Calculate metrics
@@ -139,88 +141,3 @@ def scrape_urls_standalone(urls: List[str], request_id: str = None) -> Dict[str,
             "duration_seconds": round(duration, 2),
             "error_at": format_timestamp(end_time),
         }
-
-
-def handle_azure_function_request(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Handle Azure Functions HTTP request for web scraping.
-    
-    Args:
-        req: Azure Functions HTTP request
-        
-    Returns:
-        Azure Functions HTTP response
-    """
-    start_time = datetime.now(timezone.utc)
-    request_id = req.headers.get("x-request-id") or generate_request_id()
-
-    _logger.info(
-        "[Orchestrator] Azure Function request received - request_id: %s", 
-        request_id
-    )
-
-    try:
-        # Parse and validate request
-        urls = parse_request_body(req, request_id)
-        validated_urls = validate_urls(urls)
-        
-        # Use the standalone function to do the actual work
-        result = scrape_urls_standalone(validated_urls, request_id)
-        
-        if result["status"] == "completed":
-            return create_success_response(result)
-        else:
-            return create_error_response(
-                result["message"], 
-                request_id, 
-                status_code=500,
-                additional_data={
-                    "duration_seconds": result.get("duration_seconds"),
-                    "error_at": result.get("error_at"),
-                }
-            )
-
-    except ValueError as e:
-        # Request validation error
-        end_time = datetime.now(timezone.utc)
-        duration = calculate_duration(start_time, end_time)
-        
-        return create_error_response(
-            str(e), 
-            request_id, 
-            status_code=400,
-            additional_data={
-                "duration_seconds": round(duration, 2),
-                "error_at": format_timestamp(end_time),
-            }
-        )
-
-    except Exception as e:
-        # Unexpected error
-        end_time = datetime.now(timezone.utc)
-        duration = calculate_duration(start_time, end_time)
-        
-        _logger.error(
-            "[Orchestrator] Unexpected error in Azure Function - request_id: %s, error: %s",
-            request_id,
-            str(e),
-            exc_info=True,
-        )
-
-        return create_error_response(
-            f"Internal server error: {str(e)}", 
-            request_id, 
-            status_code=500,
-            additional_data={
-                "duration_seconds": round(duration, 2),
-                "error_at": format_timestamp(end_time),
-            }
-        )
-
-
-# Azure Functions entry point
-def main(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Azure Functions entry point for the scrape pages endpoint.
-    """
-    return handle_azure_function_request(req) 

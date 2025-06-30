@@ -523,7 +523,8 @@ async def scrape_pages(req: Request) -> Response:
     
     Expected payload:
     {
-        "urls": ["http://example.com", "http://example2.com"]
+        "urls": ["http://example.com", "http://example2.com"],
+        "client_principal_id": "user-id"
     }
     
     Returns:
@@ -556,6 +557,18 @@ async def scrape_pages(req: Request) -> Response:
                 media_type="application/json",
                 status_code=400
             )
+
+        # Extract client principal ID and organization
+        client_principal_id = req_body.get('client_principal_id', '00000000-0000-0000-0000-000000000000')
+        
+        organization_id = None
+        try:
+            user = get_user(client_principal_id)
+            organization_id = user.get("data", {}).get("organizationId")
+            if organization_id:
+                logging.info(f"[scrape-pages] Retrieved organizationId: {organization_id}")
+        except Exception as e:
+            logging.info(f"[scrape-pages] No organization tracking - {str(e)}")
         
         # Use the new refactored scraping functionality
         from webscrapping import scrape_urls_standalone
@@ -563,7 +576,7 @@ async def scrape_pages(req: Request) -> Response:
         # Extract request ID from headers if provided
         request_id = req.headers.get("x-request-id")
         
-        result_data = scrape_urls_standalone(urls, request_id)
+        result_data = scrape_urls_standalone(urls, request_id, organization_id)
         
         # Determine response status code based on result
         status_code = 200 if result_data.get("status") == "completed" else 500

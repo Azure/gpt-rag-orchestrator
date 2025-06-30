@@ -10,18 +10,14 @@ from langchain_core.messages import (
 from langchain.schema import Document
 from langgraph.graph import StateGraph, END, START
 from langchain_openai import AzureChatOpenAI
-from orc.graphs.tools import CustomRetriever, GoogleSearch, TavilySearch
+from orc.graphs.tools import CustomRetriever, TavilySearch, retrieve_and_convert_to_document_format
 from langgraph.checkpoint.memory import MemorySaver
-from shared.tools import num_tokens_from_string, messages_to_string
 from shared.prompts import (
     MARKETING_ORC_PROMPT,
-    MARKETING_ANSWER_PROMPT,
     QUERY_REWRITING_PROMPT,
 )
 from langchain_core.runnables import RunnableParallel
 from shared.cosmos_db import get_conversation_data
-from typing_extensions import Literal
-from pydantic import BaseModel, Field
 from shared.util import get_organization
 
 
@@ -49,9 +45,9 @@ class ConversationState:
     chat_summary: str = field(default_factory=str)
     token_count: int = field(default_factory=int)
     query_category: str = field(default_factory=str)
+    agentic_search_mode: bool = field(default=True)
 
-
-def clean_chat_history(chat_history: List[dict]) -> str:
+def clean_chat_history(chat_history: List[dict], agentic_search_mode: bool = False) -> str:
     """
     Clean the chat history and format it as a string for LLM consumption.
 
@@ -68,6 +64,10 @@ def clean_chat_history(chat_history: List[dict]) -> str:
         chat_history = chat_history[-4:]
     else:
         chat_history = chat_history
+
+    if agentic_search_mode:
+        chat_history = [{"role": message.get("role", "").lower(), "content": message.get("content", "")} for message in chat_history]
+        return chat_history
 
     for message in chat_history:
         if not message.get("content"):
@@ -93,6 +93,7 @@ class GraphConfig:
     web_search_results: int = 2
     temperature: float = 0.4
     max_tokens: int = 5000
+    agentic_search_mode: bool = True
 
 
 class GraphBuilder:
@@ -160,6 +161,9 @@ class GraphBuilder:
             raise RuntimeError(
                 f"Failed to initialize Azure AI Search Retriever: {str(e)}"
             )
+    
+    def _run_agentic_retriever(self, conversation_history: List[dict]):
+        return retrieve_and_convert_to_document_format(conversation_history, self.organization_id)
 
     def _init_web_search(self):
         try:
@@ -374,20 +378,36 @@ class GraphBuilder:
 
     def _retrieve_context(self, state: ConversationState) -> dict:
         """Get relevant documents from vector store."""
-        docs = self.retriever.invoke(state.rewritten_query)
-        print(f"total number of docs: {len(docs)}")
+        if self.config.agentic_search_mode:
+            print("[Retrieve Context] Agentic search mode is enabled")
 
-        if docs:
-            # print id of the first document in the list
-            print(f'Document ID of the top ranked doc: {docs[0].id}')
-            # get adjacent chunks
-            adjacent_chunks = self.retriever._search_adjacent_pages(docs[0].id)
-            # reformat adjacent chunks
-            if adjacent_chunks:
-                adjacent_chunks = [Document(page_content=chunk['content'], metadata={'source': chunk['filepath'], 'score': "adjacent chunk"}) for chunk in adjacent_chunks]
-                print(f"total number of docs before adding adjacent chunks: {len(docs)}")
-                docs.extend(adjacent_chunks)
-                print(f"total number of docs after adding adjacent chunks: {len(docs)}")
+            # get the conversation history
+            conversation_history = get_conversation_data(self.conversation_id).get("history", [])
+
+            # clean the conversation history
+            conversation_history = clean_chat_history(conversation_history, agentic_search_mode=True)
+
+            # append the rewritten query to the conversation history
+            conversation_history.append({"role": "user", "content": state.rewritten_query})
+
+            docs = self._run_agentic_retriever(conversation_history)
+
+        else:
+            docs = self.retriever.invoke(state.rewritten_query)
+
+            print(f"total number of docs: {len(docs)}")
+
+            if docs:
+                # print id of the first document in the list
+                print(f'Document ID of the top ranked doc: {docs[0].id}')
+                # get adjacent chunks
+                adjacent_chunks = self.retriever._search_adjacent_pages(docs[0].id)
+                # reformat adjacent chunks
+                if adjacent_chunks:
+                    adjacent_chunks = [Document(page_content=chunk['content'], metadata={'source': chunk['filepath'], 'score': "adjacent chunk"}) for chunk in adjacent_chunks]
+                    print(f"total number of docs before adding adjacent chunks: {len(docs)}")
+                    docs.extend(adjacent_chunks)
+                    print(f"total number of docs after adding adjacent chunks: {len(docs)}")
         return {
             "context_docs": docs,
             "requires_web_search": len(docs) < 3,

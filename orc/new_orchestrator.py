@@ -223,22 +223,22 @@ class ConversationOrchestrator:
 
         try:
             # Load conversation state
-            logging.info(
-                f"[orchestrator-process_conversation] Loading conversation data"
-            )
+            logging.info(f"[orchestrator-process_conversation] Loading conversation data for ID: {conversation_id}")
             conversation_data = get_conversation_data(conversation_id)
+            logging.info(f"[orchestrator-process_conversation] Successfully loaded conversation data")
             logging.info(f"[orchestrator-process_conversation] Loading memory")
             memory = self._load_memory(conversation_data.get("memory_data", ""))
             logging.info(f"[orchestrator-process_conversation] Memory loaded")
             # Process through agent
 
             # insert conversation to the memory object
+            logging.info(f"[orchestrator-process_conversation] Creating conversation graph")
             agent = create_conversation_graph(
                 memory=memory,
                 organization_id=self.organization_id,
                 conversation_id=conversation_id,
             )
-            logging.info(f"[orchestrator-process_conversation] Agent created")
+            logging.info(f"[orchestrator-process_conversation] Successfully created agent")
             config = {"configurable": {"thread_id": conversation_id}}
 
             with get_openai_callback() as cb:

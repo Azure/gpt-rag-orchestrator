@@ -195,13 +195,14 @@ class WebScraper:
         return cleaned.strip()
 
     @staticmethod
-    def format_content_for_blob_storage(scrape_result: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+    def format_content_for_blob_storage(scrape_result: Dict[str, Any], request_id: str, organization_id: str = None) -> Dict[str, Any]:
         """
         Format scraped content for blob storage.
         
         Args:
             scrape_result: Result from scrape_page method
             request_id: Request identifier
+            organization_id: Optional organization identifier for metadata
             
         Returns:
             Dictionary with formatted content and metadata for blob storage
@@ -223,6 +224,10 @@ class WebScraper:
             "scraped_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "request_id": request_id,
         }
+
+        # Add organization_id to metadata if provided
+        if organization_id:
+            metadata["organization_id"] = WebScraper.clean_metadata_value(organization_id)
 
         return {
             "content": content_bytes,
