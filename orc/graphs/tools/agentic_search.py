@@ -39,7 +39,10 @@ class AgenticSearchConfig:
         self.azure_openai_endpoint = azure_openai_endpoint or os.getenv(
             "AZURE_OPENAI_ENDPOINT"
         )
-        self.azure_search_endpoint = azure_search_endpoint or f"https://{os.getenv('AZURE_SEARCH_SERVICE')}.search.windows.net"
+        self.azure_search_endpoint = (
+            azure_search_endpoint
+            or f"https://{os.getenv('AZURE_SEARCH_SERVICE')}.search.windows.net"
+        )
         self.azure_openai_gpt_deployment = azure_openai_gpt_deployment
         self.azure_openai_gpt_model = azure_openai_gpt_model
         self.credential = credential or DefaultAzureCredential()
@@ -131,6 +134,22 @@ class AgenticSearchManager:
             return True
         except Exception as e:
             print(f"Error creating or updating knowledge agent: {str(e)}")
+            return False
+
+    def delete_knowledge_agent(self) -> bool:
+        """
+        Delete the knowledge agent.
+        """
+        index_client = SearchIndexClient(
+            endpoint=self.config.azure_search_endpoint,
+            credential=self.config.credential,
+        )
+        try:
+            index_client.delete_agent(self.config.agent_name)
+            print(f"Knowledge agent '{self.config.agent_name}' deleted successfully")
+            return True
+        except Exception as e:
+            print(f"Error deleting knowledge agent: {str(e)}")
             return False
 
     def get_agent_client(self) -> KnowledgeAgentRetrievalClient:
@@ -612,12 +631,46 @@ class AgenticSearchManager:
 def create_default_agentic_search_manager(organization_id: str) -> AgenticSearchManager:
     """
     Create an AgenticSearchManager with default configuration.
+    Automatically checks if the knowledge agent exists and creates it if needed.
+
+    Args:
+        organization_id: The organization ID to filter documents by
 
     Returns:
-        AgenticSearchManager: Configured manager instance
+        AgenticSearchManager: Configured manager instance with agent ready to use
     """
     config = AgenticSearchConfig()
-    return AgenticSearchManager(config, organization_id)
+    manager = AgenticSearchManager(config, organization_id)
+
+    # Check if agent exists and create it if needed
+    try:
+        print(
+            f"[AgenticSearchManager] Checking if agent '{config.agent_name}' exists..."
+        )
+        if not manager.agent_exists():
+            print(
+                f"[AgenticSearchManager] Agent '{config.agent_name}' not found. Creating..."
+            )
+            success = manager.create_or_update_knowledge_agent()
+            if success:
+                print(
+                    f"[AgenticSearchManager] Agent '{config.agent_name}' created successfully!"
+                )
+            else:
+                print(
+                    f"[AgenticSearchManager] Failed to create agent '{config.agent_name}'. Auto-creation during retrieval may be attempted."
+                )
+        else:
+            print(
+                f"[AgenticSearchManager] Agent '{config.agent_name}' already exists and is ready to use."
+            )
+    except Exception as e:
+        print(f"[AgenticSearchManager] Error during agent check/creation: {str(e)}")
+        print(
+            f"[AgenticSearchManager] Will attempt auto-creation during retrieval if needed."
+        )
+
+    return manager
 
 
 def retrieve_and_convert_to_document_format(
@@ -657,3 +710,13 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Agentic search failed: {str(e)}")
         print("This might indicate a configuration issue or service unavailability.")
+
+    # Clean up: delete the agent
+    print("\nCleaning up test agent...")
+    try:
+        config = AgenticSearchConfig()
+        cleanup_manager = AgenticSearchManager(config, "123")
+        cleanup_manager.delete_knowledge_agent()
+        print("Test agent deleted successfully.")
+    except Exception as e:
+        print(f"Failed to delete test agent: {str(e)}")
