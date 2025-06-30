@@ -1,11 +1,12 @@
+import asyncio
 import os
 import json
 from dotenv import load_dotenv
 
-from src.connectors.cosmosdb import CosmosDBClient
-from src.dependencies import get_config
+from connectors import CosmosDBClient
+from dependencies import get_config
 
-def main():
+async def main():
     config = get_config()
 
     client = CosmosDBClient()
@@ -27,7 +28,7 @@ def main():
                         "id" : f"{dir_name}_{os.path.splitext(file)[0]}",  # Use the file name without extension as the ID
                         "content": content  # Parse the JSON content
                     }
-                    client.create_document("prompts", data["id"], body=data)
+                    await client.create_document("prompts", data["id"], body=data)
                     #client.update_document("prompts", data)
             except Exception as e:
                 print(f"Error {file_path}: {e}")
@@ -36,4 +37,4 @@ if __name__ == '__main__':
     # Load environment variables from .env file
     load_dotenv()
 
-    main()
+    asyncio.run(main())

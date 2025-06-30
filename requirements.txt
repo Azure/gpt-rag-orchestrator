@@ -30,3 +30,9 @@ python-dotenv==1.1.0
 # fastapi
 fastapi==0.115.12
 uvicorn==0.34.1
+
+#opentelemetry
+azure-monitor-opentelemetry
+azure-monitor-opentelemetry-exporter
+opentelemetry-instrumentation-httpx==0.52b1
+opentelemetry-instrumentation-fastapi

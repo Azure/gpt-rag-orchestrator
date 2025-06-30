@@ -1,9 +1,13 @@
-FROM python:3.12-slim
+FROM mcr.microsoft.com/devcontainers/python:dev-3.12
+
+RUN apt-get update  
+RUN apt-get install ca-certificates -y
+RUN update-ca-certificates
+
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+RUN pip install -r requirements.txt
 
 COPY . .
 

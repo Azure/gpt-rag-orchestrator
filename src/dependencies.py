@@ -4,7 +4,7 @@ Provides dependencies for API calls.
 import logging
 from fastapi import Depends, HTTPException
 from fastapi.security import APIKeyHeader
-from connectors.appconfig import AppConfigClient      
+from connectors import AppConfigClient      
 
 __config: AppConfigClient = None
 
@@ -19,7 +19,7 @@ def get_config(action: str = None) -> AppConfigClient:
     return __config
 
 def validate_api_key_header(x_api_key: str = Depends(APIKeyHeader(name='X-API-KEY'))):
-    result = x_api_key == get_config().get(f'ORCHESTRATOR_APIKEY')
+    result = x_api_key == get_config().get(f'ORCHESTRATOR_APP_APIKEY')
     
     if not result:
         logging.error('Invalid API key. You must provide a valid API key in the X-API-KEY header.')

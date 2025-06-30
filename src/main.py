@@ -1,5 +1,6 @@
 import os
 import logging
+import uvicorn
 
 from typing import Optional
 from contextlib import asynccontextmanager
@@ -7,32 +8,24 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from orchestration.orchestrator import Orchestrator
 
 from connectors.appconfig import AppConfigClient
 from dependencies import get_config, validate_api_key_header
+from telemetry import Telemetry
+from constants import APPLICATION_INSIGHTS_CONNECTION_STRING, APP_NAME
+from util.tools import is_azure_environment
 
 # app configuration
 cfg : AppConfigClient = get_config()
-
-# ----------------------------------------
-# Logging configuration
-# ----------------------------------------
-log_level = cfg.get("LOG_LEVEL", "INFO")
-logging.basicConfig(  
-    level=getattr(logging, log_level, logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-http_logger = logging.getLogger("azure.core.pipeline.policies.http_logging_policy")
-http_logger.setLevel(logging.DEBUG) 
-class DebugModeFilter(logging.Filter):
-    def filter(self, record):
-        return logging.getLogger().getEffectiveLevel() == logging.DEBUG
-http_logger.addFilter(DebugModeFilter())
     
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+
+    Telemetry.configure_monitoring(cfg, APPLICATION_INSIGHTS_CONNECTION_STRING, APP_NAME)
+
     # Placeholder for future startup logic
     yield  # <-- application starts here
     # (optional) cleanup logic after shutdown
@@ -61,7 +54,9 @@ async def orchestrator_endpoint(request: Request):
     if not ask:
         raise HTTPException(status_code=400, detail="No 'ask' field in request body")
 
-    orchestrator = Orchestrator(conversation_id=payload.get("conversation_id"))
+    user_context = payload.get("user-context", {})
+
+    orchestrator = await Orchestrator.create(conversation_id=payload.get("conversation_id"), user_context=user_context)
 
     async def sse_event_generator():
         try:
@@ -77,3 +72,10 @@ async def orchestrator_endpoint(request: Request):
         sse_event_generator(),
         media_type="text/event-stream"
     )
+
+HTTPXClientInstrumentor().instrument()
+FastAPIInstrumentor.instrument_app(app)
+
+# Run the app locally
+if (not is_azure_environment()):
+    uvicorn.run(app, host="0.0.0.0", port=9000, log_level="debug", timeout_keep_alive=60)

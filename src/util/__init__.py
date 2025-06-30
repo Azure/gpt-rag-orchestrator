@@ -1,0 +1,1 @@
+from .tools import is_azure_environment

@@ -126,12 +126,12 @@ echo
 
 echo -e "${GREEN}🛠️  Building Docker image…${NC}"
 docker build \
-  -t "${containerRegistryLoginServer}/azure-gpt-rag/orchestrator-build:${tag}" \
+  -t "${containerRegistryLoginServer}/azure-gpt-rag/orchestrator:${tag}" \
   .
 
 echo
 echo -e "${GREEN}📤 Pushing image…${NC}"
-docker push "${containerRegistryLoginServer}/azure-gpt-rag/orchestrator-build:${tag}"
+docker push "${containerRegistryLoginServer}/azure-gpt-rag/orchestrator:${tag}"
 echo -e "${GREEN}✅ Image pushed.${NC}"
 
 echo
@@ -139,5 +139,5 @@ echo -e "${GREEN}🔄 Updating container app…${NC}"
 az containerapp update \
   --name "${orchestratorApp}" \
   --resource-group "${resourceGroupName}" \
-  --image "${containerRegistryLoginServer}/azure-gpt-rag/orchestrator-build:${tag}"
+  --image "${containerRegistryLoginServer}/azure-gpt-rag/orchestrator:${tag}"
 echo -e "${GREEN}✅ Container app updated.${NC}"
