@@ -40,7 +40,6 @@ class AgenticSearchConfig:
             "AZURE_OPENAI_ENDPOINT"
         )
         self.azure_search_endpoint = azure_search_endpoint or f"https://{os.getenv('AZURE_SEARCH_SERVICE')}.search.windows.net"
-        )
         self.azure_openai_gpt_deployment = azure_openai_gpt_deployment
         self.azure_openai_gpt_model = azure_openai_gpt_model
         self.credential = credential or DefaultAzureCredential()
