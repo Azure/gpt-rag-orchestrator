@@ -32,7 +32,7 @@ class AgenticSearchConfig:
         azure_openai_gpt_deployment: str = "Agent",
         azure_openai_gpt_model: str = "gpt-4o",
         credential: Optional[Any] = None,
-        reranker_threshold: float = 2.4,
+        reranker_threshold: float = 2.0,
     ):
         self.agent_name = agent_name
         self.index_name = index_name
