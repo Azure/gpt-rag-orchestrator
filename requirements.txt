@@ -23,7 +23,7 @@ pydantic==2.11.4
 tenacity
 
 # For evaluation
-requests==2.32.3
+requests==2.32.4
 python-dotenv==1.1.0
 
 # fastapi
