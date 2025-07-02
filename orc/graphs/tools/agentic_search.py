@@ -305,17 +305,13 @@ class AgenticSearchManager:
                             "organization_id": detailed_doc.get("organization_id"),
                             "content_length": len(detailed_doc.get("content", "")),
                         }
+                        enriched_results.append(enriched_result)
                     else:
-                        # Add indication that enrichment failed
-                        enriched_result["enriched_data"] = {
-                            "error": f"Could not retrieve detailed data for document ID: {document_id}"
-                        }
+                        # Skip this document if it can't be retrieved due to organization ID mismatch
+                        print(f"Skipping document with ID '{document_id}' - not found in search index for the organization ID: {self.organization_id}")
                 else:
-                    enriched_result["enriched_data"] = {
-                        "error": "No document ID found for enrichment"
-                    }
-
-                enriched_results.append(enriched_result)
+                    # Skip documents without document ID
+                    print("Skipping document - no document ID found for enrichment")
 
         except Exception as e:
             print(f"Error enriching agentic search results: {str(e)}")
@@ -695,7 +691,7 @@ if __name__ == "__main__":
         {"role": "assistant", "content": "Marketing is..."},
     ]
     # add the latest message to the conversation history
-    latest_message = {"role": "user", "content": "What is consumer segmentation?"}
+    latest_message = {"role": "user", "content": "What is latest news on marketing?"}
     simple_messages.append(latest_message)
 
     try:
