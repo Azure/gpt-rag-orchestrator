@@ -5,13 +5,8 @@ from azure.identity import get_bearer_token_provider
 
 from azure.ai.agents.models import (
     AsyncAgentEventHandler,
-    AzureAISearchQueryType,
-    AzureAISearchTool,
-    BingGroundingTool,
-    ListSortOrder,
     MessageDeltaChunk,
     MessageDeltaTextUrlCitationAnnotation,
-    MessageTextContent,
     RunStep,
     ThreadMessage,
     ThreadRun,
@@ -27,16 +22,6 @@ from .agent_strategies import AgentStrategies
 
 from connectors.appconfig import AppConfigClient
 from dependencies import get_config
-
-# -----------------------------------------------------------------------------
-# Be sure to configure the root logger at DEBUG level somewhere early in your app,
-# e.g. in your main entrypoint:
-#
-#    logging.basicConfig(level=logging.DEBUG, 
-#                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-#
-# That way, all of the logging.debug(...) calls below will actually show up.
-# -----------------------------------------------------------------------------
 
 class McpStrategy(BaseAgentStrategy):
     """

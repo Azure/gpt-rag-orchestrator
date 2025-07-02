@@ -1,7 +1,5 @@
-import os
 import logging
 
-from typing import Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, HTTPException, Depends
@@ -10,10 +8,15 @@ from fastapi.responses import StreamingResponse
 from orchestration.orchestrator import Orchestrator
 
 from connectors.appconfig import AppConfigClient
-from dependencies import get_config, validate_api_key_header
+from dependencies import get_config, validate_dapr_token
 
-# app configuration
 cfg : AppConfigClient = get_config()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # (optional) startup logic before application starts
+    yield  # <-- application starts here
+    # (optional) cleanup logic after shutdown
 
 # ----------------------------------------
 # Logging configuration
@@ -31,11 +34,6 @@ class DebugModeFilter(logging.Filter):
         return logging.getLogger().getEffectiveLevel() == logging.DEBUG
 http_logger.addFilter(DebugModeFilter())
     
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Placeholder for future startup logic
-    yield  # <-- application starts here
-    # (optional) cleanup logic after shutdown
  
 # ----------------------------------------
 # Create FastAPI app with lifespan
@@ -50,7 +48,7 @@ app = FastAPI(
 # ----------------------------------------
 # Streaming endpoint
 # ----------------------------------------
-@app.post("/orchestrator", dependencies=[Depends(validate_api_key_header)])
+@app.post("/orchestrator", dependencies=[Depends(validate_dapr_token)])
 async def orchestrator_endpoint(request: Request):
     """
     Accepts JSON payload {"ask": "...", optional "conversation_id": "..."},

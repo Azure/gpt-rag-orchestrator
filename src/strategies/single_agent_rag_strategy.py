@@ -105,6 +105,22 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
         self.tools_list.append(ai_def)
         self.tool_resources.update(ai_res)
 
+        # === Placeholder: Add additional tools here (e.g., MCP tools) ===
+        # To add Model Context Protocol (MCP) tools, see:
+        # "Announcing Model Context Protocol Support (preview) in Azure AI Foundry Agent Service"
+        # https://techcommunity.microsoft.com/t5/azure-ai-blog/announcing-model-context-protocol-support-preview-in-azure-ai/ba-p/4140000
+        #
+        # Example for MCP tool:
+        # mcp_tool = {
+        #     "type": "mcp",
+        #     "server_label": "<your-mcp-server-label>",
+        #     "server_url": "<your-mcp-server-url>",
+        #     "require_approval": "never"
+        # }
+        # self.tools_list.append(mcp_tool)
+        # self.tool_resources.update({})  # MCP tools may not require extra resources
+        # ================================================================
+
         logging.debug(f"Final tools_list: {self.tools_list}")
         logging.debug(f"Final tool_resources: {self.tool_resources}")
 

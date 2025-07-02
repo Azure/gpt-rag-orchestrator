@@ -17,10 +17,12 @@ class BaseAgentStrategy(ABC):
         Initializes endpoint, model name, credentials, and default event handler.
         """
         # App configuration
-        cfg : AppConfigClient = get_config()
-        self.project_endpoint = cfg.get("AI_FOUNDRY_PROJECT_ENDPOINT") 
+        cfg: AppConfigClient = get_config()
+        self.project_endpoint = cfg.get("AI_FOUNDRY_PROJECT_ENDPOINT")
+        self.account_endpoint = cfg.get("AI_FOUNDRY_ACCOUNT_ENDPOINT")
         self.model_name = cfg.get("CHAT_DEPLOYMENT_NAME")
         self.prompt_source = cfg.get("PROMPT_SOURCE", "file")
+        self.openai_api_version = cfg.get("OPENAI_API_VERSION", "2025-04-01-preview")     
 
         logging.debug(f"[base_agent_strategy] Project endpoint: {self.project_endpoint}")
         logging.debug(f"[base_agent_strategy] Model name: {self.model_name}")
@@ -29,16 +31,17 @@ class BaseAgentStrategy(ABC):
             raise EnvironmentError(
                 "Both AI_FOUNDRY_PROJECT_ENDPOINT and CHAT_DEPLOYMENT_NAME must be set"
             )
-        
-        client_id = os.environ.get("AZURE_CLIENT_ID") 
-        
+
+        # Azure AD/Entra ID client ID (optional, for managed identity)
+        client_id = os.environ.get("AZURE_CLIENT_ID")
+
         # Build chained token credential: CLI first, then managed identity
         self.credential = ChainedTokenCredential(
             AzureCliCredential(),
             ManagedIdentityCredential(client_id=client_id)
         )
 
-        # AIProjectClient 
+        # Initialize the async AIProjectClient
         self.project_client = AIProjectClient(
             endpoint=self.project_endpoint,
             credential=self.credential

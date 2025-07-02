@@ -15,22 +15,25 @@ class AppConfigClient:
         Bulk-loads all keys labeled 'orchestrator' and 'gpt-rag' into an in-memory dict,
         giving precedence to 'orchestrator' where a key exists in both.
         """
-        
+        # ==== Load all config parameters in one place ====
         client_id = os.getenv("AZURE_CLIENT_ID")
-
         self.allow_env_vars = False
-        
+
         if "allow_environment_variables" in os.environ:
-            allow_env_vars = bool(os.environ[
-                "allow_environment_variables"
-                ])
-       
+            self.allow_env_vars = bool(os.environ["allow_environment_variables"])
+
         endpoint = os.getenv("APP_CONFIG_ENDPOINT")
         if not endpoint:
             raise EnvironmentError("APP_CONFIG_ENDPOINT must be set")
 
-        self.credential = ChainedTokenCredential(ManagedIdentityCredential(client_id=client_id), AzureCliCredential())
-        self.aiocredential = AsyncChainedTokenCredential(AsyncManagedIdentityCredential(client_id=client_id), AsyncAzureCliCredential())
+        self.credential = ChainedTokenCredential(
+            ManagedIdentityCredential(client_id=client_id),
+            AzureCliCredential()
+        )
+        self.aiocredential = AsyncChainedTokenCredential(
+            AsyncManagedIdentityCredential(client_id=client_id),
+            AsyncAzureCliCredential()
+        )
         client = AzureAppConfigurationClient(base_url=endpoint, credential=self.credential)
 
         self._settings: Dict[str, str] = {}
@@ -48,6 +51,7 @@ class AppConfigClient:
                 self._settings.setdefault(setting.key, setting.value)
         except AzureError as e:
             raise RuntimeError(f"Failed to bulk-load 'gpt-rag' settings: {e}")
+        # ==== End config block ====
 
     def get(self, key: str, default: Any = None, type: type = str) -> Any:
         """
@@ -55,10 +59,13 @@ class AppConfigClient:
 
         If the key was not found under either label, returns `default`.
         """
+        # ==== Grouped config lookup logic ====
         value = self._settings.get(key, default)
-
         if self.allow_env_vars is True:
-            value = os.environ.get(key)
+            env_value = os.environ.get(key)
+            if env_value is not None:
+                value = env_value
+        # ==== End grouped config lookup logic ====
 
         if value is not None:
             if type is not None:
@@ -70,5 +77,4 @@ class AppConfigClient:
                         value = type(value)
                     except ValueError as e:
                         raise Exception(f'Value for {key} could not be converted to {type.__name__}. Error: {e}')
-            
         return value

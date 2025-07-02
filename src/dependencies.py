@@ -2,8 +2,8 @@
 Provides dependencies for API calls.
 """
 import logging
-from fastapi import Depends, HTTPException
-from fastapi.security import APIKeyHeader
+import os
+from fastapi import Depends, HTTPException, Header
 from connectors.appconfig import AppConfigClient      
 
 __config: AppConfigClient = None
@@ -11,22 +11,24 @@ __config: AppConfigClient = None
 def get_config(action: str = None) -> AppConfigClient:
     global __config
 
-    if action is not None and action=='refresh':
+    if action == "refresh":
         __config = AppConfigClient()
-    else:
-        __config = __config or AppConfigClient()
-    
+    elif __config is None:
+        __config = AppConfigClient()
+
     return __config
 
-def validate_api_key_header(x_api_key: str = Depends(APIKeyHeader(name='X-API-KEY'))):
-    result = x_api_key == get_config().get(f'ORCHESTRATOR_APIKEY')
-    
-    if not result:
-        logging.error('Invalid API key. You must provide a valid API key in the X-API-KEY header.')
-        raise HTTPException(
-            status_code = 401,
-            detail = 'Invalid API key. You must provide a valid API key in the X-API-KEY header.'
-        )
+async def validate_dapr_token(
+    dapr_api_token: str = Header(None, alias="dapr-api-token")
+):
+    expected = os.getenv("APP_API_TOKEN")
+    if expected is None:
+        # for local development, use a default token
+        expected = "dev-token"
+    if dapr_api_token != expected:
+        logging.warning("Invalid Dapr token")
+        raise HTTPException(401, detail="Unauthorized")
+    return True
 
 def handle_exception(exception: Exception, status_code: int = 500):
     logging.error(exception, stack_info=True, exc_info=True)

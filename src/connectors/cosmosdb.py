@@ -1,36 +1,27 @@
 import logging
 from azure.cosmos.aio import CosmosClient
-from azure.identity.aio import ManagedIdentityCredential, AzureCliCredential, ChainedTokenCredential
-from connectors.appconfig import AppConfigClient
 from dependencies import get_config
-
-MAX_RETRIES = 10  # Maximum number of retries for rate limit errors
 
 class CosmosDBClient:
     """
-    CosmosDBClient uses the Cosmos SDK's retry mechanism with exponential backoff.
-    The number of retries is controlled by the MAX_RETRIES environment variable.
-    Delays between retries start at 0.5 seconds, doubling up to 8 seconds.
-    If a rate limit error occurs after retries, the client will retry once more after the retry-after-ms header duration (if the header is present).
+    CosmosDBClient uses the Cosmos SDK's.
     """
 
     def __init__(self):
         """
         Initializes the Cosmos DB client with credentials and endpoint.
         """
-        # App configuration
+        # ==== Load all config parameters in one place ====
         self.cfg = get_config()
-
-        # Get Azure Cosmos DB configuration
         self.database_account_name = self.cfg.get("DATABASE_ACCOUNT_NAME")
         self.database_name = self.cfg.get("DATABASE_NAME")
         self.db_uri = f"https://{self.database_account_name}.documents.azure.com:443/"
+        # ==== End config block ====
 
     async def list_documents(self, container_name) -> list:
         """
         Lists all documents from the given container.
         """
-        
         async with CosmosClient(self.db_uri, credential=self.cfg.aiocredential) as db_client:
             db = db_client.get_database_client(database=self.database_name)
             container = db.get_container_client(container_name)
@@ -45,9 +36,7 @@ class CosmosDBClient:
 
             return documents
 
-
     async def get_document(self, container, key) -> dict: 
-         
         async with CosmosClient(self.db_uri, credential=self.cfg.aiocredential) as db_client:
             db = db_client.get_database_client(database=self.database_name)
             container = db.get_container_client(container)
@@ -60,7 +49,6 @@ class CosmosDBClient:
             return document
 
     async def create_document(self, container, key, body=None) -> dict: 
-           
         async with CosmosClient(self.db_uri, credential=self.cfg.aiocredential) as db_client:
             db = db_client.get_database_client(database=self.database_name)
             container = db.get_container_client(container)
@@ -87,4 +75,3 @@ class CosmosDBClient:
                 document = None
                 logging.warning(f"[cosmosdb] could not update document: {e}", exc_info=True)
             return document
-        

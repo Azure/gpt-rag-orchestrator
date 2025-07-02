@@ -2,7 +2,6 @@ import uuid
 import logging
 
 from connectors.cosmosdb import CosmosDBClient
-from connectors.appconfig import AppConfigClient
 from strategies.agent_strategy_factory import AgentStrategyFactory
 from dependencies import get_config
 
