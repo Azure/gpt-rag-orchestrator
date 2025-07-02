@@ -932,7 +932,7 @@ def retrieve_and_convert_to_document_format(
     logger.info(f"[Agentic Search] Retrieved {len(documents)} documents")
 
     logger.info("[Agentic Search] Displaying Converted Document Results...")
-    manager.display_document_results(documents, max_results=5)
+    manager.display_document_results(documents)
 
     return documents
 

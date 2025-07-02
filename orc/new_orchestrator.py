@@ -380,7 +380,7 @@ class ConversationOrchestrator:
 
         <----------- END OF USER QUESTION ------------>
 
-        Provide a detailed answer that is highly relevant to the user's question and context and you must follow the instructions provided in the system prompt strictly.
+        Provide a detailed answer that is highly relevant to the user's question and provided context.
         """
 
         logging.info(f"[orchestrator-generate_response] Prompt: {prompt}")
