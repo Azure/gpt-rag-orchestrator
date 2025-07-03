@@ -301,6 +301,10 @@ class ConversationOrchestrator:
         logging.info(f"[orchestrator-generate_response] Retrieving conversation history")
         history = conversation_data.get("history", [])
 
+        # Retrieve organization data once for efficiency
+        logging.info(f"[orchestrator-generate_response] Retrieving organization data")
+        organization_data = get_organization(self.organization_id)
+
         system_prompt = MARKETING_ANSWER_PROMPT
 
         # add context to the system prompt
@@ -311,7 +315,7 @@ class ConversationOrchestrator:
 
         <----------- PROVIDED SEGMENT ALIAS (VERY CRITICAL, MUST FOLLOW) ------------>
         Here is the segment alias:
-        {get_organization(self.organization_id).get('segmentSynonyms','')}
+        {organization_data.get('segmentSynonyms','')}
         <----------- END OF PROVIDED SEGMENT ALIAS ------------>
         
         <----------- PROVIDED CONTEXT ------------>
@@ -337,14 +341,14 @@ class ConversationOrchestrator:
         Whenever possible, incorporate Brand information to tailor responses, ensuring that answers are highly relevant to the user's company, goals, and operational environment.        
         Here is the Brand information:
 
-        {get_organization(self.organization_id).get('brandInformation','')}
+        {organization_data.get('brandInformation','')}
         <----------- END OF PROVIDED Brand Information ------------>
 
         <----------- PROVIDED INDUSTRY DEFINITION ------------>
         This is the industry definition for the organization. This helps to understand the context of the organization and tailor responses accordingly
         Here is the industry definition:
 
-        {get_organization(self.organization_id).get('industryInformation','')}
+        {organization_data.get('industryInformation','')}
 
         <----------- END OF PROVIDED INDUSTRY DEFINITION ------------>
 
@@ -358,7 +362,7 @@ class ConversationOrchestrator:
         You should follow these instructions strictly as it sets the tone of the response user is expecting.
         Here are the instructions:
 
-        {get_organization(self.organization_id).get('additionalInstructions','')}
+        {organization_data.get('additionalInstructions','')}
         <----------- END OF Important User Instructions ------------>
 
         <----------- SYSTEM PROMPT FOR TOOL CALLING ------------>
