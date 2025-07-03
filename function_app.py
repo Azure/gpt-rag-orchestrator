@@ -387,7 +387,7 @@ async def html2pdf_conversion(req: Request) -> Response:
             status_code=500
         )
 
-@app.blob_trigger(arg_name="myblob", path="documents/{name}",
+@app.blob_trigger(arg_name="myblob", path="documents/{*name}",
                                connection="AZURE_STORAGE_CONNECTION_STRING") 
 def blob_trigger(myblob: func.InputStream):
     """
