@@ -27,7 +27,8 @@ from shared.util import (
     delete_conversation,
     trigger_indexer_with_retry,
 )
-
+from shared.cosmos_db import get_conversation_data
+from orc.graphs.tools.agentic_search import retrieve_and_convert_to_document_format
 from orc import new_orchestrator
 from financial_orc import orchestrator as financial_orchestrator
 from shared.conversation_export import export_conversation
@@ -515,6 +516,170 @@ async def conversations(req: Request) -> Response:
 
     else:
         return Response("Method not allowed", status_code=405)
+
+@app.route(route="conversation-data", methods=[func.HttpMethod.GET])
+async def conversation_data(req: Request) -> Response:
+    """
+    Endpoint to retrieve conversation data from Cosmos DB.
+    
+    Query parameters:
+    - conversation_id (required): The ID of the conversation to retrieve
+    - type (optional): The type of conversation
+    
+    Returns:
+        JSON response with conversation data
+    """
+    logging.info('[FunctionApp] Conversation-data endpoint processed a request.')
+    
+    try:
+        # Get conversation_id from query parameters
+        conversation_id = req.query_params.get('conversation_id')
+        
+        if not conversation_id:
+            return Response(
+                content=json.dumps({
+                    "status": "error", 
+                    "message": "conversation_id query parameter is required"
+                }),
+                media_type="application/json",
+                status_code=400
+            )
+        
+        # Get optional type parameter
+        conversation_type = req.query_params.get('type')
+        
+        # Call the get_conversation_data function
+        conversation_data = get_conversation_data(conversation_id, conversation_type)
+
+        return Response(        
+            content=json.dumps({
+                "status": "success",
+                "conversation_id": conversation_id,
+                "data": conversation_data
+            }),
+            media_type="application/json",
+            status_code=200
+        )
+        
+    except Exception as e:
+        logging.error(f"Error in conversation-data endpoint: {str(e)}")
+        return Response(
+            content=json.dumps({
+                "status": "error",
+                "message": f"Internal server error: {str(e)}"
+            }),
+            media_type="application/json",
+            status_code=500
+        )
+
+@app.route(route="agentic-search", methods=[func.HttpMethod.POST])
+async def agentic_search(req: Request) -> Response:
+    """
+    Endpoint to perform agentic search based on conversation history.
+    
+    Expected payload:
+x`
+    
+    Returns:
+        JSON response with search results as Document objects
+    """
+    logging.info('[agentic-search] Python HTTP trigger function processed a request.')
+    
+    try:
+        req_body = await req.json()
+        
+        # Validate required fields
+        if not req_body or 'conversation_history' not in req_body:
+            return Response(
+                content=json.dumps({
+                    "status": "error", 
+                    "message": "Request body must contain 'conversation_history' array"
+                }),
+                media_type="application/json",
+                status_code=400
+            )
+        
+        conversation_history = req_body['conversation_history']
+        organization_id = req_body.get('organization_id')
+        
+        # Validate conversation_history format
+        if not isinstance(conversation_history, list) or len(conversation_history) == 0:
+            return Response(
+                content=json.dumps({
+                    "status": "error", 
+                    "message": "conversation_history must be a non-empty array"
+                }),
+                media_type="application/json",
+                status_code=400
+            )
+        
+        # Validate message format
+        for i, msg in enumerate(conversation_history):
+            if not isinstance(msg, dict) or 'role' not in msg or 'content' not in msg:
+                return Response(
+                    content=json.dumps({
+                        "status": "error", 
+                        "message": f"Invalid message format at index {i}. Each message must have 'role' and 'content' fields"
+                    }),
+                    media_type="application/json",
+                    status_code=400
+                )
+        
+        # Default organization_id if not provided
+        if not organization_id:
+            organization_id = "00000000-0000-0000-0000-000000000000"
+            logging.info(f"[agentic-search] No organization_id provided, using default: {organization_id}")
+        
+        logging.info(f"[agentic-search] Processing {len(conversation_history)} messages for organization: {organization_id}")
+        
+        # Call the agentic search function
+        documents = retrieve_and_convert_to_document_format(
+            conversation_history=conversation_history,
+            organization_id=organization_id
+        )
+        
+        # Convert Document objects to JSON-serializable format
+        def serialize_document(doc):
+            """Convert a LangChain Document to JSON-serializable format"""
+            return {
+                "page_content": doc.page_content,
+                "metadata": doc.metadata
+            }
+        
+        serialized_documents = [serialize_document(doc) for doc in documents]
+        
+        logging.info(f"[agentic-search] Successfully retrieved {len(serialized_documents)} documents")
+        
+        return Response(
+            content=json.dumps({
+                "status": "success",
+                "total_documents": len(serialized_documents),
+                "organization_id": organization_id,
+                "documents": serialized_documents
+            }),
+            media_type="application/json",
+            status_code=200
+        )
+        
+    except json.JSONDecodeError:
+        return Response(
+            content=json.dumps({
+                "status": "error", 
+                "message": "Invalid JSON format in request body"
+            }),
+            media_type="application/json",
+            status_code=400
+        )
+    except Exception as e:
+        logging.error(f"Error in agentic-search endpoint: {str(e)}")
+        return Response(
+            content=json.dumps({
+                "status": "error",
+                "message": f"Internal server error: {str(e)}"
+            }),
+            media_type="application/json",
+            status_code=500
+        )
 
 @app.route(route="scrape-pages", methods=[func.HttpMethod.POST])
 async def scrape_pages(req: Request) -> Response:
