@@ -112,6 +112,7 @@ class GraphBuilder:
         self.retriever = self._init_retriever()
         self.web_search = self._init_web_search()
         self.conversation_id = conversation_id
+        self.organization_data = get_organization(organization_id)
 
     def _init_llm(self) -> AzureChatOpenAI:
         """Configure Azure OpenAI instance."""
@@ -132,15 +133,15 @@ class GraphBuilder:
     
     def _init_segment_alias(self) -> str:
         """Retrieve segment alias."""
-        return get_organization(self.organization_id).get('segmentSynonyms','')
+        return self.organization_data.get('segmentSynonyms','')
     
     def _init_brand_information(self) -> str:
         """Retrieve brand information."""
-        return get_organization(self.organization_id).get('brandInformation','')
+        return self.organization_data.get('brandInformation','')
     
     def _init_industry_information(self) -> str:
         """Retrieve industry information."""
-        return get_organization(self.organization_id).get('industryInformation','')
+        return self.organization_data.get('industryInformation','')
 
     def _init_retriever(self) -> CustomRetriever:
         try:

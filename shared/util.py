@@ -576,7 +576,7 @@ def get_setting(client_principal):
     if not client_principal["id"]:
         return {}
 
-    logging.info("User ID found. Getting settings for user: " + client_principal["id"])
+    logging.info("[Util] User ID found. Getting settings for user: " + client_principal["id"])
 
     setting = {}
     credential = DefaultAzureCredential()
@@ -913,7 +913,7 @@ def get_user(user_id):
     if not user_id:
         return {"error": "User ID not found."}
 
-    logging.info("User ID found. Getting data for user: " + user_id)
+    logging.info("[Util] User ID found. Getting data for user: " + user_id)
 
     user = {}
     credential = DefaultAzureCredential()
@@ -996,7 +996,7 @@ def get_organization(organization_id):
         return {"error": "Organization ID not found."}
 
     logging.info(
-        "Organization ID found. Getting data for organization: " + organization_id
+        "[Util] Organization ID found. Getting data for organization: " + organization_id
     )
 
     organization = {}
