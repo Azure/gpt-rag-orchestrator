@@ -189,7 +189,7 @@ class ConversationOrchestrator:
                 [
                     f"\nContent: \n\n{doc.page_content}"
                     + (
-                        f"\n\nSource: {self._format_source_path(doc.metadata['source'])}"
+                        f"\n\nSource: {self._format_source_path(doc.metadata['source']) if 'documents/' in doc.metadata['source'] else doc.metadata['source']}"
                         if doc.metadata.get("source")
                         else ""
                     )
