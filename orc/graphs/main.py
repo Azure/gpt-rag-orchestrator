@@ -105,6 +105,11 @@ def clean_chat_history(chat_history: List[dict], agentic_search_mode: bool = Fal
                 Human: {message}
                 AI Message: {message}
     """
+    # Safe handling of potentially None chat_history
+    if not chat_history:
+        logger.info("[Chat History Cleaning] No chat history provided or empty list")
+        return [] if agentic_search_mode else ""
+    
     logger.info(f"[Chat History Cleaning] Processing {len(chat_history)} messages in agentic_search_mode")
     
     formatted_history = []
@@ -237,10 +242,14 @@ class GraphBuilder:
             )
     
     def _run_agentic_retriever(self, conversation_history: List[dict]):
+        # Safe handling of potentially None conversation_history
+        conversation_history = conversation_history or []
         logger.info(f"[GraphBuilder Agentic Retriever] Running agentic retriever with {len(conversation_history)} messages")
         results = retrieve_and_convert_to_document_format(conversation_history, self.organization_id)
-        logger.info(f"[GraphBuilder Agentic Retriever] Retrieved {len(results)} documents")
-        return results
+        # Safe handling of potentially None results
+        results_count = len(results) if results else 0
+        logger.info(f"[GraphBuilder Agentic Retriever] Retrieved {results_count} documents")
+        return results or []
 
     def _init_web_search(self):
         logger.info("[GraphBuilder Web Search Init] Initializing Tavily web search")
@@ -255,7 +264,7 @@ class GraphBuilder:
             raise RuntimeError(f"Failed to initialize Tavily Web Search: {str(e)}")
 
     def _return_state(self, state: ConversationState) -> dict:
-        # Safe handling of potentially None values
+        # Safe handling of potentially None state
         messages_count = len(state.messages) if state.messages else 0
         context_docs_count = len(state.context_docs) if state.context_docs else 0
         
@@ -584,16 +593,23 @@ class GraphBuilder:
     def _web_search(self, state: ConversationState) -> dict:
         """Perform web search and combine with existing context."""
         logger.info(f"[Web Search] Starting web search for query: '{state.rewritten_query[:100]}...'")
-        logger.info(f"[Web Search] Current context has {len(state.context_docs)} documents")
+        
+        # Safe handling of potentially None context_docs
+        current_docs_count = len(state.context_docs) if state.context_docs else 0
+        logger.info(f"[Web Search] Current context has {current_docs_count} documents")
         
         web_docs = self.web_search.search(state.rewritten_query)
-        logger.info(f"[Web Search] Retrieved {len(web_docs)} documents from web search")
+        web_docs_count = len(web_docs) if web_docs else 0
+        logger.info(f"[Web Search] Retrieved {web_docs_count} documents from web search")
         
-        total_docs = len(state.context_docs) + len(web_docs)
+        # Safe calculation of total docs
+        context_docs = state.context_docs or []
+        web_docs = web_docs or []
+        total_docs = len(context_docs) + len(web_docs)
         logger.info(f"[Web Search] Total documents after combining: {total_docs}")
         
         return {
-            "context_docs": state.context_docs + web_docs,
+            "context_docs": context_docs + web_docs,
             "requires_web_search": state.requires_web_search,
         }
 
