@@ -71,6 +71,70 @@ azure_logger.propagate = True
 langchain_logger.propagate = True
 openai_logger.propagate = True
 
+# Document processing utilities
+def _add_documents_to_dict(docs_dict: dict, documents: List[Document], source_type: str) -> int:
+    """
+    Add documents to deduplication dictionary with fallback key generation.
+    
+    Args:
+        docs_dict: Dictionary for document deduplication
+        documents: List of Document objects to add
+        source_type: Type of source ('retrieval', 'web', 'adjacent') for fallback keys
+        
+    Returns:
+        Number of documents added
+    """
+    added_count = 0
+    
+    for doc in documents:
+        if hasattr(doc, 'id') and doc.id:
+            docs_dict[doc.id] = doc
+            added_count += 1
+        else:
+            # For documents without ID or with None ID, use a fallback key based on content hash
+            fallback_key = f"{source_type}_{hash(doc.page_content)}"
+            docs_dict[fallback_key] = doc
+            added_count += 1
+            logger.debug(f"[Document Processing] 🔧 Used fallback key for {source_type} doc: {fallback_key[:50]}...")
+    
+    return added_count
+
+def _classify_document_source(doc: Document) -> str:
+    """
+    Classify document source type based on metadata.
+    
+    Args:
+        doc: Document object to classify
+        
+    Returns:
+        'web' if web search document, 'retrieval' otherwise
+    """
+    source = doc.metadata.get('source', '').lower() if hasattr(doc, 'metadata') else ''
+    if 'http' in source and not any(domain in source for domain in ['blob.core.windows.net']):
+        return 'web'
+    return 'retrieval'
+
+def _count_documents_by_source(docs: List[Document]) -> tuple:
+    """
+    Count documents by source type.
+    
+    Args:
+        docs: List of Document objects
+        
+    Returns:
+        Tuple of (retrieval_count, web_count)
+    """
+    retrieval_count = 0
+    web_count = 0
+    
+    for doc in docs:
+        if _classify_document_source(doc) == 'web':
+            web_count += 1
+        else:
+            retrieval_count += 1
+    
+    return retrieval_count, web_count
+
 # initialize memory saver
 @dataclass
 class ConversationState:
@@ -98,39 +162,70 @@ class ConversationState:
     query_category: str = field(default_factory=str)
     agentic_search_mode: bool = field(default=True)
 
-def clean_chat_history(chat_history: List[dict], agentic_search_mode: bool = False) -> str:
+def _truncate_chat_history(chat_history: List[dict], max_messages: int = 4) -> List[dict]:
     """
-    Clean the chat history and format it as a string for LLM consumption.
-
+    Truncate chat history to the most recent messages.
+    
     Args:
-        chat_history (list): List of chat message dictionaries
-
+        chat_history: List of chat message dictionaries
+        max_messages: Maximum number of messages to keep
+        
     Returns:
-        str: Formatted chat history string in the format:
-                Human: {message}
-                AI Message: {message}
+        Truncated list of chat messages
     """
-    # Safe handling of potentially None chat_history
     if not chat_history:
         logger.info("[Chat History Cleaning] No chat history provided or empty list")
-        return [] if agentic_search_mode else ""
+        return []
     
-    logger.info(f"[Chat History Cleaning] Processing {len(chat_history)} messages in agentic_search_mode")
+    logger.info(f"[Chat History Cleaning] Processing {len(chat_history)} messages")
     
-    formatted_history = []
-    if len(chat_history) > 4:
-        chat_history = chat_history[-4:]
-        logger.info(f"[Chat History Cleaning] Truncated to last 4 messages")
+    if len(chat_history) > max_messages:
+        truncated_history = chat_history[-max_messages:]
+        logger.info(f"[Chat History Cleaning] Truncated to last {max_messages} messages")
+        return truncated_history
     else:
-        chat_history = chat_history
-        logger.info(f"[Chat History Cleaning] Less than 4 messages, no truncation needed")
-
-    if agentic_search_mode:
-        chat_history = [{"role": message.get("role", "").lower(), "content": message.get("content", "")} for message in chat_history]
-        logger.info(f"[Chat History Cleaning] Formatted for agentic search mode")
+        logger.info(f"[Chat History Cleaning] Less than {max_messages} messages, no truncation needed")
         return chat_history
 
-    for message in chat_history:
+def clean_chat_history_for_agentic_search(chat_history: List[dict]) -> List[dict]:
+    """
+    Clean and format chat history for agentic search mode.
+    
+    Args:
+        chat_history: List of chat message dictionaries
+        
+    Returns:
+        List of formatted chat messages for agentic search
+    """
+    truncated_history = _truncate_chat_history(chat_history)
+    if not truncated_history:
+        return []
+    
+    formatted_history = [
+        {"role": message.get("role", "").lower(), "content": message.get("content", "")} 
+        for message in truncated_history
+    ]
+    logger.info(f"[Chat History Cleaning] Formatted for agentic search mode")
+    return formatted_history
+
+def clean_chat_history_for_llm(chat_history: List[dict]) -> str:
+    """
+    Clean and format chat history for LLM consumption as a string.
+    
+    Args:
+        chat_history: List of chat message dictionaries
+        
+    Returns:
+        Formatted chat history string in the format:
+            Human: {message}
+            AI Message: {message}
+    """
+    truncated_history = _truncate_chat_history(chat_history)
+    if not truncated_history:
+        return ""
+    
+    formatted_history = []
+    for message in truncated_history:
         if not message.get("content"):
             continue
 
@@ -143,6 +238,23 @@ def clean_chat_history(chat_history: List[dict], agentic_search_mode: bool = Fal
 
     logger.info(f"[Chat History Cleaning] Formatted {len(formatted_history)} messages for LLM consumption")
     return "\n\n".join(formatted_history)
+
+# Backward compatibility function
+def clean_chat_history(chat_history: List[dict], agentic_search_mode: bool = False):
+    """
+    Clean the chat history and format it for consumption.
+    
+    Args:
+        chat_history: List of chat message dictionaries
+        agentic_search_mode: Whether to format for agentic search mode
+        
+    Returns:
+        List[dict] for agentic search mode, str for LLM consumption
+    """
+    if agentic_search_mode:
+        return clean_chat_history_for_agentic_search(chat_history)
+    else:
+        return clean_chat_history_for_llm(chat_history)
 
 @dataclass
 class GraphConfig:
@@ -202,23 +314,95 @@ class GraphBuilder:
             logger.error(f"[GraphBuilder LLM Init] Failed to initialize Azure OpenAI: {str(e)}")
             raise RuntimeError(f"Failed to initialize Azure OpenAI: {str(e)}")
     
+    def _get_organization_data(self, data_key: str, data_name: str) -> str:
+        """
+        Retrieve organization data by key with consistent logging.
+        
+        Args:
+            data_key: Key in organization_data dictionary
+            data_name: Human-readable name for logging
+            
+        Returns:
+            Organization data value or empty string if not found
+        """
+        data_value = self.organization_data.get(data_key, '')
+        logger.info(f"[GraphBuilder {data_name} Init] Retrieved {data_name.lower()} (local memory) for organization {self.organization_id}")
+        return data_value
+    
     def _init_segment_alias(self) -> str:
         """Retrieve segment alias."""
-        segment_aliases = self.organization_data.get('segmentSynonyms','')
-        logger.info(f"[GraphBuilder Segment Init] Retrieved segment aliases (local memory) for organization {self.organization_id}")
-        return segment_aliases
+        return self._get_organization_data('segmentSynonyms', '')
     
     def _init_brand_information(self) -> str:
         """Retrieve brand information."""
-        brand_info = self.organization_data.get('brandInformation','')
-        logger.info(f"[GraphBuilder Brand Init] Retrieved brand information (local memory) for organization {self.organization_id}")
-        return brand_info
+        return self._get_organization_data('brandInformation', '')
     
     def _init_industry_information(self) -> str:
         """Retrieve industry information."""
-        industry_info = self.organization_data.get('industryInformation','')
-        logger.info(f"[GraphBuilder Industry Init] Retrieved industry information (local memory) for organization {self.organization_id}")
-        return industry_info
+        return self._get_organization_data('industryInformation', '')
+
+    def _build_organization_context_prompt(self, history: List[dict]) -> str:
+        """
+        Build the organization context prompt with conversation history and organization data.
+        
+        Args:
+            history: List of conversation history messages
+            
+        Returns:
+            Formatted organization context prompt
+        """
+        return f"""
+        <-------------------------------->
+        
+        Historical Conversation Context:
+        <-------------------------------->
+        ```
+        {clean_chat_history_for_llm(history)}
+        ```
+        <-------------------------------->
+
+        **Alias segment mappings:**
+        <-------------------------------->
+        alias to segment mappings typically look like this (Official Name -> Alias):
+        A -> B
+        
+        This mapping is mostly used in consumer segmentation context. 
+        
+        Critical Rule – Contextual Consistency with Alias Mapping:
+    •	Always check whether the segment reference in the historical conversation is an alias (B). For example, historical conversation may mention "B" segment, but whenever you read the context in order to rewrite the query, you must map it to the official segment name "A" using the alias mapping table.
+    •	ALWAYS use the official name (A) in the rewritten query.
+    •	DO NOT use the alias (B) in the rewritten query. 
+
+        Here is the actual alias to segment mappings:
+        
+        **Official Segment Name Mappings (Official Name -> Alias):**
+        ```
+        {self._init_segment_alias()}
+        ```
+
+        For example, if the historical conversation mentions "B", and the original question also mentions "B", you must rewrite the question to use "A" instead of "B".
+
+        Look, if a mapping in the instruction is like this:
+        students -> young kids 
+
+        Though the historical conversation and the orignal question may mention "students", you must rewrite the question to use "young kids" instead of "students".
+
+        <-------------------------------->
+        Brand Information:
+        <-------------------------------->
+        ```
+        {self._init_brand_information()}
+        ```
+        <-------------------------------->
+
+        Industry Information:
+        <-------------------------------->
+        ```
+        {self._init_industry_information()}
+        ```
+        <-------------------------------->
+
+        """
 
     def _init_retriever(self) -> CustomRetriever:
         logger.info("[GraphBuilder Retriever Init] Initializing Custom Agentic Retriever")
@@ -399,32 +583,8 @@ class GraphBuilder:
             # Add documents to deduplication dictionary
             logger.info(f"[Async Custom Agentic Search] ├─ 🔄 Adding {len(all_docs)} documents to deduplication dict")
             
-            retrieval_added = 0
-            web_added = 0
-            
-            # Process retrieval documents
-            for doc in retriever_results:
-                if hasattr(doc, 'id') and doc.id:
-                    docs_dict[doc.id] = doc
-                    retrieval_added += 1
-                else:
-                    # For documents without ID or with None ID, use a fallback key based on content hash
-                    fallback_key = f"retrieval_{hash(doc.page_content)}"
-                    docs_dict[fallback_key] = doc
-                    retrieval_added += 1
-                    logger.debug(f"[Async Custom Agentic Search] ├─ 🔧 Used fallback key for retrieval doc: {fallback_key[:50]}...")
-            
-            # Process web search documents
-            for doc in web_results:
-                if hasattr(doc, 'id') and doc.id:
-                    docs_dict[doc.id] = doc
-                    web_added += 1
-                else:
-                    # For documents without ID or with None ID, use a fallback key based on content hash
-                    fallback_key = f"web_{hash(doc.page_content)}"
-                    docs_dict[fallback_key] = doc
-                    web_added += 1
-                    logger.info(f"[Async Custom Agentic Search] ├─ 🔧 Used fallback key for web doc: {fallback_key[:50]}...")
+            retrieval_added = _add_documents_to_dict(docs_dict, retriever_results, "retrieval")
+            web_added = _add_documents_to_dict(docs_dict, web_results, "web")
             
             logger.info(f"[Async Custom Agentic Search] ├─ 📊 Added to dict: {retrieval_added} retrieval + {web_added} web = {retrieval_added + web_added} total")
             logger.info(f"[Async Custom Agentic Search] ├─ 📋 Current dict size: {len(docs_dict)} unique documents")
@@ -443,6 +603,67 @@ class GraphBuilder:
         logger.info(f"[Async Custom Agentic Search] 🔍 Web search usage detected: {'YES' if any_web_search_used else 'NO'}")
         
         return docs_dict, total_retrieved, total_execution_time, parallel_total_time, any_web_search_used
+
+    def _execute_custom_agentic_search(self, rewritten_query: str) -> tuple:
+        """
+        Execute custom agentic search with sub-queries and parallel processing.
+        
+        Args:
+            rewritten_query: The query to generate sub-queries from
+            
+        Returns:
+            Tuple of (docs_list, any_web_search_used)
+        """
+        # generate sub queries
+        logger.info(f"[Custom Agentic Search Main] Generating sub-queries for retrieval")
+        sub_queries = generate_sub_queries(rewritten_query, self.llm)
+        # create a list of sub queries, include the rewritten query 
+        sub_queries = [sub_queries.strategy_query, sub_queries.consumer_insight_query, sub_queries.marketing_query, rewritten_query]
+        
+        logger.info(f"[Custom Agentic Search Main] Generated {len(sub_queries)-1 if len(sub_queries) > 1 else len(sub_queries)} sub-queries for retrieval and added the rewritten query to the search list")
+        logger.info("\n" + "-" * 78)
+        logger.info("[Custom Agentic Search Main] Sub-queries generated:")
+        for i, query in enumerate(sub_queries, 1):
+            query_type = "Rewritten Query" if i == len(sub_queries) else f"SUB-QUERY {i}"
+            logger.info(f"[Custom Agentic Search Main]   {query_type}: {query}")
+        logger.info("\n" + "-" * 78)
+
+        # Prepare queries for parallel execution
+        query_tasks = []
+        for i, query in enumerate(sub_queries, 1):
+            query_type = "Rewritten Query" if i == len(sub_queries) else f"SUB-QUERY {i}"
+            query_tasks.append((i, query, query_type))
+        
+        try:
+            docs_dict, total_retrieved, total_execution_time, parallel_total_time, any_web_search_used = asyncio.run(
+                self._execute_queries_async(sub_queries)
+            )
+                
+        except Exception as e:
+            logger.error(f"[Custom Agentic Search Main] ❌ Async execution failed: {e}")
+            logger.error(f"[Custom Agentic Search Main] 💥 Async execution is required for custom agentic search")
+            # Re-raise the exception rather than falling back
+            raise RuntimeError(f"Async execution failed: {e}") from e
+
+        # Convert dictionary values to list
+        docs = list(docs_dict.values())
+        unique_docs = len(docs)
+        
+        # Count final document sources for verification
+        final_retrieval_count, final_web_count = _count_documents_by_source(docs)
+        
+        logger.info("\n" + "=" * 78)
+        logger.info(f"[Custom Agentic Search Main] 📊 EXECUTION SUMMARY:")
+        logger.info(f"[Custom Agentic Search Main] ├─ Total queries executed: {len(sub_queries)}")
+        logger.info(f"[Custom Agentic Search Main] ├─ Execution time: {parallel_total_time:.2f}s")
+        logger.info(f"[Custom Agentic Search Main] ├─ Total documents retrieved: {total_retrieved}")
+        logger.info(f"[Custom Agentic Search Main] ├─ Unique documents after deduplication: {unique_docs}")
+        logger.info(f"[Custom Agentic Search Main] ├─ 📋 Final composition: {final_retrieval_count} retrieval + {final_web_count} web documents")
+        logger.info(f"[Custom Agentic Search Main] ├─ 🔍 Web search usage: {'Used by at least one query' if any_web_search_used else 'Not used by any query'}")
+        logger.info(f"[Custom Agentic Search Main] ├─ 🎯 Per-query web search triggered for queries with <2 retrieval results")
+        logger.info("\n" + "=" * 78)
+        
+        return docs, any_web_search_used
 
     def _init_web_search(self):
         logger.info("[GraphBuilder Web Search Init] Initializing Tavily web search")
@@ -512,61 +733,8 @@ class GraphBuilder:
         history = conversation_data.get("history", [])
         logger.info(f"[Query Rewrite] Retrieved {len(history)} messages from conversation history")
 
-        # additional system prompt
-        additional_system_prompt = f"""
-        <-------------------------------->
-        
-        Historical Conversation Context:
-        <-------------------------------->
-        ```
-        {clean_chat_history(history)}
-        ```
-        <-------------------------------->
-
-        **Alias segment mappings:**
-        <-------------------------------->
-        alias to segment mappings typically look like this (Official Name -> Alias):
-        A -> B
-        
-        This mapping is mostly used in consumer segmentation context. 
-        
-        Critical Rule – Contextual Consistency with Alias Mapping:
-    •	Always check whether the segment reference in the historical conversation is an alias (B). For example, historical conversation may mention "B" segment, but whenever you read the context in order to rewrite the query, you must map it to the official segment name "A" using the alias mapping table.
-    •	ALWAYS use the official name (A) in the rewritten query.
-    •	DO NOT use the alias (B) in the rewritten query. 
-
-        Here is the actual alias to segment mappings:
-        
-        **Official Segment Name Mappings (Official Name -> Alias):**
-        ```
-        {self._init_segment_alias()}
-        ```
-
-        For example, if the historical conversation mentions "B", and the original question also mentions "B", you must rewrite the question to use "A" instead of "B".
-
-        Look, if a mapping in the instruction is like this:
-        students -> young kids 
-
-        Though the historical conversation and the orignal question may mention "students", you must rewrite the question to use "young kids" instead of "students".
-
-        <-------------------------------->
-        Brand Information:
-        <-------------------------------->
-        ```
-        {self._init_brand_information()}
-        ```
-        <-------------------------------->
-
-        Industry Information:
-        <-------------------------------->
-        ```
-        {self._init_industry_information()}
-        ```
-        <-------------------------------->
-
-        """
         # combine the system prompt with the additional system prompt
-        system_prompt = f"{system_prompt}\n\n{additional_system_prompt}"
+        system_prompt = f"{system_prompt}\n\n{self._build_organization_context_prompt(history)}"
 
         prompt = f"""Original Question: 
         <-------------------------------->
@@ -632,7 +800,7 @@ class GraphBuilder:
         {state.question}
         ----------------------------------------
         Conversation History:
-        {clean_chat_history(history)}
+        {clean_chat_history_for_llm(history)}
         ----------------------------------------
 
         Reply with **only** the exact category name — no additional text, explanations, or formatting.
@@ -695,7 +863,7 @@ class GraphBuilder:
             conversation_history = get_conversation_data(self.conversation_id).get("history", [])
 
             # clean the conversation history
-            conversation_history = clean_chat_history(conversation_history, agentic_search_mode=True)
+            conversation_history = clean_chat_history_for_agentic_search(conversation_history)
 
             # append the rewritten query to the conversation history
             conversation_history.append({"role": "user", "content": state.rewritten_query})
@@ -706,63 +874,7 @@ class GraphBuilder:
             any_web_search_used = False
 
         else:
-            # generate sub queries
-            logger.info(f"[Custom Agentic Search Main] Generating sub-queries for retrieval")
-            sub_queries = generate_sub_queries(state.rewritten_query, self.llm)
-            # create a list of sub queries, include the rewritten query 
-            sub_queries = [sub_queries.strategy_query, sub_queries.consumer_insight_query, sub_queries.marketing_query, state.rewritten_query]
-            
-            logger.info(f"[Custom Agentic Search Main] Generated {len(sub_queries)-1 if len(sub_queries) > 1 else len(sub_queries)} sub-queries for retrieval and added the rewritten query to the search list")
-            logger.info("\n" + "-" * 78)
-            logger.info("[Custom Agentic Search Main] Sub-queries generated:")
-            for i, query in enumerate(sub_queries, 1):
-                query_type = "Rewritten Query" if i == len(sub_queries) else f"SUB-QUERY {i}"
-                logger.info(f"[Custom Agentic Search Main]   {query_type}: {query}")
-            logger.info("\n" + "-" * 78)
-
-            # Prepare queries for parallel execution
-            query_tasks = []
-            for i, query in enumerate(sub_queries, 1):
-                query_type = "Rewritten Query" if i == len(sub_queries) else f"SUB-QUERY {i}"
-                query_tasks.append((i, query, query_type))
-            
-            try:
-                docs_dict, total_retrieved, total_execution_time, parallel_total_time, any_web_search_used = asyncio.run(
-                    self._execute_queries_async(sub_queries)
-                )
-                    
-            except Exception as e:
-                logger.error(f"[Custom Agentic Search Main] ❌ Async execution failed: {e}")
-                logger.error(f"[Custom Agentic Search Main] 💥 Async execution is required for custom agentic search")
-                # Re-raise the exception rather than falling back
-                raise RuntimeError(f"Async execution failed: {e}") from e
-
-            # Convert dictionary values to list
-            docs = list(docs_dict.values())
-            unique_docs = len(docs)
-            
-            # Count final document sources for verification
-            final_retrieval_count = 0
-            final_web_count = 0
-            
-            for doc in docs:
-                # Check if it's a web search document by looking at metadata or source
-                source = doc.metadata.get('source', '').lower() if hasattr(doc, 'metadata') else ''
-                if 'http' in source and not any(domain in source for domain in ['blob.core.windows.net', 'strag0vm2b2htvuuclm']):
-                    final_web_count += 1
-                else:
-                    final_retrieval_count += 1
-            
-            logger.info("\n" + "=" * 78)
-            logger.info(f"[Custom Agentic Search Main] 📊 EXECUTION SUMMARY:")
-            logger.info(f"[Custom Agentic Search Main] ├─ Total queries executed: {len(sub_queries)}")
-            logger.info(f"[Custom Agentic Search Main] ├─ Execution time: {parallel_total_time:.2f}s")
-            logger.info(f"[Custom Agentic Search Main] ├─ Total documents retrieved: {total_retrieved}")
-            logger.info(f"[Custom Agentic Search Main] ├─ Unique documents after deduplication: {unique_docs}")
-            logger.info(f"[Custom Agentic Search Main] ├─ 📋 Final composition: {final_retrieval_count} retrieval + {final_web_count} web documents")
-            logger.info(f"[Custom Agentic Search Main] ├─ 🔍 Web search usage: {'Used by at least one query' if any_web_search_used else 'Not used by any query'}")
-            logger.info(f"[Custom Agentic Search Main] ├─ 🎯 Per-query web search triggered for queries with <2 retrieval results")
-            logger.info("\n" + "=" * 78)
+            docs, any_web_search_used = self._execute_custom_agentic_search(state.rewritten_query)
 ### <-------------------------------->
 ### Since we're adopting sub queries, let's turn off the adjacent chunks for now 
             # if docs:
@@ -798,20 +910,10 @@ class GraphBuilder:
         web_search_needed = any_web_search_used if not self.config.agentic_search_mode else len(docs) < 2
         
         # Final verification of document sources in retrieved docs
-        final_retrieval_docs = 0
-        final_web_docs = 0
+        final_retrieval_docs, final_web_docs = _count_documents_by_source(docs)
         logger.info("\n" + "=" * 78)
         logger.info(f"[Retrieve Context] 📋 POST-RETRIEVAL DECISION ANALYSIS:")
         logger.info(f"[Retrieve Context] ├─ Documents retrieved: {len(docs)}")
-        
-        # Verify the composition of final docs
-        for doc in docs:
-            source = doc.metadata.get('source', '').lower() if hasattr(doc, 'metadata') else ''
-            if 'http' in source and not any(domain in source for domain in ['blob.core.windows.net']):
-                final_web_docs += 1
-            else:
-                final_retrieval_docs += 1
-        
         logger.info(f"[Retrieve Context] ├─ 📊 Final docs composition: {final_retrieval_docs} retrieval + {final_web_docs} web")
         if not self.config.agentic_search_mode:
             logger.info(f"[Retrieve Context] ├─ Per-query web search: {'Used by at least one query' if any_web_search_used else 'Not used by any query'}")
