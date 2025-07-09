@@ -3,6 +3,10 @@ import sys
 import logging
 from dataclasses import dataclass, field
 from typing import List
+import aiohttp
+import time
+import asyncio
+from functools import wraps
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
@@ -251,6 +255,124 @@ class GraphBuilder:
         results_count = len(results) if results else 0
         logger.info(f"[GraphBuilder Agentic Retriever] Retrieved {results_count} documents")
         return results or []
+
+    async def _execute_single_query_async(self, query_info: tuple, semaphore: asyncio.Semaphore = None) -> tuple:
+        """Execute a single query retrieval asynchronously with rate limiting.
+        
+        Args:
+            query_info: Tuple of (query_index, query_text, query_type)
+            semaphore: Optional semaphore for rate limiting
+            
+        Returns:
+            Tuple of (query_index, query_type, query_text, results, execution_time)
+        """
+        query_index, query_text, query_type = query_info
+        start_time = time.time()
+        
+        # Use semaphore for rate limiting if provided
+        async with (semaphore if semaphore else asyncio.Semaphore(4)):
+            try:
+                logger.info(f"[Async Custom Agentic Search] 🔍 Starting {query_type}: {query_text}")
+
+                await asyncio.sleep(0.1)  # 100ms delay between requests
+                
+                loop = asyncio.get_event_loop()
+                results = await loop.run_in_executor(None, self.retriever.invoke, query_text)
+                
+                execution_time = time.time() - start_time
+                
+                logger.info(f"[Async Custom Agentic Search] ✅ {query_type} completed in {execution_time:.2f}s - {len(results)} documents")
+                return (query_index, query_type, query_text, results, execution_time)
+                
+            except Exception as e:
+                execution_time = time.time() - start_time
+                logger.error(f"[Async Custom Agentic Search] ❌ {query_type} failed in {execution_time:.2f}s: {str(e)}")
+                
+                # Implement exponential backoff for capacity errors
+                if "capacity" in str(e).lower() or "overload" in str(e).lower():
+                    backoff_delay = min(2 ** (query_index - 1), 10)  # Max 10 seconds
+                    logger.warning(f"[Async Custom Agentic Search] ⏳ Capacity issue detected, backing off for {backoff_delay}s")
+                    await asyncio.sleep(backoff_delay)
+                
+                return (query_index, query_type, query_text, [], execution_time)
+
+    async def _execute_queries_async(self, sub_queries: List[str]) -> tuple:
+        """Execute all queries asynchronously with improved error handling and rate limiting.
+        
+        Args:
+            sub_queries: List of query strings to execute
+            
+        Returns:
+            Tuple of (docs_dict, total_retrieved, total_execution_time, parallel_total_time)
+        """
+        # Prepare queries for async execution
+        query_tasks = []
+        for i, query in enumerate(sub_queries, 1):
+            query_type = "Rewritten Query" if i == len(sub_queries) else f"SUB-QUERY {i}"
+            query_tasks.append((i, query, query_type))
+        
+        logger.info(f"[Async Custom Agentic Search] 🚀 EXECUTING {len(query_tasks)} QUERIES ASYNCHRONOUSLY")
+        logger.info("\n" + "=" * 80)
+        
+        # Create semaphore for rate limiting (max 2 concurrent requests)
+        semaphore = asyncio.Semaphore(2)
+        
+        # Execute queries in parallel
+        docs_dict = {}
+        total_retrieved = 0
+        total_execution_time = 0
+        
+        parallel_start_time = time.time()
+        
+        # Create async tasks
+        tasks = [
+            self._execute_single_query_async(task, semaphore) 
+            for task in query_tasks
+        ]
+        
+        # Execute all tasks and gather results
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"[Async Custom Agentic Search] ❌ Task failed with exception: {result}")
+                continue
+                
+            query_index, query_type, query_text, retriever_results, execution_time = result
+            results_count = len(retriever_results)
+            total_retrieved += results_count
+            total_execution_time += execution_time
+            
+            logger.info(f"\n[Async Custom Agentic Search] 📋 {query_type} RESULTS:")
+            logger.info(f"[Async Custom Agentic Search] ├─ Query: {query_text}")
+            logger.info(f"[Async Custom Agentic Search] ├─ Execution time: {execution_time:.2f}s")
+            logger.info(f"[Async Custom Agentic Search] ├─ Documents retrieved: {results_count}")
+            
+            # Log document sources if available
+            if retriever_results:
+                logger.info(f"[Async Custom Agentic Search] ├─ 📄 Retrieved documents:")
+                for j, doc in enumerate(retriever_results, 1):  
+                    source = doc.metadata.get('source', 'Unknown source')
+                    logger.info(f"[Async Custom Agentic Search] │  └─ {j}. Source: {source}")
+            else:
+                logger.info(f"[Async Custom Agentic Search] ├─ ❌ No documents found for this query")
+            
+            logger.info(f"[Async Custom Agentic Search] └─ {query_type} PROCESSING COMPLETED")
+            logger.info("\n" + "=" * 80)
+
+            # Add documents to deduplication dictionary
+            for doc in retriever_results:
+                if hasattr(doc, 'id') and doc.id:
+                    docs_dict[doc.id] = doc
+                elif not hasattr(doc, 'id'):
+                    # For documents without ID, use a fallback key based on content hash
+                    fallback_key = f"no_id_{hash(doc.page_content)}"
+                    docs_dict[fallback_key] = doc
+        
+        parallel_total_time = time.time() - parallel_start_time
+        
+        return docs_dict, total_retrieved, total_execution_time, parallel_total_time
 
     def _init_web_search(self):
         logger.info("[GraphBuilder Web Search Init] Initializing Tavily web search")
@@ -528,54 +650,36 @@ class GraphBuilder:
             for i, query in enumerate(sub_queries, 1):
                 query_type = "Rewritten Query" if i == len(sub_queries) else f"SUB-QUERY {i}"
                 logger.info(f"[Custom Agentic Search Main]   {query_type}: {query}")
-            logger.info("=" * 80)
+            logger.info("\n" + "=" * 80)
 
-            # Use dictionary to automatically handle deduplication by document ID
-            docs_dict = {}
-            total_retrieved = 0
-
-            for i, sub_query in enumerate(sub_queries, 1):
+            # Prepare queries for parallel execution
+            query_tasks = []
+            for i, query in enumerate(sub_queries, 1):
                 query_type = "Rewritten Query" if i == len(sub_queries) else f"SUB-QUERY {i}"
-                logger.info(f"\n[Custom Agentic Search Main] 🔍 EXECUTING {query_type}")
-                logger.info(f"[Custom Agentic Search Main] ├─ Query: {sub_query}")
-                logger.info(f"[Custom Agentic Search Main] ├─ Searching database...")
-                
-                retriever_results = self.retriever.invoke(sub_query)
-                results_count = len(retriever_results)
-                total_retrieved += results_count
-                
-                logger.info(f"[Custom Agentic Search Main] ├─ ✅ Documents retrieved: {results_count}")
-                
-                # Log document titles/sources if available
-                if retriever_results:
-                    logger.info(f"[Custom Agentic Search Main] ├─ 📄 Retrieved documents:")
-                    for j, doc in enumerate(retriever_results, 1):  
-                        source = doc.metadata.get('source', 'Unknown source')
-                        logger.info(f"[Custom Agentic Search Main] │  └─ {j}. Source: {source}")
-                else:
-                    logger.info(f"[Custom Agentic Search Main] ├─ ❌ No documents found for this query")
-                logger.info(f"[Custom Agentic Search Main] └─ {query_type} COMPLETED")
-                logger.info("=" * 80)
-
-                for doc in retriever_results:
-                    if hasattr(doc, 'id') and doc.id:
-                        docs_dict[doc.id] = doc
-                    elif not hasattr(doc, 'id'):
-                        # For documents without ID, use a fallback key based on content hash
-                        fallback_key = f"no_id_{hash(doc.page_content)}"
-                        docs_dict[fallback_key] = doc
+                query_tasks.append((i, query, query_type))
+            
+            try:
+                docs_dict, total_retrieved, total_execution_time, parallel_total_time = asyncio.run(
+                    self._execute_queries_async(sub_queries)
+                )
+                    
+            except Exception as e:
+                logger.error(f"[Custom Agentic Search Main] ❌ Async execution failed: {e}")
+                logger.error(f"[Custom Agentic Search Main] 💥 Async execution is required for custom agentic search")
+                # Re-raise the exception rather than falling back
+                raise RuntimeError(f"Async execution failed: {e}") from e
 
             # Convert dictionary values to list
             docs = list(docs_dict.values())
             unique_docs = len(docs)
             
-            logger.info("\n" + "=" * 80)
-            logger.info(f"[Custom Agentic Search Main] 📊 SEARCH SUMMARY:")
+            logger.info("\n" + "=" * 78)
+            logger.info(f"[Custom Agentic Search Main] 📊 EXECUTION SUMMARY:")
             logger.info(f"[Custom Agentic Search Main] ├─ Total queries executed: {len(sub_queries)}")
+            logger.info(f"[Custom Agentic Search Main] ├─ Execution time: {parallel_total_time:.2f}s")
             logger.info(f"[Custom Agentic Search Main] ├─ Total documents retrieved: {total_retrieved}")
             logger.info(f"[Custom Agentic Search Main] ├─ Unique documents after deduplication: {unique_docs}")
-            logger.info(f"[Custom Agentic Search Main] └─ Deduplication efficiency: {((total_retrieved - unique_docs) / total_retrieved * 100):.1f}% duplicates removed" if total_retrieved > 0 else "[Custom Agentic Search Main] └─ No duplicates to remove")
-            logger.info("=" * 80)
+            logger.info("\n" + "=" * 78)
 ### <-------------------------------->
 ### Since we're adopting sub queries, let's turn off the adjacent chunks for now 
             # if docs:
@@ -609,13 +713,13 @@ class GraphBuilder:
         # Final decision based on actual retrieval results
         web_search_needed = len(docs) < 3
         
-        logger.info("\n" + "🎯 " + "=" * 78)
+        logger.info("\n" + "=" * 78)
         logger.info(f"[Retrieve Context] 📋 POST-RETRIEVAL DECISION ANALYSIS:")
         logger.info(f"[Retrieve Context] ├─ Documents retrieved: {len(docs)}")
         logger.info(f"[Retrieve Context] ├─ Threshold for web search: < 3 documents")
         logger.info(f"[Retrieve Context] ├─ Web search needed: {'YES' if web_search_needed else 'NO'}")
         logger.info(f"[Retrieve Context] └─ 🏁 RETRIEVAL PHASE COMPLETED")
-        logger.info("🎯 " + "=" * 78)
+        logger.info("\n" + "=" * 78)
         
         return {
             "context_docs": docs,
