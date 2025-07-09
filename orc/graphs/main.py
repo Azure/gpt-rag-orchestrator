@@ -257,14 +257,14 @@ class GraphBuilder:
         return results or []
 
     async def _execute_single_query_async(self, query_info: tuple, semaphore: asyncio.Semaphore = None) -> tuple:
-        """Execute a single query retrieval asynchronously with rate limiting.
+        """Execute a single query retrieval asynchronously with rate limiting and optional web search.
         
         Args:
             query_info: Tuple of (query_index, query_text, query_type)
             semaphore: Optional semaphore for rate limiting
             
         Returns:
-            Tuple of (query_index, query_type, query_text, results, execution_time)
+            Tuple of (query_index, query_type, query_text, retrieval_results, web_results, execution_time)
         """
         query_index, query_text, query_type = query_info
         start_time = time.time()
@@ -276,13 +276,32 @@ class GraphBuilder:
 
                 await asyncio.sleep(0.1)  # 100ms delay between requests
                 
+                # Execute retrieval
                 loop = asyncio.get_event_loop()
-                results = await loop.run_in_executor(None, self.retriever.invoke, query_text)
+                retrieval_results = await loop.run_in_executor(None, self.retriever.invoke, query_text)
+                
+                # Check if we need web search (less than 2 documents)
+                web_results = []
+                needs_web_search = len(retrieval_results) < 2
+                
+                if needs_web_search:
+                    logger.info(f"[Async Custom Agentic Search] 🌐 {query_type} retrieved {len(retrieval_results)} documents - performing web search")
+                    try:
+                        # Perform web search for this specific query
+                        web_results = await loop.run_in_executor(None, self.web_search.search, query_text)
+                        logger.info(f"[Async Custom Agentic Search] 🌐 {query_type} web search completed - {len(web_results)} documents")
+                    except Exception as web_error:
+                        logger.error(f"[Async Custom Agentic Search] ❌ {query_type} web search failed: {str(web_error)}")
+                        web_results = []
+                else:
+                    logger.info(f"[Async Custom Agentic Search] ✅ {query_type} retrieved {len(retrieval_results)} documents - no web search needed")
                 
                 execution_time = time.time() - start_time
                 
-                logger.info(f"[Async Custom Agentic Search] ✅ {query_type} completed in {execution_time:.2f}s - {len(results)} documents")
-                return (query_index, query_type, query_text, results, execution_time)
+                total_docs = len(retrieval_results) + len(web_results)
+                logger.info(f"[Async Custom Agentic Search] ✅ {query_type} completed in {execution_time:.2f}s - {total_docs} total documents ({len(retrieval_results)} retrieval + {len(web_results)} web)")
+                
+                return (query_index, query_type, query_text, retrieval_results, web_results, execution_time)
                 
             except Exception as e:
                 execution_time = time.time() - start_time
@@ -294,7 +313,7 @@ class GraphBuilder:
                     logger.warning(f"[Async Custom Agentic Search] ⏳ Capacity issue detected, backing off for {backoff_delay}s")
                     await asyncio.sleep(backoff_delay)
                 
-                return (query_index, query_type, query_text, [], execution_time)
+                return (query_index, query_type, query_text, [], [], execution_time)
 
     async def _execute_queries_async(self, sub_queries: List[str]) -> tuple:
         """Execute all queries asynchronously with improved error handling and rate limiting.
@@ -339,22 +358,38 @@ class GraphBuilder:
                 logger.error(f"[Async Custom Agentic Search] ❌ Task failed with exception: {result}")
                 continue
                 
-            query_index, query_type, query_text, retriever_results, execution_time = result
-            results_count = len(retriever_results)
+            query_index, query_type, query_text, retriever_results, web_results, execution_time = result
+            
+            # Combine retrieval and web search results
+            all_docs = retriever_results + web_results
+            results_count = len(all_docs)
             total_retrieved += results_count
             total_execution_time += execution_time
             
             logger.info(f"\n[Async Custom Agentic Search] 📋 {query_type} RESULTS:")
             logger.info(f"[Async Custom Agentic Search] ├─ Query: {query_text}")
             logger.info(f"[Async Custom Agentic Search] ├─ Execution time: {execution_time:.2f}s")
-            logger.info(f"[Async Custom Agentic Search] ├─ Documents retrieved: {results_count}")
+            logger.info(f"[Async Custom Agentic Search] ├─ Total documents: {results_count}")
+            logger.info(f"[Async Custom Agentic Search] ├─ Retrieval documents: {len(retriever_results)}")
+            logger.info(f"[Async Custom Agentic Search] ├─ Web search documents: {len(web_results)}")
             
             # Log document sources if available
-            if retriever_results:
-                logger.info(f"[Async Custom Agentic Search] ├─ 📄 Retrieved documents:")
-                for j, doc in enumerate(retriever_results, 1):  
-                    source = doc.metadata.get('source', 'Unknown source')
-                    logger.info(f"[Async Custom Agentic Search] │  └─ {j}. Source: {source}")
+            if all_docs:
+                logger.info(f"[Async Custom Agentic Search] ├─ 📄 All documents:")
+                
+                # Log retrieval documents first
+                if retriever_results:
+                    logger.info(f"[Async Custom Agentic Search] │  ├─ 🗄️ From retrieval:")
+                    for j, doc in enumerate(retriever_results, 1):  
+                        source = doc.metadata.get('source', 'Unknown source')
+                        logger.info(f"[Async Custom Agentic Search] │  │  └─ {j}. Source: {source}")
+                
+                # Log web search documents
+                if web_results:
+                    logger.info(f"[Async Custom Agentic Search] │  └─ 🌐 From web search:")
+                    for j, doc in enumerate(web_results, 1):  
+                        source = doc.metadata.get('source', 'Unknown source')
+                        logger.info(f"[Async Custom Agentic Search] │     └─ {j}. Source: {source}")
             else:
                 logger.info(f"[Async Custom Agentic Search] ├─ ❌ No documents found for this query")
             
@@ -362,13 +397,37 @@ class GraphBuilder:
             logger.info("\n" + "=" * 80)
 
             # Add documents to deduplication dictionary
+            logger.info(f"[Async Custom Agentic Search] ├─ 🔄 Adding {len(all_docs)} documents to deduplication dict")
+            
+            retrieval_added = 0
+            web_added = 0
+            
+            # Process retrieval documents
             for doc in retriever_results:
                 if hasattr(doc, 'id') and doc.id:
                     docs_dict[doc.id] = doc
-                elif not hasattr(doc, 'id'):
-                    # For documents without ID, use a fallback key based on content hash
-                    fallback_key = f"no_id_{hash(doc.page_content)}"
+                    retrieval_added += 1
+                else:
+                    # For documents without ID or with None ID, use a fallback key based on content hash
+                    fallback_key = f"retrieval_{hash(doc.page_content)}"
                     docs_dict[fallback_key] = doc
+                    retrieval_added += 1
+                    logger.debug(f"[Async Custom Agentic Search] ├─ 🔧 Used fallback key for retrieval doc: {fallback_key[:50]}...")
+            
+            # Process web search documents
+            for doc in web_results:
+                if hasattr(doc, 'id') and doc.id:
+                    docs_dict[doc.id] = doc
+                    web_added += 1
+                else:
+                    # For documents without ID or with None ID, use a fallback key based on content hash
+                    fallback_key = f"web_{hash(doc.page_content)}"
+                    docs_dict[fallback_key] = doc
+                    web_added += 1
+                    logger.info(f"[Async Custom Agentic Search] ├─ 🔧 Used fallback key for web doc: {fallback_key[:50]}...")
+            
+            logger.info(f"[Async Custom Agentic Search] ├─ 📊 Added to dict: {retrieval_added} retrieval + {web_added} web = {retrieval_added + web_added} total")
+            logger.info(f"[Async Custom Agentic Search] ├─ 📋 Current dict size: {len(docs_dict)} unique documents")
         
         parallel_total_time = time.time() - parallel_start_time
         
@@ -640,11 +699,12 @@ class GraphBuilder:
             sub_queries = [sub_queries.strategy_query, sub_queries.consumer_insight_query, sub_queries.marketing_query, state.rewritten_query]
             
             logger.info(f"[Custom Agentic Search Main] Generated {len(sub_queries)-1 if len(sub_queries) > 1 else len(sub_queries)} sub-queries for retrieval and added the rewritten query to the search list")
+            logger.info("\n" + "-" * 78)
             logger.info("[Custom Agentic Search Main] Sub-queries generated:")
             for i, query in enumerate(sub_queries, 1):
                 query_type = "Rewritten Query" if i == len(sub_queries) else f"SUB-QUERY {i}"
                 logger.info(f"[Custom Agentic Search Main]   {query_type}: {query}")
-            logger.info("\n" + "=" * 80)
+            logger.info("\n" + "-" * 78)
 
             # Prepare queries for parallel execution
             query_tasks = []
@@ -667,12 +727,26 @@ class GraphBuilder:
             docs = list(docs_dict.values())
             unique_docs = len(docs)
             
+            # Count final document sources for verification
+            final_retrieval_count = 0
+            final_web_count = 0
+            
+            for doc in docs:
+                # Check if it's a web search document by looking at metadata or source
+                source = doc.metadata.get('source', '').lower() if hasattr(doc, 'metadata') else ''
+                if 'http' in source and not any(domain in source for domain in ['blob.core.windows.net', 'strag0vm2b2htvuuclm']):
+                    final_web_count += 1
+                else:
+                    final_retrieval_count += 1
+            
             logger.info("\n" + "=" * 78)
             logger.info(f"[Custom Agentic Search Main] 📊 EXECUTION SUMMARY:")
             logger.info(f"[Custom Agentic Search Main] ├─ Total queries executed: {len(sub_queries)}")
             logger.info(f"[Custom Agentic Search Main] ├─ Execution time: {parallel_total_time:.2f}s")
             logger.info(f"[Custom Agentic Search Main] ├─ Total documents retrieved: {total_retrieved}")
             logger.info(f"[Custom Agentic Search Main] ├─ Unique documents after deduplication: {unique_docs}")
+            logger.info(f"[Custom Agentic Search Main] ├─ 📋 Final composition: {final_retrieval_count} retrieval + {final_web_count} web documents")
+            logger.info(f"[Custom Agentic Search Main] ├─ 🔍 Web search was triggered for queries with <2 retrieval results")
             logger.info("\n" + "=" * 78)
 ### <-------------------------------->
 ### Since we're adopting sub queries, let's turn off the adjacent chunks for now 
@@ -705,13 +779,30 @@ class GraphBuilder:
 ### <-------------------------------->
         
         # Final decision based on actual retrieval results
-        web_search_needed = len(docs) < 3
+        # Since we now do per-query web search, we can be more conservative with final web search
+        web_search_needed = len(docs) < 2
         
+        # Final verification of document sources in retrieved docs
+        final_retrieval_docs = 0
+        final_web_docs = 0
         logger.info("\n" + "=" * 78)
         logger.info(f"[Retrieve Context] 📋 POST-RETRIEVAL DECISION ANALYSIS:")
         logger.info(f"[Retrieve Context] ├─ Documents retrieved: {len(docs)}")
-        logger.info(f"[Retrieve Context] ├─ Threshold for web search: < 3 documents")
-        logger.info(f"[Retrieve Context] ├─ Web search needed: {'YES' if web_search_needed else 'NO'}")
+        
+        # Verify the composition of final docs
+        for doc in docs:
+            source = doc.metadata.get('source', '').lower() if hasattr(doc, 'metadata') else ''
+            if 'http' in source and not any(domain in source for domain in ['blob.core.windows.net']):
+                final_web_docs += 1
+            else:
+                final_retrieval_docs += 1
+        
+        logger.info(f"[Retrieve Context] ├─ 📊 Final docs composition: {final_retrieval_docs} retrieval + {final_web_docs} web")
+        logger.info(f"[Retrieve Context] ├─ Per-query web search: Already performed for queries with <2 docs")
+        logger.info(f"[Retrieve Context] ├─ Final web search threshold: < 2 total documents")
+        logger.info(f"[Retrieve Context] ├─ Final web search needed: {'YES' if web_search_needed else 'NO'}")
+        if web_search_needed:
+            logger.info(f"[Retrieve Context] ├─ 🌐 Will perform additional web search with rewritten query")
         logger.info(f"[Retrieve Context] └─ 🏁 RETRIEVAL PHASE COMPLETED")
         logger.info("\n" + "=" * 78)
         
