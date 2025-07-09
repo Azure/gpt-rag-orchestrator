@@ -255,7 +255,11 @@ class GraphBuilder:
             raise RuntimeError(f"Failed to initialize Tavily Web Search: {str(e)}")
 
     def _return_state(self, state: ConversationState) -> dict:
-        logger.info(f"[GraphBuilder Return State] Returning state with {len(state.messages)} messages, {len(state.context_docs)} context docs")
+        # Safe handling of potentially None values
+        messages_count = len(state.messages) if state.messages else 0
+        context_docs_count = len(state.context_docs) if state.context_docs else 0
+        
+        logger.info(f"[GraphBuilder Return State] Returning state with {messages_count} messages, {context_docs_count} context docs")
         return {
             "messages": state.messages,
             "context_docs": state.context_docs,
@@ -378,6 +382,8 @@ class GraphBuilder:
         Please rewrite the question to be used for searching the database. Make sure to follow the alias mapping instructions at all cost.
         ALSO, THE HISTORICAL CONVERSATION CONTEXT IS VERY VERY IMPORTANT TO THE USER'S FOLLOW UP QUESTIONS, $10,000 WILL BE DEDUCTED FROM YOUR ACCOUNT IF YOU DO NOT USE THE HISTORICAL CONVERSATION CONTEXT.
         Please also consider the line of business/industry of my company when rewriting the query. Don't be too verbose. 
+
+        if the question is a very casual/conversational one, do not rewrite, return it as it is
         """
         
         logger.info("[Query Rewrite] Sending query rewrite request to LLM")
@@ -452,7 +458,7 @@ class GraphBuilder:
 
     def _route_query(self, state: ConversationState) -> dict:
         """Determine if external knowledge is needed."""
-        logger.info(f"[Query Routing] Determining routing for rewritten query: '{state.rewritten_query[:100]}...'")
+        logger.info(f"[Query Routing] Determining initial routing decision for query: '{state.rewritten_query[:100]}...'")
 
         system_prompt = MARKETING_ORC_PROMPT
 
@@ -467,7 +473,7 @@ class GraphBuilder:
         )
         
         llm_suggests_web_search = response.content.lower().startswith("y")
-        logger.info(f"[Query Routing] LLM initial assessment - suggests_web_search: {llm_suggests_web_search}")
+        logger.info(f"[Query Routing] LLM initial assessment - Not a casual/conversational question, proceed to RAG Routing: {llm_suggests_web_search}")
         
         return {
             "requires_web_search": llm_suggests_web_search,
