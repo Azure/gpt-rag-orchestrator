@@ -413,7 +413,6 @@ class GraphBuilder:
         graph.add_node("tool_choice", self._categorize_query)
         graph.add_node("route", self._route_query)
         graph.add_node("retrieve", self._retrieve_context)
-        graph.add_node("search", self._web_search)
         graph.add_node("return", self._return_state)
 
         # Define graph flow
@@ -426,12 +425,7 @@ class GraphBuilder:
             {"retrieve": "retrieve", "return": "return"},
         )
 
-        graph.add_conditional_edges(
-            "retrieve",
-            self._needs_web_search,
-            {"search": "search", "return": "return"},
-        )
-        graph.add_edge("search", "return")
+        graph.add_edge("retrieve", "return")
         graph.add_edge("return", END)
 
         compiled_graph = graph.compile(checkpointer=memory)
@@ -725,13 +719,6 @@ class GraphBuilder:
             "context_docs": docs,
             "requires_web_search": web_search_needed,
         }
-
-    def _needs_web_search(self, state: ConversationState) -> str:
-        """Check if web search is needed based on retrieval results."""
-        decision = "search" if state.requires_web_search else "return"
-        logger.info(f"[Web Search Decision] Decision: '{decision}' (requires_web_search: {state.requires_web_search})")
-        return decision
-
     def _web_search(self, state: ConversationState) -> dict:
         """Perform web search and combine with existing context."""
         logger.info("\n" + "🌐 " + "=" * 78)
