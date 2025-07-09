@@ -85,6 +85,7 @@ class ConversationState:
     )  # track all messages in the conversation
     context_docs: List[Document] = field(default_factory=list)
     requires_web_search: bool = field(default=False)
+    requires_retrieval: bool = field(default=False)
     rewritten_query: str = field(
         default_factory=str
     )  # rewritten query for better search
@@ -481,26 +482,27 @@ class GraphBuilder:
             ]
         )
         
-        llm_suggests_web_search = response.content.lower().startswith("y")
-        logger.info(f"[Query Routing] LLM initial assessment - Not a casual/conversational question, proceed to RAG Routing: {llm_suggests_web_search}")
+        llm_suggests_retrieval = response.content.lower().startswith("y")
+        logger.info(f"[Query Routing] LLM initial assessment - Not a casual/conversational question, proceed to retrieve documents: {llm_suggests_retrieval}")
         
         return {
-            "requires_web_search": llm_suggests_web_search,
+            "requires_retrieval": llm_suggests_retrieval,
         }
 
     def _route_decision(self, state: ConversationState) -> str:
         """Route query based on knowledge requirement."""
-        decision = "retrieve" if state.requires_web_search else "return"
-        logger.info(f"[Route Decision] Routing to: '{decision}' (requires_web_search: {state.requires_web_search})")
+        decision = "retrieve" if state.requires_retrieval else "return"
+        logger.info(f"[Route Decision] Routing to: '{decision}' (requires_retrieval: {state.requires_retrieval})")
         return decision
 
     def _retrieve_context(self, state: ConversationState) -> dict:
         """Get relevant documents from vector store."""
-        logger.info(f"[Retrieve Context] Starting context retrieval in agentic_search_mode: {self.config.agentic_search_mode}")
-        logger.info(f"[Retrieve Context] Initial LLM assessment was requires_web_search: {state.requires_web_search}")
+        logger.info("\n" + "=" * 78)
+        logger.info(f"[Retrieve Context] 🔍 STARTING CONTEXT RETRIEVAL PHASE")
+        logger.info(f"[Retrieve Context] ├─ Search mode: {'Agentic Search' if self.config.agentic_search_mode else 'Custom Agentic Search'}")
+        logger.info(f"[Retrieve Context] ├─ Rewritten query: {state.rewritten_query}")
         docs = []
         if self.config.agentic_search_mode:
-            logger.info("[Agentic Search Main] Agentic search mode is enabled")
 
             # get the conversation history
             conversation_history = get_conversation_data(self.conversation_id).get("history", [])
@@ -515,20 +517,45 @@ class GraphBuilder:
             docs = self._run_agentic_retriever(conversation_history)
 
         else:
-            logger.info("[Custom Agentic Search Main] Using custom agentic search mode")
             # generate sub queries
+            logger.info(f"[Custom Agentic Search Main] Generating sub-queries for retrieval")
             sub_queries = generate_sub_queries(state.rewritten_query, self.llm)
             # create a list of sub queries, include the rewritten query 
             sub_queries = [sub_queries.strategy_query, sub_queries.consumer_insight_query, sub_queries.marketing_query, state.rewritten_query]
-            logger.info(f"[Custom Agentic Search Main] Generated {len(sub_queries)-1 if len(sub_queries) > 1 else len(sub_queries)} sub-queries for retrieval")
+            
+            logger.info(f"[Custom Agentic Search Main] Generated {len(sub_queries)-1 if len(sub_queries) > 1 else len(sub_queries)} sub-queries for retrieval and added the rewritten query to the search list")
+            logger.info("[Custom Agentic Search Main] Sub-queries generated:")
+            for i, query in enumerate(sub_queries, 1):
+                query_type = "Rewritten Query" if i == len(sub_queries) else f"SUB-QUERY {i}"
+                logger.info(f"[Custom Agentic Search Main]   {query_type}: {query}")
+            logger.info("=" * 80)
 
             # Use dictionary to automatically handle deduplication by document ID
             docs_dict = {}
+            total_retrieved = 0
 
-            for sub_query in sub_queries:
-                logger.info(f"[Custom Agentic Search Main] Running search on sub query: {sub_query}")
+            for i, sub_query in enumerate(sub_queries, 1):
+                query_type = "Rewritten Query" if i == len(sub_queries) else f"SUB-QUERY {i}"
+                logger.info(f"\n[Custom Agentic Search Main] 🔍 EXECUTING {query_type}")
+                logger.info(f"[Custom Agentic Search Main] ├─ Query: {sub_query}")
+                logger.info(f"[Custom Agentic Search Main] ├─ Searching database...")
+                
                 retriever_results = self.retriever.invoke(sub_query)
-                logger.info(f"[Custom Agentic Search Main] Number of documents retrieved: {len(retriever_results)}")
+                results_count = len(retriever_results)
+                total_retrieved += results_count
+                
+                logger.info(f"[Custom Agentic Search Main] ├─ ✅ Documents retrieved: {results_count}")
+                
+                # Log document titles/sources if available
+                if retriever_results:
+                    logger.info(f"[Custom Agentic Search Main] ├─ 📄 Retrieved documents:")
+                    for j, doc in enumerate(retriever_results, 1):  
+                        source = doc.metadata.get('source', 'Unknown source')
+                        logger.info(f"[Custom Agentic Search Main] │  └─ {j}. Source: {source}")
+                else:
+                    logger.info(f"[Custom Agentic Search Main] ├─ ❌ No documents found for this query")
+                logger.info(f"[Custom Agentic Search Main] └─ {query_type} COMPLETED")
+                logger.info("=" * 80)
 
                 for doc in retriever_results:
                     if hasattr(doc, 'id') and doc.id:
@@ -540,7 +567,15 @@ class GraphBuilder:
 
             # Convert dictionary values to list
             docs = list(docs_dict.values())
-            logger.info(f"[Retrieve Context] Total number of docs: {len(docs)}")
+            unique_docs = len(docs)
+            
+            logger.info("\n" + "=" * 80)
+            logger.info(f"[Custom Agentic Search Main] 📊 SEARCH SUMMARY:")
+            logger.info(f"[Custom Agentic Search Main] ├─ Total queries executed: {len(sub_queries)}")
+            logger.info(f"[Custom Agentic Search Main] ├─ Total documents retrieved: {total_retrieved}")
+            logger.info(f"[Custom Agentic Search Main] ├─ Unique documents after deduplication: {unique_docs}")
+            logger.info(f"[Custom Agentic Search Main] └─ Deduplication efficiency: {((total_retrieved - unique_docs) / total_retrieved * 100):.1f}% duplicates removed" if total_retrieved > 0 else "[Custom Agentic Search Main] └─ No duplicates to remove")
+            logger.info("=" * 80)
 ### <-------------------------------->
 ### Since we're adopting sub queries, let's turn off the adjacent chunks for now 
             # if docs:
@@ -572,16 +607,19 @@ class GraphBuilder:
 ### <-------------------------------->
         
         # Final decision based on actual retrieval results
-        final_web_search_needed = len(docs) < 3
-        logger.info(f"[Retrieve Context] POST-RETRIEVAL DECISION: Retrieved {len(docs)} documents")
-        logger.info(f"[Retrieve Context] Final web search decision: {final_web_search_needed} (threshold: <3 docs)")
+        web_search_needed = len(docs) < 3
         
-        if state.requires_web_search != final_web_search_needed:
-            logger.info(f"[Retrieve Context] ⚠️  Decision changed: LLM suggested {state.requires_web_search} → Final decision {final_web_search_needed}")
+        logger.info("\n" + "🎯 " + "=" * 78)
+        logger.info(f"[Retrieve Context] 📋 POST-RETRIEVAL DECISION ANALYSIS:")
+        logger.info(f"[Retrieve Context] ├─ Documents retrieved: {len(docs)}")
+        logger.info(f"[Retrieve Context] ├─ Threshold for web search: < 3 documents")
+        logger.info(f"[Retrieve Context] ├─ Web search needed: {'YES' if web_search_needed else 'NO'}")
+        logger.info(f"[Retrieve Context] └─ 🏁 RETRIEVAL PHASE COMPLETED")
+        logger.info("🎯 " + "=" * 78)
         
         return {
             "context_docs": docs,
-            "requires_web_search": final_web_search_needed,
+            "requires_web_search": web_search_needed,
         }
 
     def _needs_web_search(self, state: ConversationState) -> str:
@@ -592,21 +630,38 @@ class GraphBuilder:
 
     def _web_search(self, state: ConversationState) -> dict:
         """Perform web search and combine with existing context."""
-        logger.info(f"[Web Search] Starting web search for query: '{state.rewritten_query[:100]}...'")
+        logger.info("\n" + "🌐 " + "=" * 78)
+        logger.info(f"[Web Search] 🔍 INITIATING WEB SEARCH")
+        logger.info(f"[Web Search] ├─ Query: '{state.rewritten_query[:100]}{'...' if len(state.rewritten_query) > 100 else ''}'")
         
         # Safe handling of potentially None context_docs
         current_docs_count = len(state.context_docs) if state.context_docs else 0
-        logger.info(f"[Web Search] Current context has {current_docs_count} documents")
+        logger.info(f"[Web Search] ├─ Current context documents: {current_docs_count}")
+        logger.info(f"[Web Search] ├─ Searching web for additional context...")
         
         web_docs = self.web_search.search(state.rewritten_query)
         web_docs_count = len(web_docs) if web_docs else 0
-        logger.info(f"[Web Search] Retrieved {web_docs_count} documents from web search")
+        
+        if web_docs_count > 0:
+            logger.info(f"[Web Search] ├─ ✅ Web documents retrieved: {web_docs_count}")
+            logger.info(f"[Web Search] ├─ 📄 Web search results:")
+            for i, doc in enumerate(web_docs, 1):  
+                source = doc.metadata.get('source', 'Unknown source')
+                logger.info(f"[Web Search] │  └─ {i}. Source: {source}")
+        else:
+            logger.info(f"[Web Search] ├─ ❌ No web documents found")
         
         # Safe calculation of total docs
         context_docs = state.context_docs or []
         web_docs = web_docs or []
         total_docs = len(context_docs) + len(web_docs)
-        logger.info(f"[Web Search] Total documents after combining: {total_docs}")
+        
+        logger.info(f"[Web Search] ├─ 📊 FINAL CONTEXT SUMMARY:")
+        logger.info(f"[Web Search] │  ├─ Database documents: {current_docs_count}")
+        logger.info(f"[Web Search] │  ├─ Web documents: {web_docs_count}")
+        logger.info(f"[Web Search] │  └─ Total context documents: {total_docs}")
+        logger.info(f"[Web Search] └─ 🏁 WEB SEARCH COMPLETED")
+        logger.info("🌐 " + "=" * 78)
         
         return {
             "context_docs": context_docs + web_docs,
