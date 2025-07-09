@@ -322,7 +322,7 @@ class GraphBuilder:
             sub_queries: List of query strings to execute
             
         Returns:
-            Tuple of (docs_dict, total_retrieved, total_execution_time, parallel_total_time)
+            Tuple of (docs_dict, total_retrieved, total_execution_time, parallel_total_time, any_web_search_used)
         """
         # Prepare queries for async execution
         query_tasks = []
@@ -431,7 +431,18 @@ class GraphBuilder:
         
         parallel_total_time = time.time() - parallel_start_time
         
-        return docs_dict, total_retrieved, total_execution_time, parallel_total_time
+        # Track if any query used web search
+        any_web_search_used = False
+        for result in results:
+            if not isinstance(result, Exception):
+                _, _, _, _, web_results, _ = result
+                if len(web_results) > 0:
+                    any_web_search_used = True
+                    break
+        
+        logger.info(f"[Async Custom Agentic Search] 🔍 Web search usage detected: {'YES' if any_web_search_used else 'NO'}")
+        
+        return docs_dict, total_retrieved, total_execution_time, parallel_total_time, any_web_search_used
 
     def _init_web_search(self):
         logger.info("[GraphBuilder Web Search Init] Initializing Tavily web search")
@@ -677,6 +688,7 @@ class GraphBuilder:
         logger.info(f"[Retrieve Context] ├─ Search mode: {'Agentic Search' if self.config.agentic_search_mode else 'Custom Agentic Search'}")
         logger.info(f"[Retrieve Context] ├─ Rewritten query: {state.rewritten_query}")
         docs = []
+        any_web_search_used = False 
         if self.config.agentic_search_mode:
 
             # get the conversation history
@@ -690,6 +702,8 @@ class GraphBuilder:
             logger.info(f"[Agentic Search Main] Prepared conversation history with {len(conversation_history)} messages for agentic search")
 
             docs = self._run_agentic_retriever(conversation_history)
+            # For agentic search mode, we don't track per-query web search usage
+            any_web_search_used = False
 
         else:
             # generate sub queries
@@ -713,7 +727,7 @@ class GraphBuilder:
                 query_tasks.append((i, query, query_type))
             
             try:
-                docs_dict, total_retrieved, total_execution_time, parallel_total_time = asyncio.run(
+                docs_dict, total_retrieved, total_execution_time, parallel_total_time, any_web_search_used = asyncio.run(
                     self._execute_queries_async(sub_queries)
                 )
                     
@@ -746,7 +760,8 @@ class GraphBuilder:
             logger.info(f"[Custom Agentic Search Main] ├─ Total documents retrieved: {total_retrieved}")
             logger.info(f"[Custom Agentic Search Main] ├─ Unique documents after deduplication: {unique_docs}")
             logger.info(f"[Custom Agentic Search Main] ├─ 📋 Final composition: {final_retrieval_count} retrieval + {final_web_count} web documents")
-            logger.info(f"[Custom Agentic Search Main] ├─ 🔍 Web search was triggered for queries with <2 retrieval results")
+            logger.info(f"[Custom Agentic Search Main] ├─ 🔍 Web search usage: {'Used by at least one query' if any_web_search_used else 'Not used by any query'}")
+            logger.info(f"[Custom Agentic Search Main] ├─ 🎯 Per-query web search triggered for queries with <2 retrieval results")
             logger.info("\n" + "=" * 78)
 ### <-------------------------------->
 ### Since we're adopting sub queries, let's turn off the adjacent chunks for now 
@@ -779,8 +794,8 @@ class GraphBuilder:
 ### <-------------------------------->
         
         # Final decision based on actual retrieval results
-        # Since we now do per-query web search, we can be more conservative with final web search
-        web_search_needed = len(docs) < 2
+        # If any individual query used web search, we mark it as web search needed
+        web_search_needed = any_web_search_used if not self.config.agentic_search_mode else len(docs) < 2
         
         # Final verification of document sources in retrieved docs
         final_retrieval_docs = 0
@@ -798,10 +813,13 @@ class GraphBuilder:
                 final_retrieval_docs += 1
         
         logger.info(f"[Retrieve Context] ├─ 📊 Final docs composition: {final_retrieval_docs} retrieval + {final_web_docs} web")
-        logger.info(f"[Retrieve Context] ├─ Per-query web search: Already performed for queries with <2 docs")
-        logger.info(f"[Retrieve Context] ├─ Final web search threshold: < 2 total documents")
-        logger.info(f"[Retrieve Context] ├─ Final web search needed: {'YES' if web_search_needed else 'NO'}")
-        if web_search_needed:
+        if not self.config.agentic_search_mode:
+            logger.info(f"[Retrieve Context] ├─ Per-query web search: {'Used by at least one query' if any_web_search_used else 'Not used by any query'}")
+            logger.info(f"[Retrieve Context] ├─ Web search : {'YindicatorES' if web_search_needed else 'NO'} (based on per-query usage)")
+        else:
+            logger.info(f"[Retrieve Context] ├─ Final web search threshold: < 2 total documents")
+            logger.info(f"[Retrieve Context] ├─ Final web search needed: {'YES' if web_search_needed else 'NO'}")
+        if web_search_needed and len(docs) < 2:
             logger.info(f"[Retrieve Context] ├─ 🌐 Will perform additional web search with rewritten query")
         logger.info(f"[Retrieve Context] └─ 🏁 RETRIEVAL PHASE COMPLETED")
         logger.info("\n" + "=" * 78)
@@ -810,47 +828,6 @@ class GraphBuilder:
             "context_docs": docs,
             "requires_web_search": web_search_needed,
         }
-    def _web_search(self, state: ConversationState) -> dict:
-        """Perform web search and combine with existing context."""
-        logger.info("\n" + "🌐 " + "=" * 78)
-        logger.info(f"[Web Search] 🔍 INITIATING WEB SEARCH")
-        logger.info(f"[Web Search] ├─ Query: '{state.rewritten_query[:100]}{'...' if len(state.rewritten_query) > 100 else ''}'")
-        
-        # Safe handling of potentially None context_docs
-        current_docs_count = len(state.context_docs) if state.context_docs else 0
-        logger.info(f"[Web Search] ├─ Current context documents: {current_docs_count}")
-        logger.info(f"[Web Search] ├─ Searching web for additional context...")
-        
-        web_docs = self.web_search.search(state.rewritten_query)
-        web_docs_count = len(web_docs) if web_docs else 0
-        
-        if web_docs_count > 0:
-            logger.info(f"[Web Search] ├─ ✅ Web documents retrieved: {web_docs_count}")
-            logger.info(f"[Web Search] ├─ 📄 Web search results:")
-            for i, doc in enumerate(web_docs, 1):  
-                source = doc.metadata.get('source', 'Unknown source')
-                logger.info(f"[Web Search] │  └─ {i}. Source: {source}")
-        else:
-            logger.info(f"[Web Search] ├─ ❌ No web documents found")
-        
-        # Safe calculation of total docs
-        context_docs = state.context_docs or []
-        web_docs = web_docs or []
-        total_docs = len(context_docs) + len(web_docs)
-        
-        logger.info(f"[Web Search] ├─ 📊 FINAL CONTEXT SUMMARY:")
-        logger.info(f"[Web Search] │  ├─ Database documents: {current_docs_count}")
-        logger.info(f"[Web Search] │  ├─ Web documents: {web_docs_count}")
-        logger.info(f"[Web Search] │  └─ Total context documents: {total_docs}")
-        logger.info(f"[Web Search] └─ 🏁 WEB SEARCH COMPLETED")
-        logger.info("🌐 " + "=" * 78)
-        
-        return {
-            "context_docs": context_docs + web_docs,
-            "requires_web_search": state.requires_web_search,
-        }
-
-
 def create_conversation_graph(
     memory, organization_id=None, conversation_id=None
 ) -> StateGraph:
