@@ -134,10 +134,10 @@ Note:
 - Avoid mentioning the company name in the rewritten query unless it's really really necessary.
 
 Key Requirements:
-1. Preserve the core meaning and intent of the user’s question.
+1. Preserve the core meaning and intent of the user’s question. Make sure the rewritten query is clear, complete, fully qualified, and concise.
 2. Improve clarity by using concise language and relevant keywords.
 3. Avoid ambiguous phrasing or extraneous details that do not aid in retrieval.
-4. Keep the rewritten query brief while ensuring completeness and accuracy.
+4. Identify the main elements of the sentence, typically a subject, an action or relationship, and an object or complement. Determine which element is being asked about or emphasized (usually the unknown or focus of the question). Invert the sentence structure. Make the original object or complement the new subject. Transform the original subject into a descriptor or qualifier. Adjust the verb or relationship to fit the new structure.
 5. Take into account the historical context of the conversation, chat summary when rewriting the query.
 6. Consider the target audience (marketing/advertising industry) when rewriting the query.
 7. If user asks for elaboration on the previous answer or provide more details on any specific point, you should not rewrite the query, you should just return the original query.
@@ -215,7 +215,7 @@ Can you help me create a marketing strategy for our new eco-friendly product?
 Rewritten Query:
 
 ```
-Marketing strategy for new eco-friendly product in the context of marketing and advertising services
+Marketing strategy for new eco-friendly product
 ```
 
 5. Original Query:
