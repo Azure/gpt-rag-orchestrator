@@ -517,8 +517,8 @@ class GraphBuilder:
         logger.info(f"[Async Custom Agentic Search] 🚀 EXECUTING {len(query_tasks)} QUERIES ASYNCHRONOUSLY")
         logger.info("\n" + "=" * 80)
         
-        # Create semaphore for rate limiting (max 2 concurrent requests)
-        semaphore = asyncio.Semaphore(2)
+        # Create semaphore for rate limiting (max 3 concurrent requests)
+        semaphore = asyncio.Semaphore(3)
         
         # Execute queries in parallel
         docs_dict = {}
@@ -549,7 +549,7 @@ class GraphBuilder:
             results_count = len(all_docs)
             total_retrieved += results_count
             total_execution_time += execution_time
-            
+            logger.info("\n" + "*" * 80)
             logger.info(f"\n[Async Custom Agentic Search] 📋 {query_type} RESULTS:")
             logger.info(f"[Async Custom Agentic Search] ├─ Query: {query_text}")
             logger.info(f"[Async Custom Agentic Search] ├─ Execution time: {execution_time:.2f}s")
@@ -604,7 +604,7 @@ class GraphBuilder:
         
         return docs_dict, total_retrieved, total_execution_time, parallel_total_time, any_web_search_used
 
-    def _execute_custom_agentic_search(self, rewritten_query: str) -> tuple:
+    def _execute_custom_agentic_search(self, original_query: str, rewritten_query: str, historical_conversation: str) -> tuple:
         """
         Execute custom agentic search with sub-queries and parallel processing.
         
@@ -616,9 +616,9 @@ class GraphBuilder:
         """
         # generate sub queries
         logger.info(f"[Custom Agentic Search Main] Generating sub-queries for retrieval")
-        sub_queries = generate_sub_queries(rewritten_query, self.llm)
+        sub_queries = generate_sub_queries(original_query, rewritten_query, historical_conversation, self.llm)
         # create a list of sub queries, include the rewritten query 
-        sub_queries = [sub_queries.strategy_query, sub_queries.consumer_insight_query, sub_queries.marketing_query, rewritten_query]
+        sub_queries = [query.strip() for query in sub_queries] + [rewritten_query]
         
         logger.info(f"[Custom Agentic Search Main] Generated {len(sub_queries)-1 if len(sub_queries) > 1 else len(sub_queries)} sub-queries for retrieval and added the rewritten query to the search list")
         logger.info("\n" + "-" * 78)
@@ -857,24 +857,21 @@ class GraphBuilder:
         logger.info(f"[Retrieve Context] ├─ Rewritten query: {state.rewritten_query}")
         docs = []
         any_web_search_used = False 
-        if self.config.agentic_search_mode:
 
-            # get the conversation history
-            conversation_history = get_conversation_data(self.conversation_id).get("history", [])
-
-            # clean the conversation history
-            conversation_history = clean_chat_history_for_agentic_search(conversation_history)
+        conversation_history = get_conversation_data(self.conversation_id).get("history", [])
+                    # clean the conversation history
+        conversation_history = clean_chat_history_for_agentic_search(conversation_history)
 
             # append the rewritten query to the conversation history
-            conversation_history.append({"role": "user", "content": state.rewritten_query})
-            logger.info(f"[Agentic Search Main] Prepared conversation history with {len(conversation_history)} messages for agentic search")
+        conversation_history.append({"role": "user", "content": state.rewritten_query})
+        if self.config.agentic_search_mode:
 
             docs = self._run_agentic_retriever(conversation_history)
             # For agentic search mode, we don't track per-query web search usage
             any_web_search_used = False
 
         else:
-            docs, any_web_search_used = self._execute_custom_agentic_search(state.rewritten_query)
+            docs, any_web_search_used = self._execute_custom_agentic_search(original_query=state.question, rewritten_query=state.rewritten_query, historical_conversation=conversation_history)
 ### <-------------------------------->
 ### Since we're adopting sub queries, let's turn off the adjacent chunks for now 
             # if docs:
@@ -917,7 +914,7 @@ class GraphBuilder:
         logger.info(f"[Retrieve Context] ├─ 📊 Final docs composition: {final_retrieval_docs} retrieval + {final_web_docs} web")
         if not self.config.agentic_search_mode:
             logger.info(f"[Retrieve Context] ├─ Per-query web search: {'Used by at least one query' if any_web_search_used else 'Not used by any query'}")
-            logger.info(f"[Retrieve Context] ├─ Web search : {'YindicatorES' if web_search_needed else 'NO'} (based on per-query usage)")
+            logger.info(f"[Retrieve Context] ├─ Web search : {'YES' if web_search_needed else 'NO'} (based on per-query usage)")
         else:
             logger.info(f"[Retrieve Context] ├─ Final web search threshold: < 2 total documents")
             logger.info(f"[Retrieve Context] ├─ Final web search needed: {'YES' if web_search_needed else 'NO'}")
