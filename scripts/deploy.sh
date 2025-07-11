@@ -114,8 +114,8 @@ echo "   resourceGroupName = $resourceGroupName"
 echo "   orchestratorApp = $orchestratorApp"
 echo
 
-echo -e "${GREEN}🔐 Logging into ACR (${containerRegistryName})…${NC}"
-az acr login --name "${containerRegistryName}"
+echo -e "${GREEN}🔐 Logging into ACR (${containerRegistryName} in ${resourceGroupName})…${NC}"
+az acr login --name "${containerRegistryName}" --resource-group "${resourceGroupName}"
 echo -e "${GREEN}✅ Logged into ACR.${NC}"
 echo
 
