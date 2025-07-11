@@ -87,11 +87,6 @@ class CustomRetriever(BaseRetriever):
                 "filter": f"organization_id eq '{self.organization_id}' or organization_id eq null",
             }
 
-            print(
-                f"[Database Retriever]: Search payload for index {index}:",
-                json.dumps(search_payload, indent=2),
-            )
-
             AZURE_SEARCH_SERVICE = os.getenv("AZURE_SEARCH_SERVICE")
             AZURE_SEARCH_ENDPOINT_SF = (
                 f"https://{AZURE_SEARCH_SERVICE}.search.windows.net"
