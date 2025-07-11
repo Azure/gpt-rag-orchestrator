@@ -82,13 +82,15 @@ Make sure you're logged in to Azure before anything else:
 az login
 ```
 
+Clone this repository.
+
 ### If you used `azd provision`
 
 Just run:
 
-```bash
+```shell
 azd env refresh
-azd deploy
+azd deploy 
 ```
 
 > [!IMPORTANT]
@@ -111,6 +113,11 @@ export APP_CONFIG_ENDPOINT="https://<your-app-config-name>.azconfig.io"
 $env:APP_CONFIG_ENDPOINT = "https://<your-app-config-name>.azconfig.io"
 .\scripts\deploy.ps1
 ```
+
+## Release 1.0.0
+
+> [!NOTE]
+> If you want to use the GPT-RAG original version, simply use the v1.0.0 release from the GitHub repository.
 
 ## Contributing
 

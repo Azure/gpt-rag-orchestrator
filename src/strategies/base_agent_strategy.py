@@ -6,6 +6,7 @@ from azure.identity.aio import ChainedTokenCredential, AzureCliCredential, Manag
 from azure.ai.projects.aio import AIProjectClient
 from connectors.appconfig import AppConfigClient
 from dependencies import get_config
+from pathlib import Path
 
 class BaseAgentStrategy(ABC):
     """
@@ -180,16 +181,10 @@ class BaseAgentStrategy(ABC):
         return prompt
     
     def _prompt_dir(self):
-            """
-            Returns the directory path for prompts based on the strategy type.
-        
-            If the 'strategy_type' attribute is not defined, a ValueError is raised.
-            The directory path will include the strategy type as a subdirectory.
-        
-            Returns:
-                str: The directory path for prompts.
-            """
-            if not hasattr(self, 'strategy_type'):
-                raise ValueError("strategy_type is not defined")        
-            prompts_dir = "prompts/" + self.strategy_type.value
-            return prompts_dir
+        # __file__ is .../src/strategies/base_agent_strategy.py
+        # go up to the 'src' folder, then into 'prompts/<strategy>'
+        src_folder = Path(__file__).resolve().parent.parent  # .../src
+        prompt_folder = src_folder / "prompts" / self.strategy_type.value
+        if not prompt_folder.exists():
+            raise FileNotFoundError(f"Prompt directory not found: {prompt_folder}")
+        return str(prompt_folder)

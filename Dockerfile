@@ -33,7 +33,9 @@ COPY requirements.txt .
 RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
+
 # 6. Copy app code, expose port, and launch
 COPY . .
 EXPOSE 80
+ENV PYTHONPATH="/app/src"
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
