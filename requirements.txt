@@ -9,7 +9,7 @@ azure-keyvault-secrets==4.7.0
 numpy==1.26.2
 openai==1.58.1
 semantic-kernel==1.17.1
-requests==2.32.2
+requests==2.32.4
 tiktoken==0.5.2
 tenacity==8.2.3
 azure-cognitiveservices-search-customsearch==0.3.1
