@@ -1,95 +1,128 @@
-# Enterprise RAG Orchestrator
+Part of [GPT‑RAG](https://aka.ms/gpt-rag)
 
-This Orchestrator is part of the **Enterprise RAG (GPT-RAG)** Solution Accelerator.
+<!-- 
+page_type: sample
+languages:
+- azdeveloper
+- powershell
+- bicep
+products:
+- azure
+- azure-ai-foundry
+- azure-openai
+- azure-ai-search
+urlFragment: GPT-RAG
+name: Multi-repo ChatGPT and Enterprise data with Azure OpenAI and AI Search
+description: GPT-RAG core is a Retrieval-Augmented Generation pattern running in Azure, using Azure AI Search for retrieval and Azure OpenAI large language models to power ChatGPT-style and Q&A experiences.
+-->
+# GPT-RAG Orchestrator
 
-To learn more about the Enterprise RAG, please go to [https://aka.ms/gpt-rag](https://aka.ms/gpt-rag).
+Part of the [GPT-RAG](https://github.com/Azure/gpt-rag) solution.
 
-## How the Orchestrator Works
+The **GPT-RAG Orchestrator** service is an agentic orchestration layer built on Azure AI Foundry Agent Service and the Semantic Kernel framework. It enables agent-based RAG workflows by coordinating multiple specialized agents—each with a defined role—to collaboratively generate accurate, context-aware responses for complex user queries.
 
-The **Enterprise RAG Orchestrator** efficiently manages user interactions by coordinating various modules and plugins to generate accurate responses. The core of its functionality revolves around the `get_answer` function in [code_orchestration.py](https://github.com/Azure/gpt-rag-orchestrator/blob/main/orc/code_orchestration.py), which processes user queries through a structured workflow.
 
-### Orchestration Flow
+### How the Orchestrator Works
 
-1. **Initialization**:
-   - **Conversation Management**: Retrieves or creates a conversation record from Cosmos DB using the `conversation_id`.
-   - **Setup**: Initializes necessary variables, loads the bot description, and prepares the Semantic Kernel for processing.
+The orchestrator uses Azure AI Foundry Agent Service for single-agent and connected-agent flows, leveraging its managed runtime for agent lifecycle, state, and tool orchestration. For multi-agent scenarios, it integrates the Semantic Kernel Agent Framework to compose and coordinate specialized agents collaborating on tasks. Custom agent strategies allow developers to plug domain-specific logic without modifying core orchestration code.
 
-2. **Processing User Input (`get_answer` Function)**:
-   - **Input Handling**: Captures the latest user query and appends it to the conversation history.
-   - **Guardrails**: Performs initial checks, such as filtering blocked words to ensure content compliance.
-   - **RAG Flow**:
-     - **Language Detection**: Identifies the language of the user input.
-     - **Conversation Summarization**: Summarizes the conversation history to maintain context.
-     - **Intent Triage**: Determines the intent behind the user query (e.g., question answering, follow-up).
-     - **Data Retrieval**: Utilizes retrieval plugins to fetch relevant information based on the identified intent.
-     - **Answer Generation**: Generates a coherent response by integrating retrieved data and conversation context.
-   - **Final Guardrails**: Ensures the generated answer meets quality standards by checking for blocked content and grounding.
+Developers can extend the orchestrator by creating a new subclass of `BaseAgentStrategy`, implementing the required `initiate_agent_flow` method and any additional helpers, then registering it in `AgentStrategyFactory.get_strategy` under a unique key. The base class provides shared logic (e.g., prompt loading via `_read_prompt`, credential setup) so extensions focus only on custom behavior. 
 
-3. **Response Synthesis and Delivery**:
-   - **Updating Conversation**: Saves the generated answer and relevant metadata back to Cosmos DB.
-   - **Delivery**: Formats and sends the response to the user, completing the interaction cycle.
+## Prerequisites
 
-## Cloud Deployment
+Provision the infrastructure first by following the GPT-RAG repository instructions [GPT-RAG](https://github.com/azure/gpt-rag/tree/feature/vnext-architecture). This ensures all required Azure resources (e.g., App Service, Storage, AI Search) are in place before deploying the web application.
 
-To deploy the orchestrator in the cloud for the first time, please follow the deployment instructions provided in the [Enterprise RAG repo](https://github.com/Azure/GPT-RAG?tab=readme-ov-file#getting-started).  
-   
-These instructions include the necessary infrastructure templates to provision the solution in the cloud.  
-   
-Once the infrastructure is provisioned, you can redeploy just the orchestrator component using the instructions below:
+<details markdown="block">
+<summary>Click to view <strong>software</strong> prerequisites</summary>
+<br>
+The machine used to customize and or deploy the service should have:
 
-First, please confirm that you have met the prerequisites:
+* Azure CLI: [Install Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli)
+* Azure Developer CLI (optional, if using azd): [Install azd](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/install-azd)
+* Git: [Download Git](https://git-scm.com/downloads)
+* Python 3.12: [Download Python 3.12](https://www.python.org/downloads/release/python-3120/)
+* Docker CLI: [Install Docker](https://docs.docker.com/get-docker/)
+* VS Code (recommended): [Download VS Code](https://code.visualstudio.com/download)
+</details>
 
- - Azure Developer CLI: [Download azd for Windows](https://azdrelease.azureedge.net/azd/standalone/release/1.5.0/azd-windows-amd64.msi), [Other OS's](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/install-azd).
- - Git: [Download Git](https://git-scm.com/downloads)
- - Python 3.10: [Download Python](https://www.python.org/downloads/release/python-31011/)
 
-Then just clone this repository and reproduce the following commands within the gpt-rag-orchestrator directory:  
+<details markdown="block">
+<summary>Click to view <strong>permissions</strong> requirements</summary>
+<br>
+To customize the service, your user should have the following roles:
 
-```
-azd auth login  
-azd env refresh  
-azd deploy  
-```
+| Resource                | Role                                | Description                                 |
+| :---------------------- | :---------------------------------- | :------------------------------------------ |
+| App Configuration Store | App Configuration Data Owner        | Full control over configuration settings    |
+| Container Registry      | AcrPush                             | Push and pull container images              |
+| Key Vault               | Key Vault Contributor               | Manage Key Vault Secrets                    |
+| AI Search Service       | Search Service Contributor          | Create or update search service components  |
+| AI Search Service       | Search Index Data Contributor       | Read and write index data                   |
+| Storage Account         | Storage Blob Data Contributor       | Read and write blob data                    |
+| AI Foundry Project      | Azure AI Project User               | Access and work with the AI Foundry project |
+| Cosmos DB               | Cosmos DB Built-in Data Contributor | Read and write documents in Cosmos DB       |
 
-> Note: when running the ```azd env refresh```, use the same environment name, subscription, and region used in the initial provisioning of the infrastructure.
+To deploy the service, assign these roles to your user or service principal:
 
-### Alternative Cloud Deployment
+| Resource                                   | Role                             | Description           |
+| :----------------------------------------- | :------------------------------- | :-------------------- |
+| App Configuration Store                    | App Configuration Data Reader    | Read config           |
+| Container Registry                         | AcrPush                          | Push images           |
+| Azure Container App                        | Azure Container Apps Contributor | Manage Container Apps |
 
-If you deployed the GPT-RAG infrastructure manually, you can use Azure Functions Core Tools as an alternative to `azd` for deployment:
+Ensure the deployment identity has these roles at the correct scope (subscription or resource group).
+
+</details>
+
+## How to deploy the orchestrator service
+
+Make sure you're logged in to Azure before anything else:
 
 ```bash
-func azure functionapp publish FUNCTION_APP_NAME
+az login
 ```
 
-*Replace `FUNCTION_APP_NAME` with the name of your Orchestrator Function App before running the command.*
+Clone this repository.
 
-After completing the deployment, run the following command to confirm that the function was successfully deployed:
+### If you used `azd provision`
+
+Just run:
+
+```shell
+azd env refresh
+azd deploy 
+```
+
+> [!IMPORTANT]
+> Make sure you use the **same** subscription, resource group, environment name, and location from `azd provision`.
+
+### If you did **not** use `azd provision`
+
+You need to set the App Configuration endpoint and run the deploy script.
+
+#### Bash (Linux/macOS):
 
 ```bash
-func azure functionapp list-functions FUNCTION_APP_NAME
+export APP_CONFIG_ENDPOINT="https://<your-app-config-name>.azconfig.io"
+./scripts/deploy.sh
 ```
 
-You can download Azure Functions Core Tools from this [link](https://learn.microsoft.com/en-us/azure/azure-functions/functions-run-local?tabs=windows%2Cisolated-process%2Cnode-v4%2Cpython-v2%2Chttp-trigger%2Ccontainer-apps&pivots=programming-language-python#install-the-azure-functions-core-tools).
+#### PowerShell (Windows):
 
+```powershell
+$env:APP_CONFIG_ENDPOINT = "https://<your-app-config-name>.azconfig.io"
+.\scripts\deploy.ps1
+```
 
-## Running Locally with VS Code  
-   
-[How can I test the solution locally in VS Code?](docs/LOCAL_DEPLOYMENT.md)
+## Release 1.0.0
 
-### Evaluating
-
-[How to test the orchestrator performance?](docs/LOADTEST.md)
+> [!NOTE]
+> If you want to use the GPT-RAG original version, simply use the v1.0.0 release from the GitHub repository.
 
 ## Contributing
 
-We appreciate your interest in contributing to this project! Please refer to the [CONTRIBUTING.md](https://github.com/Azure/GPT-RAG/blob/main/CONTRIBUTING.md) page for detailed guidelines on how to contribute, including information about the Contributor License Agreement (CLA), code of conduct, and the process for submitting pull requests.
-
-Thank you for your support and contributions!
+We appreciate contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines on the Contributor License Agreement (CLA), code of conduct, and submitting pull requests.
 
 ## Trademarks
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
-trademarks or logos is subject to and must follow
-[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
-Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
-Any use of third-party trademarks or logos are subject to those third-party's policies.
+This project may contain trademarks or logos. Authorized use of Microsoft trademarks or logos must follow [Microsoft’s Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general). Modified versions must not imply sponsorship or cause confusion. Third-party trademarks are subject to their own policies.
