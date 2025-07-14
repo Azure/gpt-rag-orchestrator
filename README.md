@@ -30,7 +30,7 @@ Developers can extend the orchestrator by creating a new subclass of `BaseAgentS
 
 ## Prerequisites
 
-Provision the infrastructure first by following the GPT-RAG repository instructions [GPT-RAG](https://github.com/azure/gpt-rag/tree/feature/vnext-architecture). This ensures all required Azure resources (e.g., App Service, Storage, AI Search) are in place before deploying the web application.
+Provision the infrastructure first by following the GPT-RAG repository instructions [GPT-RAG](https://github.com/azure/gpt-rag/tree/feature/vnext-architecture). This ensures all required Azure resources (e.g., Container App, Storage, AI Search) are in place before deploying the web application.
 
 <details markdown="block">
 <summary>Click to view <strong>software</strong> prerequisites</summary>
