@@ -1,5 +1,5 @@
 # Use the official slim Python 3.12 image
-FROM python:3.12-slim
+FROM mcr.microsoft.com/devcontainers/python:dev-3.12
 
 # 1. Install prerequisites for HTTPS, GPG and lsb_release
 RUN apt-get update \
@@ -23,18 +23,21 @@ RUN ACCEPT_EULA=Y apt-get install -y \
          msodbcsql18    \
     && rm -rf /var/lib/apt/lists/*
 
-# 4. Create and activate a virtual environment for Python deps
+# 4. Install ca-certificates and update them
+RUN apt-get install ca-certificates -y
+RUN update-ca-certificates
+
+# 5. Create and activate a virtual environment for Python deps
 WORKDIR /app
 RUN python3 -m venv .venv
 ENV PATH="/app/.venv/bin:$PATH"
 
-# 5. Install Python requirements
+# 6. Install Python requirements
 COPY requirements.txt .
 RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
-
-# 6. Copy app code, expose port, and launch
+# 7. Copy app code, expose port, and launch
 COPY . .
 EXPOSE 80
 ENV PYTHONPATH="/app/src"

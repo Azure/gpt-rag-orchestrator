@@ -5,7 +5,7 @@ from .nl2sql_strategy import NL2SQLStrategy
 
 class AgentStrategyFactory:
     @staticmethod
-    def get_strategy(key: str):
+    async def get_strategy(key: str):
         """
         Return an instance of the strategy class corresponding to the given key.
         """

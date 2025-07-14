@@ -33,3 +33,8 @@ uvicorn==0.34.1
 # NL2SQL dependencies
 sqlparse==0.5.1
 pyodbc==5.1.0
+#opentelemetry
+azure-monitor-opentelemetry
+azure-monitor-opentelemetry-exporter
+opentelemetry-instrumentation-httpx==0.52b1
+opentelemetry-instrumentation-fastapi

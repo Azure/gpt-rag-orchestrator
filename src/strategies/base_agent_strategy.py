@@ -1,29 +1,38 @@
+import h11
 import logging
 import os
 import re
+import json
+
+from typing import Dict, AsyncIterator
 from abc import ABC, abstractmethod
 from azure.identity.aio import ChainedTokenCredential, AzureCliCredential, ManagedIdentityCredential
 from azure.ai.projects.aio import AIProjectClient
 from connectors.appconfig import AppConfigClient
+from connectors.cosmosdb import CosmosDBClient
 from dependencies import get_config
 from pathlib import Path
+from .agent_strategies import AgentStrategies
 
 class BaseAgentStrategy(ABC):
     """
     Base strategy for agents.
     """
+    strategy_type : AgentStrategies
+    conversation : Dict
+    user_context : Dict
 
     def __init__(self):
         """
         Initializes endpoint, model name, credentials, and default event handler.
         """
         # App configuration
-        cfg: AppConfigClient = get_config()
-        self.project_endpoint = cfg.get("AI_FOUNDRY_PROJECT_ENDPOINT")
-        self.account_endpoint = cfg.get("AI_FOUNDRY_ACCOUNT_ENDPOINT")
-        self.model_name = cfg.get("CHAT_DEPLOYMENT_NAME")
-        self.prompt_source = cfg.get("PROMPT_SOURCE", "file")
-        self.openai_api_version = cfg.get("OPENAI_API_VERSION", "2025-04-01-preview")     
+        self.cfg : AppConfigClient = get_config()
+        self.project_endpoint = self.cfg.get("AI_FOUNDRY_PROJECT_ENDPOINT")
+        self.account_endpoint = self.cfg.get("AI_FOUNDRY_ACCOUNT_ENDPOINT")
+        self.model_name = self.cfg.get("CHAT_DEPLOYMENT_NAME")
+        self.prompt_source = self.cfg.get("PROMPT_SOURCE", "file")
+        self.openai_api_version = self.cfg.get("OPENAI_API_VERSION", "2025-04-01-preview")   
 
         logging.debug(f"[base_agent_strategy] Project endpoint: {self.project_endpoint}")
         logging.debug(f"[base_agent_strategy] Model name: {self.model_name}")
@@ -48,6 +57,14 @@ class BaseAgentStrategy(ABC):
             credential=self.credential
         )
 
+        self.cosmos = CosmosDBClient()
+
+        self.user_context = {}
+
+    @classmethod
+    async def create(cls):
+        return cls()
+    
     @abstractmethod
     async def initiate_agent_flow(self, user_message: str):
         """
@@ -157,7 +174,7 @@ class BaseAgentStrategy(ABC):
  
         logging.info(f"[base_agent_strategy] Using cosmo prompt : {self.strategy_type.value} : {prompt_name}")
 
-        prompt_json = self.cosmos.get_document("prompts", f"{self.strategy_type.value}_{prompt_name}")
+        prompt_json = await self.cosmos.get_document("prompts", f"{self.strategy_type.value}_{prompt_name}")
         prompt = prompt_json.get("content", "")
             
         # Replace placeholders provided in the 'placeholders' dictionary
@@ -175,7 +192,7 @@ class BaseAgentStrategy(ABC):
             if placeholders and placeholder_name in placeholders:
                 continue
             
-            placeholder_content = self.cosmos.get_document("prompts", f"placeholder_{placeholder_name}")
+            placeholder_content = await self.cosmos.get_document("prompts", f"placeholder_{placeholder_name}")
             prompt = prompt.replace(f"{{{{{placeholder_name}}}}}", placeholder_content)
             
         return prompt
@@ -184,7 +201,28 @@ class BaseAgentStrategy(ABC):
         # __file__ is .../src/strategies/base_agent_strategy.py
         # go up to the 'src' folder, then into 'prompts/<strategy>'
         src_folder = Path(__file__).resolve().parent.parent  # .../src
+        if not hasattr(self, 'strategy_type'):
+            raise ValueError("strategy_type is not defined")     
         prompt_folder = src_folder / "prompts" / self.strategy_type.value
         if not prompt_folder.exists():
             raise FileNotFoundError(f"Prompt directory not found: {prompt_folder}")
         return str(prompt_folder)
+    
+    def _get_model(self, model_name: str = 'CHAT_DEPLOYMENT_NAME') -> Dict:
+        model_deployments = self.cfg.get("MODEL_DEPLOYMENTS", default='[]').replace("'", "\"")
+
+        try:
+            print(f"Model deployments: {model_deployments}")
+            logging.info(f"Model deployments: {model_deployments}")
+
+            json_model_deployments = json.loads(model_deployments)
+
+            #get the canonical_name of 'CHAT_DEPLOYMENT_NAME'
+            for deployment in json_model_deployments:
+                if deployment.get("canonical_name") == model_name:
+                    return deployment
+        except json.JSONDecodeError as e:
+            logging.error(f"Error decoding JSON for model deployments: {e}")
+            raise ValueError(f"Invalid model deployments configuration: {model_deployments}")
+            
+        return None
