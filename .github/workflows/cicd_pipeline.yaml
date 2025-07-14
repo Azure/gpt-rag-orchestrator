@@ -1,0 +1,43 @@
+name: CI/CD Dev Pipeline
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: dev
+
+    # Pull all four dev-environment variables and your SP secrets
+    env:
+      AZURE_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET:   ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
+      APP_CONFIG_ENDPOINT:   ${{ vars.APP_CONFIG_ENDPOINT }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Azure Developer CLI (latest)
+        uses: Azure/setup-azd@v2
+
+      - name: Verify azd version
+        run: |
+          azd version 
+
+      - name: Login to Azure CLI
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Deploy to Azure
+        run: |
+          ./scripts/deploy.sh

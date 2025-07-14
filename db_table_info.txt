@@ -1,1 +1,0 @@
-{"Table1" : "Explain information stored in table,columns and connections with other tables", "Table2" : "Explain information stored in table,columns and connections with other tables"}

@@ -1,0 +1,29 @@
+# — FastAPI & TestClient (for calling your app in-memory)
+fastapi==0.115.12
+requests==2.32.3
+
+# — Data handling & reporting
+pandas
+
+# — Azure App Configuration & Identity (AppConfigClient)
+azure-identity==1.21.0
+azure-appconfiguration==1.7.1
+
+# — Cosmos DB (async client used by your CosmosDBClient)
+azure-cosmos==4.5.1
+
+# — Azure AI Search (used by generate_eval_input.py)
+azure-search-documents==11.5.2
+
+# — Azure AI Projects & Agents (used by your strategies & evaluate.py)
+azure-ai-projects==1.0.0b11
+azure-ai-agents
+
+# — Azure AI Evaluation SDK
+azure-ai-evaluation
+
+# - Key Vault (if you use it for secrets)
+azure-keyvault-secrets==4.7.0
+
+# (Optional) If you ever load from a .env in this venv:
+# python-dotenv
