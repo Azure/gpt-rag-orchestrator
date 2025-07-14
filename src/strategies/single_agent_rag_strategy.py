@@ -124,6 +124,16 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
         logging.debug(f"Final tools_list: {self.tools_list}")
         logging.debug(f"Final tool_resources: {self.tool_resources}")
 
+    async def create():
+        """
+        Factory method to create an instance of SingleAgentRAGStrategy.
+        Initializes the agent and tools.
+        """
+        logging.debug("Creating SingleAgentRAGStrategy instance...")
+        instance = SingleAgentRAGStrategy()
+
+        return instance
+
 
     async def initiate_agent_flow(self, user_message: str):
         """
@@ -230,6 +240,12 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
                         "text": text_val
                     })
             logging.debug(f"Final conversation messages: {conv['messages']}")
+
+            #conv['completion_tokens'] = response.metadata.get('usage').completion_tokens
+            #conv['prompt_tokens'] = response.metadata.get('usage').prompt_tokens
+
+            if self.user_context:
+                conv['user_context'] = self.user_context
 
             # --------------------------------------------------
             # 6) (OPTIONAL) Clean up the agent if a new one was created
