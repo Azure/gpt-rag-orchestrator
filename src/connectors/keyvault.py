@@ -10,7 +10,7 @@ from dependencies import get_config
 # KEY VAULT 
 ##########################################################
 
-async def get_secret(secretName):
+async def get_secret(name):
     try:
 
         cfg = get_config()
@@ -20,7 +20,7 @@ async def get_secret(secretName):
                 AzureCliCredential()
             ) as credential:
             async with AsyncSecretClient(vault_url=KVUri, credential=credential) as client:
-                retrieved_secret = await client.get_secret(secretName)
+                retrieved_secret = await client.get_secret(name)
                 value = retrieved_secret.value
         return value    
     except KeyError:
@@ -30,7 +30,7 @@ async def get_secret(secretName):
         logging.info("Authentication failed. Please check your credentials.")
         return None
     except ResourceNotFoundError:
-        logging.info(f"Secret '{secretName}' not found in the Key Vault.")
+        logging.info(f"Secret '{name}' not found in the Key Vault.")
         return None
     except Exception as e:
         logging.info(f"An unexpected error occurred: {e}")
