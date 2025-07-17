@@ -775,7 +775,7 @@ class GraphBuilder:
         {question}
         </query>
 
-        Return the augmented query in text formatonly, no additional text, explanations, or formatting.
+        Return the augmented query in text format only, no additional text, explanations, or formatting.
         
         """
         logger.info(f"[Query Augment] Sending async augmented query request to LLM {augmented_query_prompt[:100]}...")
