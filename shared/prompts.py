@@ -1105,7 +1105,7 @@ Craft a *2–3 minute verbal pitch script*, as though presenting to a CMO. Your 
 Your task is to *transform business challenges into compelling creative stories that captivate clients and deliver results.* Speak as if the next big campaign depends on your pitch—because it does.
 """
 
-AGUMENTED_QUERY_PROMPT = """ 
+AUGMENTED_QUERY_PROMPT = """ 
 Input Processing:
 
 Analyze the input query to identify the core concept or topic.
