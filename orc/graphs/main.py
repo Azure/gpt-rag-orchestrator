@@ -781,7 +781,7 @@ class GraphBuilder:
         logger.info(f"[Query Augment] Sending async augmented query request to LLM {augmented_query_prompt[:100]}...")
         try:
             augmented_query = await self.llm.ainvoke(
-                [SystemMessage(content=AGUMENTED_QUERY_PROMPT), HumanMessage(content=augmented_query_prompt)]
+                [SystemMessage(content=AUGMENTED_QUERY_PROMPT), HumanMessage(content=augmented_query_prompt)]
             )
             logger.info(f"[Query Augment] Successfully augmented query: '{augmented_query.content[:100]}...'")
         except Exception as e:
