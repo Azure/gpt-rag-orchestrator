@@ -21,7 +21,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from shared.prompts import (
     MARKETING_ORC_PROMPT,
     QUERY_REWRITING_PROMPT,
-    AGUMENTED_QUERY_PROMPT, 
+    AUGMENTED_QUERY_PROMPT, 
 )
 from langchain_core.runnables import RunnableParallel
 from shared.cosmos_db import get_conversation_data
