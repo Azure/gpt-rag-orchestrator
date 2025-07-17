@@ -1105,10 +1105,7 @@ Craft a *2–3 minute verbal pitch script*, as though presenting to a CMO. Your 
 Your task is to *transform business challenges into compelling creative stories that captivate clients and deliver results.* Speak as if the next big campaign depends on your pitch—because it does.
 """
 
-context = "" 
-query = "" 
-
-AGUMENTED_QUERY_PROMPT = f""" 
+AGUMENTED_QUERY_PROMPT = """ 
 Input Processing:
 
 Analyze the input query to identify the core concept or topic.
@@ -1151,16 +1148,4 @@ Augmented Query: "Explain the impact of the Gutenberg Press in the context of re
 
 Input: "Explain CRISPR technology"
 Augmented Query: "Explain CRISPR technology in the context of genetic engineering and its potential applications in medicine and biotechnology. Cover its discovery, how it works at a molecular level, its current uses in research and therapy, ethical considerations surrounding its use, and potential future developments in the field."
-Now, provide a comprehensive explanation based on the appropriate augmented query.
-
-Context: 
-<context>
-{context}
-</context>
-
-<query>
-Query: {query}
-</query>
-
-Augmented Query:
 """

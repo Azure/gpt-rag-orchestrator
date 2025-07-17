@@ -554,10 +554,10 @@ async def stream_run(
     organization_id: str = None,
 ):
     orchestrator = ConversationOrchestrator(organization_id=organization_id)
-    resources = orchestrator.process_conversation(
+    resources = await asyncio.to_thread(orchestrator.process_conversation,
         conversation_id, ask, client_principal
     )
-    return orchestrator.generate_response(
+    return await asyncio.to_thread(orchestrator.generate_response,
         resources["conversation_id"],
         resources["state"],
         resources["conversation_data"],

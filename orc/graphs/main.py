@@ -778,7 +778,7 @@ class GraphBuilder:
         Return the augmented query in text formatonly, no additional text, explanations, or formatting.
         
         """
-        logger.info(f"[Query Augment] Sending async augmented query request to LLM {augmented_query_prompt}")
+        logger.info(f"[Query Augment] Sending async augmented query request to LLM {augmented_query_prompt[:100]}...")
         try:
             augmented_query = await self.llm.ainvoke(
                 [SystemMessage(content=AGUMENTED_QUERY_PROMPT), HumanMessage(content=augmented_query_prompt)]
@@ -790,7 +790,7 @@ class GraphBuilder:
         
         return {
             "rewritten_query": rewritte_query.content,
-            "augmented_query": augmented_query.content,
+            "augmented_query": augmented_query.content if hasattr(augmented_query, 'content') else augmented_query,
             "messages": state.messages + [HumanMessage(content=question)],
         }
 
