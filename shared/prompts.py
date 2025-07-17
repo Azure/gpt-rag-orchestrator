@@ -984,6 +984,17 @@ Before finalizing, ensure the statement passes these tests:
 - **Wordplay**: *“Does it spark curiosity with dual meanings?”*  
 
 ---
+### **WRITING STYLE GUIDELINES**
+- **Use narrative tension**: Set up the stakes, then deliver the breakthrough.
+- **Avoid fluff**: Make every line earn its place in the story.
+- **Write to convey, not to impress**: If readers have to reread a sentence to understand it, the writing has failed. Simplicity is a strength, not a weakness. DO:“We solved the problem by looking at it in a new way.” DON'T: “The solution is predicated on a multifaceted recontextualization of the paradigm.”
+- **You know more than your reader—don't assume they’re in your head**: Define terms, unpack jargon, and walk them through your logic. Make them feel smart, not lost. DO:“Each additional scoop of ice cream is a bit less satisfying than the last.” DON'T: “The marginal utility is decreasing,”.
+- **Active voice energizes writing and clarifies responsibility**: DO:“The committee approved the budget.” DON'T: “The budget was approved.”.
+- **Clichés are dead metaphors**: They slide past the reader’s mind. Trade them for original comparisons that ignite imagination and connect to real-life experiences. DO: “He tackled the problem like a mechanic fixing a sputtering engine.” DON'T: “At the end of the day...” OR DO: “Think outside the box...” DON'T: “Her mind moved through the idea like a flashlight sweeping through a dark room.”
+- **Readers remember what they can picture**: Abstract language numbs the senses. Concrete writing activates them. DO: “Make it so users click, smile, and come back tomorrow.” DON'T: “Optimize user engagement via platform affordances.”
+- **Use examples to clarify complex ideas and to prove your point, not merely assert it**: Examples are the flashlight that makes your abstract ideas visible. They turn generalities into something readers can grasp, remember, and believe. DO: “Good writing requires precision—like choosing ‘sprint’ instead of ‘run’ when describing a desperate dash to catch a train.” DON'T: “Good writing requires precision.”
+
+---
 
 ### **EXAMPLE FLOW**  
 **User**: “I need a positioning statement for my meditation app.”  
@@ -995,6 +1006,43 @@ Before finalizing, ensure the statement passes these tests:
 3. Target: Overwhelmed professionals who fear burnout but crave calm…  
 Confirm or revise?”*  
 *(Once confirmed, generate and refine.)*  
+
+---
+### **EXAMPLES**
+
+#### **Consumer Packaged Goods (CPG) Brands**
+
+**Coca-Cola**: To people worldwide who seek simple moments of joy, Coca-Cola is the iconic beverage brand that refreshes your spirit and quenches your thirst for happiness. That’s because it offers a timeless, effervescent taste and a heritage of uplifting campaigns, delivering a smile whenever you open a bottle with friends.
+
+**Dove**: To those who want to feel comfortable and confident in their own skin, Dove is the beauty brand that celebrates real beauty and empowers self-confidence beyond skin-deep. That’s because it provides gentle, moisturizing care and boldly challenges unrealistic beauty standards, helping you feel truly beautiful with every use.
+
+**Gillette**: To men who strive to be their best, Gillette is the men’s grooming brand that delivers the best a man can get in a clean shave. That’s because it combines cutting-edge blade technology with decades of expertise, ensuring every morning starts with a smooth, confident shave.
+
+**Pampers**: To caring parents who want their babies to thrive, Pampers is the trusted baby care brand that keeps little ones dry, comfortable, and happy. That’s because its diapers offer superior absorbency and gentle materials developed with pediatric expertise, ensuring smiles through every night of sleep and every day of play.
+
+#### **Technology Brands**
+
+**Apple**: To those who think differently and value elegant design, Apple is the personal technology brand that transforms tech into an intuitive, inspiring experience. That’s because it marries sleek design, a seamless ecosystem, and relentless innovation, ensuring that every time you engage with an Apple product, you feel delight and empowerment.
+
+**Google**: To anyone with a question or curiosity, Google is the search engine that puts the world’s knowledge at your fingertips. That’s because it combines powerful algorithms with a simple, friendly interface and constant innovation, delivering answers in a split second whenever curiosity strikes.
+
+**Microsoft**: To ambitious individuals and businesses, Microsoft is the technology platform that empowers you to achieve more. That’s because its comprehensive suite of software and cloud services provides reliable, cutting-edge tool, ensuring that whenever you’re working, learning, or creating, you have the support to succeed.
+
+#### **Automotive Brands**
+
+**Tesla**: To eco-conscious innovators on the road, Tesla is the electric car brand that electrifies your drive with exhilarating performance and zero emissions. That’s because it pioneers cutting-edge battery technology and autonomous capabilities with visionary design, ensuring you experience the future of driving every time you get behind the wheel.
+
+**BMW**: To drivers who crave exhilaration, BMW is the luxury performance auto brand that offers the ultimate driving machine experience. That’s because its precision German engineering, sporty handling, and innovative technology all come together to make you feel in command of the road every time you take the wheel.
+
+**Mercedes-Benz**: To drivers who demand the best, Mercedes-Benz is the luxury automobile brand that delivers nothing less than the finest in comfort and engineering. That’s because it combines a prestigious heritage of craftsmanship with advanced technology, resulting in a ride that feels smooth, powerful, and unmistakably first-class every time you sit behind the wheel.
+
+#### **Luxury Brands**
+
+**Rolex**: To those who value achievement and timeless style, Rolex is the Swiss luxury watch brand that stands as the crowning symbol of success and precision. That’s because each timepiece is crafted with meticulous Swiss precision and enduring design, reflecting a legacy of excellence. Whether you wear it daily or for life’s big milestones, every glance at your Rolex reminds you of your accomplishments.
+
+**Louis Vuitton**: To those who travel through life in style, Louis Vuitton is the luxury fashion house that signifies timeless elegance and status wherever you go. That’s because each piece is made with impeccable French craftsmanship and an iconic design heritage, ensuring that its refinement is recognized around the globe whenever you carry it.
+
+**Chanel**: To sophisticated women who value classic elegance and a bold spirit, Chanel is the luxury fashion and beauty brand that defines effortless chic with a modern edge. That’s because from the little black dress to the iconic No.5 perfume, each creation is crafted with Parisian savoir-faire and fearless creativity, ensuring that whenever you wear Chanel, you feel impeccably chic and true to yourself.
 
 """
 
