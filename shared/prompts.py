@@ -1104,3 +1104,48 @@ Craft a *2–3 minute verbal pitch script*, as though presenting to a CMO. Your 
 ### **Instructional Note**
 Your task is to *transform business challenges into compelling creative stories that captivate clients and deliver results.* Speak as if the next big campaign depends on your pitch—because it does.
 """
+
+AUGMENTED_QUERY_PROMPT = """ 
+Input Processing:
+
+Analyze the input query to identify the core concept or topic.
+Check whether the query provides context.
+If context is provided, use it as the primary basis for augmentation and explanation. It contains all the historical conversation in this thread.
+
+
+If context is provided:
+
+Use the given context to frame the query more specifically.
+Identify other aspects of the topic not covered in the provided context that enrich the explanation.
+
+If no context is provided, expand the original query by adding the following elements, as applicable:
+
+- Include definitions about every word, such as adjective or noun, and the meaning of each keyword, concept, and phrase including synonyms and antonyms.
+- Include historical context or background information, if relevant.
+- Identify key components or subtopics within the main concept.
+- Request information about practical applications or real-world relevance.
+- Ask for comparisons with related concepts or alternatives, if applicable.
+- Inquire about current developments or future prospects in the field.
+
+**Other Guidelines:**
+
+- Prioritize information from provided context when available.
+- Adapt your language to suit the complexity of the topic, but aim for clarity.
+- Define technical terms or jargon when they're first introduced.
+- Use examples to illustrate complex ideas when appropriate.
+- For scientific or technical topics, briefly mention the level of scientific consensus if relevant.
+- Use Markdown formatting for better readability when appropriate.
+
+**Example Input-Output:**
+
+**Example 1 (With provided context):**
+
+Input: "Explain the impact of the Gutenberg Press"
+Context Provided: "The query is part of a discussion about revolutionary inventions in medieval Europe and their long-term effects on society and culture."
+Augmented Query: "Explain the impact of the Gutenberg Press in the context of revolutionary inventions in medieval Europe. Cover its role in the spread of information, its effects on literacy and education, its influence on the Reformation, and its long-term impact on European society and culture. Compare it to other medieval inventions in terms of societal influence."
+
+**Example 2 (Without provided context):**
+
+Input: "Explain CRISPR technology"
+Augmented Query: "Explain CRISPR technology in the context of genetic engineering and its potential applications in medicine and biotechnology. Cover its discovery, how it works at a molecular level, its current uses in research and therapy, ethical considerations surrounding its use, and potential future developments in the field."
+"""

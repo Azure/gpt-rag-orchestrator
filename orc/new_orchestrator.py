@@ -5,6 +5,8 @@ import uuid
 import time
 import re
 import json
+import asyncio
+import concurrent.futures
 from langchain_community.callbacks import get_openai_callback
 from langsmith import traceable
 from langgraph.checkpoint.memory import MemorySaver
@@ -77,6 +79,7 @@ class ConversationState:
     chat_summary: str = field(default_factory=str)
     token_count: int = field(default_factory=int)
     query_category: str = field(default_factory=str)
+    augmented_query: str = field(default_factory=str)
 
 
 # Prompt for Tool Calling
@@ -243,8 +246,16 @@ class ConversationOrchestrator:
 
             with get_openai_callback() as cb:
                 # Get agent response
-                logging.info(f"[orchestrator-process_conversation] Invoking agent")
-                response = agent.invoke({"question": question}, config)
+                logging.info(f"[orchestrator-process_conversation] Invoking agent async")
+                
+                def run_async_agent():
+                    return asyncio.run(agent.ainvoke({"question": question}, config))
+                
+                # Run the async function in a separate thread to avoid event loop conflicts
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(run_async_agent)
+                    response = future.result()
+                
                 logging.info(f"[orchestrator-process_conversation] Agent response")
                 return {
                     "conversation_id": conversation_id,
@@ -257,6 +268,7 @@ class ConversationOrchestrator:
                         response["chat_summary"],
                         response["token_count"],
                         response["query_category"],
+                        response["augmented_query"],
                     ),
                     "conversation_data": conversation_data,
                     "memory_data": self._serialize_memory(memory, config),
@@ -376,15 +388,17 @@ class ConversationOrchestrator:
 
         prompt = f"""
         
-        Question: 
+        You're provided user's question and the augmented version of the question to help you understand the user's intent better. 
+        If the original question and augmented question are conflicting, always use the original question. 
+        Provide a detailed answer that is highly relevant to the user's question and provided context.
         
-        <----------- USER QUESTION ------------>
+        <----------- USER QUESTION & AUGMENTED VERSION ------------>
 
         ORIGINAL QUESTION: {state.question}
 
-        <----------- END OF USER QUESTION ------------>
-
-        Provide a detailed answer that is highly relevant to the user's question and provided context.
+        
+        AUGMENTED VERSION OF THE QUESTION: {state.augmented_query}
+        <----------- END OF USER QUESTION & AUGMENTED VERSION ------------>
         """
 
         logging.info(f"[orchestrator-generate_response] Prompt: {prompt}")
@@ -540,10 +554,10 @@ async def stream_run(
     organization_id: str = None,
 ):
     orchestrator = ConversationOrchestrator(organization_id=organization_id)
-    resources = await orchestrator.process_conversation(
+    resources = await asyncio.to_thread(orchestrator.process_conversation,
         conversation_id, ask, client_principal
     )
-    return orchestrator.generate_response(
+    return await asyncio.to_thread(orchestrator.generate_response,
         resources["conversation_id"],
         resources["state"],
         resources["conversation_data"],

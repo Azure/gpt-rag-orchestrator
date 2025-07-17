@@ -21,6 +21,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from shared.prompts import (
     MARKETING_ORC_PROMPT,
     QUERY_REWRITING_PROMPT,
+    AUGMENTED_QUERY_PROMPT, 
 )
 from langchain_core.runnables import RunnableParallel
 from shared.cosmos_db import get_conversation_data
@@ -161,6 +162,7 @@ class ConversationState:
     token_count: int = field(default_factory=int)
     query_category: str = field(default_factory=str)
     agentic_search_mode: bool = field(default=True)
+    augmented_query: str = field(default_factory=str)
 
 def _truncate_chat_history(chat_history: List[dict], max_messages: int = 4) -> List[dict]:
     """
@@ -723,8 +725,8 @@ class GraphBuilder:
         logger.info("[GraphBuilder Build] Successfully constructed conversation processing graph")
         return compiled_graph
 
-    def _rewrite_query(self, state: ConversationState) -> dict:
-        logger.info(f"[Query Rewrite] Starting query rewrite for: '{state.question[:100]}...'")
+    async def _rewrite_query(self, state: ConversationState) -> dict:
+        logger.info(f"[Query Rewrite] Starting async query rewrite for: '{state.question[:100]}...'")
         question = state.question
 
         system_prompt = QUERY_REWRITING_PROMPT
@@ -750,24 +752,51 @@ class GraphBuilder:
         if the question is a very casual/conversational one, do not rewrite, return it as it is
         """
         
-        logger.info("[Query Rewrite] Sending query rewrite request to LLM")
-        rewritte_query = self.llm.invoke(
+        logger.info("[Query Rewrite] Sending async query rewrite request to LLM")
+        rewritte_query = await self.llm.ainvoke(
             [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
         )
         logger.info(f"[Query Rewrite] Successfully rewrote query: '{rewritte_query.content[:100]}...'")
 
         if state.messages is None:
             state.messages = []
+        
+        # augment the query with the historical conversation context
+        augmented_query_prompt = f""" 
+        Augment the query with the historical conversation context. If the query is a very casual/conversational one, do not augment, return it as it is.
+        
+        Here is the historical conversation context if available:
+        <context>
+        {clean_chat_history_for_llm(history)}
+        </context>
 
+        Here is the query to augment:
+        <query>
+        {question}
+        </query>
+
+        Return the augmented query in text format only, no additional text, explanations, or formatting.
+        
+        """
+        logger.info(f"[Query Augment] Sending async augmented query request to LLM {augmented_query_prompt[:100]}...")
+        try:
+            augmented_query = await self.llm.ainvoke(
+                [SystemMessage(content=AUGMENTED_QUERY_PROMPT), HumanMessage(content=augmented_query_prompt)]
+            )
+            logger.info(f"[Query Augment] Successfully augmented query: '{augmented_query.content[:100]}...'")
+        except Exception as e:
+            logger.error(f"[Query Augment] Failed to augment query, using original question: {e}")
+            augmented_query = question
+        
         return {
             "rewritten_query": rewritte_query.content,
-            # save the original question to state
+            "augmented_query": augmented_query.content if hasattr(augmented_query, 'content') else augmented_query,
             "messages": state.messages + [HumanMessage(content=question)],
         }
 
-    def _categorize_query(self, state: ConversationState) -> dict:
+    async def _categorize_query(self, state: ConversationState) -> dict:
         """Categorize the query."""
-        logger.info(f"[Query Categorization] Starting query categorization for: '{state.question[:100]}...'")
+        logger.info(f"[Query Categorization] Starting async query categorization for: '{state.question[:100]}...'")
 
         conversation_data = get_conversation_data(self.conversation_id)
         history = conversation_data.get("history", [])
@@ -806,8 +835,8 @@ class GraphBuilder:
         Reply with **only** the exact category name — no additional text, explanations, or formatting.
         """
         
-        logger.info("[Query Categorization] Sending categorization request to LLM")
-        response = self.llm.invoke(
+        logger.info("[Query Categorization] Sending async categorization request to LLM")
+        response = await self.llm.ainvoke(
             [
                 SystemMessage(content=category_prompt),
                 HumanMessage(content=state.question),
@@ -820,14 +849,14 @@ class GraphBuilder:
             "query_category": response.content
         }
 
-    def _route_query(self, state: ConversationState) -> dict:
+    async def _route_query(self, state: ConversationState) -> dict:
         """Determine if external knowledge is needed."""
-        logger.info(f"[Query Routing] Determining initial routing decision for query: '{state.rewritten_query[:100]}...'")
+        logger.info(f"[Query Routing] Determining async routing decision for query: '{state.rewritten_query[:100]}...'")
 
         system_prompt = MARKETING_ORC_PROMPT
 
-        logger.info("[Query Routing] Sending routing decision request to LLM")
-        response = self.llm.invoke(
+        logger.info("[Query Routing] Sending async routing decision request to LLM")
+        response = await self.llm.ainvoke(
             [
                 SystemMessage(content=system_prompt),
                 HumanMessage(
