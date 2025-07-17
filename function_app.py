@@ -31,8 +31,7 @@ from shared.util import (
 from orc import new_orchestrator
 from financial_orc import orchestrator as financial_orchestrator
 from shared.conversation_export import export_conversation
-app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
-
+app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 @app.route(route="orc", methods=[func.HttpMethod.POST])
 async def stream_response(req: Request) -> StreamingResponse:
     """Endpoint to stream LLM responses to the client"""
@@ -606,3 +605,18 @@ async def scrape_pages(req: Request) -> Response:
             media_type="application/json",
             status_code=500
         )
+
+################ MCP Functions ################
+
+@app.generic_trigger(
+    arg_name="context",
+    type="mcpToolTrigger",
+    toolName="mcp_status",
+    description="A tool to check the status of the MCP",
+    toolProperties="[]",
+)
+def mcp_status(context) -> None:
+    """
+    A simple MCP tool that returns the status of the MCP.
+    """
+    return "MCP is running!"
