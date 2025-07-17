@@ -613,9 +613,9 @@ async def scrape_pages(req: Request) -> Response:
     type="mcpToolTrigger",
     toolName="mcp_status",
     description="A tool to check the status of the MCP",
-    toolProperties=[],
+    toolProperties="[]",
 )
-def mcp_status(context) -> str:
+def mcp_status(context) -> None:
     """
     A simple MCP tool that returns the status of the MCP.
     """
