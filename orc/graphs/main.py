@@ -170,7 +170,6 @@ class ConversationState:
     chat_summary: str = field(default_factory=str)
     token_count: int = field(default_factory=int)
     query_category: str = field(default_factory=str)
-    agentic_search_mode: bool = field(default=True)
     augmented_query: str = field(default_factory=str)
 
 
@@ -263,21 +262,17 @@ def clean_chat_history_for_llm(chat_history: List[dict]) -> str:
 
 
 # Backward compatibility function
-def clean_chat_history(chat_history: List[dict], agentic_search_mode: bool = False):
+def clean_chat_history(chat_history: List[dict]):
     """
     Clean the chat history and format it for consumption.
 
     Args:
         chat_history: List of chat message dictionaries
-        agentic_search_mode: Whether to format for agentic search mode
 
     Returns:
-        List[dict] for agentic search mode, str for LLM consumption
+        str for LLM consumption
     """
-    if agentic_search_mode:
-        return clean_chat_history_for_agentic_search(chat_history)
-    else:
-        return clean_chat_history_for_llm(chat_history)
+    return clean_chat_history_for_llm(chat_history)
 
 
 @dataclass
@@ -291,7 +286,6 @@ class GraphConfig:
     web_search_results: int = 2
     temperature: float = 0.4
     max_tokens: int = 50000  # input tokens could be really large
-    agentic_search_mode: bool = False
 
 
 class GraphBuilder:
@@ -308,7 +302,7 @@ class GraphBuilder:
             f"[GraphBuilder Init] Initializing GraphBuilder for conversation: {conversation_id}"
         )
         logger.info(
-            f"[GraphBuilder Init] Config - agentic_search_mode: {config.agentic_search_mode}, model temperature: {config.temperature}, max_tokens: {config.max_tokens}"
+            f"[GraphBuilder Init] Config - model temperature: {config.temperature}, max_tokens: {config.max_tokens}"
         )
 
         self.organization_id = organization_id
@@ -472,6 +466,7 @@ class GraphBuilder:
                 f"Failed to initialize Azure AI Search Retriever: {str(e)}"
             )
 
+    #! TBR (to be removed)
     def _run_agentic_retriever(self, conversation_history: List[dict]):
         # Safe handling of potentially None conversation_history
         conversation_history = conversation_history or []
@@ -488,6 +483,7 @@ class GraphBuilder:
         )
         return results or []
 
+    #! TBR (to be removed)
     async def _execute_single_query_async(
         self, query_info: tuple, semaphore: asyncio.Semaphore = None
     ) -> tuple:
@@ -576,6 +572,7 @@ class GraphBuilder:
 
                 return (query_index, query_type, query_text, [], [], execution_time)
 
+    #! TBR (to be removed)
     async def _execute_queries_async(self, sub_queries: List[str]) -> tuple:
         """Execute all queries asynchronously with improved error handling and rate limiting.
 
@@ -660,9 +657,7 @@ class GraphBuilder:
 
                 # Log retrieval documents first
                 if retriever_results:
-                    logger.info(
-                        "[Async Custom Agentic Search] │  ├─ 🗄️ From retrieval:"
-                    )
+                    logger.info("[Async Custom Agentic Search] │  ├─ 🗄️ From retrieval:")
                     for j, doc in enumerate(retriever_results, 1):
                         source = doc.metadata.get("source", "Unknown source")
                         logger.info(
@@ -729,6 +724,7 @@ class GraphBuilder:
             any_web_search_used,
         )
 
+    #! TBR (to be removed)
     def _execute_custom_agentic_search(
         self, original_query: str, rewritten_query: str, historical_conversation: str
     ) -> tuple:
@@ -742,9 +738,7 @@ class GraphBuilder:
             Tuple of (docs_list, any_web_search_used)
         """
         # generate sub queries
-        logger.info(
-            "[Custom Agentic Search Main] Generating sub-queries for retrieval"
-        )
+        logger.info("[Custom Agentic Search Main] Generating sub-queries for retrieval")
         sub_queries = generate_sub_queries(
             original_query, rewritten_query, historical_conversation, self.llm
         )
@@ -822,6 +816,7 @@ class GraphBuilder:
 
         return docs, any_web_search_used
 
+    #! TBR (to be removed)
     def _init_web_search(self):
         logger.info("[GraphBuilder Web Search Init] Initializing Tavily web search")
         try:
@@ -851,7 +846,7 @@ class GraphBuilder:
             "context_docs": state.context_docs,
             "chat_summary": state.chat_summary,
             "token_count": state.token_count,
-            "requires_web_search": state.requires_web_search,
+            "requires_web_search": state.requires_web_search,  #! TBR
             "rewritten_query": state.rewritten_query,
             "query_category": state.query_category,
         }
@@ -864,21 +859,20 @@ class GraphBuilder:
         # Add processing nodes
 
         graph.add_node("rewrite", self._rewrite_query)
-        graph.add_node("tool_choice", self._categorize_query)
         graph.add_node("route", self._route_query)
+        graph.add_node("tool_choice", self._categorize_query)
         graph.add_node("retrieve", self._retrieve_context)
         graph.add_node("return", self._return_state)
 
         # Define graph flow
         graph.add_edge(START, "rewrite")
-        graph.add_edge("rewrite", "tool_choice")
-        graph.add_edge("tool_choice", "route")
+        graph.add_edge("rewrite", "route")
         graph.add_conditional_edges(
             "route",
             self._route_decision,
-            {"retrieve": "retrieve", "return": "return"},
+            {"tool_choice": "tool_choice", "return": "return"},
         )
-
+        graph.add_edge("tool_choice", "retrieve")
         graph.add_edge("retrieve", "return")
         graph.add_edge("return", END)
 
@@ -1042,12 +1036,12 @@ class GraphBuilder:
     async def _route_query(self, state: ConversationState) -> dict:
         """Determine if external knowledge is needed."""
         logger.info(
-            f"[Query Routing] Determining async routing decision for query: '{state.rewritten_query[:100]}...'"
+            f"[Query Routing] Determining routing decision for query: '{state.rewritten_query[:100]}...'"
         )
 
         system_prompt = MARKETING_ORC_PROMPT
 
-        logger.info("[Query Routing] Sending async routing decision request to LLM")
+        logger.info("[Query Routing] Sending routing decision request to LLM")
         response = await self.llm.ainvoke(
             [
                 SystemMessage(content=system_prompt),
@@ -1064,11 +1058,12 @@ class GraphBuilder:
 
         return {
             "requires_retrieval": llm_suggests_retrieval,
+            "query_category": "General",
         }
 
     def _route_decision(self, state: ConversationState) -> str:
         """Route query based on knowledge requirement."""
-        decision = "retrieve" if state.requires_retrieval else "return"
+        decision = "tool_choice" if state.requires_retrieval else "return"
         logger.info(
             f"[Route Decision] Routing to: '{decision}' (requires_retrieval: {state.requires_retrieval})"
         )
@@ -1078,9 +1073,6 @@ class GraphBuilder:
         """Get relevant documents from vector store."""
         logger.info("\n" + "=" * 78)
         logger.info("[Retrieve Context] 🔍 STARTING CONTEXT RETRIEVAL PHASE")
-        logger.info(
-            f"[Retrieve Context] ├─ Search mode: {'Agentic Search' if self.config.agentic_search_mode else 'Custom Agentic Search'}"
-        )
         logger.info(f"[Retrieve Context] ├─ Rewritten query: {state.rewritten_query}")
         docs = []
         any_web_search_used = False
@@ -1095,54 +1087,11 @@ class GraphBuilder:
 
         # append the rewritten query to the conversation history
         conversation_history.append({"role": "user", "content": state.rewritten_query})
-        if self.config.agentic_search_mode:
 
-            docs = self._run_agentic_retriever(conversation_history)
-            # For agentic search mode, we don't track per-query web search usage
-            any_web_search_used = False
-
-        else:
-            docs, any_web_search_used = self._execute_custom_agentic_search(
-                original_query=state.question,
-                rewritten_query=state.rewritten_query,
-                historical_conversation=conversation_history,
-            )
-        ### <-------------------------------->
-        ### Since we're adopting sub queries, let's turn off the adjacent chunks for now
-        # if docs:
-        #     # print id of the first document in the list
-        #     print(f'Document ID of the top ranked doc: {docs[0].id}')
-        #     # get adjacent chunks
-        #     adjacent_chunks = self.retriever._search_adjacent_pages(docs[0].id)
-        #     # reformat adjacent chunks
-        #     if adjacent_chunks:
-        #         for chunk in adjacent_chunks:
-        #             # Create Document object for adjacent chunk
-        #             adjacent_doc = Document(
-        #                 page_content=chunk['content'],
-        #                 metadata={'source': chunk['filepath'], 'score': "adjacent chunk"}
-        #             )
-
-        #             # Add to dictionary (automatically handles deduplication)
-        #             if hasattr(adjacent_doc, 'id') and adjacent_doc.id:
-        #                 docs_dict[adjacent_doc.id] = adjacent_doc
-        #             else:
-        #                 # For adjacent chunks without ID, use a fallback key
-        #                 fallback_key = f"adjacent_{hash(chunk['content'])}"
-        #                 docs_dict[fallback_key] = adjacent_doc
-
-        #         print(f"total number of docs before adding adjacent chunks: {len(docs)}")
-        #         # Update docs list with potentially new adjacent chunks
-        #         docs = list(docs_dict.values())
-        #         print(f"total number of docs after adding adjacent chunks: {len(docs)}")
-        ### <-------------------------------->
-
-        # Final decision based on actual retrieval results
-        # If any individual query used web search, we mark it as web search needed
-        web_search_needed = (
-            any_web_search_used
-            if not self.config.agentic_search_mode
-            else len(docs) < 2
+        docs, any_web_search_used = self._execute_custom_agentic_search(
+            original_query=state.question,
+            rewritten_query=state.rewritten_query,
+            historical_conversation=conversation_history,
         )
 
         # Final verification of document sources in retrieved docs
@@ -1153,21 +1102,14 @@ class GraphBuilder:
         logger.info(
             f"[Retrieve Context] ├─ 📊 Final docs composition: {final_retrieval_docs} retrieval + {final_web_docs} web"
         )
-        if not self.config.agentic_search_mode:
-            logger.info(
-                f"[Retrieve Context] ├─ Per-query web search: {'Used by at least one query' if any_web_search_used else 'Not used by any query'}"
-            )
-            logger.info(
-                f"[Retrieve Context] ├─ Web search : {'YES' if web_search_needed else 'NO'} (based on per-query usage)"
-            )
-        else:
-            logger.info(
-                "[Retrieve Context] ├─ Final web search threshold: < 2 total documents"
-            )
-            logger.info(
-                f"[Retrieve Context] ├─ Final web search needed: {'YES' if web_search_needed else 'NO'}"
-            )
-        if web_search_needed and len(docs) < 2:
+        logger.info(
+            f"[Retrieve Context] ├─ Per-query web search: {'Used by at least one query' if any_web_search_used else 'Not used by any query'}"
+        )
+        logger.info(
+            f"[Retrieve Context] ├─ Web search : {'YES' if any_web_search_used else 'NO'} (based on per-query usage)"
+        )
+
+        if any_web_search_used and len(docs) < 2:
             logger.info(
                 "[Retrieve Context] ├─ 🌐 Will perform additional web search with rewritten query"
             )
@@ -1176,7 +1118,7 @@ class GraphBuilder:
 
         return {
             "context_docs": docs,
-            "requires_web_search": web_search_needed,
+            "requires_web_search": any_web_search_used,
         }
 
 
