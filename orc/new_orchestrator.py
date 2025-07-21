@@ -15,7 +15,6 @@ from shared.cosmos_db import (
     get_conversation_data,
     update_conversation_data,
     store_agent_error,
-    store_user_consumed_tokens,
 )
 from langchain_openai import AzureChatOpenAI
 from langchain_anthropic import ChatAnthropic
@@ -25,7 +24,6 @@ from langchain_core.messages import (
     AIMessage,
     HumanMessage,
     SystemMessage as LangchainSystemMessage,
-    RemoveMessage,
 )
 from urllib.parse import unquote
 
@@ -33,15 +31,12 @@ from shared.util import get_setting
 
 from langchain.schema import Document
 from shared.prompts import (
-    MARKETING_ORC_PROMPT,
     MARKETING_ANSWER_PROMPT,
-    QUERY_REWRITING_PROMPT,
     CREATIVE_BRIEF_PROMPT,
     MARKETING_PLAN_PROMPT,
     BRAND_POSITION_STATEMENT_PROMPT,
     CREATIVE_COPYWRITER_PROMPT,
 )
-from shared.tools import num_tokens_from_string, messages_to_string
 from shared.util import get_organization
 from dotenv import load_dotenv
 
@@ -226,37 +221,47 @@ class ConversationOrchestrator:
 
         try:
             # Load conversation state
-            logging.info(f"[orchestrator-process_conversation] Loading conversation data for ID: {conversation_id}")
+            logging.info(
+                f"[orchestrator-process_conversation] Loading conversation data for ID: {conversation_id}"
+            )
             conversation_data = get_conversation_data(conversation_id)
-            logging.info(f"[orchestrator-process_conversation] Successfully loaded conversation data")
-            logging.info(f"[orchestrator-process_conversation] Loading memory")
+            logging.info(
+                "[orchestrator-process_conversation] Successfully loaded conversation data"
+            )
+            logging.info("[orchestrator-process_conversation] Loading memory")
             memory = self._load_memory(conversation_data.get("memory_data", ""))
-            logging.info(f"[orchestrator-process_conversation] Memory loaded")
+            logging.info("[orchestrator-process_conversation] Memory loaded")
             # Process through agent
 
             # insert conversation to the memory object
-            logging.info(f"[orchestrator-process_conversation] Creating conversation graph")
+            logging.info(
+                "[orchestrator-process_conversation] Creating conversation graph"
+            )
             agent = create_conversation_graph(
                 memory=memory,
                 organization_id=self.organization_id,
                 conversation_id=conversation_id,
             )
-            logging.info(f"[orchestrator-process_conversation] Successfully created agent")
+            logging.info(
+                "[orchestrator-process_conversation] Successfully created agent"
+            )
             config = {"configurable": {"thread_id": conversation_id}}
 
             with get_openai_callback() as cb:
                 # Get agent response
-                logging.info(f"[orchestrator-process_conversation] Invoking agent async")
-                
+                logging.info(
+                    "[orchestrator-process_conversation] Invoking agent async"
+                )
+
                 def run_async_agent():
                     return asyncio.run(agent.ainvoke({"question": question}, config))
-                
+
                 # Run the async function in a separate thread to avoid event loop conflicts
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(run_async_agent)
                     response = future.result()
-                
-                logging.info(f"[orchestrator-process_conversation] Agent response")
+
+                logging.info("[orchestrator-process_conversation] Agent response")
                 return {
                     "conversation_id": conversation_id,
                     "state": ConversationState(
@@ -306,15 +311,16 @@ class ConversationOrchestrator:
         }
         yield json.dumps(data)
         context = ""
-        max_tokens = 2000
         if state.context_docs:
             context = self._format_context(state.context_docs)
 
-        logging.info(f"[orchestrator-generate_response] Retrieving conversation history")
+        logging.info(
+            "[orchestrator-generate_response] Retrieving conversation history"
+        )
         history = conversation_data.get("history", [])
 
         # Retrieve organization data once for efficiency
-        logging.info(f"[orchestrator-generate_response] Retrieving organization data")
+        logging.info("[orchestrator-generate_response] Retrieving organization data")
         organization_data = get_organization(self.organization_id)
 
         system_prompt = MARKETING_ANSWER_PROMPT
@@ -408,7 +414,7 @@ class ConversationOrchestrator:
         try:
             if user_settings["model"] == "gpt-4.1":
                 logging.info(
-                    f"[orchestrator-generate_response] Streaming response from Azure Chat OpenAI"
+                    "[orchestrator-generate_response] Streaming response from Azure Chat OpenAI"
                 )
                 response_llm = AzureChatOpenAI(
                     temperature=user_settings["temperature"],
@@ -437,7 +443,7 @@ class ConversationOrchestrator:
                         break
             elif user_settings["model"] == "Claude-4-Sonnet":
                 logging.info(
-                    f"[orchestrator-generate_response] Streaming response from Claude 4 Sonnet"
+                    "[orchestrator-generate_response] Streaming response from Claude 4 Sonnet"
                 )
                 response_llm = ChatAnthropic(
                     model="claude-sonnet-4-20250514",
@@ -463,7 +469,7 @@ class ConversationOrchestrator:
                         break
             elif user_settings["model"] == "DeepSeek-V3-0324":
                 logging.info(
-                    f"[orchestrator-generate_response] Streaming response from DeepSeek V3"
+                    "[orchestrator-generate_response] Streaming response from DeepSeek V3"
                 )
                 endpoint = os.getenv("AZURE_INFERENCE_SDK_ENDPOINT")
                 key = os.getenv("AZURE_INFERENCE_SDK_KEY")
@@ -554,10 +560,11 @@ async def stream_run(
     organization_id: str = None,
 ):
     orchestrator = ConversationOrchestrator(organization_id=organization_id)
-    resources = await asyncio.to_thread(orchestrator.process_conversation,
-        conversation_id, ask, client_principal
+    resources = await asyncio.to_thread(
+        orchestrator.process_conversation, conversation_id, ask, client_principal
     )
-    return await asyncio.to_thread(orchestrator.generate_response,
+    return await asyncio.to_thread(
+        orchestrator.generate_response,
         resources["conversation_id"],
         resources["state"],
         resources["conversation_data"],
