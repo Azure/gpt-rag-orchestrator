@@ -97,8 +97,11 @@ class ConversationOrchestrator:
 
     def _serialize_memory(self, memory: MemorySaver, config: dict) -> str:
         """Convert memory state to base64 encoded string for storage."""
-        serialized = memory.serde.dumps(memory.get_tuple(config))
-        return base64.b64encode(serialized).decode("utf-8")
+        tuple_data = memory.get_tuple(config)
+        if tuple_data:
+            serialized = memory.serde.dumps(tuple_data)
+            return base64.b64encode(serialized).decode("utf-8")
+        return ""
 
     def _sanitize_response(self, text: str) -> str:
         """Remove sensitive storage URLs from response text."""
@@ -108,16 +111,13 @@ class ConversationOrchestrator:
         return text
 
     def _load_memory(self, memory_data: str) -> MemorySaver:
-        """Decode and load conversation memory from base64 string."""
-        memory = MemorySaver()
-        if memory_data != "":
-            decoded_data = base64.b64decode(memory_data)
-            json_data = memory.serde.loads(decoded_data)
-            if json_data:
-                memory.put(
-                    config=json_data[0], checkpoint=json_data[1], metadata=json_data[2]
-                )
-        return memory
+        """Create a fresh memory saver for this conversation.
+        
+        In modern LangGraph, we use a fresh checkpointer for each conversation
+        and let the graph handle memory persistence automatically.
+        The conversation history is maintained through the database instead.
+        """
+        return MemorySaver()
 
     def _clean_chat_history(self, chat_history: List[dict]) -> str:
         """
