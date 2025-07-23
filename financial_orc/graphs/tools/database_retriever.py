@@ -34,11 +34,11 @@ class CustomRetriever(BaseRetriever):
         indexes (List): List of index names to search.
     """
 
-    topK = 1
-    reranker_threshold = 0.5
-    vector_similarity_threshold = 0.1
-    semantic_config = "financial-index-semantic-configuration"
-    index_name = "financial-index"
+    topK: int = 1
+    reranker_threshold: float = 0.5
+    vector_similarity_threshold: float = 0.1
+    semantic_config: str = "financial-index-semantic-configuration"
+    index_name: str = "financial-index"
     indexes: List
     verbose: bool
     document_id: str
