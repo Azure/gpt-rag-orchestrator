@@ -192,7 +192,6 @@ def log_processing_summary(
     successful_scrapes: int,
     failed_scrapes: int,
     duration: float,
-    blob_storage_enabled: bool = False
 ):
     """
     Log a standardized processing summary.
@@ -203,19 +202,16 @@ def log_processing_summary(
         successful_scrapes: Number of successful scrapes
         failed_scrapes: Number of failed scrapes
         duration: Processing duration in seconds
-        blob_storage_enabled: Whether blob storage was used
     """
     success_rate = (successful_scrapes / total_urls) * 100 if total_urls > 0 else 0
     
     _logger.info(
         "[Utils] Processing completed - request_id: %s, "
-        "total: %d, success: %d (%.1f%%), failed: %d, "
-        "duration: %.2fs, blob_storage: %s",
+        "total: %d, success: %d (%.1f%%), failed: %d, duration: %.2fs",
         request_id,
         total_urls,
         successful_scrapes,
         success_rate,
         failed_scrapes,
         duration,
-        "enabled" if blob_storage_enabled else "disabled"
     )

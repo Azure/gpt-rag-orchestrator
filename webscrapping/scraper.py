@@ -9,7 +9,7 @@ import logging
 import requests
 import re
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, List
 from .config import CrawlerConfig
 from .html_parser import HtmlParser
 
@@ -232,4 +232,82 @@ class WebScraper:
         return {
             "content": content_bytes,
             "metadata": metadata,
-        } 
+        }
+
+    @staticmethod
+    def format_multipage_content_for_blob_storage(
+        crawl_result: Dict[str, Any], 
+        request_id: str, 
+        organization_id: str = None,
+        original_url: str = None,
+        crawl_parameters: Dict[str, Any] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Format multipage crawl results for blob storage.
+        
+        Args:
+            crawl_result: Result from Tavily crawl_website method
+            request_id: Request identifier
+            organization_id: Optional organization identifier for metadata
+            original_url: The original URL that was crawled
+            crawl_parameters: Parameters used for crawling (limit, max_depth, max_breadth)
+            
+        Returns:
+            List of dictionaries with formatted content and metadata for blob storage
+        """
+        if 'results' not in crawl_result or not crawl_result['results']:
+            return []
+
+        formatted_results = []
+        crawl_session_id = f"multipage_{request_id}"
+        crawled_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        
+        for page_index, page_result in enumerate(crawl_result['results']):
+            try:
+                # Extract content from Tavily page result
+                page_url = page_result.get('url', '')
+                page_title = page_result.get('title', 'No Title')
+                page_content = page_result.get('content', '')
+                
+                # Convert content to bytes
+                content_bytes = page_content.encode("utf-8")
+                
+                # Create comprehensive metadata for blob storage
+                metadata = {
+                    # Basic page metadata
+                    "title": WebScraper.clean_metadata_value(page_title),
+                    "page_url": WebScraper.clean_metadata_value(page_url),
+                    "original_content_type": "text/html",
+                    "stored_content_type": "text/plain",
+                    "content_length": str(len(page_content)),
+                    "scraped_at": crawled_at,
+                    
+                    # Crawl session metadata
+                    "crawl_session_id": crawl_session_id,
+                    "request_id": request_id,
+                    "original_crawl_url": WebScraper.clean_metadata_value(original_url or ''),
+                    "total_pages_in_crawl": str(len(crawl_result['results'])),
+                }
+                
+                # Add additional Tavily metadata if available
+                if 'published_date' in page_result:
+                    metadata["published_date"] = WebScraper.clean_metadata_value(page_result['published_date'])
+                
+                # Add organization_id to metadata if provided
+                if organization_id:
+                    metadata["organization_id"] = WebScraper.clean_metadata_value(organization_id)
+                
+                formatted_results.append({
+                    "url": page_url,
+                    "content": content_bytes,
+                    "metadata": metadata,
+                })
+                
+            except Exception as e:
+                # Log error but continue with other pages
+                _logger.warning(
+                    f"Failed to format page {page_index} for blob storage: {str(e)}"
+                )
+                continue
+        
+        return formatted_results

@@ -6,7 +6,6 @@ import stripe
 import platform
 
 from azurefunctions.extensions.http.fastapi import Request, StreamingResponse, Response
-
 from scheduler import main as scheduler_main
 from weekly_scheduler import main as weekly_scheduler_main
 from monthly_scheduler import main as monthly_scheduler_main
@@ -31,6 +30,13 @@ from shared.util import (
 from orc import new_orchestrator
 from financial_orc import orchestrator as financial_orchestrator
 from shared.conversation_export import export_conversation
+from webscrapping.multipage_scrape import crawl_website
+
+# MULTIPAGE SCRAPING CONSTANTS
+DEFAULT_LIMIT = 30
+DEFAULT_MAX_DEPTH = 4
+DEFAULT_MAX_BREADTH = 15
+
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 @app.route(route="orc", methods=[func.HttpMethod.POST])
 async def stream_response(req: Request) -> StreamingResponse:
@@ -291,33 +297,6 @@ async def webhook(req: Request) -> Response:
 
     return Response(content=json.dumps({"success": True}), media_type="application/json")
 
-# @app.function_name(name="scheduler")
-# @app.schedule(schedule="0 0 11,23 * * *", arg_name="timer", run_on_startup=False)
-# async def scheduler(timer: func.TimerRequest) -> None:
-#     # Your scheduler implementation
-#     try:
-#         scheduler_main(timer)
-#     except Exception as e:
-#         logging.error(f"Error in scheduler: {e}")
-
-# @app.function_name(name="weekly_scheduler")
-# @app.schedule(schedule="0 20 19 * * *", arg_name="timer", run_on_startup=False)
-# async def weekly_scheduler(timer: func.TimerRequest) -> None:
-#     # Your weekly scheduler implementation
-#     try:
-#         weekly_scheduler_main(timer)
-#     except Exception as e:
-#         logging.error(f"Error in weekly scheduler: {e}")
-
-# @app.function_name(name="monthly_scheduler")
-# @app.schedule(schedule="0 0 13 1 * *", arg_name="timer")
-# async def monthly_scheduler(timer: func.TimerRequest) -> None:
-#     # Your monthly scheduler implementation
-#     try:
-#         monthly_scheduler_main(timer)
-#     except Exception as e:
-#         logging.error(f"Error in monthly scheduler: {e}")
-
 @app.function_name(name="html_to_pdf_converter")
 @app.route(route="html_to_pdf_converter", methods=[func.HttpMethod.POST])
 async def html2pdf_conversion(req: Request) -> Response:
@@ -515,14 +494,14 @@ async def conversations(req: Request) -> Response:
     else:
         return Response("Method not allowed", status_code=405)
 
-@app.route(route="scrape-pages", methods=[func.HttpMethod.POST])
-async def scrape_pages(req: Request) -> Response:
+@app.route(route="scrape-page", methods=[func.HttpMethod.POST])
+async def scrape_page(req: Request) -> Response:
     """
-    Endpoint to scrape multiple web pages in parallel.
+    Endpoint to scrape a single web page.
     
     Expected payload:
     {
-        "urls": ["http://example.com", "http://example2.com"],
+        "url": "http://example.com",
         "client_principal_id": "user-id"
     }
     
@@ -536,22 +515,22 @@ async def scrape_pages(req: Request) -> Response:
         req_body = await req.json()
         
         # Validate payload
-        if not req_body or 'urls' not in req_body:
+        if not req_body or 'url' not in req_body:
             return Response(
                 content=json.dumps({
                     "status": "error", 
-                    "message": "Request body must contain 'urls' array"
+                    "message": "Request body must contain 'url' field"
                 }),
                 media_type="application/json",
                 status_code=400
             )
         
-        urls = req_body['urls']
-        if not isinstance(urls, list) or len(urls) == 0:
+        url = req_body['url']
+        if not isinstance(url, str) or not url.strip():
             return Response(
                 content=json.dumps({
                     "status": "error", 
-                    "message": "urls must be a non-empty array"
+                    "message": "url must be a non-empty string"
                 }),
                 media_type="application/json",
                 status_code=400
@@ -569,16 +548,19 @@ async def scrape_pages(req: Request) -> Response:
         except Exception as e:
             logging.info(f"[scrape-pages] No organization tracking - {str(e)}")
         
-        # Use the new refactored scraping functionality
-        from webscrapping import scrape_urls_standalone
+        from webscrapping import scrape_single_url
+        from webscrapping.utils import generate_request_id
+        request_id = req.headers.get("x-request-id") or generate_request_id()
         
-        # Extract request ID from headers if provided
-        request_id = req.headers.get("x-request-id")
+        result_data = scrape_single_url(url.strip(), request_id, organization_id)
         
-        result_data = scrape_urls_standalone(urls, request_id, organization_id)
-        
-        # Determine response status code based on result
-        status_code = 200 if result_data.get("status") == "completed" else 500
+        result_status = result_data.get("status")
+        if result_status == "completed":
+            status_code = 200  
+        elif result_status == "failed":
+            status_code = 422  
+        else: 
+            status_code = 500  
         
         return Response(
             content=json.dumps(result_data),
@@ -606,6 +588,287 @@ async def scrape_pages(req: Request) -> Response:
             status_code=500
         )
 
+def create_preview_results(results: list, preview_length: int = 100) -> list:
+    """
+    Create a preview version of crawl results with truncated raw_content.
+    
+    Args:
+        results: List of crawl results from Tavily
+        preview_length: Number of characters to show in preview (default: 100)
+        
+    Returns:
+        List of results with truncated raw_content for API response
+    """
+    if not results:
+        return results
+    
+    preview_results = []
+    for result in results:
+        # Create a copy of the result
+        preview_result = result.copy()
+        
+        # Truncate raw_content if it exists
+        if 'raw_content' in preview_result and preview_result['raw_content']:
+            content = preview_result['raw_content'] 
+            if len(content) > preview_length:
+                preview_result['raw_content'] = content[:preview_length] + "..."
+            
+        preview_results.append(preview_result)
+    
+    return preview_results
+
+
+@app.route(route="multipage-scrape", methods=[func.HttpMethod.POST])
+async def multipage_scrape(req: Request) -> Response:
+    """
+    Endpoint to crawl a website using advanced multipage scraping with Tavily.
+    
+    Expected payload:
+    {
+        "url": "https://example.com",
+        "limit": 30,           // optional, default 30
+        "max_depth": 4,        // optional, default 4  
+        "max_breadth": 15,     // optional, default 15
+        "client_principal_id": "user-id"  // optional
+    }
+    
+    Returns:
+        JSON response with crawling results including all discovered pages
+    """
+    logging.info('[multipage-scrape] Python HTTP trigger function processed a request.')
+    
+    try:
+        req_body = await req.json()
+        
+        # Validate payload
+        if not req_body or 'url' not in req_body:
+            return Response(
+                content=json.dumps({
+                    "status": "error", 
+                    "message": "Request body must contain 'url' field"
+                }),
+                media_type="application/json",
+                status_code=400
+            )
+        
+        url = req_body['url']
+        if not url or not isinstance(url, str):
+            return Response(
+                content=json.dumps({
+                    "status": "error", 
+                    "message": "url must be a non-empty string"
+                }),
+                media_type="application/json",
+                status_code=400
+            )
+
+        limit = req_body.get('limit', DEFAULT_LIMIT)
+        max_depth = req_body.get('max_depth', DEFAULT_MAX_DEPTH)
+        max_breadth = req_body.get('max_breadth', DEFAULT_MAX_BREADTH)
+        
+        if not isinstance(limit, int) or limit < 1 or limit > 100:
+            return Response(
+                content=json.dumps({
+                    "status": "error", 
+                    "message": "limit must be an integer between 1 and 100"
+                }),
+                media_type="application/json",
+                status_code=400
+            )
+            
+        if not isinstance(max_depth, int) or max_depth < 1 or max_depth > 10:
+            return Response(
+                content=json.dumps({
+                    "status": "error", 
+                    "message": "max_depth must be an integer between 1 and 10"
+                }),
+                media_type="application/json",
+                status_code=400
+            )
+            
+        if not isinstance(max_breadth, int) or max_breadth < 1 or max_breadth > 50:
+            return Response(
+                content=json.dumps({
+                    "status": "error", 
+                    "message": "max_breadth must be an integer between 1 and 50"
+                }),
+                media_type="application/json",
+                status_code=400
+            )
+
+        # Extract client principal ID for logging/tracking
+        client_principal_id = req_body.get('client_principal_id', '00000000-0000-0000-0000-000000000000')
+        
+        organization_id = None
+        try:
+            user = get_user(client_principal_id)
+            organization_id = user.get("data", {}).get("organizationId")
+            if organization_id:
+                logging.info(f"[multipage-scrape] Retrieved organizationId: {organization_id}")
+        except Exception as e:
+            logging.info(f"[multipage-scrape] No organization tracking - {str(e)}")
+        
+        logging.info(f"[multipage-scrape] Starting crawl for URL: {url} with limit: {limit}, max_depth: {max_depth}, max_breadth: {max_breadth}")
+        
+        # Extract request ID from headers if provided, or generate one
+        from webscrapping.utils import generate_request_id
+        request_id = req.headers.get("x-request-id") or generate_request_id()
+        
+        # Execute the multipage crawling
+        crawl_result = crawl_website(url, limit, max_depth, max_breadth)
+        
+        # Check if crawling was successful
+        if 'error' in crawl_result:
+            return Response(
+                content=json.dumps({
+                    "status": "error",
+                    "message": f"Crawling failed: {crawl_result['error']}",
+                    "url": url
+                }),
+                media_type="application/json",
+                status_code=500
+            )
+        
+        # Initialize blob storage (always enabled)
+        from webscrapping.blob_manager import create_crawler_manager_from_env
+        from webscrapping.scraper import WebScraper
+        
+        crawler_manager = create_crawler_manager_from_env(request_id)
+        blob_storage_result = None
+        
+        # Handle blob storage for all successful crawls
+        if crawl_result.get('results'):
+            # Format crawl results for blob storage
+            crawl_parameters = {
+                "limit": limit,
+                "max_depth": max_depth,
+                "max_breadth": max_breadth
+            }
+            
+            formatted_pages = WebScraper.format_multipage_content_for_blob_storage(
+                crawl_result=crawl_result,
+                request_id=request_id,
+                organization_id=organization_id,
+                original_url=url,
+                crawl_parameters=crawl_parameters
+            )
+            
+            if crawler_manager and formatted_pages:
+                try:
+                    # Upload to blob storage
+                    blob_storage_result = crawler_manager.store_multipage_results_in_blob(
+                        formatted_pages=formatted_pages,
+                        content_type="text/plain"
+                    )
+                    
+                    logging.info(
+                        f"[multipage-scrape] Blob storage: {blob_storage_result['total_successful']} uploaded, "
+                        f"{blob_storage_result['total_failed']} failed, {blob_storage_result['total_duplicates']} duplicates"
+                    )
+                    
+                except Exception as blob_error:
+                    blob_storage_result = {
+                        "status": "error",
+                        "error": f"Blob storage upload failed: {str(blob_error)}",
+                        "total_processed": len(formatted_pages),
+                        "total_successful": 0,
+                        "total_failed": len(formatted_pages),
+                        "total_duplicates": 0
+                    }
+                    logging.error(
+                        f"[multipage-scrape] Blob storage failed for URL: {url}, error: {str(blob_error)}"
+                    )
+            elif not crawler_manager:
+                # Storage not configured
+                blob_storage_result = {
+                    "status": "not_configured",
+                    "message": "Blob storage not configured - missing Azure storage environment variables",
+                    "total_processed": len(formatted_pages) if formatted_pages else 0,
+                    "total_successful": 0,
+                    "total_failed": 0,
+                    "total_duplicates": 0
+                }
+                logging.info(f"[multipage-scrape] Blob storage not configured for URL: {url}")
+            else:
+                # Failed to format pages
+                blob_storage_result = {
+                    "status": "error",
+                    "error": "Failed to format pages for blob storage",
+                    "total_processed": 0,
+                    "total_successful": 0,
+                    "total_failed": 0,
+                    "total_duplicates": 0
+                }
+        else:
+            # No results to store
+            blob_storage_result = {
+                "status": "no_content",
+                "message": "No pages found to store",
+                "total_processed": 0,
+                "total_successful": 0,
+                "total_failed": 0,
+                "total_duplicates": 0
+            }
+        
+        # Create preview results for API response (truncated raw_content)
+        preview_results = create_preview_results(crawl_result.get('results', []))
+        
+        # Generate message based on blob storage result  
+        if blob_storage_result.get("total_successful", 0) > 0:
+            if blob_storage_result.get("total_failed", 0) > 0:
+                message = f"Scraped {blob_storage_result['total_successful']} pages successfully, {blob_storage_result['total_failed']} failed"
+            else:
+                message = f"Successfully scraped {blob_storage_result['total_successful']} pages and uploaded to blob storage"
+        elif blob_storage_result.get("status") == "not_configured":
+            message = f"Scraped {len(crawl_result.get('results', []))} pages (blob storage not configured)"
+        else:
+            message = f"Scraped {len(crawl_result.get('results', []))} pages but blob storage failed"
+
+        # Format successful response with preview results
+        response_data = {
+            "status": "completed",
+            "message": message,
+            "url": url,
+            "parameters": {
+                "limit": limit,
+                "max_depth": max_depth,
+                "max_breadth": max_breadth
+            },
+            "results": preview_results,
+            "pages_found": len(crawl_result.get('results', [])),
+            "response_time": crawl_result.get('response_time', 0.0),
+            "organization_id": organization_id,
+            "request_id": request_id,
+            "blob_storage_result": blob_storage_result
+        }
+        
+        logging.info(f"[multipage-scrape] Successfully crawled {response_data['pages_found']} pages from {url}")
+        
+        return Response(
+            content=json.dumps(response_data),
+            media_type="application/json",
+            status_code=200
+        )
+        
+    except json.JSONDecodeError:
+        return Response(
+            content=json.dumps({
+                "status": "error", 
+                "message": "Invalid JSON format"
+            }),
+            media_type="application/json",
+            status_code=400
+        )
+    except Exception as e:
+        logging.error(f"Error in multipage-scrape endpoint: {str(e)}")
+        return Response(
+            content=json.dumps({
+                "status": "error", 
+                "message": f"Internal server error: {str(e)}"
+            }),
+            media_type="application/json",
+            status_code=500
+        )
 ################ MCP Functions ################
 
 @app.generic_trigger(
