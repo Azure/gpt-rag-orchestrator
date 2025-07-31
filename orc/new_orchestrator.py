@@ -530,6 +530,7 @@ class ConversationOrchestrator:
                     "user_id": user_info["id"],
                     "user_name": user_info["name"],
                     "response_time": round(time.time() - start_time, 2),
+                    "organization_id": self.organization_id,
                 },
             }
         )

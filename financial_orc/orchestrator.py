@@ -304,6 +304,7 @@ class FinancialOrchestrator:
             "user_id": user_info["id"],
             "user_name": user_info["name"],
             "response_time": response_time,
+            "organization_id": self.organization_id,
         }
         conversation_data["interaction"] = interaction
 
