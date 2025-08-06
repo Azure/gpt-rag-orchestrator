@@ -1,3 +1,4 @@
+import os
 import asyncio
 import logging
 import pyodbc
@@ -45,9 +46,11 @@ class SQLDBClient:
                 logging.error(f"Failed to connect to SQL Database with SQL Server authentication: {e}")
                 raise
         else:
+            client_id = os.environ.get("AZURE_CLIENT_ID")
+
             # Use Azure AD token for authentication via Managed Identity.
             credential = ChainedTokenCredential(
-                ManagedIdentityCredential(),
+                ManagedIdentityCredential(client_id=client_id),
                 AzureCliCredential()
             )
             try:
