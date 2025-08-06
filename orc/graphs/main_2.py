@@ -600,7 +600,12 @@ class GraphBuilder:
         state: ConversationState
     ) -> Dict[str, Any]:
         """Configure additional arguments for data_analyst tool calls."""
-        pass
+        if tool_call["name"] == "data_analyst":
+            tool_call["args"].update(
+                {
+                    "organization_id": self.organization_id,
+                }
+            )
     
     async def _init_mcp_client(self) -> MultiServerMCPClient:
         """Initialize the MCP client"""
@@ -651,6 +656,7 @@ class GraphBuilder:
         
         logger.info(f"Executing {len(mcp_tool_used)} tool(s)...")
         
+        # gotta call it here again since langchain gives me too much trouble to store tool calls results in the state
         client = await self._init_mcp_client()
         mcp_available_tools = await client.get_tools()
         
