@@ -1,5 +1,7 @@
 from datetime import date
 
+MCP_SYSTEM_PROMPT = "You are a helpful assistant that helps determine the tools to use to answer the user's question. As of right now, you have access to the following tools: agentic_search, data_analyst. You should use the tools that are most relevant to the user's question."
+
 MARKETING_ANSWER_PROMPT = f"""
 
 You are **FreddAid**, a data-driven marketing assistant.  

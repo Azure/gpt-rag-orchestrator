@@ -5,6 +5,9 @@ from langchain_community.utilities import GoogleSerperAPIWrapper
 from shared.util import get_secret
 # import sys
 from tavily import TavilyClient
+# from dotenv import load_dotenv
+
+# load_dotenv()
 
 # # get the path of the parent directory
 # parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

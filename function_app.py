@@ -869,17 +869,3 @@ async def multipage_scrape(req: Request) -> Response:
             media_type="application/json",
             status_code=500
         )
-################ MCP Functions ################
-
-@app.generic_trigger(
-    arg_name="context",
-    type="mcpToolTrigger",
-    toolName="mcp_status",
-    description="A tool to check the status of the MCP",
-    toolProperties="[]",
-)
-def mcp_status(context) -> None:
-    """
-    A simple MCP tool that returns the status of the MCP.
-    """
-    return "MCP is running!"
