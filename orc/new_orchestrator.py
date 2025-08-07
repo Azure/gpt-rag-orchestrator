@@ -272,7 +272,6 @@ class ConversationOrchestrator:
                     future = executor.submit(run_async_agent)
                     response = future.result()
 
-                logging.info("[orchestrator-process_conversation] Agent response")
                 return {
                     "conversation_id": conversation_id,
                     "state": ConversationState(
@@ -313,12 +312,18 @@ class ConversationOrchestrator:
         logging.info(
             f"[orchestrator-generate_response] Generating response for: {state.question}"
         )
+        blob_urls = []
+        for tool_result in state.tool_results:
+            results_json = json.loads(tool_result)
+            blob_urls.extend(results_json.get("blob_urls", []))
+        
         data = {
             "conversation_id": conversation_id,
             "thoughts": [
                 f"""
                 Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Retrieval: {state.requires_retrieval} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / MCP Tools Used: {len(state.mcp_tool_used)} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
             ],
+            "images_blob_urls": blob_urls,
         }
         yield json.dumps(data)
         context = ""
@@ -529,6 +534,7 @@ class ConversationOrchestrator:
                     "thoughts": [
                         f"""Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Retrieval: {state.requires_retrieval} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / MCP Tools Used: {len(state.mcp_tool_used)} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
                     ],
+                    "images_blob_urls": blob_urls,
                 },
             ]
         )
