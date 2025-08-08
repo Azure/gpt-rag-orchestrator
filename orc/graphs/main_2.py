@@ -4,7 +4,7 @@ import json
 import logging
 import asyncio
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 from dotenv import load_dotenv
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from typing import Dict, Any
@@ -30,7 +30,7 @@ from shared.prompts import (
 )
 from shared.cosmos_db import get_conversation_data
 from shared.util import get_organization
-from orc.graphs.utils import clean_chat_history_for_llm
+from orc.graphs.utils import clean_chat_history_for_llm, extract_thread_id_from_history
 from langgraph.checkpoint.memory import MemorySaver
 
 # Set up logging for Azure Functions - this needs to be done before creating loggers
@@ -99,6 +99,7 @@ class ConversationState:
     augmented_query: str = field(default_factory=str)
     mcp_tool_used: List[Dict[str, Any]] = field(default_factory=list)
     tool_results: List[Any] = field(default_factory=list)
+    code_thread_id: Optional[str] = field(default=None)
 
 
 @dataclass
@@ -328,10 +329,25 @@ class GraphBuilder:
         <-------------------------------->
 
         """
+      
+    def _get_code_thread_id(self, state: ConversationState) -> Optional[str]:
+        """Extract thread id from the code interpreter tool result"""
+        if state.mcp_tool_used and state.tool_results:
+            for tool_call, tool_result in zip(state.mcp_tool_used, state.tool_results):
+                if tool_call["name"] == "data_analyst":
+                    if isinstance(tool_result, str):
+                        tool_result = json.loads(tool_result)
+                    if isinstance(tool_result, dict):
+                        thread_id = tool_result.get("thread_id")
+                        if thread_id:
+                            logger.info(f"Existing thread id found: {thread_id}")
+                            return thread_id
+        return None
 
-    def _return_state(self, state: ConversationState) -> dict:
+    def _get_context_docs_from_tool_results(self, state: ConversationState) -> List[Any]:
+        """Get context docs from the tool results"""
+        context_docs = []
 
-        # pass tool result to context_docs 
         if state.mcp_tool_used and state.tool_results:
             for i, tool_call in enumerate(state.mcp_tool_used):
                 if i < len(state.tool_results):
@@ -339,21 +355,27 @@ class GraphBuilder:
                     
                     if isinstance(tool_result, str):
                         tool_result = json.loads(tool_result)
-                        
+
                     if tool_call["name"] == "agentic_search" and isinstance(tool_result, dict):
-                        state.context_docs.append(tool_result.get("results", tool_result))
+                        context_docs.append(tool_result.get("results", tool_result))
                     elif tool_call["name"] == "data_analyst" and isinstance(tool_result, dict):
-                        state.context_docs.append(tool_result.get("last_agent_message", tool_result))
+                        context_docs.append(tool_result.get("last_agent_message", tool_result))
                     else:
-                        state.context_docs.append(tool_result)
+                        context_docs.append(tool_result)
+        return context_docs
+    
+    def _return_state(self, state: ConversationState) -> dict:
+        # Get updated thread ID from tool results, fallback to existing thread ID
+        updated_thread_id = self._get_code_thread_id(state) or state.code_thread_id
         
         return {
             "messages": state.messages,
-            "context_docs": state.context_docs,
+            "context_docs": self._get_context_docs_from_tool_results(state),
             "rewritten_query": state.rewritten_query,
             "query_category": state.query_category,
             "mcp_tool_used": state.mcp_tool_used,
             "tool_results": state.tool_results,
+            "code_thread_id": updated_thread_id
         }
 
     def build(self, memory) -> StateGraph:
@@ -468,6 +490,10 @@ class GraphBuilder:
             )
             augmented_query = question
 
+        # Initialize code thread ID from conversation history (this is for the code interpreter tool)
+        existing_thread_id = extract_thread_id_from_history(history)
+        logger.info(f"[Query Rewrite] Initialized thread_id from history: {existing_thread_id}")
+
         return {
             "rewritten_query": rewritte_query.content,
             "augmented_query": (
@@ -476,6 +502,7 @@ class GraphBuilder:
                 else augmented_query
             ),
             "messages": state.messages + [HumanMessage(content=question)],
+            "code_thread_id": existing_thread_id,
         }
 
     async def _categorize_query(self, state: ConversationState) -> dict:
@@ -604,8 +631,13 @@ class GraphBuilder:
             tool_call["args"].update(
                 {
                     "organization_id": self.organization_id,
+                    "code_thread_id": state.code_thread_id
                 }
             )
+    
+    def _is_local_environment(self) -> bool:
+        """Check if the current environment is local development."""
+        return os.getenv("ENVIRONMENT", "").lower() == "local"
     
     async def _init_mcp_client(self) -> MultiServerMCPClient:
         """Initialize the MCP client"""
@@ -616,10 +648,16 @@ class GraphBuilder:
             logger.error(f"Error getting MCP function variables: {str(e)}")
             raise RuntimeError(f"Error getting MCP function variables: {str(e)}")
         
+        # Use different endpoint for local environment
+        if self._is_local_environment():
+            mcp_url = f"http://localhost:7073/runtime/webhooks/mcp/sse"
+        else:
+            mcp_url = f"https://{mcp_function_name}.azurewebsites.net/runtime/webhooks/mcp/sse?code={mcp_function_secret}"
+        
         client = MultiServerMCPClient(
             {
                 "search": {
-                    "url": f"https://{mcp_function_name}.azurewebsites.net/runtime/webhooks/mcp/sse?code={mcp_function_secret}",
+                    "url": mcp_url,
                     "transport": "sse",
                 }
             }
