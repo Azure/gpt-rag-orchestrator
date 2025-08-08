@@ -6,6 +6,7 @@ azure-mgmt-web==8.0.0
 azure-mgmt-storage==22.1.1
 azure-storage-blob==12.25.1
 azure-appconfiguration==1.7.1
+azure.appconfiguration.provider
 azure-ai-projects==1.0.0b11
 azure-search-documents==11.5.2
 

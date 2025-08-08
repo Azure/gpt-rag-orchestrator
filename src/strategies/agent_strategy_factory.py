@@ -12,7 +12,7 @@ class AgentStrategyFactory:
         if key == AgentStrategies.SINGLE_AGENT_RAG.value:
             return SingleAgentRAGStrategy()
         if key == AgentStrategies.MCP.value:
-            return McpStrategy()
+            return await McpStrategy.create()
         if key == AgentStrategies.NL2SQL.value:
             return NL2SQLStrategy()
         # if key == AgentStrategies.MULTIMODAL.value:
