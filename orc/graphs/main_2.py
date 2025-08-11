@@ -349,7 +349,7 @@ class GraphBuilder:
         return None
 
     def _get_context_docs_from_tool_results(self, state: ConversationState) -> List[Any]:
-        """Get context docs from the tool results"""
+        """Get context docs from the tool results, including blob paths for data_analyst with images"""
         context_docs = []
 
         if state.mcp_tool_used and state.tool_results:
@@ -364,17 +364,26 @@ class GraphBuilder:
                         context_docs.append(tool_result.get("results", tool_result))
                     elif tool_call["name"] == "data_analyst" and isinstance(tool_result, dict):
                         context_docs.append(tool_result.get("last_agent_message", tool_result))
+                        
+                        # Add blob path if images exist for data_analyst tool
+                        if tool_result.get("blob_urls"):
+                            blob_path = tool_result.get("blob_urls")[0].get("blob_path")
+                            if blob_path:
+                                logger.info(f"[MCP] Adding blob path to context: {blob_path}")
+                                blob_path_content = f"Here is the graph/visualization link: \n\n{blob_path}"
+                                context_docs.append(blob_path_content)
                     else:
                         context_docs.append(tool_result)
         return context_docs
-    
+
     def _return_state(self, state: ConversationState) -> dict:
         # Get updated thread ID from tool results, fallback to existing thread ID
         updated_thread_id = self._get_code_thread_id(state) or state.code_thread_id
-        
+
+        context_docs = self._get_context_docs_from_tool_results(state)
         return {
             "messages": state.messages,
-            "context_docs": self._get_context_docs_from_tool_results(state),
+            "context_docs": context_docs,
             "rewritten_query": state.rewritten_query,
             "query_category": state.query_category,
             "mcp_tool_used": state.mcp_tool_used,
@@ -670,10 +679,13 @@ class GraphBuilder:
     
     async def _get_tool_calls(self, state: ConversationState) -> dict:
         """Get tool calls from the MCP server"""
+
+        logger.info(f"[MCP] Initializing MCP client")
         client = await self._init_mcp_client()
 
+        logger.info(f"[MCP] Getting tools from MCP client")
         tools = await client.get_tools()
-        logger.info(f"Found {len(tools)} tools")
+        logger.info(f"[MCP] Found {len(tools)} tools")
 
         # equip the llm with the tools
         llm_with_tools = self.llm.bind_tools(tools, tool_choice="any") # switch to auto in case we want to use no tool 
@@ -682,8 +694,8 @@ class GraphBuilder:
         try:
             response = await llm_with_tools.ainvoke(message)
         except Exception as e:
-            logger.error(f"Error getting tool calls from LLM: {str(e)}")
-            raise RuntimeError(f"Error getting tool calls from LLM: {str(e)}")
+            logger.error(f"[MCP] Error getting tool calls from LLM: {str(e)}")
+            raise RuntimeError(f"[MCP] Error getting tool calls from LLM: {str(e)}")
         return {
             "mcp_tool_used": response.tool_calls,
         }
@@ -693,10 +705,10 @@ class GraphBuilder:
         mcp_tool_used = state.mcp_tool_used
         tool_results = []
         if not mcp_tool_used:
-            logger.info("No tool calls to execute")
+            logger.info("[MCP] No tool calls to execute")
             return tool_results
         
-        logger.info(f"Executing {len(mcp_tool_used)} tool(s)...")
+        logger.info(f"[MCP] Executing {len(mcp_tool_used)} tool(s)...")
         
         # gotta call it here again since langchain gives me too much trouble to store tool calls results in the state
         client = await self._init_mcp_client()
@@ -712,15 +724,15 @@ class GraphBuilder:
             tool = self._find_tool_by_name(mcp_available_tools, tool_name)
             if tool:
                 try:
-                    logger.info(f"Running {tool_name}...")
+                    logger.info(f"[MCP] Running {tool_name}...")
                     tool_result = await tool.ainvoke(tool_call["args"])
                     tool_results.append(tool_result)
                     logger.info(f"{tool_name} completed successfully")
                 except Exception as e:
-                    logger.error(f"Error executing {tool_name}: {e}")
+                    logger.error(f"[MCP] Error executing {tool_name}: {e}")
                     tool_results.append(f"Error: {e}")
             else:
-                error_msg = f"Tool '{tool_name}' not found in available tools"
+                error_msg = f"[MCP] Tool '{tool_name}' not found in available tools"
                 logger.error(error_msg)
                 tool_results.append(error_msg)
         
@@ -728,13 +740,13 @@ class GraphBuilder:
             preview = str(tool_results[0])
             if len(preview) > 200:
                 preview = preview[:200] + "..."
-            logger.info(f"Tool results: {preview}")
+            logger.info(f"[MCP] Tool results: {preview}")
             return {
                 "tool_results": tool_results,
             }
             
         else:
-            logger.info("No tool results to return")
+            logger.info("[MCP] No tool results to return")
             return {
                 "tool_results": tool_results,
             }
