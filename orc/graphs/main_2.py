@@ -727,7 +727,7 @@ class GraphBuilder:
                     logger.info(f"[MCP] Running {tool_name}...")
                     tool_result = await tool.ainvoke(tool_call["args"])
                     tool_results.append(tool_result)
-                    logger.info(f"{tool_name} completed successfully")
+                    logger.info(f"[MCP] {tool_name} completed successfully")
                 except Exception as e:
                     logger.error(f"[MCP] Error executing {tool_name}: {e}")
                     tool_results.append(f"Error: {e}")
