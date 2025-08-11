@@ -367,7 +367,9 @@ class GraphBuilder:
                         
                         # Add blob path if images exist for data_analyst tool
                         if tool_result.get("blob_urls"):
-                            blob_path = tool_result.get("blob_urls")[0].get("blob_path")
+                        blob_urls = tool_result.get("blob_urls")
+                        if isinstance(blob_urls, list) and len(blob_urls) > 0 and isinstance(blob_urls[0], dict):
+                            blob_path = blob_urls[0].get("blob_path")
                             if blob_path:
                                 logger.info(f"[MCP] Adding blob path to context: {blob_path}")
                                 blob_path_content = f"Here is the graph/visualization link: \n\n{blob_path}"
