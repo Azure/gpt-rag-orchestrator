@@ -161,6 +161,17 @@ class GraphBuilder:
                 "industryInformation": "",
             }
 
+        # Initialize conversation data with error handling - cache it to avoid multiple DB calls
+        try:
+            self.conversation_data = get_conversation_data(conversation_id)
+            logger.info(f"[GraphBuilder Init] Successfully retrieved conversation data for ID: {conversation_id}")
+        except Exception as e:
+            logger.exception(f"[GraphBuilder Init] Failed to retrieve conversation data")
+            logger.warning("[GraphBuilder Init] Using empty conversation data as fallback")
+            self.conversation_data = {
+                "history": []
+            }
+
         logger.info("[GraphBuilder Init] Successfully initialized GraphBuilder")
 
     def _init_llm(self) -> AzureChatOpenAI:
@@ -223,20 +234,13 @@ class GraphBuilder:
 
     def _get_conversation_data(self) -> dict:
         """
-        Retrieve conversation data.
+        Retrieve cached conversation data to avoid multiple DB calls.
 
         Returns:
             Dictionary containing conversation data with history
         """
-        logger.info(f"[Conversation] Fetching conversation data for ID: {self.conversation_id}")
-        try:
-            return get_conversation_data(self.conversation_id)
-        except Exception as e:
-            logger.error(f"[Conversation] Failed to retrieve conversation data: {str(e)}")
-            logger.warning("[Conversation] Using empty conversation history as fallback")
-            return {
-                "history": []
-            }
+        logger.info(f"[Conversation] Using cached conversation data for ID: {self.conversation_id}")
+        return self.conversation_data
 
     async def _llm_invoke(self, messages, **kwargs):
         """
@@ -514,7 +518,7 @@ class GraphBuilder:
         conversation_data = self._get_conversation_data()
         history = conversation_data.get("history", [])
         logger.info(
-            f"[Query Categorization] Using {len(history)} conversation history messages for context"
+            f"[Query Categorization] Retrieved {len(history)} conversation history messages for context"
         )
 
         category_prompt = f"""
