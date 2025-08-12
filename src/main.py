@@ -75,15 +75,15 @@ async def orchestrator_endpoint(request: Request):
             logging.error(f"No 'conversation_id' provided in feedback payload, and payload is {payload}")
             raise HTTPException(status_code=400, detail="No 'conversation_id' field in request body")
 
-        star_rating = payload.get("stars_rating")
-        feedback_text = payload.get("feedback_text", "")
-
         # Create orchestrator instance and save feedback
         orchestrator = await Orchestrator.create(conversation_id=conversation_id)
         await orchestrator.save_feedback({
             "ask": ask,
-            "stars_rating": star_rating,
-            "feedback_text": feedback_text
+            "conversation_id": conversation_id,
+            "question_id": payload.get("question_id"),
+            "is_positive": payload.get("is_positive"),
+            "stars_rating": payload.get("stars_rating"),
+            "feedback_text": payload.get("feedback_text")
         })
         return {"status": "success", "message": "Feedback saved successfully"}
     
