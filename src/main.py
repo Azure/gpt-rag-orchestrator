@@ -67,9 +67,27 @@ async def orchestrator_endpoint(request: Request):
     ask = payload.get("ask")
     if not ask:
         raise HTTPException(status_code=400, detail="No 'ask' field in request body")
+    
+    if payload.get("type") == "feedback":
+        # Handle feedback submission
+        conversation_id = payload.get("conversation_id")
+        if not conversation_id:
+            logging.error(f"No 'conversation_id' provided in feedback payload, and payload is {payload}")
+            raise HTTPException(status_code=400, detail="No 'conversation_id' field in request body")
 
+        star_rating = payload.get("stars_rating")
+        feedback_text = payload.get("feedback_text", "")
+
+        # Create orchestrator instance and save feedback
+        orchestrator = await Orchestrator.create(conversation_id=conversation_id)
+        await orchestrator.save_feedback({
+            "ask": ask,
+            "stars_rating": star_rating,
+            "feedback_text": feedback_text
+        })
+        return {"status": "success", "message": "Feedback saved successfully"}
+    
     user_context = payload.get("user-context", {})
-
     orchestrator = await Orchestrator.create(conversation_id=payload.get("conversation_id"), user_context=user_context)
 
     async def sse_event_generator():

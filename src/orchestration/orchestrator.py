@@ -73,3 +73,25 @@ class Orchestrator:
                 await self.database_client.update_document(self.database_container, self.agentic_strategy.conversation)
 
             logging.debug(f"Finished conversation {self.conversation_id}")
+
+    async def save_feedback(self, feedback: Dict):
+        """
+        Save user feedback into the same Cosmos DB container as the conversation.
+        """
+        if not self.conversation_id:
+            raise ValueError("Conversation ID is required to save feedback")
+
+        # Retrieve existing conversation document
+        conversation = await self.database_client.get_document(
+            self.database_container,
+            self.conversation_id
+        )
+        if conversation is None:
+            raise ValueError(f"Conversation {self.conversation_id} not found in database")
+
+        if "feedback" not in conversation:
+            conversation["feedback"] = []
+        conversation["feedback"].append(feedback)
+
+        await self.database_client.update_document(self.database_container, conversation)
+        logging.info(f"Feedback saved for conversation {self.conversation_id}")
