@@ -289,6 +289,16 @@ The application of artificial intelligence (AI) in healthcare has led to signifi
 
 Each of these advancements underscores the transformative potential of AI in healthcare, offering hope for more efficient, personalized, and accessible medical services. The integration of AI into healthcare practices requires careful consideration of ethical, privacy, and data security concerns, ensuring that these innovations benefit all segments of the population.
 
+Example 3: Image/Citation Example
+If the provided context includes an image or graph, ensure that you embed the image directly in your answer. Use the format shown below:
+
+1. The price for groceries has increased by 10% in the past 3 months. ![Image](https://wsj.com/grocery-price-increase.png)
+2. The market share of the top 5 competitors in the grocery industry is as follows: ![Image](https://nytimes.com/grocery-market-share.jpeg)
+3. The percentage of customers who quit last quarter is as follows: ![Image](https://ft.com/customer-churn.jpg)
+
+**Guidelines:**
+- To identify an image or graph in context, look for file extensions such as `.jpeg`, `.jpg`, `.png`, etc. in the URL.
+- Always use "Image" as the alt text for embedded images.
 <-- End of examples
 
 """
