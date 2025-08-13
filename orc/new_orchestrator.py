@@ -10,7 +10,8 @@ import concurrent.futures
 from langchain_community.callbacks import get_openai_callback
 from langsmith import traceable
 from langgraph.checkpoint.memory import MemorySaver
-from orc.graphs.main import create_conversation_graph
+# from orc.graphs.main import create_conversation_graph
+from orc.graphs.main_2 import create_conversation_graph
 from shared.cosmos_db import (
     get_conversation_data,
     update_conversation_data,
@@ -19,7 +20,7 @@ from shared.cosmos_db import (
 from langchain_openai import AzureChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Dict, Any, Optional
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
@@ -59,7 +60,14 @@ class ConversationState:
         question: Current user query
         messages: Conversation history as a list of messages
         context_docs: Retrieved documents from various sources
-        requires_web_search: Flag indicating if web search is needed
+        requires_retrieval: Flag indicating if retrieval is needed
+        rewritten_query: Rewritten query for better search
+        query_category: Category of the query
+        augmented_query: Augmented version of the query
+        mcp_tool_used: List of MCP tools that were used
+        tool_results: Results from tool execution
+        code_thread_id: Thread id for the code interpreter tool
+        last_mcp_tool_used: Name of the last MCP tool used
     """
 
     question: str
@@ -67,15 +75,16 @@ class ConversationState:
         default_factory=list
     )  # track all messages in the conversation
     context_docs: List[Document] = field(default_factory=list)
-    requires_web_search: bool = field(default=False)
+    requires_retrieval: bool = field(default=False)
     rewritten_query: str = field(
         default_factory=str
     )  # rewritten query for better search
-    chat_summary: str = field(default_factory=str)
-    token_count: int = field(default_factory=int)
     query_category: str = field(default_factory=str)
     augmented_query: str = field(default_factory=str)
-
+    mcp_tool_used: List[Dict[str, Any]] = field(default_factory=list)
+    tool_results: List[Any] = field(default_factory=list)
+    code_thread_id: Optional[str] = field(default=None)
+    last_mcp_tool_used: str = field(default="")
 
 # Prompt for Tool Calling
 CATEGORY_PROMPT = {
@@ -177,27 +186,43 @@ class ConversationOrchestrator:
             return source_path
 
     def _format_context(
-        self, context_docs: List[Document], display_source: bool = True
+        self, context_docs: List, display_source: bool = True
     ) -> str:
         """Formats retrieved documents into a string for LLM consumption."""
         if not context_docs:
             return ""
-        if display_source:
-            return "\n\n==============================================\n\n".join(
-                [
-                    f"\nContent: \n\n{doc.page_content}"
-                    + (
-                        f"\n\nSource: {self._format_source_path(doc.metadata['source']) if 'documents/' in doc.metadata['source'] else doc.metadata['source']}"
-                        if doc.metadata.get("source")
-                        else ""
-                    )
-                    for doc in context_docs
-                ]
-            )
-        else:
-            return "\n\n==============================================\n\n".join(
-                [f"\nContent: \n\n{doc.page_content}" for doc in context_docs]
-            )
+        
+        formatted_docs = []
+        for doc in context_docs:
+            if hasattr(doc, 'page_content'):
+                content = doc.page_content
+                source = doc.metadata.get("source", "") if hasattr(doc, 'metadata') else ""
+            elif isinstance(doc, dict):
+                content = doc.get('Content', doc.get('content', doc.get('text', str(doc))))
+                source = doc.get('Source', doc.get('source', doc.get('Title', '')))
+            else:
+                # Fallback to string representation
+                content = str(doc)
+                source = ""
+            
+            if display_source and source:
+                formatted_source = self._format_source_path(source) if 'documents/' in source else source
+                formatted_docs.append(f"\nContent: \n\n{content}\n\nSource: {formatted_source}")
+            else:
+                formatted_docs.append(f"\nContent: \n\n{content}")
+        
+        return "\n\n==============================================\n\n".join(formatted_docs)
+    
+    def _get_tool_name(self, state: ConversationState) -> str:
+        """Get the name of the tool used from the state."""
+        tool_name_mapping = {
+            "data_analyst": "Data Analyst",
+            "agentic_search": "Agentic Search",
+        }
+        if state.mcp_tool_used:
+            tool_name = state.mcp_tool_used[-1]["name"]
+            return tool_name_mapping.get(tool_name, tool_name)
+        return ""
 
     def process_conversation(
         self, conversation_id: str, question: str, user_info: dict
@@ -261,19 +286,20 @@ class ConversationOrchestrator:
                     future = executor.submit(run_async_agent)
                     response = future.result()
 
-                logging.info("[orchestrator-process_conversation] Agent response")
                 return {
                     "conversation_id": conversation_id,
                     "state": ConversationState(
-                        question,
-                        response["messages"],
-                        response["context_docs"],
-                        response["requires_web_search"],
-                        response["rewritten_query"],
-                        response["chat_summary"],
-                        response["token_count"],
-                        response["query_category"],
-                        response["augmented_query"],
+                        question=question,
+                        messages=response["messages"],
+                        context_docs=response["context_docs"],
+                        requires_retrieval=response.get("requires_retrieval", False),
+                        rewritten_query=response["rewritten_query"],
+                        query_category=response["query_category"],
+                        augmented_query=response.get("augmented_query", ""),
+                        mcp_tool_used=response.get("mcp_tool_used", []),
+                        tool_results=response.get("tool_results", []),
+                        code_thread_id=response.get("code_thread_id", None),
+                        last_mcp_tool_used=response.get("last_mcp_tool_used", ""),
                     ),
                     "conversation_data": conversation_data,
                     "memory_data": self._serialize_memory(memory, config),
@@ -302,12 +328,19 @@ class ConversationOrchestrator:
         logging.info(
             f"[orchestrator-generate_response] Generating response for: {state.question}"
         )
+        blob_urls = []
+        for tool_result in state.tool_results:
+            results_json = json.loads(tool_result)
+            blob_urls.extend(results_json.get("blob_urls", []))
+        
+        tool_name = self._get_tool_name(state)
         data = {
             "conversation_id": conversation_id,
             "thoughts": [
                 f"""
-                Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Web Search: {state.requires_web_search} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
+                Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Retrieval: {state.requires_retrieval} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / MCP Tool Used: {tool_name} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
             ],
+            "images_blob_urls": blob_urls,
         }
         yield json.dumps(data)
         context = ""
@@ -507,6 +540,7 @@ class ConversationOrchestrator:
         )
 
         answer = self._sanitize_response(complete_response)
+        tool_name = self._get_tool_name(state)
 
         # Update conversation history
         history.extend(
@@ -516,8 +550,11 @@ class ConversationOrchestrator:
                     "role": "assistant",
                     "content": answer,
                     "thoughts": [
-                        f"""Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Web Search: {state.requires_web_search} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
+                        f"""Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Retrieval: {state.requires_retrieval} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / MCP Tool Used: {tool_name} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
                     ],
+                    "images_blob_urls": blob_urls,
+                    "code_thread_id": state.code_thread_id,
+                    "last_mcp_tool_used": state.last_mcp_tool_used
                 },
             ]
         )
@@ -530,6 +567,7 @@ class ConversationOrchestrator:
                     "user_id": user_info["id"],
                     "user_name": user_info["name"],
                     "response_time": round(time.time() - start_time, 2),
+                    "organization_id": self.organization_id,
                 },
             }
         )

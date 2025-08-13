@@ -1,5 +1,6 @@
 # utility functions
-
+from dotenv import load_dotenv
+load_dotenv()
 import re
 import json
 import asyncio
