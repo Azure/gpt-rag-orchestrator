@@ -66,6 +66,7 @@ class Orchestrator:
 
             # 3) Stream all chunks from the strategy
             try:
+                yield f"{self.conversation_id} "
                 async for chunk in self.agentic_strategy.initiate_agent_flow(ask):
                     yield chunk
             finally:
