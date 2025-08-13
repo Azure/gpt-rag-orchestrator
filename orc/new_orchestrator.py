@@ -67,6 +67,7 @@ class ConversationState:
         mcp_tool_used: List of MCP tools that were used
         tool_results: Results from tool execution
         code_thread_id: Thread id for the code interpreter tool
+        last_mcp_tool_used: Name of the last MCP tool used
     """
 
     question: str
@@ -83,6 +84,7 @@ class ConversationState:
     mcp_tool_used: List[Dict[str, Any]] = field(default_factory=list)
     tool_results: List[Any] = field(default_factory=list)
     code_thread_id: Optional[str] = field(default=None)
+    last_mcp_tool_used: str = field(default="")
 
 # Prompt for Tool Calling
 CATEGORY_PROMPT = {
@@ -286,6 +288,7 @@ class ConversationOrchestrator:
                         mcp_tool_used=response.get("mcp_tool_used", []),
                         tool_results=response.get("tool_results", []),
                         code_thread_id=response.get("code_thread_id", None),
+                        last_mcp_tool_used=response.get("last_mcp_tool_used", ""),
                     ),
                     "conversation_data": conversation_data,
                     "memory_data": self._serialize_memory(memory, config),
@@ -537,7 +540,8 @@ class ConversationOrchestrator:
                         f"""Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Retrieval: {state.requires_retrieval} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / MCP Tools Used: {len(state.mcp_tool_used)} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
                     ],
                     "images_blob_urls": blob_urls,
-                    "code_thread_id": state.code_thread_id
+                    "code_thread_id": state.code_thread_id,
+                    "last_mcp_tool_used": state.last_mcp_tool_used
                 },
             ]
         )

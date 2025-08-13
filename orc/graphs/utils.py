@@ -162,3 +162,30 @@ def extract_thread_id_from_history(conversation_history: List[dict]) -> Optional
     
     logger.debug("[Thread ID Extraction] No thread_id found in conversation history")
     return None
+
+
+def extract_last_mcp_tool_from_history(conversation_history: List[dict]) -> str:
+    """
+    Extract the most recent MCP tool used from conversation history.
+    
+    Args:
+        conversation_history: List of conversation messages from the database
+        
+    Returns:
+        Name of the last MCP tool used, empty string if none found
+    """
+    if not conversation_history:
+        logger.debug("[MCP Tool Extraction] No conversation history provided")
+        return ""
+    
+    logger.info(f"[MCP Tool Extraction] Searching {len(conversation_history)} messages for last MCP tool")
+    
+    for message in reversed(conversation_history):
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            last_mcp_tool = message.get("last_mcp_tool_used")
+            if last_mcp_tool:
+                logger.info(f"[MCP Tool Extraction] Found last MCP tool in conversation history: {last_mcp_tool}")
+                return last_mcp_tool
+    
+    logger.debug("[MCP Tool Extraction] No MCP tool usage found in conversation history")
+    return ""

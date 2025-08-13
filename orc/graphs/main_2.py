@@ -30,7 +30,7 @@ from shared.prompts import (
 )
 from shared.cosmos_db import get_conversation_data
 from shared.util import get_organization
-from orc.graphs.utils import clean_chat_history_for_llm, extract_thread_id_from_history
+from orc.graphs.utils import clean_chat_history_for_llm, extract_thread_id_from_history, extract_last_mcp_tool_from_history
 from langgraph.checkpoint.memory import MemorySaver
 
 # Set up logging for Azure Functions - this needs to be done before creating loggers
@@ -100,6 +100,7 @@ class ConversationState:
     mcp_tool_used: List[Dict[str, Any]] = field(default_factory=list)
     tool_results: List[Any] = field(default_factory=list)
     code_thread_id: Optional[str] = field(default=None)
+    last_mcp_tool_used: str = field(default="")
 
 
 @dataclass
@@ -347,6 +348,14 @@ class GraphBuilder:
                             logger.info(f"Existing thread id found: {thread_id}")
                             return thread_id
         return None
+    
+    def _get_last_mcp_tool_used(self, state: ConversationState) -> str:
+        """Extract the name of the last MCP tool used"""
+        if state.mcp_tool_used:
+            last_tool_name = state.mcp_tool_used[-1]["name"] #[0] works just fine
+            logger.info(f"Last MCP tool used: {last_tool_name}")
+            return last_tool_name
+        return state.last_mcp_tool_used
 
     def _get_context_docs_from_tool_results(self, state: ConversationState) -> List[Any]:
         """Get context docs from the tool results, including blob paths for data_analyst with images"""
@@ -379,6 +388,9 @@ class GraphBuilder:
     def _return_state(self, state: ConversationState) -> dict:
         # Get updated thread ID from tool results, fallback to existing thread ID
         updated_thread_id = self._get_code_thread_id(state) or state.code_thread_id
+        
+        # Get the the latest mcp tool used 
+        last_mcp_tool_used = self._get_last_mcp_tool_used(state)
 
         context_docs = self._get_context_docs_from_tool_results(state)
         return {
@@ -388,7 +400,8 @@ class GraphBuilder:
             "query_category": state.query_category,
             "mcp_tool_used": state.mcp_tool_used,
             "tool_results": state.tool_results,
-            "code_thread_id": updated_thread_id
+            "code_thread_id": updated_thread_id,
+            "last_mcp_tool_used": last_mcp_tool_used
         }
 
     def build(self, memory) -> StateGraph:
@@ -505,7 +518,11 @@ class GraphBuilder:
 
         # Initialize code thread ID from conversation history (this is for the code interpreter tool)
         existing_thread_id = extract_thread_id_from_history(history)
-        logger.info(f"[Query Rewrite] Initialized thread_id from history: {existing_thread_id}")
+        logger.info(f"[Query Rewrite] Initialized code thread_id from history if available: {existing_thread_id}")
+        
+        # Initialize last MCP tool used from conversation history
+        existing_last_mcp_tool = extract_last_mcp_tool_from_history(history)
+        logger.info(f"[Query Rewrite] Retrieved last_mcp_tool_used from history: {existing_last_mcp_tool}")
 
         return {
             "rewritten_query": rewritte_query.content,
@@ -516,6 +533,7 @@ class GraphBuilder:
             ),
             "messages": state.messages + [HumanMessage(content=question)],
             "code_thread_id": existing_thread_id,
+            "last_mcp_tool_used": existing_last_mcp_tool,
         }
 
     async def _categorize_query(self, state: ConversationState) -> dict:
@@ -686,11 +704,29 @@ class GraphBuilder:
         logger.info(f"[MCP] Getting tools from MCP client")
         tools = await client.get_tools()
         logger.info(f"[MCP] Found {len(tools)} tools")
+        
+        # get the conversation history
+        conversation_data = self._get_conversation_data()
+        history = conversation_data.get("history", [])
+        logger.info(f"[MCP] Retrieved {len(history)} conversation history messages for context")
 
+        clean_history = clean_chat_history_for_llm(history)
+        logger.info(f"[MCP] Cleaned conversation history: {clean_history}")
+
+        # get the last mcp tool used
+        last_mcp_tool_used = state.last_mcp_tool_used
+        human_prompt = f"""
+        User's question:{state.question}
+
+        Previous tool used (if any):{last_mcp_tool_used}
+
+        Here is the conversation history to determine if the current question is a follow up question to a previous question:
+        {clean_history}
+        """
         # equip the llm with the tools
         llm_with_tools = self.llm.bind_tools(tools, tool_choice="any") # switch to auto in case we want to use no tool 
 
-        message = [SystemMessage(content=MCP_SYSTEM_PROMPT), HumanMessage(content=state.question)]
+        message = [SystemMessage(content=MCP_SYSTEM_PROMPT), HumanMessage(content=human_prompt)]
         try:
             response = await llm_with_tools.ainvoke(message)
         except Exception as e:
