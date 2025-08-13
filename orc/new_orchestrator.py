@@ -212,6 +212,17 @@ class ConversationOrchestrator:
                 formatted_docs.append(f"\nContent: \n\n{content}")
         
         return "\n\n==============================================\n\n".join(formatted_docs)
+    
+    def _get_tool_name(self, state: ConversationState) -> str:
+        """Get the name of the tool used from the state."""
+        tool_name_mapping = {
+            "data_analyst": "Data Analyst",
+            "agentic_search": "Agentic Search",
+        }
+        if state.mcp_tool_used:
+            tool_name = state.mcp_tool_used[-1]["name"]
+            return tool_name_mapping.get(tool_name, tool_name)
+        return ""
 
     def process_conversation(
         self, conversation_id: str, question: str, user_info: dict
@@ -322,11 +333,12 @@ class ConversationOrchestrator:
             results_json = json.loads(tool_result)
             blob_urls.extend(results_json.get("blob_urls", []))
         
+        tool_name = self._get_tool_name(state)
         data = {
             "conversation_id": conversation_id,
             "thoughts": [
                 f"""
-                Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Retrieval: {state.requires_retrieval} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / MCP Tools Used: {len(state.mcp_tool_used)} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
+                Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Retrieval: {state.requires_retrieval} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / MCP Tool Used: {tool_name} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
             ],
             "images_blob_urls": blob_urls,
         }
@@ -528,6 +540,7 @@ class ConversationOrchestrator:
         )
 
         answer = self._sanitize_response(complete_response)
+        tool_name = self._get_tool_name(state)
 
         # Update conversation history
         history.extend(
@@ -537,7 +550,7 @@ class ConversationOrchestrator:
                     "role": "assistant",
                     "content": answer,
                     "thoughts": [
-                        f"""Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Retrieval: {state.requires_retrieval} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / MCP Tools Used: {len(state.mcp_tool_used)} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
+                        f"""Model Used: {user_settings['model']} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Retrieval: {state.requires_retrieval} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / MCP Tool Used: {tool_name} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
                     ],
                     "images_blob_urls": blob_urls,
                     "code_thread_id": state.code_thread_id,

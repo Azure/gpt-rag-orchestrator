@@ -722,11 +722,11 @@ DOCSEARCH_PROMPT_TEXT = """
 
 --> Beginning of examples
 
-Example 1:
+Example 1: Text citation example
 
 Artificial Intelligence has revolutionized healthcare in several ways [[1]](https://medical-ai.org/research/impact2023) through improved diagnosis accuracy and treatment planning. Machine learning models have shown a 95% accuracy rate in detecting early-stage cancers [[2]](https://cancer-research.org/studies/ml-detection?year=2023). Recent studies indicate that AI-assisted surgeries have reduced recovery times by 30% [[3]](https://surgical-innovations.com/ai-impact?study=recovery).
 
-Example 2:
+Example 2: Text citation example
 
 The application of artificial intelligence (AI) in healthcare has led to significant advancements across various domains:
 
@@ -737,7 +737,7 @@ The application of artificial intelligence (AI) in healthcare has led to signifi
 
 Each of these advancements underscores the transformative potential of AI in healthcare, offering hope for more efficient, personalized, and accessible medical services. The integration of AI into healthcare practices requires careful consideration of ethical, privacy, and data security concerns, ensuring that these innovations benefit all segments of the population.
 
-Example 3: Image/Citation Example
+Example 3: Image/Graph Citation Example (MUST STRICTLY FOLLOW THIS FORMAT, OTHERWISE THE IMAGE WILL FAIL TO BE DISPLAYED)
 If the provided context includes an image or graph, ensure that you embed the image directly in your answer. Use the format shown below:
 
 1. The price for groceries has increased by 10% in the past 3 months. ![Image](https://wsj.com/grocery-price-increase.png)
@@ -747,6 +747,7 @@ If the provided context includes an image or graph, ensure that you embed the im
 **Guidelines:**
 - To identify an image or graph in context, look for file extensions such as `.jpeg`, `.jpg`, `.png`, etc. in the URL.
 - Always use "Image" as the alt text for embedded images.
+
 <-- End of examples
 
 """
@@ -757,7 +758,10 @@ Your name is FreddAid, a data-driven marketing assistant designed to answer ques
 
 **Guidelines for Responses**:
 
-**IMPORTANT**: You will be seriously penalized with negative 10000 dollars if you don't provide citations/references in your final answer. You will be rewarded 10000 dollars if you provide citations/references in paragraphs and sentences. DO NOT CREATE A SEPARATE SECTION FOR CITATIONS/REFERENCES.
+**IMPORTANT**: 
+- You will be seriously penalized with negative 10000 dollars if you don't provide citations/references in your final answer. You will be rewarded 10000 dollars if you provide citations/references in paragraphs and sentences. DO NOT CREATE A SEPARATE SECTION FOR CITATIONS/REFERENCES. 
+- If the citation contains image/graph, you MUST STRICTLY FOLLOW THE FORMAT IN THE EXAMPLES AS SHOWN LATER, OTHERWISE THE IMAGE WILL FAIL TO RENDER.
+- Only when the context DOES NOT contain any citations/references, only in this case, you're allowed to provide no citations/references in your final answer.
 
 1. **Clarity and Structure**:  
    - Begin with a clear and concise summary of the key takeaway.  
