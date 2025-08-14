@@ -117,13 +117,15 @@ class GraphConfig:
         temperature (float): Sampling temperature for the language model. Default is 0.4.
         max_tokens (int): Maximum number of tokens for the model output. Default is 200000.
     """
-    azure_api_version: str = "2025-01-01-preview"
-    azure_deployment: str = "gpt-4.1"
+    azure_api_version: str = "2025-04-01-preview" #TODO: move to env, resuse the azure api version from mcp rag
+    azure_deployment: str = "gpt-4.1" #todo: move to env
+    support_model_deployment: str = 'gpt-5-nano' # TODO: move to env
+    support_model_reasoning_effort: str = 'low' # TODO: move to env
     retriever_top_k: int = 5
     reranker_threshold: float = 2
     web_search_results: int = 2
     temperature: float = 0.4
-    max_tokens: int = 200000
+    max_tokens: int = 20000
 
 class GraphBuilder:
     """Builds and manages the conversation flow graph."""
@@ -148,6 +150,7 @@ class GraphBuilder:
         
         # Initialize LLM and retriever
         self.llm = self._init_llm()
+        self.support_llm = self._init_support_model()
         
         # Initialize organization data with error handling
         try:
@@ -203,6 +206,21 @@ class GraphBuilder:
                 f"[GraphBuilder LLM Init] Failed to initialize Azure OpenAI: {str(e)}"
             )
             raise RuntimeError(f"Failed to initialize Azure OpenAI: {str(e)}")
+        
+    def _init_support_model(self) -> AzureChatOpenAI:
+        """Configure Azure OpenAI instance."""
+        logger.info("[GraphBuilder Support Model Init] Initializing Azure OpenAI client")
+        config = self.config
+        return AzureChatOpenAI(
+            openai_api_version=config.azure_api_version,
+            azure_deployment=config.support_model_deployment,
+            reasoning_effort=config.support_model_reasoning_effort,
+            streaming=False,
+            timeout=30,
+            max_retries=3,
+            azure_endpoint=os.getenv("O1_ENDPOINT"),
+            api_key=os.getenv("O1_KEY"),
+        )
 
     def _get_organization_data(self, data_key: str, data_name: str) -> str:
         """
@@ -255,6 +273,19 @@ class GraphBuilder:
             LLM response
         """
         return await self.llm.ainvoke(messages, **kwargs)
+    
+    async def _support_llm_invoke(self, messages, **kwargs):    
+        """
+        Support LLM invocation.
+
+        Args:
+            messages: List of messages to send to LLM
+            **kwargs: Additional arguments for LLM call
+
+        Returns:
+            LLM response
+        """
+        return await self.support_llm.ainvoke(messages, **kwargs)
     
     def _find_tool_by_name(self, tools: List[Any], tool_name: str):
         """
@@ -584,12 +615,11 @@ class GraphBuilder:
         logger.info(
             "[Query Categorization] Sending async categorization request to LLM"
         )
-        response = await self._llm_invoke(
+        response = await self._support_llm_invoke(
             [
                 SystemMessage(content=category_prompt),
                 HumanMessage(content=state.question),
-            ],
-            temperature=0,
+            ]
         )
         logger.info(
             f"[Query Categorization] Categorized query as: '{response.content}'"
@@ -606,7 +636,7 @@ class GraphBuilder:
         system_prompt = MARKETING_ORC_PROMPT
 
         logger.info("[Query Routing] Sending routing decision request to LLM")
-        response = await self._llm_invoke(
+        response = await self._support_llm_invoke(
             [
                 SystemMessage(content=system_prompt),
                 HumanMessage(
