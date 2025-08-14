@@ -749,7 +749,7 @@ class GraphBuilder:
         logger.info(f"[MCP] Retrieved {len(history)} conversation history messages for context")
 
         clean_history = clean_chat_history_for_llm(history)
-        logger.info(f"[MCP] Cleaned conversation history: {clean_history}")
+        logger.info(f"[MCP] Cleaned conversation history: {clean_history[:200] if len(clean_history) > 200 else clean_history}")
 
         # get the last mcp tool used
         last_mcp_tool_used = state.last_mcp_tool_used
