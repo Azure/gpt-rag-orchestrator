@@ -635,12 +635,20 @@ class GraphBuilder:
 
         system_prompt = MARKETING_ORC_PROMPT
 
+        human_prompt = f"""
+        How should I categorize this question:
+        - Original Question: {state.question}
+        - Rewritten Question: {state.rewritten_query}
+        
+        Answer yes/no.
+        """
+
         logger.info("[Query Routing] Sending routing decision request to LLM")
-        response = await self._support_llm_invoke(
+        response = await self._llm_invoke(
             [
                 SystemMessage(content=system_prompt),
                 HumanMessage(
-                    content=f"How should I categorize this question: \n\n{state.rewritten_query}\n\nAnswer yes/no."
+                    content= human_prompt
                 ),
             ]
         )
@@ -759,20 +767,30 @@ class GraphBuilder:
         message = [SystemMessage(content=MCP_SYSTEM_PROMPT), HumanMessage(content=human_prompt)]
         try:
             response = await llm_with_tools.ainvoke(message)
+            logger.info(f"[MCP] Tool calls found: {len(response.tool_calls) if hasattr(response, 'tool_calls') and response.tool_calls else 0}")
+            if hasattr(response, 'tool_calls') and response.tool_calls:
+                logger.info(f"[MCP] Tool calls: {response.tool_calls}")
+            else:
+                logger.warning(f"[MCP] No tool calls returned by LLM. Response content: {response.content[:200] if hasattr(response, 'content') else 'No content'}...")
+                logger.info(f"[MCP] Available tools count: {len(tools)}")
+                logger.info(f"[MCP] Available tool names: {[tool.name for tool in tools] if tools else 'No tools'}")
+                logger.info(f"[MCP] Human prompt sent to LLM: {human_prompt[:300]}...")
         except Exception as e:
             logger.error(f"[MCP] Error getting tool calls from LLM: {str(e)}")
             raise RuntimeError(f"[MCP] Error getting tool calls from LLM: {str(e)}")
         return {
-            "mcp_tool_used": response.tool_calls,
+            "mcp_tool_used": response.tool_calls if hasattr(response, 'tool_calls') else [],
         }
         
-    async def _execute_mcp_tool_calls(self, state: ConversationState) -> List[Any]:
+    async def _execute_mcp_tool_calls(self, state: ConversationState) -> dict:
         """Execute tool calls."""
         mcp_tool_used = state.mcp_tool_used
         tool_results = []
         if not mcp_tool_used:
             logger.info("[MCP] No tool calls to execute")
-            return tool_results
+            return {
+                "tool_results": tool_results,
+            }
         
         logger.info(f"[MCP] Executing {len(mcp_tool_used)} tool(s)...")
         
