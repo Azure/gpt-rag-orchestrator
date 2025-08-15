@@ -770,6 +770,17 @@ Examples:
 - The percentage of customers who quit last quarter: ![Customer Churn](https://ft.com/customer-churn.jpg)
 
 
+Example 3: Image/Graph Citation Example (MUST STRICTLY FOLLOW THIS FORMAT, OTHERWISE THE IMAGE WILL FAIL TO BE DISPLAYED)
+If the provided context includes an image or graph, ensure that you embed the image directly in your answer. Use the format shown below:
+
+1. The price for groceries has increased by 10% in the past 3 months. ![Image](https://wsj.com/grocery-price-increase.png)
+2. The market share of the top 5 competitors in the grocery industry is as follows: ![Image](https://nytimes.com/grocery-market-share.jpeg)
+3. The percentage of customers who quit last quarter is as follows: ![Image](https://ft.com/customer-churn.jpg)
+
+**Guidelines:**
+- To identify an image or graph in context, look for file extensions such as `.jpeg`, `.jpg`, `.png`, etc. in the URL.
+- Always use "Image" as the alt text for embedded images.
+
 <-- End of examples
 
 """
@@ -823,7 +834,6 @@ Your name is FreddAid, a data-driven marketing assistant designed to answer ques
 - Concise for summaries; expanded and detailed for explanations.
 # Stop Conditions
 - Deliver the full, cited answer when requirements are met; clarify or escalate only if essential context is missing.
-
 """
 
 
