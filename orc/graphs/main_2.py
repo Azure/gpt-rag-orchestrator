@@ -121,11 +121,13 @@ class GraphConfig:
     azure_deployment: str = "gpt-4.1" #todo: move to env
     support_model_deployment: str = 'gpt-5-nano' # TODO: move to env
     support_model_reasoning_effort: str = 'low' # TODO: move to env
+
     retriever_top_k: int = 5
     reranker_threshold: float = 2
     web_search_results: int = 2
     temperature: float = 0.4
     max_tokens: int = 20000
+
 
 class GraphBuilder:
     """Builds and manages the conversation flow graph."""
@@ -206,7 +208,7 @@ class GraphBuilder:
                 f"[GraphBuilder LLM Init] Failed to initialize Azure OpenAI: {str(e)}"
             )
             raise RuntimeError(f"Failed to initialize Azure OpenAI: {str(e)}")
-        
+            
     def _init_support_model(self) -> AzureChatOpenAI:
         """Configure Azure OpenAI instance."""
         logger.info("[GraphBuilder Support Model Init] Initializing Azure OpenAI client")
@@ -620,6 +622,7 @@ class GraphBuilder:
                 SystemMessage(content=category_prompt),
                 HumanMessage(content=state.question),
             ]
+
         )
         logger.info(
             f"[Query Categorization] Categorized query as: '{response.content}'"
@@ -642,7 +645,6 @@ class GraphBuilder:
         
         Answer yes/no.
         """
-
         logger.info("[Query Routing] Sending routing decision request to LLM")
         response = await self._llm_invoke(
             [
