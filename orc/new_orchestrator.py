@@ -438,6 +438,11 @@ class ConversationOrchestrator:
         
         AUGMENTED VERSION OF THE QUESTION: {state.augmented_query}
         <----------- END OF USER QUESTION & AUGMENTED VERSION ------------>
+
+        <----------- USER INSTRUCTIONS ------------>
+        Do not mention the user's instruction in the response:
+        - Ensure that you follow the citation format for text and image. Again, if an image link is present in the context, you must include it in the response. DO not forget the `!` for image citation.
+        - If there are absolutely no references or links in the context at all, you can omit the citation.
         """
 
         logging.info(f"[orchestrator-generate_response] Prompt: {prompt}")
