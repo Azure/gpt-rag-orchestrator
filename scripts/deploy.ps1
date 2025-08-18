@@ -41,6 +41,42 @@ if ($env:DEBUG -eq 'true') {
 
 Write-Host ""  # blank line
 
+#region Early Docker validation
+$pausedPattern   = 'Docker Desktop is manually paused'
+$daemonDownRegex = '((?i)error during connect|Cannot connect to the Docker daemon|Is the docker daemon running|The Docker daemon is not running|dockerDesktopLinuxEngine|dockerDesktopWindowsEngine|The system cannot find the file specified|open \\./pipe/|context deadline exceeded)'
+
+# Optional: try service check, but do NOT fail based on it
+try {
+    $dockerSvc = Get-Service -Name 'com.docker.service' -ErrorAction SilentlyContinue
+    if ($dockerSvc) {
+        Write-Blue "🔍 Docker Desktop service status: $($dockerSvc.Status)"
+    }
+} catch { }
+
+if (Get-Command docker -ErrorAction SilentlyContinue) {
+    Write-Blue "🔍 Checking Docker availability…"
+    $probeOutput = & docker info 2>&1
+    $probeExit   = $LASTEXITCODE
+    $probeText   = ($probeOutput | Out-String)
+
+    if ($probeText -match $pausedPattern -or $probeText -match $daemonDownRegex -or $probeExit -ne 0) {
+        if ($probeText -match $pausedPattern) {
+            Write-ErrorColored '❌ Docker Desktop is manually paused. Unpause it via the Whale menu or Dashboard.'
+        } else {
+            Write-ErrorColored '❌ Docker Desktop is not running.'
+        }
+        Write-Yellow '⚠️  Please start/unpause Docker Desktop and re-run this script.'
+        exit 1
+    }
+} else {
+    Write-ErrorColored '❌ Docker CLI not found on this system.'
+    Write-Yellow '⚠️  Please install Docker Desktop and re-run this script.'
+    exit 1
+}
+Write-Green "✅ Docker is available."
+Write-Host ""
+#endregion
+
 #region APP_CONFIG_ENDPOINT check
 if ($null -ne $env:APP_CONFIG_ENDPOINT -and $env:APP_CONFIG_ENDPOINT.Trim() -ne '') {
     Write-Green "✅ Using APP_CONFIG_ENDPOINT from environment: $($env:APP_CONFIG_ENDPOINT)"

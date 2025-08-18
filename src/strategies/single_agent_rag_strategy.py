@@ -33,7 +33,7 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
         Initialize base credentials and tools.
         """
         super().__init__()
- 
+
         # Force all logs at DEBUG or above to appear
         logging.debug("Initializing SingleAgentRAGStrategy...")
 
@@ -45,17 +45,18 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
 
         # Agent Tools Initialization Section
         # =========================================================
-        
-        # Allow the user to specify an existing agent ID
-        self.existing_agent_id = cfg.get("AGENT_ID") or None
 
-        # Agent Tools Initialization Section
-        # =========================================================
+        # Allow the user to specify an existing agent ID (optional)
+        # Use a safe default to avoid raising when key is not present
+        self.existing_agent_id = cfg.get("AGENT_ID", "") or None
+
+        # Initialize tool containers
         self.tools_list = []
         self.tool_resources = {}
 
         # --- Initialize BingGroundingTool (if configured) ---
-        bing_conn = cfg.get("BING_CONNECTION_ID")
+        # Optional: if not provided, Bing tool is skipped
+        bing_conn = cfg.get("BING_CONNECTION_ID", "")
         if not bing_conn:
             logging.warning(
                 "BING_CONNECTION_ID not set in App Config variables. "
@@ -68,9 +69,10 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
             logging.debug(f"Added BingGroundingTool to tools_list: {bing_def}")
 
         # --- Initialize AzureAISearchTool ---
-        
-        azure_ai_conn_id = cfg.get("SEARCH_CONNECTION_ID") 
-        index_name = cfg.get("SEARCH_RAG_INDEX_NAME", "ragindex") 
+
+        # Optional: if not provided, Azure AI Search tool logs a warning
+        azure_ai_conn_id = cfg.get("SEARCH_CONNECTION_ID", "")
+        index_name = cfg.get("SEARCH_RAG_INDEX_NAME", "ragindex")
 
         logging.debug(f"seachConnectionId (cfg)  = {azure_ai_conn_id}")
         logging.debug(f"SEARCH_RAG_INDEX_NAME (cfg) = {index_name}")
@@ -91,7 +93,7 @@ class SingleAgentRAGStrategy(BaseAgentStrategy):
         self.ai_search = AzureAISearchTool(
             index_connection_id=azure_ai_conn_id,
             index_name=index_name,
-            query_type=AzureAISearchQueryType.SIMPLE, 
+            query_type=AzureAISearchQueryType.SIMPLE,
             top_k=cfg.get("SEARCH_TOP_K", 5, int),
             filter="",  # Optional filter for search results
         )
