@@ -67,7 +67,7 @@ class McpStrategy(BaseAgentStrategy):
         Initialize base credentials and tools.
         """
         super().__init__()
- 
+
         # Force all logs at DEBUG or above to appear
         logging.debug("Initializing McpStrategy...")
 
@@ -79,12 +79,12 @@ class McpStrategy(BaseAgentStrategy):
 
         # Agent Tools Initialization Section
         # =========================================================
-        
-        # Allow the user to specify an existing agent ID
-        self.existing_agent_id = cfg.get("AGENT_ID") or None
 
-        #need to inject the user_context header into the h11 writer
-        #this is a workaround for the fact that h11 does not support custom headers
+        # Allow the user to specify an existing agent ID (optional)
+        self.existing_agent_id = cfg.get("AGENT_ID", "") or None
+
+        # need to inject the user_context header into the h11 writer
+        # this is a workaround for the fact that h11 does not support custom headers
         h11._writers.write_headers = self.write_headers
     
     async def create():
