@@ -189,7 +189,7 @@ class NL2SQLPlugin:
     async def tables_retrieval(
         self,
         input: Annotated[str, "Optimized retrieval query"],
-        datasource: Annotated[Optional[str], "Target datasource"] = None
+    datasource: Annotated[str, "Target datasource"] = None
     ) -> TablesRetrievalResult:
         idx = self.tables_index
         approach = self.search_approach

@@ -1,5 +1,6 @@
 import os
 import logging
+import logging.config
 import platform
 
 from azure.monitor.opentelemetry import configure_azure_monitor
@@ -17,6 +18,16 @@ class ExcludeTraceLogsFilter(logging.Filter):
         filter_out = filter_out and 'transmission succeeded' not in record.getMessage().lower()
         return filter_out
 
+class DebugModeFilter(logging.Filter):
+    """Allow records only when the root logger is in DEBUG.
+
+    Used to gate very verbose Azure HTTP pipeline logs so they only appear
+    when explicitly requested via LOG_LEVEL=DEBUG.
+    """
+    def filter(self, record):
+        return logging.getLogger().getEffectiveLevel() == logging.DEBUG
+
+
 class Telemetry:
     """
     Manages logging and the recording of application telemetry.
@@ -30,22 +41,33 @@ class Telemetry:
 
     @staticmethod
     def configure_basic(config: AppConfigClient):
-        level=config.get('LOG_LEVEL', 'DEBUG').upper()
+        # Determine app log level
+        level = Telemetry.translate_log_level(config.get('LOG_LEVEL', 'INFO'))
 
-        #convert to logging level
-        if level == 'DEBUG':    
-            level = logging.DEBUG
-        elif level == 'INFO':
-            level = logging.INFO
-        elif level == 'WARNING':
-            level = logging.WARNING
-        elif level == 'ERROR':
-            level = logging.ERROR
-        elif level == 'CRITICAL':
-            level = logging.CRITICAL
+        # Apply base config with force to avoid duplicate handlers (e.g., under uvicorn --reload)
+        logging.basicConfig(
+            level=level,
+            format="%(asctime)s [%(levelname)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            force=True,
+        )
 
-        logging.basicConfig(level=level, force=True)
-        logging.getLogger("azure").setLevel(config.get('AZURE_LOG_LEVEL', 'WARNING').upper())
+        # Azure SDK loggers level (default WARNING unless overridden)
+        azure_level = Telemetry.translate_log_level(config.get('AZURE_LOG_LEVEL', 'WARNING'))
+        for name in ("azure", "azure.identity", "azure.core"):
+            lg = logging.getLogger(name)
+            lg.setLevel(azure_level if level != logging.DEBUG else logging.DEBUG)
+            # Ensure a clean state under --reload (avoid stacked filters)
+            lg.filters = []
+
+        # Azure HTTP pipeline logger: verbose only in DEBUG; replace filters to avoid stacking
+        http_logger = logging.getLogger("azure.core.pipeline.policies.http_logging_policy")
+        if level == logging.DEBUG:
+            http_logger.setLevel(logging.DEBUG)
+            http_logger.filters = [DebugModeFilter()]
+        else:
+            http_logger.setLevel(azure_level if azure_level >= logging.WARNING else logging.WARNING)
+            http_logger.filters = []
         #logging.getLogger("httpx").setLevel(config.get_value('HTTPX_LOGLEVEL', 'ERROR').upper())
         #logging.getLogger("httpcore").setLevel(config.get_value('HTTPCORE_LOGLEVEL', 'ERROR').upper())
         #logging.getLogger("openai._base_client").setLevel(config.get_value('OPENAI_BASE_CLIENT_LOGLEVEL', 'WARNING').upper())
@@ -61,7 +83,25 @@ class Telemetry:
     @staticmethod
     def configure_monitoring(config: AppConfigClient, telemetry_connection_string: str, api_name : str):
 
-        Telemetry.telemetry_connection_string = config.get(telemetry_connection_string)
+        # Try to get the connection string without throwing if config is disabled/unavailable.
+        try:
+            Telemetry.telemetry_connection_string = config.get(
+                telemetry_connection_string,
+                default=os.getenv(telemetry_connection_string)
+            )
+        except Exception:
+            Telemetry.telemetry_connection_string = os.getenv(telemetry_connection_string)
+
+        # If we have no connection string, disable telemetry gracefully with a clear message.
+        if not Telemetry.telemetry_connection_string:
+            reason = (
+                "authentication not available (run 'az login' or configure Managed Identity)"
+                if getattr(config, "disabled", False)
+                else f"missing '{telemetry_connection_string}'"
+            )
+            logging.info("Telemetry disabled: %s.", reason)
+            return
+
         Telemetry.api_name = api_name
         resource = Resource.create(
             {
@@ -71,17 +111,42 @@ class Telemetry:
                 SERVICE_INSTANCE_ID: f"{platform.node()}"
             })
 
-        # Configure Azure Monitor defaults
-        configure_azure_monitor(
-            connection_string=Telemetry.telemetry_connection_string,
-            disable_offline_storage=True,
-            disable_metrics=True,
-            disable_tracing=False,
-            disable_logging=False,
-            resource=resource
-        )
+        # Quiet noisy DEBUG during setup (optional)
+        quiet_names = [
+            "azure.monitor.opentelemetry",
+            "azure.monitor.opentelemetry._configure",
+            "opentelemetry",
+            "azure.core.pipeline.policies.http_logging_policy",
+        ]
+        saved = []
+        try:
+            for name in quiet_names:
+                lg = logging.getLogger(name)
+                saved.append((lg, lg.level))
+                lg.setLevel(logging.WARNING)
+            
+            # Allow users to opt-in to sending application logs to App Insights.
+            # Tracing remains enabled by default.
+            disable_logging_export = str(config.get("AZURE_MONITOR_DISABLE_LOGGING", os.getenv("AZURE_MONITOR_DISABLE_LOGGING", "true"))).lower() == "true"
 
-        #Configure telemetry logging
+            # Configure Azure Monitor defaults
+            configure_azure_monitor(
+                connection_string=Telemetry.telemetry_connection_string,
+                disable_offline_storage=True,
+                disable_metrics=True,
+                disable_tracing=False,
+                disable_logging=disable_logging_export,
+                resource=resource
+            )
+        finally:
+            # Restore original levels
+            for lg, lvl in saved:
+                try:
+                    lg.setLevel(lvl)
+                except Exception:
+                    pass
+
+    #Configure telemetry logging (console + optional Azure Monitor logging via SDK)
         Telemetry.configure_logging(config)
 
     @staticmethod
@@ -101,31 +166,39 @@ class Telemetry:
 
     @staticmethod
     def translate_log_level(log_level: str) -> int:
-        if log_level == "Debug":
-            return logging.DEBUG
-        elif log_level == "Trace":
-            return logging.DEBUG
-        elif log_level == "Information":
+        """Map a variety of input strings to logging levels.
+
+        Accepts standard names (DEBUG, INFO, WARNING, ERROR, CRITICAL, NOTSET),
+        common synonyms (Trace -> DEBUG, Information -> INFO), and integers.
+        Case-insensitive.
+        """
+        if log_level is None:
             return logging.INFO
-        elif log_level == "Warning":
-            return logging.WARNING
-        elif log_level == "Error":
-            return logging.ERROR
-        elif log_level == "Critical":
-            return logging.CRITICAL
-        else:
-            return logging.NOTSET
+        if isinstance(log_level, int):
+            return int(log_level)
+        s = str(log_level).strip()
+        # Try standard logging names first
+        std = getattr(logging, s.upper(), None)
+        if isinstance(std, int):
+            return std
+        # Synonyms
+        synonyms = {
+            "trace": logging.DEBUG,
+            "information": logging.INFO,
+        }
+        return synonyms.get(s.lower(), logging.INFO)
 
     @staticmethod
     def configure_logging(config: AppConfigClient):
-
+        # Resolve log levels with robust parsing; default INFO for app, WARNING for azure SDK
         Telemetry.log_level = Telemetry.translate_log_level(
-            config.get("LOG_LEVEL", default= "Information"))
-        
+            config.get("LOG_LEVEL", default="INFO")
+        )
         Telemetry.azure_log_level = Telemetry.translate_log_level(
-            config.get("LOG_LEVEL", default= "Information"))
+            config.get("AZURE_LOG_LEVEL", default="WARNING")
+        )
 
-        enable_console_logging = config.get("ENABLE_CONSOLE_LOGGING", default='true').lower()
+        enable_console_logging = str(config.get("ENABLE_CONSOLE_LOGGING", default='true')).lower()
 
         handlers = []
 
@@ -178,10 +251,15 @@ class Telemetry:
                 },
             },
             'loggers': {
-                'azure': {  # Adjust the logger name accordingly
+                # Keep Azure SDK logs quiet unless explicitly raised
+                'azure': {
                     'level': Telemetry.azure_log_level,
-                    "class": "opentelemetry.sdk._logs.LoggingHandler",
-                    'filters': ['exclude_trace_logs']
+                    'propagate': True
+                },
+                # Gate the very chatty HTTP pipeline logger
+                'azure.core.pipeline.policies.http_logging_policy': {
+                    'level': logging.DEBUG if Telemetry.log_level == logging.DEBUG else logging.WARNING,
+                    'propagate': True
                 },
                 '': {
                     'handlers': ['console'],
@@ -201,3 +279,36 @@ class Telemetry:
 
         #set the logging configuration
         logging.config.dictConfig(LOGGING)
+
+    @staticmethod
+    def log_log_level_diagnostics(config: AppConfigClient) -> None:
+        """Log the resolved LOG_LEVEL and the effective root logger level.
+
+        Prefers the environment variable LOG_LEVEL, then App Configuration,
+        otherwise defaults to INFO. Keeps main.py minimal.
+        """
+        try:
+            lvl_env = os.getenv("LOG_LEVEL")
+            if lvl_env:
+                src = "env"
+                resolved = lvl_env.strip().upper()
+            else:
+                try:
+                    cfg_val = config.get("LOG_LEVEL", None)
+                except Exception:
+                    cfg_val = None
+                if cfg_val:
+                    src = "appconfig"
+                    resolved = str(cfg_val).strip().upper()
+                else:
+                    src = "default"
+                    resolved = "INFO"
+
+            logging.getLogger().info("Resolved LOG_LEVEL=%s (source=%s)", resolved, src)
+            logging.getLogger().info(
+                "Effective root logger level: %s",
+                logging.getLevelName(logging.getLogger().getEffectiveLevel()),
+            )
+        except Exception:
+            # Best effort only
+            pass

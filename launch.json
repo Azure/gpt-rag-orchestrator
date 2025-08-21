@@ -15,8 +15,6 @@
       "env": {
         "APP_CONFIG_ENDPOINT": "https://<add-your-app-config-name-here>.azconfig.io"
       },
-      "cwd": "${workspaceFolder}/src",
-      "python": "${command:python.interpreterPath}",
       "jinja": true,
       "justMyCode": true
     }

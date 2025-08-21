@@ -1,15 +1,18 @@
 import os
 import logging
 
-from typing import Dict, Any
+from typing import Any
 from azure.identity import ChainedTokenCredential, ManagedIdentityCredential, AzureCliCredential
-from azure.identity.aio import ChainedTokenCredential as AsyncChainedTokenCredential, ManagedIdentityCredential as AsyncManagedIdentityCredential, AzureCliCredential as AsyncAzureCliCredential
-from azure.appconfiguration import AzureAppConfigurationClient
-from azure.core.exceptions import AzureError
+from azure.identity.aio import (
+    ChainedTokenCredential as AsyncChainedTokenCredential,
+    ManagedIdentityCredential as AsyncManagedIdentityCredential,
+    AzureCliCredential as AsyncAzureCliCredential,
+)
+from azure.core.exceptions import ClientAuthenticationError
 from azure.appconfiguration.provider import (
     AzureAppConfigurationKeyVaultOptions,
     load,
-    SettingSelector
+    SettingSelector,
 )
 
 from tenacity import retry, wait_random_exponential, stop_after_attempt, RetryError
@@ -24,27 +27,29 @@ class AppConfigClient:
         Bulk-loads all keys labeled 'orchestrator' and 'gpt-rag' into an in-memory dict,
         giving precedence to 'orchestrator' where a key exists in both.
         """
-        # ==== Load all config parameters in one place ====
-        try:
-            self.tenant_id = os.environ.get('AZURE_TENANT_ID', "*")
-        except Exception as e:
-            raise e
-        
-        try:
-            self.client_id = os.environ.get('AZURE_CLIENT_ID', "*")
-        except Exception as e:
-            raise e
-        
-        self.allow_env_vars = False
+        # Defaults
+        self.disabled = False
+        self.auth_failed = False
+        self.client = {}
 
+        # ==== Load all config parameters in one place ====
+        self.tenant_id = os.environ.get('AZURE_TENANT_ID', "*")
+        self.client_id = os.environ.get('AZURE_CLIENT_ID', "*")
+
+        self.allow_env_vars = False
         if "allow_environment_variables" in os.environ:
-            self.allow_env_vars = bool(os.environ["allow_environment_variables"])
+            # Parse string -> bool safely ("false" -> False)
+            self.allow_env_vars = str(os.environ["allow_environment_variables"]).lower() in ("1", "true", "yes")
 
         endpoint = os.getenv("APP_CONFIG_ENDPOINT")
 
+        # If there's no endpoint configured, skip remote config entirely.
         if not endpoint:
-            raise EnvironmentError("APP_CONFIG_ENDPOINT must be set")
+            logging.info("Azure App Configuration skipped: no APP_CONFIG_ENDPOINT set. Remote keys will not be fetched.")
+            self.disabled = True
+            return
 
+        # Prepare credentials for endpoint-based access
         self.credential = ChainedTokenCredential(
             ManagedIdentityCredential(client_id=self.client_id),
             AzureCliCredential()
@@ -58,16 +63,32 @@ class AppConfigClient:
         base_label_selector = SettingSelector(label_filter='gpt-rag', key_filter='*')
         no_label_selector = SettingSelector(label_filter=None, key_filter='*')
 
+        # Try to load from Azure App Configuration. If auth fails, don't spam stack traces.
         try:
-            self.client = load(selects=[orchestrator_label_selector, base_label_selector, no_label_selector],endpoint=endpoint, credential=self.credential,key_vault_options=AzureAppConfigurationKeyVaultOptions(credential=self.credential))
+            self.client = load(
+                selects=[orchestrator_label_selector, base_label_selector, no_label_selector],
+                endpoint=endpoint,
+                credential=self.credential,
+                key_vault_options=AzureAppConfigurationKeyVaultOptions(credential=self.credential)
+            )
+            logging.info("Azure App Configuration loaded successfully.")
+        except ClientAuthenticationError:
+            # Not logged in / MSI unavailable -> disable remote config, log a friendly message.
+            logging.warning(
+                "Azure App Configuration disabled: not authenticated (run 'az login' or configure Managed Identity). "
+                "Skipping remote configuration and not fetching any keys."
+            )
+            self.disabled = True
+            self.auth_failed = True
+            self.client = {}
         except Exception as e:
-            logging.log("error", f"Unable to connect to Azure App Configuration. Please check APP_CONFIGURATION_URI setting. {e}")
-            try:
-                connection_string = os.environ["AZURE_APPCONFIG_CONNECTION_STRING"]
-                # Connect to Azure App Configuration using a connection string.
-                self.client = load(connection_string=connection_string, key_vault_options=AzureAppConfigurationKeyVaultOptions(credential=self.credential))
-            except Exception as e:
-                raise Exception(f"Unable to connect to Azure App Configuration. Please check your connection string or endpoint. {e}")
+            # Any other error: disable and keep running without remote config.
+            logging.warning(
+                "Azure App Configuration unavailable (%s). Skipping remote configuration and not fetching any keys.",
+                str(e)
+            )
+            self.disabled = True
+            self.client = {}
 
 
     def get(self, key: str, default: Any = None, type: type = str) -> Any:
@@ -82,18 +103,16 @@ class AppConfigClient:
 
         allow_env_vars = False
         if "allow_environment_variables" in os.environ:
-            allow_env_vars = bool(os.environ[
-                    "allow_environment_variables"
-                    ])
+            allow_env_vars = str(os.environ["allow_environment_variables"]).lower() in ("1", "true", "yes")
 
         if allow_env_vars is True:
             value = os.environ.get(key)
 
-        if value is None:
+        if value is None and not self.disabled:
             try:
                 value = self.get_config_with_retry(name=key)
-            except Exception as e:
-                pass
+            except Exception:
+                value = None
 
         if value is not None:
             if type is not None:
@@ -131,10 +150,14 @@ class AppConfigClient:
         before_sleep=retry_before_sleep
     )
     def get_config_with_retry(self, name):
+        if self.disabled or not self.client:
+            return None
         try:
             return self.client[name]
+        except KeyError:
+            return None
         except RetryError:
-            pass
+            return None
 
     # Helper functions for reading environment variables
     def read_env_variable(self, var_name, default=None):

@@ -1,6 +1,6 @@
-# NL2SQL and Chat with Fabric Scenarios
+# NL2SQL and NL2DAX (Fabric) Strategy
 
-This page provides an overview of how the NL2SQL scenario works within the GPT-RAG Agentic Orchestrator. It explores the key components, including architecture, agent orchestration, authentication methods, and the configuration of data sources and data dictionaries.
+This page provides an overview of how the NL2SQL scenario works within the GPT-RAG Agentic Orchestrator. It explores the key components, including architecture, agent orchestration, authentication methods, and the configuration of data sources and NL2SQL metadata.
 
 ## Table of Contents
 
@@ -11,7 +11,7 @@ This page provides an overview of how the NL2SQL scenario works within the GPT-R
    - [3.1 Azure SQL Databases](#azure-sql-databases)
    - [3.2 Microsoft Fabric](#microsoft-fabric)
 4. [**Data Sources Configuration**](#data-sources-configuration)
-5. [**Data Dictionary**](#data-dictionary)
+5. [**NL2SQL metadata**](#nl2sql-metadata)
 
 ---
 
@@ -54,9 +54,15 @@ The orchestrator supports different authentication methods depending on the data
 
 When connecting to **Azure SQL Databases**, you have two authentication options:
 
-- **Managed Identity (Preferred):** Uses the system-assigned or user-assigned identity of the Orchestrator Azure Function. The prerequisite is to ensure that the orchestrator’s managed identity has the `db_datareader` role on the target database.
+- **Managed Identity (Preferred):** Uses the system-assigned or user-assigned identity of the Orchestrator Container App. The prerequisite is to ensure that the orchestrator’s managed identity has the `db_datareader` role on the target database.
+
+![SQL Database configuration](../media/sql-database-configuration-role-assignment.png)  
+*SQL Database configuration — example: assigning read access to the Container App.*
 
 - **SQL Server Authentication:** Requires a `uid` and password for a user with read access to the database. The password must be stored in **Azure Key Vault**, following the naming convention `{datasource_id}-secret`. Configuration details are provided in the next section.
+
+> [!NOTE]
+> Make sure **Allow Azure services and resources to access this server** is set to true in SQL Database Server page in both options.
 
 ### **Microsoft Fabric**
 
@@ -163,13 +169,13 @@ For data sources that require secrets—such as those accessed via a **Service P
 
 ---
 
-## **Data Dictionary**
+## NL2SQL metadata
 
-The Data Dictionary is essential for **NL2SQL** and **Chat with Fabric** scenarios, providing metadata about queries, tables, and measures that the orchestrator uses to generate optimized SQL and DAX queries. This section explains how to document the data dictionary and outlines the indexing process.
+NL2SQL metadata is essential for **NL2SQL** and **Chat with Fabric** scenarios, providing metadata about queries, tables, and measures that the orchestrator uses to generate optimized SQL and DAX queries. This section explains how to document the metadata and outlines the indexing process.
 
-### **How to Document the Data Dictionary**
+### **How to document NL2SQL metadata**
 
-The data dictionary includes three types of content:
+NL2SQL metadata includes three types of content:
 
 - **Tables:** Descriptions of tables used by the chatbot to generate queries. In the column descriptions, provide at least the column names and their descriptions; optionally, you can include data types and example values for greater clarity
 - **Queries:** Sample queries used for few-shot learning by the orchestrator. These are optional, use this only for frequently used queries that help optimize the AI agents' performance.
@@ -190,7 +196,7 @@ The file names are flexible and should follow a clear naming convention for easy
 > [!NOTE]
 > The `datasource` field can be any name of your choice. This name will be used to reference the datasource within GPT-RAG and must contain only alphanumeric characters and dashes.
 
-### **Data Dictionary Elements**
+### **NL2SQL metadata elements**
 
 Before the examples, here are the field descriptions for each element type:
 
@@ -309,9 +315,9 @@ Example of a local measure JSON:
 > [!Tip]
 > You can find more exampes in the [samples folder](../samples/).
 
-### **How to Ingest the Data Dictionary**
+### **How to ingest NL2SQL metadata**
 
-Every data dictionary element is indexed into an AI Search Index based on its element type: measure, table, or query. This process is handled by an AI Search Indexer, which runs on a scheduled basis or can be triggered manually. 
+Every NL2SQL metadata element is indexed into an AI Search Index based on its element type: measure, table, or query. This process is handled by an AI Search Indexer, which runs on a scheduled basis or can be triggered manually. 
 
 The diagram below illustrates the NL2SQL data ingestion pipeline:  
 

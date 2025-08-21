@@ -21,12 +21,13 @@ Part of the [GPT-RAG](https://github.com/Azure/gpt-rag) solution.
 
 The **GPT-RAG Orchestrator** service is an agentic orchestration layer built on Azure AI Foundry Agent Service and the Semantic Kernel framework. It enables agent-based RAG workflows by coordinating multiple specialized agents—each with a defined role—to collaboratively generate accurate, context-aware responses for complex user queries.
 
-
 ### How the Orchestrator Works
 
-The orchestrator uses Azure AI Foundry Agent Service for single-agent and connected-agent flows, leveraging its managed runtime for agent lifecycle, state, and tool orchestration. For multi-agent scenarios, it integrates the Semantic Kernel Agent Framework to compose and coordinate specialized agents collaborating on tasks. Custom agent strategies allow developers to plug domain-specific logic without modifying core orchestration code.
+The orchestrator uses **Azure AI Foundry Agent Service** for single-agent and connected-agent flows, leveraging its managed runtime for agent lifecycle, state management, and tool orchestration. For multi-agent scenarios, it integrates the **Semantic Kernel Agent Framework** to compose and coordinate specialized agents working together on tasks. Custom agent strategies enable developers to add domain-specific logic without modifying the core orchestration code.
 
-Developers can extend the orchestrator by creating a new subclass of `BaseAgentStrategy`, implementing the required `initiate_agent_flow` method and any additional helpers, then registering it in `AgentStrategyFactory.get_strategy` under a unique key. The base class provides shared logic (e.g., prompt loading via `_read_prompt`, credential setup) so extensions focus only on custom behavior. 
+Developers can extend the orchestrator by creating a new subclass of `BaseAgentStrategy`, implementing the required `initiate_agent_flow` method (along with any additional helpers), and registering it in `AgentStrategyFactory.get_strategy` under a unique key.
+
+Examples of available strategies include the **Single Agent RAG Strategy** and the **[NL2SQL Strategy](docs/nl2sql_strategy.md)**.
 
 ## Prerequisites
 
@@ -114,14 +115,14 @@ $env:APP_CONFIG_ENDPOINT = "https://<your-app-config-name>.azconfig.io"
 .\scripts\deploy.ps1
 ```
 
-## Release 1.0.0
+## Previous Releases
 
-> [!NOTE]
-> If you want to use the GPT-RAG original version, simply use the v1.0.0 release from the GitHub repository.
+> [!NOTE]  
+> For earlier versions, use the corresponding release in the GitHub repository (e.g., v1.0.0 for the initial version).
 
-## Contributing
+## 🤝 Contributing
 
-We appreciate contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines on the Contributor License Agreement (CLA), code of conduct, and submitting pull requests.
+We appreciate contributions! See [CONTRIBUTING.md](https://github.com/Azure/GPT-RAG/blob/main/CONTRIBUTING.md) for guidelines on the Contributor License Agreement (CLA), code of conduct, and submitting pull requests.
 
 ## Trademarks
 
