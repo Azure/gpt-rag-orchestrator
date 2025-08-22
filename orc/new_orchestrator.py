@@ -266,6 +266,7 @@ class ConversationOrchestrator:
                 memory=memory,
                 organization_id=self.organization_id,
                 conversation_id=conversation_id,
+                user_id=user_info["id"],
             )
             logging.info(
                 "[orchestrator-process_conversation] Successfully created agent"
