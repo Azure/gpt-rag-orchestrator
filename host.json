@@ -9,7 +9,14 @@
     }
   },
   "extensionBundle": {
-    "id": "Microsoft.Azure.Functions.ExtensionBundle.Experimental",
-    "version": "[4.*, 5.0.0)"
-  }
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[4.0.0, 5.0.0)"
+  },
+  "http": {
+    "routePrefix": "api",
+    "maxConcurrentRequests": 100,
+    "maxOutstandingRequests": 200,
+    "dynamicThrottlesEnabled": false
+  },
+  "functionTimeout": "00:10:00"
 }

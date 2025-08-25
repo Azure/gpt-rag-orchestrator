@@ -93,7 +93,6 @@ async def stream_response(req: Request) -> StreamingResponse:
                     user_settings=settings,
                 ),
                 media_type="text/event-stream",
-                headers={"X-Content-Type-Options": "nosniff"}
             )
         except Exception as e:
             logging.error(f"[FunctionApp] Error in progress streaming: {str(e)}")

@@ -247,7 +247,7 @@ class ConversationOrchestrator:
             "progress": 5,
             "timestamp": time.time()
         }
-        yield json.dumps(progress_data) + "\n" + " " * 8192 + "\n"
+        yield json.dumps(progress_data)
 
         try:
             # Load conversation state
@@ -263,7 +263,7 @@ class ConversationOrchestrator:
                 "progress": 10,
                 "timestamp": time.time()
             }
-            yield json.dumps(progress_data) + "\n" + " " * 8192 + "\n"
+            yield json.dumps(progress_data)
 
             config = {"configurable": {"thread_id": conversation_id}}
 
@@ -330,7 +330,7 @@ class ConversationOrchestrator:
                 ],
                 "images_blob_urls": blob_urls,
             }
-            yield json.dumps(thoughts_data) + "\n" + " " * 8192 + "\n"
+            yield json.dumps(thoughts_data)
 
             # Progress for response generation start
             response_start_data = {
@@ -353,7 +353,7 @@ class ConversationOrchestrator:
                 "message": "I'm sorry, I encountered an error while processing your request. Please try again.",
                 "timestamp": time.time()
             }
-            yield json.dumps(error_data) + "\n" + " " * 8192 + "\n"
+            yield json.dumps(error_data)
 
     def _generate_final_response(self, state, conversation_data, user_info, user_settings, start_time, conversation_id):
         """Generate the final streaming response using the processed state."""
