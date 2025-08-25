@@ -58,23 +58,15 @@ class ProgressSteps:
 
     INITIALIZATION = "initialization"
     QUERY_REWRITE = "query_rewrite"
-    QUERY_CATEGORIZATION = "query_categorization"
-    ROUTING = "routing"
-    TOOL_SELECTION = "tool_selection"
-    TOOL_EXECUTION = "tool_execution"
     AGENTIC_SEARCH = "agentic_search"
     DATA_ANALYSIS = "data_analysis"
     RESPONSE_GENERATION = "response_generation"
 
 
 STEP_MESSAGES = {
-    ProgressSteps.INITIALIZATION: "Starting conversation...",
-    ProgressSteps.QUERY_REWRITE: "Analyzing & rewriting your question...",
-    ProgressSteps.QUERY_CATEGORIZATION: "Categorizing your request...",
-    ProgressSteps.ROUTING: "Determining information sources needed...",
-    ProgressSteps.TOOL_SELECTION: "Selecting appropriate tools...",
-    ProgressSteps.TOOL_EXECUTION: "Executing tools...",
-    ProgressSteps.AGENTIC_SEARCH: "Executing Agentic Search...",
-    ProgressSteps.DATA_ANALYSIS: "Executing Data Analysis Tool...",
-    ProgressSteps.RESPONSE_GENERATION: "Generating your response...",
+    ProgressSteps.INITIALIZATION: "Firing up the FreddAid engine...",
+    ProgressSteps.QUERY_REWRITE: "FreddAid’s tweezers out - refining your question...",
+    ProgressSteps.AGENTIC_SEARCH: "FreddAid is on the case - searching for answers...",
+    ProgressSteps.DATA_ANALYSIS: "FreddAid’s analysis gears are grinding...",
+    ProgressSteps.RESPONSE_GENERATION: "FreddAid’s quill is dancing - crafting your response...",
 }
