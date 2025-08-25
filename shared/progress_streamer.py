@@ -68,5 +68,5 @@ STEP_MESSAGES = {
     ProgressSteps.QUERY_REWRITE: "FreddAid’s tweezers out - refining your question...",
     ProgressSteps.AGENTIC_SEARCH: "FreddAid is on the case - searching for answers...",
     ProgressSteps.DATA_ANALYSIS: "FreddAid’s analysis gears are grinding...",
-    ProgressSteps.RESPONSE_GENERATION: "FreddAid’s quill is dancing - crafting your response...",
+    ProgressSteps.RESPONSE_GENERATION: "Composing your response...",
 }
