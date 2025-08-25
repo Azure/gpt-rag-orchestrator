@@ -18,5 +18,10 @@
     "maxOutstandingRequests": 200,
     "dynamicThrottlesEnabled": false
   },
-  "functionTimeout": "00:10:00"
+  "functionTimeout": "00:10:00",
+  "queues": {
+    "maxDequeueCount": 5,
+    "visibilityTimeout": "00:00:30",
+    "messageEncoding": "none"
+  }
 }
