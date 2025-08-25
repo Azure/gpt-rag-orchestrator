@@ -32,7 +32,7 @@ class ProgressStreamer:
 
         if self.yield_func:
             try:
-                self.yield_func(json.dumps(progress_data) + "\n")
+                self.yield_func(json.dumps(progress_data) + "\n" + " " * 8192 + "\n")
             except Exception as e:
                 logger.warning(f"Failed to yield progress: {e}")
 
@@ -48,7 +48,7 @@ class ProgressStreamer:
 
         if self.yield_func:
             try:
-                self.yield_func(json.dumps(error_data) + "\n")
+                self.yield_func(json.dumps(error_data) + "\n" + " " * 8192 + "\n")
             except Exception as e:
                 logger.warning(f"Failed to yield error: {e}")
 
