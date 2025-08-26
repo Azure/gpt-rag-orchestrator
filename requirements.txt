@@ -30,3 +30,4 @@ beautifulsoup4
 PyMuPDF
 azure-search-documents==11.6.0b12
 langchain-mcp-adapters
+deepagents

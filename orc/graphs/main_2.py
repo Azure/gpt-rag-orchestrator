@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from typing import Dict, Any
 from shared.util import get_secret
+from shared.progress_streamer import ProgressStreamer, ProgressSteps, STEP_MESSAGES
 
 # Load environment variables FIRST, before importing modules that read them
 load_dotenv()
@@ -137,6 +138,8 @@ class GraphBuilder:
         organization_id: str = None,
         config: GraphConfig = GraphConfig(),
         conversation_id: str = None,
+        user_id: str = None,
+        progress_streamer: Optional[ProgressStreamer] = None,
     ):
         """Initialize with with configuration"""
         logger.info(
@@ -149,6 +152,8 @@ class GraphBuilder:
         self.organization_id = organization_id
         self.config = config
         self.conversation_id = conversation_id
+        self.user_id = user_id
+        self.progress_streamer = progress_streamer
         
         # Initialize LLM and retriever
         self.llm = self._init_llm()
@@ -473,6 +478,13 @@ class GraphBuilder:
         logger.info(
             f"[Query Rewrite] Starting async query rewrite for: '{state.question[:100]}...'"
         )
+        
+        if self.progress_streamer:
+            self.progress_streamer.emit_progress(
+                ProgressSteps.QUERY_REWRITE,
+                STEP_MESSAGES[ProgressSteps.QUERY_REWRITE],
+                20
+            )
         question = state.question
 
         system_prompt = QUERY_REWRITING_PROMPT
@@ -617,7 +629,7 @@ class GraphBuilder:
         logger.info(
             "[Query Categorization] Sending async categorization request to LLM"
         )
-        response = await self._support_llm_invoke(
+        response = await self._llm_invoke(
             [
                 SystemMessage(content=category_prompt),
                 HumanMessage(content=state.question),
@@ -702,7 +714,8 @@ class GraphBuilder:
             tool_call["args"].update(
                 {
                     "organization_id": self.organization_id,
-                    "code_thread_id": state.code_thread_id
+                    "code_thread_id": state.code_thread_id,
+                    "user_id": self.user_id
                 }
             )
     
@@ -802,6 +815,21 @@ class GraphBuilder:
         
         for tool_call in mcp_tool_used:
             tool_name = tool_call["name"]
+            
+            if self.progress_streamer:
+                if tool_name == "agentic_search":
+                    self.progress_streamer.emit_progress(
+                        ProgressSteps.AGENTIC_SEARCH,
+                        STEP_MESSAGES[ProgressSteps.AGENTIC_SEARCH],
+                        40
+                    )
+                elif tool_name == "data_analyst":
+                    self.progress_streamer.emit_progress(
+                        ProgressSteps.DATA_ANALYSIS,
+                        STEP_MESSAGES[ProgressSteps.DATA_ANALYSIS],
+                        40
+                    )
+            
             if tool_name == "agentic_search":
                 self._configure_agentic_search_args(tool_call, state)
             elif tool_name == "data_analyst":
@@ -838,7 +866,7 @@ class GraphBuilder:
             }
 
 def create_conversation_graph(
-    memory, organization_id=None, conversation_id=None
+    memory, organization_id=None, conversation_id=None, user_id=None, progress_streamer=None
 ) -> StateGraph:
     """Create and return a configured conversation graph.
     Returns:
@@ -848,37 +876,6 @@ def create_conversation_graph(
         f"[Conversation Graph Creation] Creating conversation graph for conversation: {conversation_id}"
     )
     builder = GraphBuilder(
-        organization_id=organization_id, conversation_id=conversation_id
+        organization_id=organization_id, conversation_id=conversation_id, user_id=user_id, progress_streamer=progress_streamer
     )
     return builder.build(memory)
-
-
-# if __name__ == "__main__":
-
-#     config = GraphConfig()
-#     # Initialize memory saver
-#     memory = MemorySaver()
-
-#     graph_builder = GraphBuilder(
-#         organization_id="6c33b530-22f6-49ca-831b-25d587056237",
-#         config=config,
-#         conversation_id="123",
-#     )
-
-#     graph = graph_builder.build(memory=memory)
-    
-#     print(f"\nInvoking Graph with Sample Question...")
-    
-#     question = "How has total POS $ and POS Units evolved month-over-month from Jan 2024 through the latest month in 2025?"
-
-#     async def run_graph():
-#         try:
-#             config_dict = {"configurable": {"thread_id": "test-thread-123"}}
-#             result = await graph.ainvoke({"question": question}, config=config_dict)
-            
-#             print(result)
-                
-#         except Exception as e:
-#             print(f"Error invoking graph: {str(e)}")
-    
-#     asyncio.run(run_graph())

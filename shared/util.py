@@ -12,12 +12,15 @@ import time
 import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Dict, Any, Optional
 from azure.cosmos import CosmosClient
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 from .exceptions import MissingRequiredFieldError
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
+from shared.blob_client_async import get_blob_service_client
+from shared.cosmos_client_async import get_client, get_db, get_container
 
 
 # logging level
@@ -1649,3 +1652,86 @@ def trigger_indexer_with_retry(indexer_name: str, blob_name: str) -> bool:
         return False
     finally:
         loop.close()
+
+
+def get_report_job(job_id: str, organization_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve a report job from Cosmos DB.
+    
+    Args:
+        job_id: Unique identifier for the job
+        organization_id: Organization ID (used as partition key)
+        
+    Returns:
+        Job document or None if not found
+    """
+    try:
+        db = get_db(AZURE_DB_NAME)
+        container_client = get_container(db, "report_jobs")
+        
+        job = container_client.read_item(item=job_id, partition_key=organization_id)
+        return job
+        
+    except CosmosResourceNotFoundError:
+        logging.warning(f"Report job {job_id} not found for organization {organization_id}")
+        return None
+    except Exception as e:
+        logging.error(f"Error retrieving report job {job_id}: {str(e)}")
+        return None
+
+def update_report_job_status(
+    job_id: str, 
+    organization_id: str, 
+    status: str, 
+    result_metadata: Optional[Dict[str, Any]] = None,
+    error_payload: Optional[Dict[str, Any]] = None
+) -> bool:
+    """
+    Update the status and result of a report job.
+    
+    Args:
+        job_id: Unique identifier for the job
+        organization_id: Organization ID (used as partition key)
+        status: New status (QUEUED, RUNNING, SUCCEEDED, FAILED)
+        result_metadata: Metadata about the generated report (for SUCCEEDED status)
+        error_payload: Error information (for FAILED status)
+        
+    Returns:
+        True if update successful, False otherwise
+    """
+    try:
+        db = get_db(AZURE_DB_NAME)
+        container_client = get_container(db, "report_jobs")
+        
+        # Get the current job
+        job = container_client.read_item(item=job_id, partition_key=organization_id)
+        
+        # Update status and timestamp
+        job["status"] = status
+        job["updated_at"] = datetime.now(timezone.utc).isoformat()
+        
+        # Add result metadata for successful jobs
+        if status == "SUCCEEDED" and result_metadata:
+            job["result"] = result_metadata
+            job["completed_at"] = datetime.now(timezone.utc).isoformat()
+            
+        # Add error information for failed jobs
+        elif status == "FAILED" and error_payload:
+            job["error"] = error_payload
+            job["failed_at"] = datetime.now(timezone.utc).isoformat()
+            
+        # Update start time for running jobs
+        elif status == "RUNNING":
+            job["started_at"] = datetime.now(timezone.utc).isoformat()
+        
+        # Save the updated job
+        container_client.patch_item(item=job_id, body=job)
+        logging.info(f"Updated report job {job_id} to status {status}")
+        return True
+        
+    except CosmosResourceNotFoundError:
+        logging.error(f"Report job {job_id} not found for organization {organization_id}")
+        return False
+    except Exception as e:
+        logging.error(f"Error updating report job {job_id}: {str(e)}")
+        return False
