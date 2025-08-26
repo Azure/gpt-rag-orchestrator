@@ -46,7 +46,7 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 @app.queue_trigger(
     arg_name="msg", 
     queue_name="report-jobs",
-    connection="AzureWebJobsStorage"
+    connection="AZURE_STORAGE_CONNECTION_STRING"
 )
 def report_worker(msg: func.QueueMessage) -> None:
     """
