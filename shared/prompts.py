@@ -940,8 +940,6 @@ Examples:
 - The market share of the top 5 competitors in the grocery industry: ![Grocery Market Share](https://nytimes.com/grocery-market-share.jpeg)
 - The percentage of customers who quit last quarter: ![Customer Churn](https://ft.com/customer-churn.jpg)
 
-<-- End of examples
-
 """
 
 system_prompt = """
