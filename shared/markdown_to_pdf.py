@@ -2,7 +2,7 @@
 Markdown to PDF conversion utility.
 
 This module provides functionality to convert markdown content to PDF documents
-using WeasyPrint for high-quality PDF generation.
+using xhtml2pdf for PDF generation without native dependencies.
 """
 
 import io
@@ -10,10 +10,44 @@ import logging
 import markdown
 import html
 from typing import Dict, Any, Union
-from html_to_pdf_converter import html_to_pdf
+from xhtml2pdf import pisa
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+
+def html_to_pdf_xhtml2pdf(html_content: str) -> bytes:
+    """
+    Convert HTML content to PDF bytes using xhtml2pdf.
+    
+    Args:
+        html_content (str): The HTML content to convert
+        
+    Returns:
+        bytes: PDF document as bytes
+        
+    Raises:
+        Exception: If PDF generation fails
+    """
+    try:
+        # Create a bytes buffer for the PDF output
+        pdf_buffer = io.BytesIO()
+        
+        # Convert HTML to PDF using xhtml2pdf
+        pisa_status = pisa.CreatePDF(html_content, dest=pdf_buffer)
+        
+        if pisa_status.err:
+            raise Exception(f"xhtml2pdf conversion failed with {pisa_status.err} errors")
+        
+        # Get the PDF bytes
+        pdf_bytes = pdf_buffer.getvalue()
+        pdf_buffer.close()
+        
+        return pdf_bytes
+        
+    except Exception as e:
+        logger.error(f"Failed to convert HTML to PDF using xhtml2pdf: {str(e)}")
+        raise Exception(f"HTML to PDF conversion failed: {str(e)}") from e
 
 
 def markdown_to_html(markdown_content: str) -> str:
@@ -177,8 +211,8 @@ def dict_to_pdf(input_dict: Dict[str, Any]) -> bytes:
         # Convert markdown to HTML
         html_content = markdown_to_html(markdown_content)
         
-        # Convert HTML to PDF
-        pdf_bytes = html_to_pdf(html_content)
+        # Convert HTML to PDF using xhtml2pdf
+        pdf_bytes = html_to_pdf_xhtml2pdf(html_content)
         
         logger.info(f"Successfully generated PDF ({len(pdf_bytes)} bytes)")
         return pdf_bytes

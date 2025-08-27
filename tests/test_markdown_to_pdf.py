@@ -94,18 +94,18 @@ print("Hello World")
         self.assertIn('<pre class="codehilite"><code', result)
         self.assertIn('<blockquote>', result)
 
-    @patch('shared.markdown_to_pdf.html_to_pdf')
-    def test_dict_to_pdf_valid_input(self, mock_html_to_pdf):
+    @patch('shared.markdown_to_pdf.html_to_pdf_xhtml2pdf')
+    def test_dict_to_pdf_valid_input(self, mock_html_to_pdf_xhtml2pdf):
         """Test dict to PDF conversion with valid input."""
-        mock_html_to_pdf.return_value = b'fake_pdf_content'
+        mock_html_to_pdf_xhtml2pdf.return_value = b'fake_pdf_content'
         
         result = dict_to_pdf(self.sample_dict)
         
         self.assertEqual(result, b'fake_pdf_content')
-        mock_html_to_pdf.assert_called_once()
+        mock_html_to_pdf_xhtml2pdf.assert_called_once()
         
-        # Check that the HTML passed to html_to_pdf contains expected content
-        args, kwargs = mock_html_to_pdf.call_args
+        # Check that the HTML passed to html_to_pdf_xhtml2pdf contains expected content
+        args, kwargs = mock_html_to_pdf_xhtml2pdf.call_args
         html_content = args[0]
         self.assertIn('Weekly Brand Analysis Report', html_content)
         self.assertIn('Executive Summary', html_content)
@@ -152,10 +152,10 @@ print("Hello World")
         with self.assertRaises(ValueError):
             dict_to_pdf(invalid_dict2)
 
-    @patch('shared.markdown_to_pdf.html_to_pdf')
-    def test_dict_to_pdf_html_generation_failure(self, mock_html_to_pdf):
+    @patch('shared.markdown_to_pdf.html_to_pdf_xhtml2pdf')
+    def test_dict_to_pdf_html_generation_failure(self, mock_html_to_pdf_xhtml2pdf):
         """Test dict to PDF conversion when HTML to PDF conversion fails."""
-        mock_html_to_pdf.side_effect = Exception("PDF generation failed")
+        mock_html_to_pdf_xhtml2pdf.side_effect = Exception("PDF generation failed")
         
         with self.assertRaises(Exception) as context:
             dict_to_pdf(self.simple_dict)
@@ -197,22 +197,22 @@ print("Hello World")
             'another_field': 123
         }
         
-        with patch('shared.markdown_to_pdf.html_to_pdf') as mock_html_to_pdf:
-            mock_html_to_pdf.return_value = b'fake_pdf_content'
+        with patch('shared.markdown_to_pdf.html_to_pdf_xhtml2pdf') as mock_html_to_pdf_xhtml2pdf:
+            mock_html_to_pdf_xhtml2pdf.return_value = b'fake_pdf_content'
             
             result = dict_to_pdf(dict_with_extras)
             
             self.assertEqual(result, b'fake_pdf_content')
-            mock_html_to_pdf.assert_called_once()
+            mock_html_to_pdf_xhtml2pdf.assert_called_once()
 
     def test_integration_with_real_example(self):
         """Integration test with the actual example provided by the user."""
-        # This test requires actual WeasyPrint functionality
-        # Skip if WeasyPrint is not available
+        # This test requires actual xhtml2pdf functionality
+        # Skip if xhtml2pdf is not available
         try:
-            from weasyprint import HTML
+            from xhtml2pdf import pisa
         except ImportError:
-            self.skipTest("WeasyPrint not available for integration test")
+            self.skipTest("xhtml2pdf not available for integration test")
         
         try:
             result = dict_to_pdf(self.sample_dict)
@@ -249,8 +249,8 @@ This contains <b>HTML</b> tags.
         large_content = "# Large Content\n\n" + "This is a test paragraph. " * 1000
         large_dict = {'content': large_content}
         
-        with patch('shared.markdown_to_pdf.html_to_pdf') as mock_html_to_pdf:
-            mock_html_to_pdf.return_value = b'fake_pdf_content'
+        with patch('shared.markdown_to_pdf.html_to_pdf_xhtml2pdf') as mock_html_to_pdf_xhtml2pdf:
+            mock_html_to_pdf_xhtml2pdf.return_value = b'fake_pdf_content'
             
             result = dict_to_pdf(large_dict)
             self.assertEqual(result, b'fake_pdf_content')
@@ -266,14 +266,14 @@ Y caracteres especiales: €, £, ¥, ©, ®, ™
         """
         unicode_dict = {'content': unicode_content}
         
-        with patch('shared.markdown_to_pdf.html_to_pdf') as mock_html_to_pdf:
-            mock_html_to_pdf.return_value = b'fake_pdf_content'
+        with patch('shared.markdown_to_pdf.html_to_pdf_xhtml2pdf') as mock_html_to_pdf_xhtml2pdf:
+            mock_html_to_pdf_xhtml2pdf.return_value = b'fake_pdf_content'
             
             result = dict_to_pdf(unicode_dict)
             self.assertEqual(result, b'fake_pdf_content')
             
-            # Check that unicode content was passed to html_to_pdf
-            args, kwargs = mock_html_to_pdf.call_args
+            # Check that unicode content was passed to html_to_pdf_xhtml2pdf
+            args, kwargs = mock_html_to_pdf_xhtml2pdf.call_args
             html_content = args[0]
             self.assertIn('Título con acentos', html_content)
 
