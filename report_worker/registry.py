@@ -11,14 +11,23 @@ from abc import ABC, abstractmethod
 from shared.blob_client_async import get_blob_service_client
 from azure.core.exceptions import ResourceNotFoundError, ResourceExistsError
 from azure.storage.blob import ContentSettings
-
+from datetime import datetime, timezone
+import json
 class ReportGeneratorBase(ABC):
-    """Base class for all report generators"""
+    """
+    Base class for all report generators.
+    
+    NOTE: The report_worker function now handles PDF conversion and blob storage automatically.
+    Generators should return markdown content, and the worker will:
+    1. Convert markdown to PDF using shared/markdown_to_pdf.py
+    2. Store PDF in Azure Blob Storage at: documents/organization_files/{organization_id}/
+    3. Add metadata: organization_id, report_id, timestamp
+    """
     
     @abstractmethod
-    def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
         """
-        Generate a report and return metadata about the generated artifact.
+        Generate a report and return markdown content.
         
         Args:
             job_id: Unique identifier for the report job
@@ -26,82 +35,60 @@ class ReportGeneratorBase(ABC):
             parameters: Report-specific parameters
             
         Returns:
-            Dict containing:
-            - blob_url: URL to the generated report artifact
-            - file_name: Name of the generated file
-            - file_size: Size of the file in bytes
-            - content_type: MIME type of the generated file
-            - metadata: Any additional metadata about the report
+            str: Markdown formatted report content that will be converted to PDF
         """
         pass
 
 class SampleReportGenerator(ReportGeneratorBase):
     """Sample report generator for demonstration purposes"""
     
-    async def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate a sample report"""
-        import json
-        from datetime import datetime, timezone
-        from azure.storage.blob import BlobServiceClient
-        import os
-        
-        # Create sample report content
-        report_content = {
-            "report_type": "sample",
-            "job_id": job_id,
-            "organization_id": organization_id,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "parameters": parameters,
-            "data": {
-                "message": "This is a sample report",
-                "status": "completed"
-            }
-        }
-        
-        # Convert to JSON
-        json_content = json.dumps(report_content, indent=2)
-        file_name = f"sample_report_{job_id}.json"
-        
-        bsc = await get_blob_service_client()
-        container_client = bsc.get_container_client(container_name="reports")
-        blob_name = f"{organization_id}/{file_name}"
-        
-        # Ensure container exists
-        try:
-            container_client.get_container_properties()
-        except ResourceNotFoundError:
-            try:
-                container_client.create_container()
-            except ResourceExistsError:
-                pass  # another worker created it
-        except Exception as e:
-            logging.error(f"Error getting container properties: {e}")
-            raise e
-            
-        # Upload the report
-        blob_client = container_client.get_blob_client(blob=blob_name)
-        
-        blob_client.upload_blob(
-            json_content.encode('utf-8'), 
-            overwrite=True,
-            content_settings=ContentSettings(content_type='application/json')
-        )
-        
-        return {
-            "blob_url": blob_client.url,
-            "file_name": file_name,
-            "file_size": len(json_content.encode('utf-8')),
-            "content_type": "application/json",
-            "metadata": {
-                "records_processed": 1,
-                "report_version": "1.0"
-            }
-        }
+    def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
+        """Generate a sample report in markdown format"""
+        # Generate markdown content
+        markdown_content = f"""# Sample Report
+
+## Report Information
+- **Job ID**: {job_id}
+- **Organization ID**: {organization_id}
+- **Generated At**: {datetime.now(timezone.utc).isoformat()}
+- **Report Type**: Sample
+
+## Parameters
+```json
+{json.dumps(parameters, indent=2)}
+```
+
+## Report Data
+
+### Summary
+This is a sample report generated to demonstrate the new markdown-based report generation system.
+
+### Status
+✅ **Completed Successfully**
+
+### Key Metrics
+| Metric | Value |
+|--------|-------|
+| Records Processed | 1 |
+| Report Version | 1.0 |
+| Status | Completed |
+
+### Additional Information
+The report generation system now automatically:
+1. Converts markdown content to PDF
+2. Stores PDFs in Azure Blob Storage
+3. Organizes files by organization
+4. Adds proper metadata
+
+---
+*Report generated on {datetime.now(timezone.utc).strftime('%Y-%m-%d at %H:%M:%S UTC')}*
+"""
+        return markdown_content
 
 class ConversationAnalyticsGenerator(ReportGeneratorBase):
     """Generate analytics reports from conversation data"""
     
-    async def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
         """Generate conversation analytics report"""
         # This would implement actual conversation analytics logic
         # For now, return a placeholder
@@ -110,7 +97,7 @@ class ConversationAnalyticsGenerator(ReportGeneratorBase):
 class UsageReportGenerator(ReportGeneratorBase):
     """Generate usage reports for organization"""
     
-    async def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
         """Generate usage report"""
         # This would implement actual usage reporting logic
         # For now, return a placeholder
