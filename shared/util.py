@@ -1726,7 +1726,7 @@ def update_report_job_status(
             job["started_at"] = datetime.now(timezone.utc).isoformat()
         
         # Save the updated job
-        container_client.patch_item(item=job_id, body=job)
+        container_client.replace_item(item=job_id, body=job)
         logging.info(f"Updated report job {job_id} to status {status}")
         return True
         
