@@ -16,6 +16,7 @@ load_dotenv()
 ModelType = Literal["o4-mini", "claude-sonnet-4-20250514", "gpt-4.1"]
 ReasoningEffort = Literal["low", "medium", "high"]
 ModelClient = Union[AzureChatOpenAI, ChatAnthropic]
+time_range = Literal["day", "week", "month", "year"]
 
 logger = logging.getLogger(__name__)
 
@@ -198,12 +199,13 @@ class AgentConfig:
             max_retries=self.DEFAULT_MAX_RETRIES,
         )
 
-    def internet_search(self, query: str, include_domains: list[str] = None) -> list[dict]:
+    def internet_search(self, query: str, include_domains: list[str] = None, time_range: time_range = "month") -> list[dict]:
         """Run a internet search
 
         Args:
             query: Search query string
             include_domains: List of domains to include in the search
+            time_range: Time range to search in. Available options: day, week, month, year
 
         Returns:
             List of search results with title, url, and content
@@ -218,7 +220,7 @@ class AgentConfig:
                 include_domains=include_domains,
                 include_raw_content=False,
                 topic="general",
-                time_range="week",
+                time_range=time_range,
                 search_depth="advanced",
             )
             return results

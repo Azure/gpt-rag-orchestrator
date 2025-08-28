@@ -1,11 +1,18 @@
 import logging
 from typing import Dict, Any
 from functools import cached_property
-from shared.prompts import henkel_brand_analysis_prompt, competitor_analysis_prompt
+from shared.prompts import (
+    henkel_brand_analysis_prompt,
+    competitor_analysis_prompt,
+    product_analysis_prompt,
+    brand_analysis_prompt,
+)
 from deepagents import create_deep_agent
 from reports.config import AgentConfig, EnvironmentConfigLoader
 from shared.util import normalize_markdown
+
 logger = logging.getLogger(__name__)
+
 
 class ReportGenerator:
     def __init__(
@@ -66,13 +73,15 @@ class ReportGenerator:
             logger.error(f"Failed to generate report: {str(e)}", exc_info=True)
             raise
 
-#[START] this is for langgraph studio
+
+# [START] this is for langgraph studio
 report_agent = ReportGenerator(
     config=EnvironmentConfigLoader.load_from_environment(),
-    agent_prompt=competitor_analysis_prompt,
+    agent_prompt=brand_analysis_prompt,
     recursion_limit=1000,
 ).agent
-#[END] 
+# [END]
+
 
 def run_analysis(query: str, prompt: str, recursion_limit: int = 500) -> None:
     """Run brand analysis with the given query."""
@@ -95,9 +104,34 @@ def run_analysis(query: str, prompt: str, recursion_limit: int = 500) -> None:
 
 
 if __name__ == "__main__":
+    competitor_analysis_query = "Please provide a 2-page competitor analysis on these brands: sika, 3m, bostik. The industry is construction adhesives and sealants."
+    product_analysis_query = """
+    Please generate a monthly product performance report for the following consumer adhesive and sealant products:
+
+    Super Glue Gel Control - Super Glue
+
+    Silicone 1 Tub & Tile - Caulk & Sealants
+
+    Gaps & Cracks Insulating Foam - Foam Insulation
+
+    Silicone 1 All Purpose Sealant Window & Door - Caulk & Sealants
+
+    Advanced Silicone Kitchen & Bath Sealant - Caulk & Sealants
+
+    PL Premium Polyurethane Construction Adhesive - Construction Adhesive
+
+    Power Grab Mounting Tape - Mounting Tape
+"""
+    brand_analysis_query = """ 
+    Please generate the weekly Brand Analysis Report.
+
+    Brand Focus: Loctite's consumer and construction adhesives business.
+
+    Industry Context: Consumer & Professional Adhesives and Sealants.
+"""
     result = run_analysis(
-        query="Please provide a 2-page competitor analysis on these brands: sika, 3m, bostik. The industry is construction adhesives and sealants.",
-        prompt=competitor_analysis_prompt,
+        query=product_analysis_query,
+        prompt=product_analysis_prompt,
         recursion_limit=1000,
     )
     if result:

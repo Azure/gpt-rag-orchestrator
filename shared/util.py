@@ -1,5 +1,5 @@
 # utility functions
-from pydoc import html
+import html
 from dotenv import load_dotenv
 load_dotenv()
 import re
