@@ -35,6 +35,8 @@ from shared.conversation_export import export_conversation
 from webscrapping.multipage_scrape import crawl_website
 from report_worker.registry import get_generator
 from shared.util import get_report_job, update_report_job_status
+from shared.markdown_to_pdf import dict_to_pdf
+from shared.blob_client_async import get_blob_service_client
 # MULTIPAGE SCRAPING CONSTANTS
 DEFAULT_LIMIT = 30
 DEFAULT_MAX_DEPTH = 4
@@ -48,7 +50,7 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
     queue_name="report-jobs",
     connection="AZURE_STORAGE_CONNECTION_STRING"
 )
-def report_worker(msg: func.QueueMessage) -> None:
+async def report_worker(msg: func.QueueMessage) -> None:
     """
     Azure Function triggered by messages in the report-jobs queue.
     
@@ -154,7 +156,74 @@ def report_worker(msg: func.QueueMessage) -> None:
         # Generate the report
         parameters = job.get('parameters', {})
         try:
-            result_metadata = generator.generate(job_id, organization_id, parameters)
+            # Generate markdown content using the appropriate generator
+            logging.info(f"[ReportWorker] Generating markdown content for job {job_id}")
+            markdown_content = generator.generate(job_id, organization_id, parameters)
+            logging.info(f"[ReportWorker] Generated markdown content ({len(markdown_content)} chars) for job {job_id}")
+            
+            # Convert markdown to PDF
+            logging.info(f"[ReportWorker] Converting markdown to PDF for job {job_id}")
+            pdf_content_dict = {"content": markdown_content}
+            pdf_bytes = dict_to_pdf(pdf_content_dict)
+            logging.info(f"[ReportWorker] Generated PDF ({len(pdf_bytes)} bytes) for job {job_id}")
+            
+            # Store PDF in Azure Blob Storage
+            blob_service_client = await get_blob_service_client()
+            container_name = "documents"
+            
+            # Create blob name with organization structure
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            file_name = f"report_{job_id}_{timestamp}.pdf"
+            blob_name = f"organization_files/{organization_id}/{file_name}"
+            
+            # Prepare metadata
+            blob_metadata = {
+                "organization_id": organization_id,
+                "report_id": job_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "report_key": report_key,
+                "correlation_id": correlation_id or ""
+            }
+            
+            logging.info(f"[ReportWorker] Storing PDF in blob: {blob_name}")
+            
+            # Get container client and ensure container exists
+            container_client = blob_service_client.get_container_client(container_name)
+            try:
+                await container_client.get_container_properties()
+            except Exception:
+                try:
+                    await container_client.create_container()
+                    logging.info(f"[ReportWorker] Created container: {container_name}")
+                except Exception as e:
+                    # Container might already exist (race condition)
+                    logging.info(f"[ReportWorker] Container creation result: {str(e)}")
+            
+            # Upload PDF to blob storage
+            blob_client = container_client.get_blob_client(blob_name)
+            await blob_client.upload_blob(
+                pdf_bytes,
+                overwrite=True,
+                metadata=blob_metadata,
+                content_settings={
+                    "content_type": "application/pdf"
+                }
+            )
+            
+            blob_url = blob_client.url
+            logging.info(f"[ReportWorker] Successfully stored PDF at: {blob_url}")
+            
+            # Prepare result metadata
+            result_metadata = {
+                "blob_url": blob_url,
+                "file_name": file_name,
+                "file_size": len(pdf_bytes),
+                "content_type": "application/pdf",
+                "blob_name": blob_name,
+                "container_name": container_name,
+                "metadata": blob_metadata
+            }
+            
             logging.info(f"[ReportWorker] Successfully generated report for job {job_id}")
             
             # Update job status to SUCCEEDED
