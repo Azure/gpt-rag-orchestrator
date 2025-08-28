@@ -8,6 +8,7 @@ csx
 edge
 Publish
 
+AGENTS.md
 # poetry env 
 poetry.lock
 pyproject.toml
@@ -65,6 +66,9 @@ venv.bak/
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Pickle files
+*.pckl
 
 # Azurite artifacts
 __blobstorage__

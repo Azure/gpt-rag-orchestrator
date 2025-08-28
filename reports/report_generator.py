@@ -1,12 +1,11 @@
 import logging
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 from functools import cached_property
 from shared.prompts import henkel_brand_analysis_prompt, competitor_analysis_prompt
 from deepagents import create_deep_agent
 from reports.config import AgentConfig, EnvironmentConfigLoader
-
+from shared.util import normalize_markdown
 logger = logging.getLogger(__name__)
-
 
 class ReportGenerator:
     def __init__(
@@ -57,7 +56,9 @@ class ReportGenerator:
             raise ValueError("Query cannot be empty")
 
         try:
-            result = self.agent.invoke({"messages": [{"role": "user", "content": query}]})
+            result = self.agent.invoke(
+                {"messages": [{"role": "user", "content": query}]}
+            )
             if not result:
                 raise RuntimeError("Agent returned empty result")
             return result
@@ -65,6 +66,13 @@ class ReportGenerator:
             logger.error(f"Failed to generate report: {str(e)}", exc_info=True)
             raise
 
+#[START] this is for langgraph studio
+report_agent = ReportGenerator(
+    config=EnvironmentConfigLoader.load_from_environment(),
+    agent_prompt=competitor_analysis_prompt,
+    recursion_limit=1000,
+).agent
+#[END] 
 
 def run_analysis(query: str, prompt: str, recursion_limit: int = 500) -> None:
     """Run brand analysis with the given query."""
@@ -85,24 +93,6 @@ def run_analysis(query: str, prompt: str, recursion_limit: int = 500) -> None:
         logger.error(f"Application error: {e}")
         print(f"Error: {e}")
 
-def normalize_markdown(md_raw: str) -> str:
-    import html, re
-    # If double-encoded (starts/ends with quotes), unquote once
-    if md_raw and md_raw[0] in "\"'" and md_raw[-1] == md_raw[0]:
-        try:
-            import json
-            md_raw = json.loads(md_raw)
-        except Exception:
-            pass
-    md = md_raw.replace("\r\n", "\n").replace("\r", "\n")
-    md = (md
-          .replace("\\r", "\r")
-          .replace("\\n", "\n")
-          .replace("\\t", "\t"))
-    md = re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), md)
-    md = html.unescape(md)
-    # Optional spacing guards omitted for brevity
-    return md.strip()
 
 if __name__ == "__main__":
     result = run_analysis(
