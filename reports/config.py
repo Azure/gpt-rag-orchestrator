@@ -38,7 +38,7 @@ class EnvironmentConfigLoader:
             "TAVILY_API_KEY": "tavily_key",
             "AGENT_ENDPOINT_SERVICE": "reasoning_endpoint_service",
             "ANTHROPIC_API_KEY": "anthropic_api_key",
-            "BRAND_ANALYSIS_MODEL": "brand_analysis_model",
+            "BRAND_ANALYSIS_MODEL": "analysis_model",
         }
 
         config_dict = {}
@@ -79,7 +79,7 @@ class AgentConfig:
     tavily_key: str
     reasoning_endpoint_service: str
     anthropic_api_key: str
-    brand_analysis_model: ModelType
+    analysis_model: ModelType
     reasoning_effort: ReasoningEffort
 
     def __post_init__(self):
@@ -93,7 +93,7 @@ class AgentConfig:
             "tavily_key",
             "reasoning_endpoint_service",
             "anthropic_api_key",
-            "brand_analysis_model",
+            "analysis_model",
         ]
         missing_fields = [
             field for field in required_fields if not getattr(self, field)
@@ -117,9 +117,9 @@ class AgentConfig:
         valid_models = list(get_args(ModelType))
         valid_efforts = list(get_args(ReasoningEffort))
 
-        if self.brand_analysis_model not in valid_models:
+        if self.analysis_model not in valid_models:
             raise ConfigurationError(
-                f"Invalid model: {self.brand_analysis_model}. "
+                f"Invalid model: {self.analysis_model}. "
                 f"Must be one of: {', '.join(valid_models)}"
             )
 
@@ -144,9 +144,9 @@ class AgentConfig:
     def model_client(self) -> ModelClient:
         """Lazy-loaded model client with error handling."""
         try:
-            if self.brand_analysis_model == "o4-mini":
+            if self.analysis_model == "o4-mini":
                 return self._create_reasoning_client()
-            elif self.brand_analysis_model == "gpt-4.1":
+            elif self.analysis_model == "gpt-4.1":
                 return self._create_non_reasoning_client()
             else:
                 return self._create_anthropic_client()
@@ -163,7 +163,7 @@ class AgentConfig:
         return AzureChatOpenAI(
             azure_ad_token_provider=token_provider,
             azure_endpoint=openai_base_url,
-            azure_deployment=self.brand_analysis_model,
+            azure_deployment=self.analysis_model,
             max_retries=self.DEFAULT_MAX_RETRIES,
             reasoning_effort=self.reasoning_effort,
             timeout=self.DEFAULT_TIMEOUT,
@@ -192,17 +192,18 @@ class AgentConfig:
         """Create and configure Anthropic client."""
         return ChatAnthropic(
             api_key=self.anthropic_api_key,
-            model=self.brand_analysis_model,
+            model=self.analysis_model,
             temperature=self.DEFAULT_TEMPERATURE,
             max_tokens=self.DEFAULT_MAX_TOKENS_ANTHROPIC,
             max_retries=self.DEFAULT_MAX_RETRIES,
         )
 
-    def internet_search(self, query: str) -> list[dict]:
-        """Run a web search using Tavily.
+    def internet_search(self, query: str, include_domains: list[str] = None) -> list[dict]:
+        """Run a internet search
 
         Args:
             query: Search query string
+            include_domains: List of domains to include in the search
 
         Returns:
             List of search results with title, url, and content
@@ -214,6 +215,7 @@ class AgentConfig:
             results = self.tavily_client.search(
                 query,
                 max_results=3,
+                include_domains=include_domains,
                 include_raw_content=False,
                 topic="general",
                 time_range="week",
@@ -238,6 +240,7 @@ class AgentConfig:
             "description": "Used to research more in depth questions. Only give this researcher one topic at a time. Do not pass multiple sub questions to this researcher. Instead, you should break down a large topic into the necessary components, and then call multiple research agents in parallel, one for each sub question.",
             "prompt": sub_research_prompt,
             "tools": tools,
+            # "model": model # TODO: config a model for this sub agent so that it won't use the same model as the main agent
         }
 
     def init_critique_subagent(self) -> dict:
