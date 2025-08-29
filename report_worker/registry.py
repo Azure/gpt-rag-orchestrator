@@ -8,40 +8,44 @@ Each report type has a unique key and associated generator function.
 import logging
 from typing import Dict, Any, Optional, Type
 from abc import ABC, abstractmethod
-from shared.blob_client_async import get_blob_service_client
-from azure.core.exceptions import ResourceNotFoundError, ResourceExistsError
-from azure.storage.blob import ContentSettings
 from datetime import datetime, timezone
 import json
+from reports.report_generator import run_analysis
+
+
 class ReportGeneratorBase(ABC):
     """
     Base class for all report generators.
-    
+
     NOTE: The report_worker function now handles PDF conversion and blob storage automatically.
     Generators should return markdown content, and the worker will:
     1. Convert markdown to PDF using shared/markdown_to_pdf.py
     2. Store PDF in Azure Blob Storage at: documents/organization_files/{organization_id}/
     3. Add metadata: organization_id, report_id, timestamp
     """
-    
+
+    def __init__(self, report_type: str):
+        self.report_type = report_type or "generic"
+
     @abstractmethod
     def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
         """
         Generate a report and return markdown content.
-        
+
         Args:
             job_id: Unique identifier for the report job
             organization_id: Organization requesting the report
             parameters: Report-specific parameters
-            
+
         Returns:
             str: Markdown formatted report content that will be converted to PDF
         """
         pass
 
+
 class SampleReportGenerator(ReportGeneratorBase):
     """Sample report generator for demonstration purposes"""
-    
+
     def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
         """Generate a sample report in markdown format"""
         # Generate markdown content
@@ -85,53 +89,99 @@ The report generation system now automatically:
 """
         return markdown_content
 
-class ConversationAnalyticsGenerator(ReportGeneratorBase):
-    """Generate analytics reports from conversation data"""
-    
-    def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
-        """Generate conversation analytics report"""
-        # This would implement actual conversation analytics logic
-        # For now, return a placeholder
-        raise NotImplementedError("Conversation analytics generator not yet implemented")
 
-class UsageReportGenerator(ReportGeneratorBase):
-    """Generate usage reports for organization"""
-    
+class BrandAnalysisReportGenerator(ReportGeneratorBase):
+    """Generate a brand analysis report"""
+
     def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
-        """Generate usage report"""
-        # This would implement actual usage reporting logic
-        # For now, return a placeholder
-        raise NotImplementedError("Usage report generator not yet implemented")
+        """Generate a brand analysis report"""
+        # Extract brand_focus and industry_context from parameters
+        brand_focus = parameters.get(
+            'brand_focus', "Loctite's consumer and construction adhesives business")
+        industry_context = parameters.get(
+            'industry_context', "Consumer & Professional Adhesives and Sealants")
+
+        # Generate dynamic query
+        query = f"""
+    Please generate the weekly Brand Analysis Report.
+
+    Brand Focus: {brand_focus}
+
+    Industry Context: {industry_context}
+    """
+
+        return run_analysis(query, self.report_type)
+
+
+class CompetitorAnalysisReportGenerator(ReportGeneratorBase):
+    """Generate a competitor analysis report"""
+
+    def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
+        """Generate a competitor analysis report"""
+        # Extract categories and other parameters
+        categories = parameters.get('categories', [])
+        industry_context = parameters.get('industry_context', "")
+
+        # Extract competitor brands from categories
+        brands = []
+        for category in categories:
+            if 'brands' in category:
+                brands.extend(category['brands'])
+            elif 'competitors' in category:
+                brands.extend(category['competitors'])
+
+        # Generate dynamic query
+        brands_str = ", ".join(brands)
+        query = f"Please provide a 2-page competitor analysis on these brands: {brands_str}. The industry is {industry_context}."
+
+        return run_analysis(query, self.report_type)
+
+
+class ProductAnalysisReportGenerator(ReportGeneratorBase):
+    """Generate a product analysis report"""
+
+    def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
+        """Generate a product analysis report"""
+        # Extract categories and other parameters
+        categories = parameters.get('categories', [])
+
+        # Build product list from categories
+        product_lines = []
+        for category in categories:
+            category_name = category.get('category', 'Unknown Category')
+            products = category.get('product', [])
+
+            for product in products:
+                product_lines.append(f"{product} - {category_name}")
+
+        # Generate product list string
+        product_list_str = "\n    ".join(product_lines)
+
+        # Generate dynamic query
+        query = f"""
+    Please generate a monthly product performance report for the following products:
+    {product_list_str}
+    """
+        return run_analysis(query, self.report_type)
+
 
 # Registry of available report generators
 _REPORT_GENERATORS: Dict[str, Type[ReportGeneratorBase]] = {
     "sample": SampleReportGenerator,
-    "conversation_analytics": ConversationAnalyticsGenerator,
-    "usage_report": UsageReportGenerator,
+    "brand_analysis": BrandAnalysisReportGenerator("brand_analysis"),
+    "competitor_analysis": CompetitorAnalysisReportGenerator("competitor_analysis"),
+    "product_analysis": ProductAnalysisReportGenerator("product_analysis"),
 }
 
-def get_generator(report_key: str) -> Optional[ReportGeneratorBase]:
-    cls = _REPORT_GENERATORS.get(report_key)
-    return cls() if cls else None
 
-def register_generator(report_key: str, generator: ReportGeneratorBase) -> None:
-    """
-    Register a new report generator.
-    
-    Args:
-        report_key: Unique key for the report type
-        generator: ReportGeneratorBase instance
-    """
-    if not isinstance(generator, ReportGeneratorBase):
-        raise ValueError("Generator must inherit from ReportGeneratorBase")
-        
-    _REPORT_GENERATORS[report_key] = generator
-    logging.info(f"Registered report generator: {report_key}")
+def get_generator(report_key: str) -> Optional[ReportGeneratorBase]:
+    return _REPORT_GENERATORS.get(report_key)
+
 
 def list_available_generators() -> Dict[str, str]:
     """
     List all available report generators.
-    
+
     Returns:
         Dict mapping report keys to generator class names
     """
