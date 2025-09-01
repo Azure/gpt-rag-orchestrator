@@ -1,7 +1,7 @@
 import uuid
 import logging
 
-from typing import Dict
+from typing import Dict, Optional
 from connectors.cosmosdb import CosmosDBClient
 from strategies.agent_strategy_factory import AgentStrategyFactory
 from strategies.base_agent_strategy import BaseAgentStrategy
@@ -44,7 +44,7 @@ class Orchestrator:
 
         return instance
 
-    async def stream_response(self, ask: str):
+    async def stream_response(self, ask: str, question_id: Optional[str] = None):
         logging.debug(f"Starting conversation {self.conversation_id}")
 
         with tracer.start_as_current_span('stream_response', kind=SpanKind.SERVER) as span:
@@ -60,6 +60,15 @@ class Orchestrator:
                 conversation = await self.database_client.get_document(self.database_container, self.conversation_id)
                 if conversation is None:
                     raise ValueError(f"Conversation {self.conversation_id} not found")
+
+            # Optionally record the incoming question (id + text) for traceability
+            if question_id:
+                questions = conversation.get("questions") or []
+                questions.append({
+                    "question_id": question_id,
+                    "text": ask
+                })
+                conversation["questions"] = questions
 
             # 2) Hand off the conversation dict to the strategy
             self.agentic_strategy.conversation = conversation
@@ -89,6 +98,35 @@ class Orchestrator:
         )
         if conversation is None:
             raise ValueError(f"Conversation {self.conversation_id} not found in database")
+
+        # Try to resolve question_id if the client didn't provide it
+        try:
+            provided_question_id = feedback.get("question_id")
+            if not provided_question_id:
+                questions = conversation.get("questions") or []
+                resolved_question_id = None
+
+                # 1) Prefer matching by question text (most recent first)
+                fb_text = (feedback.get("text") or "").strip()
+                if fb_text:
+                    for q in reversed(questions):
+                        if (q.get("text") or "").strip() == fb_text:
+                            resolved_question_id = q.get("question_id")
+                            break
+
+                # 2) Fallback to the last question's question_id
+                if not resolved_question_id and questions:
+                    resolved_question_id = questions[-1].get("question_id")
+
+                if resolved_question_id:
+                    feedback["question_id"] = resolved_question_id
+                else:
+                    logging.warning(
+                        f"Could not resolve question_id for feedback in conversation {self.conversation_id}; saving with question_id=null"
+                    )
+        except Exception as e:
+            # Do not fail feedback saving if resolution logic errors; just log
+            logging.exception("Error attempting to resolve question_id from conversation questions: %s", e)
 
         if "feedback" not in conversation:
             conversation["feedback"] = []
