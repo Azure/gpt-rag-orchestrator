@@ -83,8 +83,34 @@ async def orchestrator_endpoint(
     then streams back an answer via SSE.
     """
 
-    # Prefer "ask", fallback to "question" for compatibility
-    ask = body.ask or body.question
+    # Determine operation type first (defensive: body may not include type)
+    op_type = getattr(body, "type", None)
+
+    # Feedback submissions: allow missing ask/question; validate only what's required
+    if op_type == "feedback":
+        # Handle feedback submission
+        conversation_id = body.conversation_id
+        if not conversation_id:
+            logging.error(f"No 'conversation_id' provided in feedback body, and payload is {body}")
+            raise HTTPException(status_code=400, detail="No 'conversation_id' field in request body")
+
+        # Create orchestrator instance and save feedback
+        orchestrator = await Orchestrator.create(conversation_id=conversation_id)
+        # Build feedback dict defensively; optional fields may be absent
+        _qid = getattr(body, "question_id", None)
+        feedback = {
+            "conversation_id": conversation_id,
+            "question_id": _qid,
+            "is_positive": getattr(body, "is_positive", None),
+            "stars_rating": getattr(body, "stars_rating", None),
+            # Normalize empty strings to None
+            "feedback_text": (getattr(body, "feedback_text", None) or "").strip() or None,
+        }
+        await orchestrator.save_feedback(feedback)
+        return {"status": "success", "message": "Feedback saved successfully"}    
+
+    # For non-feedback operations, require an ask/question
+    ask = (getattr(body, "ask", None) or getattr(body, "question", None))
     if not ask:
         raise HTTPException(status_code=400, detail="No 'ask' or 'question' field in request body")
 
@@ -97,7 +123,8 @@ async def orchestrator_endpoint(
 
     async def sse_event_generator():
         try:
-            async for chunk in orchestrator.stream_response(ask):
+            _qid = getattr(body, "question_id", None) 
+            async for chunk in orchestrator.stream_response(ask, _qid):
                 yield f"{chunk}"
         except Exception as e:
             logging.exception("Error in SSE generator")

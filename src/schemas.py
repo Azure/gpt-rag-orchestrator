@@ -2,10 +2,40 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
 class OrchestratorRequest(BaseModel):
-    ask: str = Field(..., description="Main user question or request. (Required)")
+    # Core ask/question fields
+    ask: Optional[str] = Field(
+        None,
+        description="Main user question or request. Optional here to allow pure feedback payloads; the API enforces it for non-feedback.",
+    )
     question: Optional[str] = Field(
         None,
         description="Alias for 'ask', kept for backward compatibility. (Optional)"
+    )
+
+    # Operation type (e.g., feedback)
+    type: Optional[str] = Field(
+        None,
+        description="Operation type. When set to 'feedback', the request is treated as a feedback submission.",
+        example="feedback",
+    )
+
+    question_id: Optional[str] = Field(
+        None,
+        description="Identifier of the question within the conversation for which feedback is provided. (Optional)",
+    )
+    is_positive: Optional[bool] = Field(
+        None,
+        description="Thumbs up/down style flag for feedback. (Optional)",
+    )
+    stars_rating: Optional[int] = Field(
+        None,
+        ge=1,
+        le=5,
+        description="Star rating from 1 to 5. (Optional)",
+    )
+    feedback_text: Optional[str] = Field(
+        None,
+        description="Free-form feedback text. (Optional)",
     )
     conversation_id: Optional[str] = Field(
         None,
@@ -39,15 +69,27 @@ class OrchestratorRequest(BaseModel):
 
     class Config:
         json_schema_extra = {
-            "example": {
-                "ask": "How often are performance reviews conducted at Contoso Electronics?",
-                "conversation_id": "",
-                "client_principal_id": "",
-                "client_principal_name": "",
-                "client_group_names": [],
-                "access_token": "",
-                "user_context": {}
-            }
+            "examples": [
+                {
+                    "summary": "Ask a question",
+                    "value": {
+                        "ask": "How often are performance reviews conducted at Contoso Electronics?",
+                        "conversation_id": "8db90ba1-aa03-494e-a46e-efddf7cb4277",
+                        "user_context": {}
+                    },
+                },
+                {
+                    "summary": "Submit feedback",
+                    "value": {
+                        "type": "feedback",
+                        "conversation_id": "8db90ba1-aa03-494e-a46e-efddf7cb4277",
+                        "question_id": "q-123",
+                        "is_positive": True,
+                        "stars_rating": 5,
+                        "feedback_text": "Great answer, concise and accurate."
+                    },
+                },
+            ]
         }
 
 
