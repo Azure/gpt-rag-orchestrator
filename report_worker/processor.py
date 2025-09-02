@@ -18,8 +18,7 @@ from .registry import get_generator
 
 async def process_report_job(
     job_id: str,
-    organization_id: str, 
-    correlation_id: Optional[str],
+    organization_id: str,
     dequeue_count: int = 1
 ) -> None:
     """
@@ -28,7 +27,6 @@ async def process_report_job(
     Args:
         job_id: Unique identifier for the report job
         organization_id: Organization requesting the report
-        correlation_id: Correlation ID for tracking
         dequeue_count: Number of times this message has been dequeued
     
     Raises:
@@ -36,7 +34,7 @@ async def process_report_job(
     """
     logging.info(
         f"[ReportWorker] Processing job {job_id} for org {organization_id} "
-        f"(correlation: {correlation_id}, dequeue_count: {dequeue_count})"
+        f"(dequeue_count: {dequeue_count})"
     )
     
     # Fetch job from Cosmos DB
@@ -106,8 +104,7 @@ async def process_report_job(
             pdf_bytes=pdf_bytes,
             job_id=job_id,
             organization_id=organization_id,
-            report_key=report_key,
-            correlation_id=correlation_id
+            report_key=report_key
         )
         
         logging.info(f"[ReportWorker] Successfully generated report for job {job_id}")
@@ -126,7 +123,7 @@ async def process_report_job(
             
         logging.info(
             f"[ReportWorker] Completed job {job_id} successfully "
-            f"(correlation: {correlation_id})"
+            f"(dequeue_count: {dequeue_count})"
         )
         
     except NotImplementedError as e:
@@ -144,7 +141,6 @@ async def process_report_job(
             "error_type": "transient",
             "error_message": str(e),
             "dequeue_count": dequeue_count,
-            "correlation_id": correlation_id,
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
         raise  # Re-raise to trigger Azure Storage Queue retry
@@ -154,8 +150,7 @@ async def _store_pdf_in_blob(
     pdf_bytes: bytes,
     job_id: str,
     organization_id: str,
-    report_key: str,
-    correlation_id: Optional[str]
+    report_key: str
 ) -> Dict[str, Any]:
     """
     Store PDF in Azure Blob Storage and return metadata.
@@ -165,7 +160,6 @@ async def _store_pdf_in_blob(
         job_id: Report job ID
         organization_id: Organization ID
         report_key: Report type key
-        correlation_id: Correlation ID for tracking
         
     Returns:
         Dict containing blob metadata and URLs
@@ -184,7 +178,6 @@ async def _store_pdf_in_blob(
         "report_id": job_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "report_key": report_key,
-        "correlation_id": correlation_id or ""
     }
     
     logging.info(f"[ReportWorker] Storing PDF in blob: {blob_name}")
@@ -237,7 +230,7 @@ def extract_message_metadata(msg) -> Tuple[Optional[str], Optional[str], Optiona
         msg: Azure Function Queue message
         
     Returns:
-        Tuple of (job_id, organization_id, correlation_id, dequeue_count, message_id)
+        Tuple of (job_id, organization_id, dequeue_count, message_id)
         Returns (None, None, None, 1, "unknown") if parsing fails
     """
     try:
@@ -274,13 +267,12 @@ def extract_message_metadata(msg) -> Tuple[Optional[str], Optional[str], Optiona
         # Extract required fields
         job_id = payload.get('job_id')
         organization_id = payload.get('organization_id')
-        correlation_id = payload.get('correlation_id')
         
-        if not all([job_id, organization_id, correlation_id]):
+        if not all([job_id, organization_id]):
             logging.error(f"[ReportWorker] Missing required fields in payload: {payload}")
             return None, None, None, dequeue_count, message_id
             
-        return job_id, organization_id, correlation_id, dequeue_count, message_id
+        return job_id, organization_id, dequeue_count, message_id
         
     except Exception as e:
         logging.error(f"[ReportWorker] Error extracting message metadata: {str(e)}")

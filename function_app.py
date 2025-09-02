@@ -50,26 +50,25 @@ async def report_worker(msg: func.QueueMessage) -> None:
     """
     logging.info('[report-worker] Python Service Bus Queue trigger function processed a request.')
 
-    correlation_id = None
     job_id = None
     organization_id = None
     dequeue_count = 1
     
     try:
         # Extract message metadata and required fields
-        job_id, organization_id, correlation_id, dequeue_count, message_id = extract_message_metadata(msg)
+        job_id, organization_id, dequeue_count, message_id = extract_message_metadata(msg)
         
         # Return early if message parsing failed
-        if not all([job_id, organization_id, correlation_id]):
+        if not all([job_id, organization_id]):
             return
             
         # Process the report job
-        await process_report_job(job_id, organization_id, correlation_id, dequeue_count)
+        await process_report_job(job_id, organization_id, dequeue_count)
             
     except Exception as e:
         logging.error(
             f"[ReportWorker] Unexpected error for job {job_id} "
-            f"(correlation: {correlation_id}): {str(e)}\n"
+            f"(dequeue_count: {dequeue_count}): {str(e)}\n"
             f"Traceback: {traceback.format_exc()}"
         )
         
@@ -79,7 +78,6 @@ async def report_worker(msg: func.QueueMessage) -> None:
                 "error_type": "unexpected",
                 "error_message": str(e), 
                 "dequeue_count": dequeue_count,
-                "correlation_id": correlation_id,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
             update_report_job_status(job_id, organization_id, 'FAILED', error_payload=error_payload)
