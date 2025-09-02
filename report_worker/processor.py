@@ -87,7 +87,7 @@ async def process_report_job(
     logging.info(f"[ReportWorker] Found generator for {report_key}: {generator.__class__.__name__}")
     
     # Generate the report
-    parameters = job.get('parameters', {})
+    parameters = job.get('params', {})
     
     try:
         # Generate markdown content using the appropriate generator
