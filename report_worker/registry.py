@@ -111,7 +111,7 @@ class BrandAnalysisReportGenerator(ReportGeneratorBase):
         # Extract brand_focus and industry_context from parameters
         brand_focus = parameters.get('brand_focus', "")
         industry_context = parameters.get('industry_context', "")
-        
+
         if not brand_focus or not industry_context:
             raise ValueError("brand_focus and industry_context are required")
 
@@ -135,16 +135,14 @@ class CompetitorAnalysisReportGenerator(ReportGeneratorBase):
         # Extract categories and other parameters
         categories = parameters.get('categories', [])
         industry_context = parameters.get('industry_context', "")
-        
+
         if not categories or not industry_context:
             raise ValueError("categories and industry_context are required")
 
         # Extract competitor brands from categories
         brands = []
         for category in categories:
-            if 'brands' in category:
-                brands.extend(category['brands'])
-            elif 'competitors' in category:
+            if 'competitors' in category:
                 brands.extend(category['competitors'])
 
         # Generate dynamic query

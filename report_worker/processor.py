@@ -88,9 +88,6 @@ async def process_report_job(
     
     # Generate the report
     parameters = job.get('parameters', {})
-    parameters['categories'] = job.get('categories', [])
-    parameters['brand_focus'] = job.get('brand_focus', "")
-    parameters['industry_context'] = job.get('industry_context', "")
     
     try:
         # Generate markdown content using the appropriate generator
