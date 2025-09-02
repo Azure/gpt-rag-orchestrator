@@ -200,9 +200,6 @@ async def _store_pdf_in_blob(
         pdf_bytes,
         overwrite=True,
         metadata=blob_metadata,
-        content_settings={
-            "content_type": "application/pdf"
-        }
     )
     
     blob_url = blob_client.url
