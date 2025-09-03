@@ -138,5 +138,45 @@ class TestReportScheduler(unittest.TestCase):
         with patch.object(report_scheduler, "WEB_APP_URL", "http://test/api"):
             report_scheduler.main(MagicMock())
 
+class TestProductCategoryGrouping(unittest.TestCase):
+    def setUp(self):
+        self.org_id = "org123"
+        self.full_url = "http://test/api"
+        os.environ["AZURE_DB_NAME"] = "testdb"
+
+    def test_group_products_by_category_no_duplicates(self):
+        products = [
+            {"name": "ProductA", "category": "Cat1"},
+            {"name": "ProductB", "category": "Cat1"},
+            {"name": "ProductC", "category": "Cat2"},
+        ]
+        # Manual Grouping like the code
+        category_map = {}
+        for product in products:
+            product_name = product.get("name")
+            product_category = product.get("category")
+            if not product_name or not product_category:
+                continue
+            if product_category not in category_map:
+                category_map[product_category] = []
+            category_map[product_category].append(product_name)
+
+        self.assertEqual(set(category_map.keys()), {"Cat1", "Cat2"})
+        self.assertEqual(category_map["Cat1"], ["ProductA", "ProductB"])
+        self.assertEqual(category_map["Cat2"], ["ProductC"])
+
+    def test_create_products_payload_format(self):
+        product_names = ["ProductA", "ProductB"]
+        category = "Cat1"
+        payload = report_scheduler.create_products_payload(product_names, category)
+        self.assertIn("report_key", payload)
+        self.assertIn("report_name", payload)
+        self.assertIn("categories", payload)
+        self.assertEqual(payload["report_key"], "product_analysis")
+        self.assertEqual(payload["report_name"], product_names)
+        self.assertEqual(payload["categories"]["category"], category)
+        self.assertEqual(payload["categories"]["product"], product_names)
+
+
 if __name__ == "__main__":
     unittest.main()

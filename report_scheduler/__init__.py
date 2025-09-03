@@ -75,6 +75,37 @@ def main(mytimer: func.TimerRequest) -> None:
                     log_response_result(full_url, response)
                 except Exception as e:
                     logger.error(f"Failed to send request to {full_url}: {str(e)}")
+
+            organization_products = []
+            try:
+                organization_products = get_products(org_id)
+            except Exception as e:
+                logger.error(f"Error fetching products for organization {org_id}: {str(e)}")
+
+            if not organization_products:
+                logger.warning(f"No products found for organization: {org_id}")
+            else:
+                logger.info(f"Products found for organization: {org_id}. Proceeding with report generation.")
+                category_map = {}
+                for product in organization_products:
+                    product_name = product.get("name")
+                    product_category = product.get("category")
+                    if not product_name or not product_category:
+                        logger.warning(f"Product missing required fields: {product}")
+                        continue
+
+                    if product_category not in category_map:
+                        category_map[product_category] = []
+                    category_map[product_category].append(product_name)
+
+                for product_category, product_names in category_map.items():
+                    payload = create_products_payload(product_names, product_category)
+                    try:
+                        response = send_http_request(full_url, payload)
+                        log_response_result(full_url, response)
+                    except Exception as e:
+                        logger.error(f"Failed to send request to {full_url}: {str(e)}")
+
     except Exception as e:
         logger.error(f"Unexpected error in report scheduler: {str(e)}")
     finally:
@@ -158,6 +189,17 @@ def create_brands_payload(brand_name: str, industry_description: str) -> dict:
         "params": {
             "brand_focus": brand_name,
             "industry_context": industry_description
+        }
+    }
+
+def create_products_payload(product_names: list[str], category: str) -> dict:
+    """Create the payload for the products API request."""
+    return {
+        "report_key": "product_analysis",
+        "report_name": product_names,
+        "categories": {
+            "product": product_names,
+            "category": category
         }
     }
 
