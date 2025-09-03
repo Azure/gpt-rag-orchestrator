@@ -168,7 +168,7 @@ class AgentConfig:
             max_retries=self.DEFAULT_MAX_RETRIES,
             reasoning_effort=self.reasoning_effort,
             timeout=self.DEFAULT_TIMEOUT,
-            max_tokens=self.DEFAULT_MAX_TOKENS,
+            max_completion_tokens=self.DEFAULT_MAX_TOKENS,
             api_version=self.DEFAULT_API_VERSION,
         )
 
