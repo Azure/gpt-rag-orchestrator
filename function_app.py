@@ -1025,23 +1025,23 @@ async def multipage_scrape(req: Request) -> Response:
         )
 
 
-#@app.timer_trigger(schedule="0 0 2 * * 0", arg_name="mytimer", run_on_startup=False)
-#def report_scheduler_timer(mytimer: func.TimerRequest) -> None:
-#    """
-#    Timer trigger function that runs every Sunday at 2:00 AM UTC.
-#    Cron expression: "0 0 2 * * 0" means:
-#    - 0 seconds
-#    - 0 minutes
-#    - 2 hours (2 AM)
-#    - * any day of month
-#    - * any month
-#    - 0 = Sunday (day of week)
-#    """
-#    logging.info("Report scheduler timer trigger started")
-#    
-#    try:
-#        report_scheduler_main(mytimer)
-#        logging.info("Report scheduler completed successfully")
-#    except Exception as e:
-#        logging.error(f"Report scheduler failed: {str(e)}")
-#        raise
+@app.timer_trigger(schedule="0 0 2 * * 0", arg_name="mytimer", run_on_startup=False)
+def report_scheduler_timer(mytimer: func.TimerRequest) -> None:
+    """
+    Timer trigger function that runs every Sunday at 2:00 AM UTC.
+    Cron expression: "0 0 2 * * 0" means:
+    - 0 seconds
+    - 0 minutes
+    - 2 hours (2 AM)
+    - * any day of month
+    - * any month
+    - 0 = Sunday (day of week)
+    """
+    logging.info("Report scheduler timer trigger started")
+    
+    try:
+        report_scheduler_main(mytimer)
+        logging.info("Report scheduler completed successfully")
+    except Exception as e:
+        logging.error(f"Report scheduler failed: {str(e)}")
+        raise
