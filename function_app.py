@@ -7,6 +7,11 @@ import traceback
 from datetime import datetime, timezone
 
 from azurefunctions.extensions.http.fastapi import Request, StreamingResponse, Response
+from scheduler import main as scheduler_main
+from weekly_scheduler import main as weekly_scheduler_main
+from monthly_scheduler import main as monthly_scheduler_main
+from report_scheduler import main as report_scheduler_main
+from html_to_pdf_converter import html_to_pdf
 
 from shared.util import (
     get_user,
@@ -1019,3 +1024,25 @@ async def multipage_scrape(req: Request) -> Response:
             media_type="application/json",
             status_code=500,
         )
+
+
+@app.timer_trigger(schedule="0 0 2 * * 0", arg_name="mytimer", run_on_startup=False)
+def report_scheduler_timer(mytimer: func.TimerRequest) -> None:
+    """
+    Timer trigger function that runs every Sunday at 2:00 AM UTC.
+    Cron expression: "0 0 2 * * 0" means:
+    - 0 seconds
+    - 0 minutes
+    - 2 hours (2 AM)
+    - * any day of month
+    - * any month
+    - 0 = Sunday (day of week)
+    """
+    logging.info("Report scheduler timer trigger started")
+    
+    try:
+        report_scheduler_main(mytimer)
+        logging.info("Report scheduler completed successfully")
+    except Exception as e:
+        logging.error(f"Report scheduler failed: {str(e)}")
+        raise
