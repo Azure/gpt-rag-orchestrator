@@ -2,7 +2,7 @@ import logging
 import os
 import requests
 from datetime import datetime, timezone
-from azure.functions import func
+import azure.functions as func
 from tenacity import retry, wait_exponential, stop_after_attempt
 from shared import cosmos_client_async
 

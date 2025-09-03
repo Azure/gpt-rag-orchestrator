@@ -11,7 +11,6 @@ from scheduler import main as scheduler_main
 from weekly_scheduler import main as weekly_scheduler_main
 from monthly_scheduler import main as monthly_scheduler_main
 from report_scheduler import main as report_scheduler_main
-from html_to_pdf_converter import html_to_pdf
 
 from shared.util import (
     get_user,
