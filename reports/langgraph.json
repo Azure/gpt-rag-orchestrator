@@ -1,0 +1,10 @@
+{
+    "dependencies": [".."],
+    "graphs": {
+      "report_generator": "./report_generator.py:report_agent"
+    },
+    "env": "../.env",
+    "python_path": ".."
+  }
+
+  

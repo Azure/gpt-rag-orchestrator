@@ -3,7 +3,6 @@ import logging
 import json
 import os
 import stripe
-import platform
 import traceback
 from datetime import datetime, timezone
 
@@ -11,7 +10,7 @@ from azurefunctions.extensions.http.fastapi import Request, StreamingResponse, R
 from scheduler import main as scheduler_main
 from weekly_scheduler import main as weekly_scheduler_main
 from monthly_scheduler import main as monthly_scheduler_main
-from html_to_pdf_converter import html_to_pdf
+from report_scheduler import main as report_scheduler_main
 
 from shared.util import (
     get_user,
@@ -22,7 +21,6 @@ from shared.util import (
     enable_organization_subscription,
     update_subscription_logs,
     updateExpirationDate,
-    trigger_indexer_run,
     get_conversations,
     get_conversation,
     delete_conversation,
@@ -33,8 +31,8 @@ from orc import new_orchestrator
 from financial_orc import orchestrator as financial_orchestrator
 from shared.conversation_export import export_conversation
 from webscrapping.multipage_scrape import crawl_website
-from report_worker.registry import get_generator
-from shared.util import get_report_job, update_report_job_status
+from report_worker.processor import extract_message_metadata, process_report_job
+from shared.util import update_report_job_status
 # MULTIPAGE SCRAPING CONSTANTS
 DEFAULT_LIMIT = 30
 DEFAULT_MAX_DEPTH = 4
@@ -46,9 +44,9 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 @app.queue_trigger(
     arg_name="msg", 
     queue_name="report-jobs",
-    connection="AzureWebJobsStorage"
+    connection="AZURE_STORAGE_CONNECTION_STRING"
 )
-def report_worker(msg: func.QueueMessage) -> None:
+async def report_worker(msg: func.QueueMessage) -> None:
     """
     Azure Function triggered by messages in the report-jobs queue.
     
@@ -56,148 +54,25 @@ def report_worker(msg: func.QueueMessage) -> None:
     """
     logging.info('[report-worker] Python Service Bus Queue trigger function processed a request.')
 
-    correlation_id = None
     job_id = None
     organization_id = None
+    dequeue_count = 1
+    
     try:
-        # Extract message metadata
-        dequeue_count = msg.dequeue_count or 1
-        message_id = msg.id or "unknown"
+        # Extract message metadata and required fields
+        job_id, organization_id, dequeue_count, message_id = extract_message_metadata(msg)
         
-        logging.info(
-            f"[ReportWorker] Received message {message_id} "
-            f"(dequeue_count: {dequeue_count})"
-        )
-        
-        # Parse message body
-        try:
-            # Handle both string and bytes message body
-            if hasattr(msg, 'get_body'):
-                raw_body = msg.get_body()
-                if isinstance(raw_body, bytes):
-                    message_body = raw_body.decode('utf-8')
-                else:
-                    message_body = str(raw_body)
-            else:
-                # Fallback for direct string access
-                message_body = str(msg)
-                
-            payload = json.loads(message_body)
-            logging.info(f"[ReportWorker] Parsed message body: {message_body}")
-            
-        except (UnicodeDecodeError, json.JSONDecodeError) as e:
-            logging.error(f"[ReportWorker] Invalid message format: {str(e)}")
-            logging.error(f"[ReportWorker] Raw message: {repr(msg.get_body() if hasattr(msg, 'get_body') else msg)}")
+        # Return early if message parsing failed
+        if not all([job_id, organization_id]):
             return
             
-        # Extract required fields
-        job_id = payload.get('job_id')
-        organization_id = payload.get('organization_id')
-        correlation_id = payload.get('correlation_id')
-        
-        if not all([job_id, organization_id, correlation_id]):
-            logging.error(f"[ReportWorker] Missing required fields in payload: {payload}")
-            return
-            
-        logging.info(
-            f"[ReportWorker] Processing job {job_id} for org {organization_id} "
-            f"(correlation: {correlation_id}, dequeue_count: {dequeue_count})"
-        )
-        
-        # Fetch job from Cosmos DB
-        job = get_report_job(job_id, organization_id)
-        if not job:
-            logging.error(f"[ReportWorker] Job {job_id} not found in database")
-            return
-            
-        logging.info(f"[ReportWorker] Retrieved job {job_id}: {job.get('report_key', 'unknown')}")
-        
-        # Check job status for idempotency
-        current_status = job.get('status', '').upper()
-        if current_status != 'QUEUED':
-            logging.info(
-                f"[ReportWorker] Job {job_id} status is {current_status}, skipping processing"
-            )
-            return
-            
-        # Update job status to RUNNING
-        success = update_report_job_status(job_id, organization_id, 'RUNNING')
-        if not success:
-            logging.error(f"[ReportWorker] Failed to update job {job_id} status to RUNNING")
-            raise Exception(f"Failed to update job {job_id} status to RUNNING")
-            
-        logging.info(f"[ReportWorker] Updated job {job_id} status to RUNNING")
-        
-        # Get report generator
-        report_key = job.get('report_key')
-        if not report_key:
-            logging.error(f"[ReportWorker] Job {job_id} missing report_key")
-            update_report_job_status(job_id, organization_id, 'FAILED', error_payload={
-                "error_type": "deterministic",
-                "error_message": "Missing report_key",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
-            return
-            
-        generator = get_generator(report_key)
-        if not generator:
-            logging.error(f"[ReportWorker] No generator found for report_key: {report_key}")
-            update_report_job_status(job_id, organization_id, 'FAILED', error_payload={
-                "error_type": "deterministic",
-                "error_message": f"No generator found for report_key: {report_key}",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
-            return
-            
-        logging.info(f"[ReportWorker] Found generator for {report_key}: {generator.__class__.__name__}")
-        
-        # Generate the report
-        parameters = job.get('parameters', {})
-        try:
-            result_metadata = generator.generate(job_id, organization_id, parameters)
-            logging.info(f"[ReportWorker] Successfully generated report for job {job_id}")
-            
-            # Update job status to SUCCEEDED
-            success = update_report_job_status(
-                job_id, 
-                organization_id, 
-                'SUCCEEDED', 
-                result_metadata=result_metadata
-            )
-            
-            if not success:
-                logging.error(f"[ReportWorker] Failed to update job {job_id} status to SUCCEEDED")
-                raise Exception(f"Failed to update job {job_id} status to SUCCEEDED")
-                
-            logging.info(
-                f"[ReportWorker] Completed job {job_id} successfully "
-                f"(correlation: {correlation_id})"
-            )
-            
-        except NotImplementedError as e:
-            logging.error(f"[ReportWorker] Report generator not implemented: {str(e)}")
-            update_report_job_status(job_id, organization_id, 'FAILED', error_payload={
-                "error_type": "deterministic",
-                "error_message": f"Report generator not implemented: {str(e)}",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
-            return
-            
-        except Exception as e:
-            logging.error(f"[ReportWorker] Error generating report: {str(e)}")
-            update_report_job_status(job_id, organization_id, 'FAILED', error_payload={
-                "error_type": "transient",
-                "error_message": str(e),
-                "dequeue_count": dequeue_count,
-                "correlation_id": correlation_id,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
-            raise  # Re-raise to trigger Azure Storage Queue retry
+        # Process the report job
+        await process_report_job(job_id, organization_id, dequeue_count)
             
     except Exception as e:
         logging.error(
             f"[ReportWorker] Unexpected error for job {job_id} "
-            f"(correlation: {correlation_id}): {str(e)}\n"
+            f"(dequeue_count: {dequeue_count}): {str(e)}\n"
             f"Traceback: {traceback.format_exc()}"
         )
         
@@ -207,7 +82,6 @@ def report_worker(msg: func.QueueMessage) -> None:
                 "error_type": "unexpected",
                 "error_message": str(e), 
                 "dequeue_count": dequeue_count,
-                "correlation_id": correlation_id,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
             update_report_job_status(job_id, organization_id, 'FAILED', error_payload=error_payload)
@@ -581,63 +455,6 @@ async def webhook(req: Request) -> Response:
     return Response(
         content=json.dumps({"success": True}), media_type="application/json"
     )
-
-
-@app.function_name(name="html_to_pdf_converter")
-@app.route(route="html_to_pdf_converter", methods=[func.HttpMethod.POST])
-async def html2pdf_conversion(req: Request) -> Response:
-    logging.info("Python HTTP trigger function processed a request.")
-
-    try:
-        # Get request body
-        req_body = await req.json()
-        html_content = req_body.get("html")
-
-        if not html_content:
-            return Response(
-                content="Please provide 'html' in the request body", status_code=400
-            )
-
-        # Add size validation
-        if len(html_content) > 10 * 1024 * 1024:  # 10MB limit
-            return Response(
-                content="HTML content too large. Maximum size is 10MB", status_code=400
-            )
-
-        # Basic HTML validation
-        if not html_content.strip().startswith("<"):
-            return Response(content="Invalid HTML content", status_code=400)
-
-        # Log request (sanitized)
-        logging.info(f"Processing HTML content of length: {len(html_content)}")
-
-        # Convert HTML to PDF bytes
-        pdf_bytes = html_to_pdf(html_content)
-
-        return Response(
-            content=pdf_bytes, media_type="application/pdf", status_code=200
-        )
-
-    except ValueError as ve:
-        return Response(content=f"Invalid request body: {str(ve)}", status_code=400)
-    except Exception as e:
-        error_message = str(e)
-
-        # windows error handling
-        if platform.system() == "Windows":
-            error_message = f"""Error converting HTML to PDF: {str(e)}
-            
-            If you're experiencing WeasyPrint installation issues on Windows,
-            please check the solution here: https://github.com/assafelovic/gpt-researcher/issues/166
-            Common issues include GTK3 installation, missing dependencies, and path configuration."""
-
-        else:
-            error_message = f"Error converting HTML to PDF: {str(e)}"
-
-        logging.error(error_message)
-
-        return Response(content=error_message, status_code=500)
-
 
 @app.blob_trigger(
     arg_name="myblob",
@@ -1206,3 +1023,25 @@ async def multipage_scrape(req: Request) -> Response:
             media_type="application/json",
             status_code=500,
         )
+
+
+@app.timer_trigger(schedule="0 0 2 * * 0", arg_name="mytimer", run_on_startup=False)
+def report_scheduler_timer(mytimer: func.TimerRequest) -> None:
+    """
+    Timer trigger function that runs every Sunday at 2:00 AM UTC.
+    Cron expression: "0 0 2 * * 0" means:
+    - 0 seconds
+    - 0 minutes
+    - 2 hours (2 AM)
+    - * any day of month
+    - * any month
+    - 0 = Sunday (day of week)
+    """
+    logging.info("Report scheduler timer trigger started")
+    
+    try:
+        report_scheduler_main(mytimer)
+        logging.info("Report scheduler completed successfully")
+    except Exception as e:
+        logging.error(f"Report scheduler failed: {str(e)}")
+        raise

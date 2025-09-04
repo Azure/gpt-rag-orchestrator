@@ -8,143 +8,205 @@ Each report type has a unique key and associated generator function.
 import logging
 from typing import Dict, Any, Optional, Type
 from abc import ABC, abstractmethod
-from shared.blob_client_async import get_blob_service_client
-from azure.core.exceptions import ResourceNotFoundError, ResourceExistsError
-from azure.storage.blob import ContentSettings
+from datetime import datetime, timezone
+import json
+from reports.report_generator import run_analysis
+
 
 class ReportGeneratorBase(ABC):
-    """Base class for all report generators"""
-    
+    """
+    Base class for all report generators.
+
+    NOTE: The report_worker function now handles PDF conversion and blob storage automatically.
+    Generators should return markdown content, and the worker will:
+    1. Convert markdown to PDF using shared/markdown_to_pdf.py
+    2. Store PDF in Azure Blob Storage at: documents/organization_files/{organization_id}/
+    3. Add metadata: organization_id, report_id, timestamp
+    """
+
+    # Define valid report types as class attribute
+    VALID_REPORT_TYPES = {
+        "sample",
+        "brand_analysis",
+        "competitor_analysis",
+        "product_analysis"
+    }
+
+    def __init__(self, report_type: str):
+        if report_type not in self.VALID_REPORT_TYPES:
+            raise ValueError(
+                f"Invalid report type '{report_type}'. "
+                f"Valid types are: {', '.join(sorted(self.VALID_REPORT_TYPES))}"
+            )
+        self.report_type = report_type
+
     @abstractmethod
-    def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
         """
-        Generate a report and return metadata about the generated artifact.
-        
+        Generate a report and return markdown content.
+
         Args:
             job_id: Unique identifier for the report job
             organization_id: Organization requesting the report
             parameters: Report-specific parameters
-            
+
         Returns:
-            Dict containing:
-            - blob_url: URL to the generated report artifact
-            - file_name: Name of the generated file
-            - file_size: Size of the file in bytes
-            - content_type: MIME type of the generated file
-            - metadata: Any additional metadata about the report
+            str: Markdown formatted report content that will be converted to PDF
         """
         pass
 
+
 class SampleReportGenerator(ReportGeneratorBase):
     """Sample report generator for demonstration purposes"""
-    
-    async def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate a sample report"""
-        import json
-        from datetime import datetime, timezone
-        from azure.storage.blob import BlobServiceClient
-        import os
-        
-        # Create sample report content
-        report_content = {
-            "report_type": "sample",
-            "job_id": job_id,
-            "organization_id": organization_id,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "parameters": parameters,
-            "data": {
-                "message": "This is a sample report",
-                "status": "completed"
-            }
-        }
-        
-        # Convert to JSON
-        json_content = json.dumps(report_content, indent=2)
-        file_name = f"sample_report_{job_id}.json"
-        
-        bsc = await get_blob_service_client()
-        container_client = bsc.get_container_client(container_name="reports")
-        blob_name = f"{organization_id}/{file_name}"
-        
-        # Ensure container exists
-        try:
-            container_client.get_container_properties()
-        except ResourceNotFoundError:
-            try:
-                container_client.create_container()
-            except ResourceExistsError:
-                pass  # another worker created it
-        except Exception as e:
-            logging.error(f"Error getting container properties: {e}")
-            raise e
-            
-        # Upload the report
-        blob_client = container_client.get_blob_client(blob=blob_name)
-        
-        blob_client.upload_blob(
-            json_content.encode('utf-8'), 
-            overwrite=True,
-            content_settings=ContentSettings(content_type='application/json')
-        )
-        
-        return {
-            "blob_url": blob_client.url,
-            "file_name": file_name,
-            "file_size": len(json_content.encode('utf-8')),
-            "content_type": "application/json",
-            "metadata": {
-                "records_processed": 1,
-                "report_version": "1.0"
-            }
-        }
 
-class ConversationAnalyticsGenerator(ReportGeneratorBase):
-    """Generate analytics reports from conversation data"""
-    
-    async def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate conversation analytics report"""
-        # This would implement actual conversation analytics logic
-        # For now, return a placeholder
-        raise NotImplementedError("Conversation analytics generator not yet implemented")
+    def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
+        """Generate a sample report in markdown format"""
+        # Generate markdown content
+        markdown_content = f"""# Sample Report
 
-class UsageReportGenerator(ReportGeneratorBase):
-    """Generate usage reports for organization"""
-    
-    async def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate usage report"""
-        # This would implement actual usage reporting logic
-        # For now, return a placeholder
-        raise NotImplementedError("Usage report generator not yet implemented")
+## Report Information
+- **Job ID**: {job_id}
+- **Organization ID**: {organization_id}
+- **Generated At**: {datetime.now(timezone.utc).isoformat()}
+- **Report Type**: Sample
+
+## Parameters
+```json
+{json.dumps(parameters, indent=2)}
+```
+
+## Report Data
+
+### Summary
+This is a sample report generated to demonstrate the new markdown-based report generation system.
+
+### Status
+✅ **Completed Successfully**
+
+### Key Metrics
+| Metric | Value |
+|--------|-------|
+| Records Processed | 1 |
+| Report Version | 1.0 |
+| Status | Completed |
+
+### Additional Information
+The report generation system now automatically:
+1. Converts markdown content to PDF
+2. Stores PDFs in Azure Blob Storage
+3. Organizes files by organization
+4. Adds proper metadata
+
+---
+*Report generated on {datetime.now(timezone.utc).strftime('%Y-%m-%d at %H:%M:%S UTC')}*
+"""
+        return markdown_content
+
+
+class BrandAnalysisReportGenerator(ReportGeneratorBase):
+    """Generate a brand analysis report"""
+
+    def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
+        """Generate a brand analysis report"""
+        # Extract brand_focus and industry_context from parameters
+        brand_focus = parameters.get('brand_focus', "")
+        industry_context = parameters.get('industry_context', "")
+
+        if not brand_focus or not industry_context:
+            raise ValueError("brand_focus and industry_context are required")
+
+        # Generate dynamic query
+        query = f"""
+    Please generate the weekly Brand Analysis Report.
+
+    Brand Focus: {brand_focus}
+
+    Industry Context: {industry_context}
+    """
+
+        return run_analysis(query, self.report_type)
+
+
+class CompetitorAnalysisReportGenerator(ReportGeneratorBase):
+    """Generate a competitor analysis report"""
+
+    def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
+        """Generate a competitor analysis report"""
+        # Extract categories and other parameters
+        categories = parameters.get('categories', [])
+        industry_context = parameters.get('industry_context', "")
+
+        if not categories or not industry_context:
+            raise ValueError("categories and industry_context are required")
+
+        # Extract competitor brands from categories
+        brands = []
+        for category in categories:
+            if 'competitors' in category:
+                brands.extend(category['competitors'])
+
+        # Generate dynamic query
+        brands_str = ", ".join(brands)
+        query = f"Please provide a 2-page competitor analysis on these brands: {brands_str}. The industry is {industry_context}."
+
+        return run_analysis(query, self.report_type)
+
+
+class ProductAnalysisReportGenerator(ReportGeneratorBase):
+    """Generate a product analysis report"""
+
+    def generate(self, job_id: str, organization_id: str, parameters: Dict[str, Any]) -> str:
+        """Generate a product analysis report"""
+        # Extract categories and other parameters
+        categories = parameters.get('categories', [])
+
+        # Build product list from categories
+        product_lines = []
+        for category in categories:
+            category_name = category.get('category', 'Unknown Category')
+            products = category.get('product', [])
+
+            for product in products:
+                product_lines.append(f"{product} - {category_name}")
+
+        # Generate product list string
+        product_list_str = "\n    ".join(product_lines)
+
+        # Generate dynamic query
+        query = f"""
+    Please generate a monthly product performance report for the following products:
+    {product_list_str}
+    """
+        return run_analysis(query, self.report_type)
+
 
 # Registry of available report generators
 _REPORT_GENERATORS: Dict[str, Type[ReportGeneratorBase]] = {
-    "sample": SampleReportGenerator,
-    "conversation_analytics": ConversationAnalyticsGenerator,
-    "usage_report": UsageReportGenerator,
+    "sample": SampleReportGenerator("sample"),
+    "brand_analysis": BrandAnalysisReportGenerator("brand_analysis"),
+    "competitor_analysis": CompetitorAnalysisReportGenerator("competitor_analysis"),
+    "product_analysis": ProductAnalysisReportGenerator("product_analysis"),
 }
 
-def get_generator(report_key: str) -> Optional[ReportGeneratorBase]:
-    cls = _REPORT_GENERATORS.get(report_key)
-    return cls() if cls else None
 
-def register_generator(report_key: str, generator: ReportGeneratorBase) -> None:
+def get_generator(report_key: str) -> Optional[ReportGeneratorBase]:
+    return _REPORT_GENERATORS.get(report_key)
+
+
+def get_valid_report_types() -> set:
     """
-    Register a new report generator.
-    
-    Args:
-        report_key: Unique key for the report type
-        generator: ReportGeneratorBase instance
+    Get all valid report types from the base class definition.
+
+    Returns:
+        Set of valid report type strings
     """
-    if not isinstance(generator, ReportGeneratorBase):
-        raise ValueError("Generator must inherit from ReportGeneratorBase")
-        
-    _REPORT_GENERATORS[report_key] = generator
-    logging.info(f"Registered report generator: {report_key}")
+    return ReportGeneratorBase.VALID_REPORT_TYPES.copy()
+
 
 def list_available_generators() -> Dict[str, str]:
     """
     List all available report generators.
-    
+
     Returns:
         Dict mapping report keys to generator class names
     """

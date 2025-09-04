@@ -1,4 +1,5 @@
 # utility functions
+import html
 from dotenv import load_dotenv
 load_dotenv()
 import re
@@ -1725,7 +1726,7 @@ def update_report_job_status(
             job["started_at"] = datetime.now(timezone.utc).isoformat()
         
         # Save the updated job
-        container_client.patch_item(item=job_id, body=job)
+        container_client.replace_item(item=job_id, body=job)
         logging.info(f"Updated report job {job_id} to status {status}")
         return True
         
@@ -1735,3 +1736,18 @@ def update_report_job_status(
     except Exception as e:
         logging.error(f"Error updating report job {job_id}: {str(e)}")
         return False
+    
+
+# Precompiled regex for unicode escape sequences like \uXXXX
+UNICODE_ESCAPE_RE = re.compile(r"\\u([0-9a-fA-F]{4})")
+def normalize_markdown(md_raw: str) -> str:
+    if md_raw and md_raw[0] in "\"'" and md_raw[-1] == md_raw[0]:
+        try:
+            md_raw = json.loads(md_raw)
+        except Exception:
+            pass
+    md = md_raw.replace("\r\n", "\n").replace("\r", "\n")
+    md = md.replace("\\r", "\r").replace("\\n", "\n").replace("\\t", "\t")
+    md = UNICODE_ESCAPE_RE.sub(lambda m: chr(int(m.group(1), 16)), md)
+    md = html.unescape(md)
+    return md.strip()

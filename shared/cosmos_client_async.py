@@ -7,14 +7,18 @@ from azure.cosmos import CosmosClient
 _client = None
 _lock = threading.Lock()
 
+AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
+AZURE_DB_NAME = os.environ.get("AZURE_DB_NAME")
+AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
+
 def get_client() -> CosmosClient:
     global _client
     if _client is None:
         with _lock:
             if _client is None:
                 _client = CosmosClient(
-                    os.environ["AZURE_DB_URI"],                  # e.g. https://acct.documents.azure.com
-                    credential=DefaultAzureCredential(),         # MI in Azure, dev identity locally
+                    AZURE_DB_URI,
+                    credential=DefaultAzureCredential(),
                     consistency_level="Session",
                 )
     return _client
