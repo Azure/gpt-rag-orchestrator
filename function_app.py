@@ -126,7 +126,7 @@ async def stream_response(req: Request) -> StreamingResponse:
     # validate settings
     temp_setting = settings.get("temperature")
     settings["temperature"] = float(temp_setting) if temp_setting is not None else 0.3
-    settings["model"] = settings.get("model") or "DeepSeek-V3-0324"
+    settings["model"] = settings.get("model") or "gpt-4.1"
     logging.info(f"[function_app] Validated settings: {settings}")
     if question:
         orchestrator = new_orchestrator.ConversationOrchestrator(
