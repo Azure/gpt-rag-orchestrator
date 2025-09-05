@@ -1,4 +1,5 @@
 import os
+from zoneinfo import ZoneInfo
 from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
 import uuid
@@ -78,12 +79,18 @@ def store_agent_error(user_id, error, ask):
     except Exception as e:
         logging.error(f"Error retrieving the conversations: {e}")
 
-def get_conversation_data(conversation_id, type = None):
+def get_conversation_data(conversation_id, type = None, user_timezone=None):
     credential = DefaultAzureCredential()
     db_client = CosmosClient(AZURE_DB_URI, credential=credential)
     db = db_client.get_database_client(database=AZURE_DB_NAME)
     container = db.get_container_client("conversations")
 
+    tz = timezone.utc
+    if user_timezone:
+        try:
+            tz = ZoneInfo(user_timezone)
+        except Exception:
+            logging.warning(f"[CosmosDB] Unknown timezone '{user_timezone}', defaulting to UTC")
     try:
         conversation = container.read_item(
             item=conversation_id, partition_key=conversation_id
@@ -97,7 +104,7 @@ def get_conversation_data(conversation_id, type = None):
             body={
                 "id": conversation_id,
                 "conversation_data": {
-                    "start_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "start_date": datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S"),
                     "history": [],  # Initialize empty history list
                     "memory_data": "",
                     "interaction": {},
@@ -110,7 +117,7 @@ def get_conversation_data(conversation_id, type = None):
     conversation_data = conversation.get(
         "conversation_data",
         {
-            "start_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "start_date": datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S"),
             "history": [],  # Ensure history exists in default structure
             "memory_data": "",
             "interaction": {},

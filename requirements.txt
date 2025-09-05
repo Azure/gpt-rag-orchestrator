@@ -13,7 +13,7 @@ langgraph
 pandas
 langchain-community
 tabulate===0.9.0
-stripe
+stripe==12.5.0
 tavily-python
 google_search_results==2.4.2
 langchain-openai
