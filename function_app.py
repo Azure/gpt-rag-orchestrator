@@ -96,6 +96,7 @@ async def stream_response(req: Request) -> StreamingResponse:
     req_body = await req.json()
     question = req_body.get("question")
     conversation_id = req_body.get("conversation_id")
+    user_timezone = req_body.get("user_timezone")
     client_principal_id = req_body.get("client_principal_id")
     client_principal_name = req_body.get("client_principal_name")
     client_principal_organization = req_body.get("client_principal_organization")
@@ -139,6 +140,7 @@ async def stream_response(req: Request) -> StreamingResponse:
                     question=question,
                     user_info=client_principal,
                     user_settings=settings,
+                    user_timezone=user_timezone,
                 ),
                 media_type="text/event-stream",
             )

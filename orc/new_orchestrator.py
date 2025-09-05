@@ -231,6 +231,7 @@ class ConversationOrchestrator:
         question: str,
         user_info: dict,
         user_settings: dict = None,
+        user_timezone: str | None = None,
     ):
         """Generate response with real-time progress streaming."""
         start_time = time.time()
@@ -252,7 +253,7 @@ class ConversationOrchestrator:
         try:
             # Load conversation state
             logging.info(f"[orchestrator] Loading conversation data for ID: {conversation_id}")
-            conversation_data = get_conversation_data(conversation_id)
+            conversation_data = get_conversation_data(conversation_id, user_timezone=user_timezone)
             memory = self._load_memory(conversation_data.get("memory_data", ""))
 
             # Progress for graph setup
