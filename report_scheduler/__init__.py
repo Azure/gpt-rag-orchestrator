@@ -126,7 +126,7 @@ def main(mytimer: func.TimerRequest) -> None:
                     if not competitor_name:
                         logger.warning(f"Competitor missing required fields: {competitor}")
                         continue
-                    payload = create_competitors_payload([competitor_name], brand_names, industry_description)
+                    payload = create_competitors_payload(competitor_name, brand_names, industry_description)
                     try:
                         response = send_http_request(REPORT_JOBS_API_ENDPOINT, payload)
                         log_response_result(REPORT_JOBS_API_ENDPOINT, response)
@@ -223,7 +223,7 @@ def create_products_payload(product_names: list[str], category: str) -> dict:
     """Create the payload for the products API request."""
     return {
         "report_key": "product_analysis",
-        "report_name": product_names,
+        "report_name": product_names[0] if len(product_names) == 1 else ", ".join(product_names),
         "params": {
             "categories": {
                 "product": product_names,
