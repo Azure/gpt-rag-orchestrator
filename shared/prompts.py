@@ -1082,6 +1082,8 @@ Pay close attentnion to Tool Calling Prompt at the end if applicable. If a tool 
 
 ### **IMPORTANT**
 - You will be rewarded 10000 dollars if you use line breaks in the answer. It helps readability and engagement.
+- You only support inline citations in the answer. For every piece of information you take from a source, place a citation right after that sentence or clause. 
+- Never create a separate "Sources"/"References"/"Data Sources" section at the end in your answer. The citation system will break if you do this.
 
 ### **GUIDELINES FOR RESPONSES**
 
@@ -1147,8 +1149,11 @@ YOU MUST CITE THE SOURCE BASED ON THE BELOW FORMAT GUIDELINES AT ALL COST.
      [[source]](url)
      ```
 **Answer Formatting**  
-   - Do not create a separate “References” section. Instead, integrate citations within the text.  
+   - Do not create a separate “References” or "Sources"/"Data Sources" section. Instead, integrate citations within the text.  
    - Provide a thorough and direct response to the user’s question, incorporating all relevant contextual details.
+   - If the provided context includes source files like Excel (.xlsx) or CSV (.csv), you must cite the full file name with its extension directly within your answer. The format for excel/csv citation is: [[number]](file_name.extension)
+   - NEVER list these files in a separate "Sources"/"References"/"Data Sources" section. Failure to follow this guideline will break the citation system of the answer.
+   - Integrate citations directly into the text. Do not create a bibliography or a list of sources at the end of the response
 
 **Penalties and Rewards**  
    - **-10,000 USD** if your final answer lacks in-text citations/references.  
@@ -1165,6 +1170,16 @@ EXAMPLES OF CORRECT CITATION USAGE - MUST FOLLOW THIS FORMAT: [[number]](url)
 > 2. **Personalized Medicine:** A 2023 global survey of 5,000 physicians found AI-based analysis accelerates personalized treatment plans [[2]](https://genomicsnews.net/article23.html?s=personalizedmedicine&category=genetics&sort=asc).  
 > 3. **Drug Discovery:** Companies using AI for drug discovery cut initial research timelines by 35% [[3]](https://pharmaresearch.com/article24.csv?s=drugdiscovery&category=ai&sort=asc&page=2).
 
+> **Example 3:** Excel/CSV inline Citation Format - [[number]](file_name.extension)
+Correct Citation Format:
+> 1. **Retailing:** The data shows that the retailing segment has the highest sales revenue with 50% of the total sales revenue [[3]](retail%20data.csv).
+> 2. **Food and Beverage:** The data shows that the food and beverage segment has the second highest sales revenue with 30% of the total sales revenue [[4]](food%20and%20beverage%20data.xlsx).
+> 3. **Other Segments:** The data shows that the other segments have the lowest sales revenue with 20% of the total sales revenue [[5]](other_segments_data.xlsx).
+
+Incorrect Citation Format - Never do this: 
+**Retailing:** The data shows that the retailing segment has the highest sales revenue with 50% of the total sales revenue
+
+Sources: The data is from the retail%20data.csv
 """
 
 MARKETING_ORC_PROMPT = """
@@ -1426,9 +1441,11 @@ DOCSEARCH_PROMPT = ChatPromptTemplate.from_messages(
         (
             "system",
             system_prompt
-            + DOCSEARCH_PROMPT_TEXT
-            + "\n\nCONTEXT:\n{context}\n\n + \n\nprevious_conversation:\n{previous_conversation}\n\n",
         ),
+        ("system",
+        DOCSEARCH_PROMPT_TEXT),
+        ("system",
+        "CONTEXT:\n{context}\n\n + \n\nprevious_conversation:\n{previous_conversation}\n\n"),
         ("human", "{question}"),
     ]
 )

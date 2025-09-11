@@ -425,7 +425,7 @@ class ConversationOrchestrator:
         This is the important user instructions for the response.
         You should follow these instructions strictly as it sets the tone of the response user is expecting.
         Here are the instructions:
-
+        - Never create a separate "Sources"/"References"/"Data Sources" section at the end in your answer. The citation system will break if you do this.
         {organization_data.get('additionalInstructions','')}
         <----------- END OF Important User Instructions ------------>
 
@@ -456,6 +456,8 @@ class ConversationOrchestrator:
         Do not mention the user's instruction in the response:
         - Ensure that you follow the citation format for text and image. Again, if an image link is present in the context, you must include it in the response. DO not forget the `!` for image citation.
         - If there are absolutely no references or links in the context at all, you can omit the citation.
+        - If the context contains citations for excel or csv files, you must refer to the excel/csv citation format as instructed above when generating the response. The format for excel/csv citation is: [[number]](file_name.extension). Please refer to examples of csv/excel citation format above for more examples
+        - IMPORTANT: Never create a separate "Sources"/"References"/"Data Sources" section at the end in your answer. The citation system will break if you do this.
         """
 
         logging.info(f"[orchestrator] Starting final response generation")
