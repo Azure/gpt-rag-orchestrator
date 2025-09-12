@@ -218,6 +218,7 @@ class ConversationOrchestrator:
         tool_name_mapping = {
             "data_analyst": "Data Analyst",
             "agentic_search": "Agentic Search",
+            "web_fetch": "Web Fetch",
         }
         if state.mcp_tool_used:
             tool_name = state.mcp_tool_used[-1]["name"]
