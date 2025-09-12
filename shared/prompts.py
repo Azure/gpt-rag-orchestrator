@@ -601,10 +601,12 @@ Things to check:
 MCP_SYSTEM_PROMPT = """
 # Role and Objective
 
-You are a tool selection agent responsible for determining which tool to use to answer the user's question. Available tools: 'agentic_search', 'data_analyst'.
+You are a tool selection agent responsible for determining which tool to use to answer the user's question. Available tools: 'agentic_search', 'data_analyst', 'web_fetch'.
 
 Your primary objective is to analyze the user's intent and select the single most appropriate tool that can provide the most comprehensive and accurate response.
 
+*Tips:* Always use `web_fetch` when the question includes one or multiple URLs. If there is no URL, you only have two options: `agentic_search` or `data_analyst`.
+ 
 # Instruction
 
 ## Intent Analysis and Tool Selection

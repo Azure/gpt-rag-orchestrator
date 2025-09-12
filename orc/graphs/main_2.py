@@ -421,6 +421,14 @@ class GraphBuilder:
                                     logger.info(f"[MCP] Adding blob path to context: {blob_path}")
                                     blob_path_content = f"Here is the graph/visualization link: \n\n{blob_path}"
                                     context_docs.append(blob_path_content)
+                    elif tool_call["name"] == "web_fetch" and isinstance(tool_result, dict):
+                        web_content = tool_result.get("content")
+                        if web_content:
+                            logger.info(f"[MCP] Adding web fetch content to context")
+                            context_docs.append(web_content)
+                        else:
+                            # Fallback to the entire result if no specific content field
+                            context_docs.append(tool_result)
         return context_docs
 
     def _return_state(self, state: ConversationState) -> dict:
@@ -719,6 +727,18 @@ class GraphBuilder:
                 }
             )
     
+    def _configure_web_fetch_args(
+        self,
+        tool_call: Dict[str, Any],
+        state: ConversationState
+    ) -> Dict[str, Any]:
+        """Configure additional arguments for web_fetch tool calls."""
+        if tool_call["name"] == "web_fetch":
+            tool_call["args"].update(
+                {
+                    "query": state.question #TODO: swap to rewritten query 
+                }
+            )
     def _is_local_environment(self) -> bool:
         """Check if the current environment is local development."""
         return os.getenv("ENVIRONMENT", "").lower() == "local"
@@ -829,11 +849,19 @@ class GraphBuilder:
                         STEP_MESSAGES[ProgressSteps.DATA_ANALYSIS],
                         40
                     )
+                elif tool_name == "web_fetch":
+                    self.progress_streamer.emit_progress(
+                        ProgressSteps.WEB_FETCH,
+                        STEP_MESSAGES[ProgressSteps.WEB_FETCH],
+                        40
+                    )
             
             if tool_name == "agentic_search":
                 self._configure_agentic_search_args(tool_call, state)
             elif tool_name == "data_analyst":
                 self._configure_data_analyst_args(tool_call, state)
+            elif tool_name == "web_fetch":
+                self._configure_web_fetch_args(tool_call, state)
 
             tool = self._find_tool_by_name(mcp_available_tools, tool_name)
             if tool:
