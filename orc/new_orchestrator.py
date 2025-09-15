@@ -3,11 +3,9 @@ import logging
 import base64
 import uuid
 import time
-import re
 import json
 import asyncio
 import concurrent.futures
-from langchain_community.callbacks import get_openai_callback
 from langsmith import traceable
 from langgraph.checkpoint.memory import MemorySaver
 from orc.graphs.main_2 import create_conversation_graph
@@ -18,19 +16,15 @@ from shared.cosmos_db import (
 )
 from langchain_openai import AzureChatOpenAI
 from langchain_anthropic import ChatAnthropic
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from langchain_core.messages import (
-    AIMessage,
     HumanMessage,
     SystemMessage as LangchainSystemMessage,
 )
-from urllib.parse import unquote
 
 from shared.util import get_setting
 from shared.progress_streamer import ProgressStreamer, ProgressSteps, STEP_MESSAGES
 
-from langchain.schema import Document
 from shared.prompts import (
     MARKETING_ANSWER_PROMPT,
     CREATIVE_BRIEF_PROMPT,
@@ -41,50 +35,20 @@ from shared.prompts import (
 from shared.util import get_organization
 from dotenv import load_dotenv
 
-from azure.ai.inference import ChatCompletionsClient
-from azure.core.credentials import AzureKeyCredential
-from azure.ai.inference.models import SystemMessage, UserMessage
+from orc.graphs.models import ConversationState
+from orc.graphs.utils import clean_chat_history_for_llm
+from orc.graphs.constants import TOOL_DISPLAY_NAME, ENV_O1_ENDPOINT, ENV_O1_KEY
+from orc.orchestrator.formatters import (
+    sanitize_storage_urls,
+    format_context,
+    extract_blob_urls,
+)
 
 load_dotenv()
 # Configure logging
 logging.getLogger("azure").setLevel(logging.INFO)
 logging.getLogger("azure.cosmos").setLevel(logging.INFO)
 logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO").upper())
-
-
-@dataclass
-class ConversationState:
-    """State container for conversation flow management.
-
-    Attributes:
-        question: Current user query
-        messages: Conversation history as a list of messages
-        context_docs: Retrieved documents from various sources
-        requires_retrieval: Flag indicating if retrieval is needed
-        rewritten_query: Rewritten query for better search
-        query_category: Category of the query
-        augmented_query: Augmented version of the query
-        mcp_tool_used: List of MCP tools that were used
-        tool_results: Results from tool execution
-        code_thread_id: Thread id for the code interpreter tool
-        last_mcp_tool_used: Name of the last MCP tool used
-    """
-
-    question: str
-    messages: List[AIMessage | HumanMessage] = field(
-        default_factory=list
-    )  # track all messages in the conversation
-    context_docs: List[Document] = field(default_factory=list)
-    requires_retrieval: bool = field(default=False)
-    rewritten_query: str = field(
-        default_factory=str
-    )  # rewritten query for better search
-    query_category: str = field(default_factory=str)
-    augmented_query: str = field(default_factory=str)
-    mcp_tool_used: List[Dict[str, Any]] = field(default_factory=list)
-    tool_results: List[Any] = field(default_factory=list)
-    code_thread_id: Optional[str] = field(default=None)
-    last_mcp_tool_used: str = field(default="")
 
 # Prompt for Tool Calling
 CATEGORY_PROMPT = {
@@ -114,14 +78,11 @@ class ConversationOrchestrator:
 
     def _sanitize_response(self, text: str) -> str:
         """Remove sensitive storage URLs from response text."""
-        if self.storage_url in text:
-            regex = rf"(Source:\s?\/?)?(source:)?(https:\/\/)?({self.storage_url})?(\/?documents\/?)?"
-            return re.sub(regex, "", text)
-        return text
+        return sanitize_storage_urls(text, self.storage_url)
 
     def _load_memory(self, memory_data: str) -> MemorySaver:
         """Create a fresh memory saver for this conversation.
-        
+
         In modern LangGraph, we use a fresh checkpointer for each conversation
         and let the graph handle memory persistence automatically.
         The conversation history is maintained through the database instead.
@@ -129,100 +90,17 @@ class ConversationOrchestrator:
         return MemorySaver()
 
     def _clean_chat_history(self, chat_history: List[dict]) -> str:
-        """
-        Clean the chat history and format it as a string for LLM consumption.
+        """Use shared formatter for chat history."""
+        return clean_chat_history_for_llm(chat_history)
 
-        Args:
-            chat_history (list): List of chat message dictionaries
+    def _format_context(self, context_docs: List, display_source: bool = True) -> str:
+        return format_context(context_docs, display_source=display_source)
 
-        Returns:
-            str: Formatted chat history string in the format:
-                 Human: {message}
-                 AI: {message}
-        """
-        formatted_history = []
-
-        for message in chat_history:
-            if not message.get("content"):
-                continue
-
-            role = message.get("role", "").lower()
-            content = message.get("content", "")
-
-            if role and content:
-                display_role = "Human" if role == "user" else "AI Message"
-                formatted_history.append(f"{display_role}: {content}")
-
-        return "\n\n".join(formatted_history)
-
-    def _format_source_path(self, source_path: str) -> str:
-        """
-        Formats a source path by extracting relevant parts and URL decoding.
-
-        Args:
-            source_path: The raw source path from document metadata
-
-        Returns:
-            str: A clean, readable file path
-        """
-        if not source_path:
-            return ""
-
-        try:
-            # Split the path and take elements from index 3 onwards
-            path_parts = source_path.split("/")[3:]
-
-            # URL decode each part to convert %20 to spaces, etc.
-            decoded_parts = [unquote(part) for part in path_parts]
-
-            # Join with forward slashes to create a clean path
-            clean_path = "/".join(decoded_parts)
-
-            return clean_path
-
-        except (IndexError, Exception) as e:
-            # Fallback to original path if processing fails
-            logging.warning(f"Failed to format source path '{source_path}': {e}")
-            return source_path
-
-    def _format_context(
-        self, context_docs: List, display_source: bool = True
-    ) -> str:
-        """Formats retrieved documents into a string for LLM consumption."""
-        if not context_docs:
-            return ""
-        
-        formatted_docs = []
-        for doc in context_docs:
-            if hasattr(doc, 'page_content'):
-                content = doc.page_content
-                source = doc.metadata.get("source", "") if hasattr(doc, 'metadata') else ""
-            elif isinstance(doc, dict):
-                content = doc.get('Content', doc.get('content', doc.get('text', str(doc))))
-                source = doc.get('Source', doc.get('source', doc.get('Title', '')))
-            else:
-                # Fallback to string representation
-                content = str(doc)
-                source = ""
-            
-            if display_source and source:
-                formatted_source = self._format_source_path(source) if 'documents/' in source else source
-                formatted_docs.append(f"\nContent: \n\n{content}\n\nSource: {formatted_source}")
-            else:
-                formatted_docs.append(f"\nContent: \n\n{content}")
-        
-        return "\n\n==============================================\n\n".join(formatted_docs)
-    
     def _get_tool_name(self, state: ConversationState) -> str:
         """Get the name of the tool used from the state."""
-        tool_name_mapping = {
-            "data_analyst": "Data Analyst",
-            "agentic_search": "Agentic Search",
-            "web_fetch": "Web Fetch",
-        }
         if state.mcp_tool_used:
             tool_name = state.mcp_tool_used[-1]["name"]
-            return tool_name_mapping.get(tool_name, tool_name)
+            return TOOL_DISPLAY_NAME.get(tool_name, tool_name) or ""
         return ""
 
     @traceable(run_type="llm")
@@ -231,13 +109,13 @@ class ConversationOrchestrator:
         conversation_id: str,
         question: str,
         user_info: dict,
-        user_settings: dict = None,
+        user_settings: Optional[dict] = None,
         user_timezone: str | None = None,
     ):
         """Generate response with real-time progress streaming."""
         start_time = time.time()
         conversation_id = conversation_id or str(uuid.uuid4())
-        
+
         logging.info(
             f"[orchestrator-generate_response] Starting streaming response for: {question[:50]}..."
         )
@@ -247,14 +125,18 @@ class ConversationOrchestrator:
             "step": ProgressSteps.INITIALIZATION,
             "message": STEP_MESSAGES[ProgressSteps.INITIALIZATION],
             "progress": 5,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
         yield f"__PROGRESS__{json.dumps(progress_data)}__PROGRESS__\n"
 
         try:
             # Load conversation state
-            logging.info(f"[orchestrator] Loading conversation data for ID: {conversation_id}")
-            conversation_data = get_conversation_data(conversation_id, user_timezone=user_timezone)
+            logging.info(
+                f"[orchestrator] Loading conversation data for ID: {conversation_id}"
+            )
+            conversation_data = get_conversation_data(
+                conversation_id, user_timezone=user_timezone
+            )
             memory = self._load_memory(conversation_data.get("memory_data", ""))
 
             # Progress for graph setup
@@ -263,7 +145,7 @@ class ConversationOrchestrator:
                 "step": "graph_setup",
                 "message": "Setting up conversation...",
                 "progress": 10,
-                "timestamp": time.time()
+                "timestamp": time.time(),
             }
             yield f"__PROGRESS__{json.dumps(progress_data)}__PROGRESS__\n"
 
@@ -271,16 +153,16 @@ class ConversationOrchestrator:
 
             # Create a list to collect progress updates from the async agent
             progress_updates = []
-            
+
             def stream_progress(data):
                 progress_updates.append(data)
-            
+
             agent = create_conversation_graph(
                 memory=memory,
                 organization_id=self.organization_id,
                 conversation_id=conversation_id,
                 user_id=user_info["id"],
-                progress_streamer=ProgressStreamer(stream_progress)
+                progress_streamer=ProgressStreamer(stream_progress),
             )
 
             def run_async_agent():
@@ -288,17 +170,17 @@ class ConversationOrchestrator:
 
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_async_agent)
-                
+
                 while not future.done():
                     while progress_updates:
                         progress_update = progress_updates.pop(0)
                         yield progress_update
                     time.sleep(0.1)  # Small delay to prevent busy waiting
-                
+
                 while progress_updates:
                     progress_update = progress_updates.pop(0)
                     yield progress_update
-                    
+
                 response = future.result()
 
             # Create conversation state from response
@@ -316,19 +198,15 @@ class ConversationOrchestrator:
                 last_mcp_tool_used=response.get("last_mcp_tool_used", ""),
             )
 
-            # Get blob URLs for images
-            blob_urls = []
-            for tool_result in state.tool_results:
-                if isinstance(tool_result, str):
-                    results_json = json.loads(tool_result)
-                    blob_urls.extend(results_json.get("blob_urls", []))
+            # Get blob URLs for images for data analyst tool
+            blob_urls = extract_blob_urls(state.tool_results)
 
             # Emit thoughts data first
             tool_name = self._get_tool_name(state)
             thoughts_data = {
                 "conversation_id": conversation_id,
                 "thoughts": [
-                    f"""Model Used: {user_settings.get('model', 'gpt-4.1')} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Retrieval: {state.requires_retrieval} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / MCP Tool Used: {tool_name} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
+                    f"""Model Used: {user_settings.get('model')} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Retrieval: {state.requires_retrieval} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / MCP Tool Used: {tool_name} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
                 ],
                 "images_blob_urls": blob_urls,
             }
@@ -340,12 +218,19 @@ class ConversationOrchestrator:
                 "step": ProgressSteps.RESPONSE_GENERATION,
                 "message": STEP_MESSAGES[ProgressSteps.RESPONSE_GENERATION],
                 "progress": 60,
-                "timestamp": time.time()
+                "timestamp": time.time(),
             }
             yield f"__PROGRESS__{json.dumps(response_start_data)}__PROGRESS__\n"
 
             # Now start response generation
-            yield from self._generate_final_response(state, conversation_data, user_info, user_settings, start_time, conversation_id)
+            yield from self._generate_final_response(
+                state,
+                conversation_data,
+                user_info,
+                user_settings,
+                start_time,
+                conversation_id,
+            )
 
         except Exception as e:
             logging.error(f"[orchestrator] Error in response generation: {str(e)}")
@@ -353,13 +238,21 @@ class ConversationOrchestrator:
             error_data = {
                 "type": "error",
                 "message": "I'm sorry, I encountered an error while processing your request. Please try again.",
-                "timestamp": time.time()
+                "timestamp": time.time(),
             }
             yield f"__PROGRESS__{json.dumps(error_data)}__PROGRESS__\n"
 
-    def _generate_final_response(self, state, conversation_data, user_info, user_settings, start_time, conversation_id):
+    def _generate_final_response(
+        self,
+        state,
+        conversation_data,
+        user_info,
+        user_settings,
+        start_time,
+        conversation_id,
+    ):
         """Generate the final streaming response using the processed state."""
-        
+
         context = ""
         if state.context_docs:
             context = self._format_context(state.context_docs)
@@ -461,11 +354,11 @@ class ConversationOrchestrator:
         - IMPORTANT: Never create a separate "Sources"/"References"/"Data Sources" section at the end in your answer. The citation system will break if you do this.
         """
 
-        logging.info(f"[orchestrator] Starting final response generation")
+        logging.info("[orchestrator] Starting final response generation")
         complete_response = ""
 
         try:
-            model = user_settings.get('model', 'gpt-4.1')
+            model = user_settings.get("model", "gpt-4.1")
             if model == "gpt-4.1":
                 logging.info("[orchestrator] Streaming response from Azure Chat OpenAI")
                 response_llm = AzureChatOpenAI(
@@ -475,13 +368,15 @@ class ConversationOrchestrator:
                     streaming=True,
                     timeout=30,
                     max_retries=3,
-                    azure_endpoint=os.getenv("O1_ENDPOINT"),
-                    api_key=os.getenv("O1_KEY"),
+                    azure_endpoint=os.getenv(ENV_O1_ENDPOINT),
+                    api_key=os.getenv(ENV_O1_KEY),
                 )
-                tokens = response_llm.stream([
-                    LangchainSystemMessage(content=system_prompt),
-                    HumanMessage(content=prompt),
-                ])
+                tokens = response_llm.stream(
+                    [
+                        LangchainSystemMessage(content=system_prompt),
+                        HumanMessage(content=prompt),
+                    ]
+                )
                 while True:
                     try:
                         token = next(tokens)
@@ -491,7 +386,7 @@ class ConversationOrchestrator:
                             yield chunk
                     except StopIteration:
                         break
-            
+
             elif model == "Claude-4-Sonnet":
                 logging.info("[orchestrator] Streaming response from Claude 4 Sonnet")
                 response_llm = ChatAnthropic(
@@ -501,10 +396,12 @@ class ConversationOrchestrator:
                     api_key=os.getenv("ANTHROPIC_API_KEY"),
                     max_tokens=10000,
                 )
-                tokens = response_llm.stream([
-                    LangchainSystemMessage(content=system_prompt),
-                    HumanMessage(content=prompt),
-                ])
+                tokens = response_llm.stream(
+                    [
+                        LangchainSystemMessage(content=system_prompt),
+                        HumanMessage(content=prompt),
+                    ]
+                )
                 while True:
                     try:
                         token = next(tokens)
@@ -514,32 +411,7 @@ class ConversationOrchestrator:
                             yield chunk
                     except StopIteration:
                         break
-                        
-            elif model == "DeepSeek-V3-0324":
-                logging.info("[orchestrator] Streaming response from DeepSeek V3")
-                endpoint = os.getenv("AZURE_INFERENCE_SDK_ENDPOINT")
-                key = os.getenv("AZURE_INFERENCE_SDK_KEY")
-                client = ChatCompletionsClient(
-                    endpoint=endpoint, credential=AzureKeyCredential(key)
-                )
 
-                response = client.complete(
-                    messages=[
-                        SystemMessage(content=system_prompt),
-                        UserMessage(content=prompt),
-                    ],
-                    model=model,
-                    max_tokens=10000,
-                    temperature=user_settings.get("temperature", 0.4),
-                    stream=True,
-                )
-
-                for update in response:
-                    if update.choices and update.choices[0].delta:
-                        chunk = update.choices[0].delta.content or ""
-                        complete_response += chunk
-                        yield chunk
-                        
         except Exception as e:
             logging.error(f"[orchestrator] Error generating response: {str(e)}")
             store_agent_error(user_info["id"], str(e), state.question)
@@ -550,40 +422,42 @@ class ConversationOrchestrator:
         # Save conversation history
         answer = self._sanitize_response(complete_response)
         tool_name = self._get_tool_name(state)
-        
+
         # Get blob URLs
-        blob_urls = []
-        for tool_result in state.tool_results:
-            if isinstance(tool_result, str):
-                results_json = json.loads(tool_result)
-                blob_urls.extend(results_json.get("blob_urls", []))
+        # blob_urls = extract_blob_urls(state.tool_results)
 
         # Update conversation history
-        history.extend([
-            {"role": "user", "content": state.question},
-            {
-                "role": "assistant",
-                "content": answer,
-                "thoughts": [
-                    f"""Model Used: {user_settings.get('model', 'gpt-4.1')} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Retrieval: {state.requires_retrieval} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / MCP Tool Used: {tool_name} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
-                ],
-                "images_blob_urls": blob_urls,
-                "code_thread_id": state.code_thread_id,
-                "last_mcp_tool_used": state.last_mcp_tool_used
-            },
-        ])
-        
+        history.extend(
+            [
+                {"role": "user", "content": state.question},
+                {
+                    "role": "assistant",
+                    "content": answer,
+                    "thoughts": [
+                        f"""Model Used: {user_settings.get('model', 'gpt-4.1')} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Retrieval: {state.requires_retrieval} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / MCP Tool Used: {tool_name} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
+                    ],
+                    # "images_blob_urls": blob_urls,
+                    "code_thread_id": state.code_thread_id,
+                    "last_mcp_tool_used": state.last_mcp_tool_used,
+                },
+            ]
+        )
+
         # Save updated state
-        conversation_data.update({
-            "history": history,
-            "memory_data": self._serialize_memory(MemorySaver(), {"configurable": {"thread_id": conversation_id}}),
-            "interaction": {
-                "user_id": user_info["id"],
-                "user_name": user_info["name"],
-                "response_time": round(time.time() - start_time, 2),
-                "organization_id": self.organization_id,
-            },
-        })
+        conversation_data.update(
+            {
+                "history": history,
+                "memory_data": self._serialize_memory(
+                    MemorySaver(), {"configurable": {"thread_id": conversation_id}}
+                ),
+                "interaction": {
+                    "user_id": user_info["id"],
+                    "user_name": user_info["name"],
+                    "response_time": round(time.time() - start_time, 2),
+                    "organization_id": self.organization_id,
+                },
+            }
+        )
 
         update_conversation_data(conversation_id, conversation_data)
 

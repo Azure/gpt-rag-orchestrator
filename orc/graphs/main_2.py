@@ -2,17 +2,16 @@ import os
 import sys
 import json
 import logging
-from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
+from dataclasses import dataclass
+from typing import List, Optional
+
 from dotenv import load_dotenv
-load_dotenv()
 from shared.progress_streamer import ProgressStreamer, ProgressSteps, STEP_MESSAGES
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
     SystemMessage,
 )
-from langchain.schema import Document
 from langgraph.graph import StateGraph, END, START
 from langchain_openai import AzureChatOpenAI
 
@@ -25,6 +24,9 @@ from orc.graphs.context_builder import ContextBuilder
 from orc.graphs.mcp_executor import MCPExecutor
 from orc.graphs.query_planner import QueryPlanner
 from orc.graphs.constants import ENV_O1_ENDPOINT, ENV_O1_KEY
+from orc.graphs.models import ConversationState
+
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,28 +67,6 @@ azure_identity_logger.propagate = True
 azure_logger.propagate = True
 langchain_logger.propagate = True
 openai_logger.propagate = True
-
-
-@dataclass
-class ConversationState:
-    """State container for conversation flow management.
-
-    Attributes:
-        question: Current user query
-        messages: Conversation history as a list of messages
-    """
-
-    question: str
-    messages: List[AIMessage | HumanMessage] = field(default_factory=list)
-    context_docs: List[Document] = field(default_factory=list)
-    requires_retrieval: bool = field(default=False)
-    rewritten_query: str = field(default_factory=str)
-    query_category: str = field(default_factory=str)
-    augmented_query: str = field(default_factory=str)
-    mcp_tool_used: List[Dict[str, Any]] = field(default_factory=list)
-    tool_results: List[Any] = field(default_factory=list)
-    code_thread_id: Optional[str] = field(default=None)
-    last_mcp_tool_used: str = field(default="")
 
 
 @dataclass

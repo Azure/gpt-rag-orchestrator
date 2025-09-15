@@ -21,3 +21,9 @@ TOOL_PROGRESS_STEP = {
     TOOL_WEB_FETCH: ProgressSteps.WEB_FETCH,
 }
 
+# Display names for tools
+TOOL_DISPLAY_NAME = {
+    TOOL_AGENTIC_SEARCH: "Agentic Search",
+    TOOL_DATA_ANALYST: "Data Analyst",
+    TOOL_WEB_FETCH: "Web Fetch",
+}
