@@ -219,33 +219,36 @@ def create_brands_payload(brand_name: str, industry_description: str) -> dict:
         }
     }
 
-def create_products_payload(product_names: list[str], category: str) -> dict:
+def create_products_payload(product_names: str, category: str) -> dict:
     """Create the payload for the products API request."""
     return {
         "report_key": "product_analysis",
         "report_name": product_names[0] if len(product_names) == 1 else ", ".join(product_names),
         "params": {
-            "categories": {
-                "product": product_names,
-                "category": category
-            }
+            "categories": [
+                {
+                    "product": product_names,
+                    "category": category
+                }
+            ]
         }
     }
 
-def create_competitors_payload(competitor_name: list[str], brands: list[str], industry_description: str) -> dict:
+def create_competitors_payload(competitor_name: str, brands: str, industry_description: str) -> dict:
     """Create the payload for the competitors API request."""
     return {
         "report_key": "competitor_analysis",
         "report_name": competitor_name,
         "params": {
-            "categories": {
-                "brands": brands,
-                "competitors": competitor_name,
-            },
+            "categories": [
+                {
+                    "brands": brands,
+                    "competitors": [competitor_name]
+                }
+            ],
             "industry_context": industry_description
         }
     }
-
 
 def get_products(organization_id: str):
     """Get elements from the 'products' container based on the provided organization_id."""
