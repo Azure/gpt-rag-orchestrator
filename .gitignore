@@ -78,3 +78,6 @@ __azurite_db*__.json
 .azure
 financial-orc/graphs/test.ipynb
 shared/data/company_name.json
+
+.gemini/
+gha-creds-*.json
