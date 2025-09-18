@@ -101,7 +101,7 @@ class MCPExecutor:
         if tool_call["name"] == TOOL_WEB_FETCH:
             tool_call["args"].update(
                 {
-                    "query": state.state.question,
+                    "query": state.question
                 }
             )
 
