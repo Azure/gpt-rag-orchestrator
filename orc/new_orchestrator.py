@@ -352,6 +352,7 @@ class ConversationOrchestrator:
         - If there are absolutely no references or links in the context at all, you can omit the citation.
         - If the context contains citations for excel or csv files, you must refer to the excel/csv citation format as instructed above when generating the response. The format for excel/csv citation is: [[number]](file_name.extension). Please refer to examples of csv/excel citation format above for more examples
         - IMPORTANT: Never create a separate "Sources"/"References"/"Data Sources" section at the end in your answer. The citation system will break if you do this.
+        - Never cite the visual more than once. If the visual is already cited, do not cite it again.
         """
 
         logging.info("[orchestrator] Starting final response generation")
