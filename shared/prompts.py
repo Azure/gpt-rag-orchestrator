@@ -1276,7 +1276,6 @@ A strategist and creative who specializes in brand development and communication
 
 """
 
-print(MARKETING_ANSWER_PROMPT)
 MARKETING_ORC_PROMPT = """
 
 # Role and Objective
