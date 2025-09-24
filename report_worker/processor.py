@@ -93,6 +93,7 @@ async def process_report_job(
         markdown_content = generator.generate(job_id, organization_id, parameters)
         logging.info(f"[ReportWorker] Generated markdown content ({len(markdown_content)} chars) for job {job_id}")
         
+        markdown_content = markdown_content.replace("---", "")
         # Convert markdown to PDF
         logging.info(f"[ReportWorker] Converting markdown to PDF for job {job_id}")
         pdf_content_dict = {"content": markdown_content}

@@ -173,9 +173,10 @@ class TestProductCategoryGrouping(unittest.TestCase):
         self.assertIn("report_name", payload)
         self.assertIn("categories", payload["params"])
         self.assertEqual(payload["report_key"], "product_analysis")
-        self.assertEqual(payload["report_name"], product_names)
-        self.assertEqual(payload["params"]["categories"]["category"], category)
-        self.assertEqual(payload["params"]["categories"]["product"], product_names)
+        self.assertEqual(payload["report_name"], ", ".join(product_names))
+        self.assertEqual(payload["params"]["categories"][0]["category"], category)
+        self.assertEqual(payload["params"]["categories"][0]["product"], product_names)
+        
 
 class TestCompetitorGrouping(unittest.TestCase):
     def setUp(self):
@@ -183,43 +184,42 @@ class TestCompetitorGrouping(unittest.TestCase):
         self.industry_description = "IndustryDesc"
         self.brand_names = ["BrandA", "BrandB"]
         self.competitors = [
-            {"name": "Competitor1", "category": "Cat1"},
-            {"name": "Competitor2", "category": "Cat1"},
-            {"name": "Competitor3", "category": "Cat2"},
+            {"name": "Competitor1"},
+            {"name": "Competitor2"},
+            {"name": "Competitor3"},
         ]
 
-    def test_group_competitors_by_category(self):
-        competitors_by_category = {}
+    def test_iterate_competitors_individually(self):
         for competitor in self.competitors:
             competitor_name = competitor.get("name")
-            competitor_category = competitor.get("category")
-            if not competitor_name or not competitor_category:
+            if not competitor_name:
                 continue
-            if competitor_category not in competitors_by_category:
-                competitors_by_category[competitor_category] = []
-            competitors_by_category[competitor_category].append(competitor_name)
-        self.assertEqual(set(competitors_by_category.keys()), {"Cat1", "Cat2"})
-        self.assertEqual(competitors_by_category["Cat1"], ["Competitor1", "Competitor2"])
-        self.assertEqual(competitors_by_category["Cat2"], ["Competitor3"])
+            payload = report_scheduler.create_competitors_payload(
+                competitor_name, self.brand_names, self.industry_description
+            )
+            self.assertIn("report_key", payload)
+            self.assertIn("report_name", payload)
+            self.assertIn("params", payload)
+            self.assertIn("categories", payload["params"])
+            self.assertEqual(payload["report_key"], "competitor_analysis")
+            self.assertEqual(payload["report_name"], competitor_name)
+            self.assertEqual(payload["params"]["categories"][0]["brands"], self.brand_names)
+            self.assertEqual(payload["params"]["categories"][0]["competitors"], [competitor_name])
+            self.assertEqual(payload["params"]["industry_context"], self.industry_description)
 
     def test_create_competitors_payload_format(self):
-        category = "Cat1"
-        competitor_names = ["Competitor1", "Competitor2"]
+        competitor_name = "Competitor1"
         payload = report_scheduler.create_competitors_payload(
-            category_name=category,
-            competitor_name=competitor_names,
-            brands=self.brand_names,
-            industry_description=self.industry_description
+            competitor_name, self.brand_names, self.industry_description
         )
         self.assertIn("report_key", payload)
         self.assertIn("report_name", payload)
         self.assertIn("params", payload)
         self.assertIn("categories", payload["params"])
         self.assertEqual(payload["report_key"], "competitor_analysis")
-        self.assertEqual(payload["report_name"], competitor_names)
-        self.assertEqual(payload["params"]["categories"]["category"], category)
-        self.assertEqual(payload["params"]["categories"]["brands"], self.brand_names)
-        self.assertEqual(payload["params"]["categories"]["competitors"], competitor_names)
+        self.assertEqual(payload["report_name"], competitor_name)
+        self.assertEqual(payload["params"]["categories"][0]["brands"], self.brand_names)
+        self.assertEqual(payload["params"]["categories"][0]["competitors"], [competitor_name])
         self.assertEqual(payload["params"]["industry_context"], self.industry_description)
 
 if __name__ == "__main__":

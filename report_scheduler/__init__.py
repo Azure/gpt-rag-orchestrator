@@ -46,8 +46,8 @@ def main(mytimer: func.TimerRequest) -> None:
             if not org_id or not industry_description:
                 logger.warning(f"Organization missing required fields (id or industry_description): {org}")
                 continue
-            full_url = f"{WEB_APP_URL}/api/report-jobs?organization_id={org_id}"
-            logger.info(f"Sending request to: {full_url}")
+            REPORT_JOBS_API_ENDPOINT = f"{WEB_APP_URL}/api/report-jobs?organization_id={org_id}"
+            logger.info(f"Sending request to: {REPORT_JOBS_API_ENDPOINT}")
 
             logger.info(f"Fetching brands for organization: {org_id}")
             try:
@@ -71,10 +71,10 @@ def main(mytimer: func.TimerRequest) -> None:
                 payload = create_brands_payload(brand_name, industry_description)
 
                 try:
-                    response = send_http_request(full_url, payload)
-                    log_response_result(full_url, response)
+                    response = send_http_request(REPORT_JOBS_API_ENDPOINT, payload)
+                    log_response_result(REPORT_JOBS_API_ENDPOINT, response)
                 except Exception as e:
-                    logger.error(f"Failed to send request to {full_url}: {str(e)}")
+                    logger.error(f"Failed to send request to {REPORT_JOBS_API_ENDPOINT}: {str(e)}")
 
             organization_products = []
             try:
@@ -101,10 +101,10 @@ def main(mytimer: func.TimerRequest) -> None:
                 for product_category, product_names in category_map.items():
                     payload = create_products_payload(product_names, product_category)
                     try:
-                        response = send_http_request(full_url, payload)
-                        log_response_result(full_url, response)
+                        response = send_http_request(REPORT_JOBS_API_ENDPOINT, payload)
+                        log_response_result(REPORT_JOBS_API_ENDPOINT, response)
                     except Exception as e:
-                        logger.error(f"Failed to send request to {full_url}: {str(e)}")
+                        logger.error(f"Failed to send request to {REPORT_JOBS_API_ENDPOINT}: {str(e)}")
 
             organization_competitors = []
             try:
@@ -116,30 +116,22 @@ def main(mytimer: func.TimerRequest) -> None:
                 logger.warning(f"No competitors found for organization: {org_id}")
             else:
                 logger.info(f"Competitors found for organization: {org_id}. Proceeding with report generation.")
-                competitors_by_category = {}
-                for competitor in organization_competitors:
-                    competitor_name = competitor.get("name")
-                    competitor_category = competitor.get("category")
-                    if not competitor_name or not competitor_category:
-                        logger.warning(f"Competitor missing required fields: {competitor}")
-                        continue
-                    
-                    if competitor_category not in competitors_by_category:
-                        competitors_by_category[competitor_category] = []
-                    competitors_by_category[competitor_category].append(competitor_name)
-
                 brand_names = [brand.get("name") for brand in organization_brands if brand.get("name")]
                 if not brand_names:
                     logger.warning(f"No valid brand names found for organization: {org_id}")
                     continue
 
-                for competitor_category, competitor_names in competitors_by_category.items():
-                    payload = create_competitors_payload(competitor_category, competitor_names, brand_names, industry_description)
+                for competitor in organization_competitors:
+                    competitor_name = competitor.get("name")
+                    if not competitor_name:
+                        logger.warning(f"Competitor missing required fields: {competitor}")
+                        continue
+                    payload = create_competitors_payload(competitor_name, brand_names, industry_description)
                     try:
-                        response = send_http_request(full_url, payload)
-                        log_response_result(full_url, response)
+                        response = send_http_request(REPORT_JOBS_API_ENDPOINT, payload)
+                        log_response_result(REPORT_JOBS_API_ENDPOINT, response)
                     except Exception as e:
-                        logger.error(f"Failed to send request to {full_url}: {str(e)}")
+                        logger.error(f"Failed to send request to {REPORT_JOBS_API_ENDPOINT}: {str(e)}")
 
     except Exception as e:
         logger.error(f"Unexpected error in report scheduler: {str(e)}")
@@ -227,34 +219,36 @@ def create_brands_payload(brand_name: str, industry_description: str) -> dict:
         }
     }
 
-def create_products_payload(product_names: list[str], category: str) -> dict:
+def create_products_payload(product_names: str, category: str) -> dict:
     """Create the payload for the products API request."""
     return {
         "report_key": "product_analysis",
-        "report_name": product_names,
+        "report_name": product_names[0] if len(product_names) == 1 else ", ".join(product_names),
         "params": {
-            "categories": {
-                "product": product_names,
-                "category": category
-            }
+            "categories": [
+                {
+                    "product": product_names,
+                    "category": category
+                }
+            ]
         }
     }
 
-def create_competitors_payload(category_name: str, competitor_name: list[str], brands: list[str], industry_description: str) -> dict:
+def create_competitors_payload(competitor_name: str, brands: str, industry_description: str) -> dict:
     """Create the payload for the competitors API request."""
     return {
         "report_key": "competitor_analysis",
         "report_name": competitor_name,
         "params": {
-            "categories": {
-                "category": category_name,
-                "brands": brands,
-                "competitors": competitor_name,
-            },
+            "categories": [
+                {
+                    "brands": brands,
+                    "competitors": [competitor_name]
+                }
+            ],
             "industry_context": industry_description
         }
     }
-
 
 def get_products(organization_id: str):
     """Get elements from the 'products' container based on the provided organization_id."""

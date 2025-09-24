@@ -60,13 +60,15 @@ class ProgressSteps:
     QUERY_REWRITE = "query_rewrite"
     AGENTIC_SEARCH = "agentic_search"
     DATA_ANALYSIS = "data_analysis"
+    WEB_FETCH = "web_fetch"
     RESPONSE_GENERATION = "response_generation"
 
 
 STEP_MESSAGES = {
     ProgressSteps.INITIALIZATION: "Firing up the FreddAid engine...",
-    ProgressSteps.QUERY_REWRITE: "FreddAid’s tweezers out - refining your question...",
+    ProgressSteps.QUERY_REWRITE: "FreddAid's tweezers out - refining your question...",
     ProgressSteps.AGENTIC_SEARCH: "FreddAid is on the case - searching for answers...",
-    ProgressSteps.DATA_ANALYSIS: "FreddAid’s analysis gears are grinding...",
+    ProgressSteps.DATA_ANALYSIS: "FreddAid's analysis gears are grinding...",
+    ProgressSteps.WEB_FETCH: "FreddAid is fetching web content...",
     ProgressSteps.RESPONSE_GENERATION: "Composing your response...",
 }
