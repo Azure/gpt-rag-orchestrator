@@ -201,20 +201,3 @@ class CosmosDBLoader:
         except Exception as e:
             logger.error(f"Error retrieving company list: {str(e)}")
             raise
-
-    
-if __name__ == "__main__":
-    # run the script to upload data to Cosmos DB
-    data_file_path = os.path.join(os.path.dirname(__file__), "data/company_name.json")
-    container_name = "companyAnalysis"
-    db_uri = f"https://{os.environ['AZURE_DB_ID']}.documents.azure.com:443/" if os.environ.get('AZURE_DB_ID') else None
-    credential = os.environ.get('AZURE_COSMOS_KEY')
-    # credential = DefaultAzureCredential()
-    database_name = os.environ.get('AZURE_DB_NAME') if os.environ.get('AZURE_DB_NAME') else None
-
-    cosmos_db_loader = CosmosDBLoader(container_name=container_name, db_uri=db_uri, credential=credential, database_name=database_name)
-    # create the container if it doesn't exist
-    cosmos_db_loader.create_container_single_hash()
-    # upload the data to the container
-
-    cosmos_db_loader.upload_data(data_file_path)

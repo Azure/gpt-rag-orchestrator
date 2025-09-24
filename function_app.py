@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from azurefunctions.extensions.http.fastapi import Request, StreamingResponse, Response
 from scheduler import main as scheduler_main
 from weekly_scheduler import main as weekly_scheduler_main
-from monthly_scheduler import main as monthly_scheduler_main
 from report_scheduler import main as report_scheduler_main
 
 from shared.util import (
