@@ -46,6 +46,8 @@ AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
 AZURE_DB_NAME = os.environ.get("AZURE_DB_NAME")
 AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
 
+AZURE_REPORT_JOBS_CONTAINER = os.environ.get("AZURE_REPORT_JOBS_CONTAINER", "reportJobs")
+
 model_max_tokens = {
     "gpt-35-turbo": 4096,
     "gpt-35-turbo-16k": 16384,
@@ -1668,7 +1670,7 @@ def get_report_job(job_id: str, organization_id: str) -> Optional[Dict[str, Any]
     """
     try:
         db = get_db(AZURE_DB_NAME)
-        container_client = get_container(db, "report_jobs")
+        container_client = get_container(db, AZURE_REPORT_JOBS_CONTAINER)
         
         job = container_client.read_item(item=job_id, partition_key=organization_id)
         return job
@@ -1702,7 +1704,7 @@ def update_report_job_status(
     """
     try:
         db = get_db(AZURE_DB_NAME)
-        container_client = get_container(db, "report_jobs")
+        container_client = get_container(db, AZURE_REPORT_JOBS_CONTAINER)
         
         # Get the current job
         job = container_client.read_item(item=job_id, partition_key=organization_id)
