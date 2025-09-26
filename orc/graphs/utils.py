@@ -2,6 +2,7 @@ import logging
 import sys
 from typing import List, Any, Optional
 from dotenv import load_dotenv
+
 load_dotenv()
 
 logging.basicConfig(
@@ -48,9 +49,7 @@ langchain_logger.propagate = True
 openai_logger.propagate = True
 
 
-def truncate_chat_history(
-    chat_history: List[Any], max_messages: int = 6
-) -> List[Any]:
+def truncate_chat_history(chat_history: List[Any], max_messages: int = 6) -> List[Any]:
     """
     Truncate chat history to the most recent messages.
 
@@ -98,21 +97,21 @@ def clean_chat_history_for_llm(chat_history: List[Any]) -> str:
 
     formatted_history = []
     for message in truncated_history:
-        if hasattr(message, 'content'):
+        if hasattr(message, "content"):
             content = message.content
             if not content:
                 continue
-            
-            if hasattr(message, 'type'):
-                if message.type == 'human':
+
+            if hasattr(message, "type"):
+                if message.type == "human":
                     display_role = "Human"
-                elif message.type == 'ai':
+                elif message.type == "ai":
                     display_role = "AI Message"
                 else:
-                    display_role = "AI Message" 
+                    display_role = "AI Message"
             else:
                 display_role = "AI Message"
-                
+
         elif isinstance(message, dict):
             if not message.get("content"):
                 continue
@@ -139,53 +138,98 @@ def clean_chat_history_for_llm(chat_history: List[Any]) -> str:
 def extract_thread_id_from_history(conversation_history: List[dict]) -> Optional[str]:
     """
     Extract the most recent code_thread_id from conversation history.
-    
+
     Args:
         conversation_history: List of conversation messages from the database
-        
+
     Returns:
         Most recent thread_id if found, None otherwise
     """
     if not conversation_history:
         logger.debug("[Thread ID Extraction] No conversation history provided")
         return None
-    
-    logger.info(f"[Thread ID Extraction] Searching {len(conversation_history)} messages for thread_id")
-    
+
+    logger.info(
+        f"[Thread ID Extraction] Searching {len(conversation_history)} messages for thread_id"
+    )
+
     # Search backwards through history to find the most recent thread_id
     for message in reversed(conversation_history):
         if isinstance(message, dict) and message.get("role") == "assistant":
             thread_id = message.get("code_thread_id")
             if thread_id:
-                logger.info(f"[Thread ID Extraction] Found thread_id in conversation history: {thread_id}")
+                logger.info(
+                    f"[Thread ID Extraction] Found thread_id in conversation history: {thread_id}"
+                )
                 return thread_id
-    
+
     logger.debug("[Thread ID Extraction] No thread_id found in conversation history")
     return None
+
+
+def extract_uploaded_file_refs_from_history(
+    conversation_history: List[dict],
+) -> List[dict]:
+    """
+    Extract the most recent uploaded_file_refs from conversation history.
+
+    Args:
+        conversation_history: List of conversation messages from the database
+
+    Returns:
+        Most recent uploaded_file_refs if found, empty list otherwise
+    """
+    if not conversation_history:
+        logger.debug("[File Refs Extraction] No conversation history provided")
+        return []
+
+    logger.info(
+        f"[File Refs Extraction] Searching {len(conversation_history)} messages for uploaded_file_refs"
+    )
+
+    for message in reversed(conversation_history):
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            uploaded_file_refs = message.get("uploaded_file_refs")
+            if uploaded_file_refs and isinstance(uploaded_file_refs, list):
+                logger.info(
+                    f"[File Refs Extraction] Found {len(uploaded_file_refs)} uploaded_file_refs in conversation history"
+                )
+                return uploaded_file_refs
+
+    logger.debug(
+        "[File Refs Extraction] No uploaded_file_refs found in conversation history"
+    )
+    return []
 
 
 def extract_last_mcp_tool_from_history(conversation_history: List[dict]) -> str:
     """
     Extract the most recent MCP tool used from conversation history.
-    
+
     Args:
         conversation_history: List of conversation messages from the database
-        
+
     Returns:
         Name of the last MCP tool used, empty string if none found
     """
     if not conversation_history:
         logger.debug("[MCP Tool Extraction] No conversation history provided")
         return ""
-    
-    logger.info(f"[MCP Tool Extraction] Searching {len(conversation_history)} messages for last MCP tool")
-    
+
+    logger.info(
+        f"[MCP Tool Extraction] Searching {len(conversation_history)} messages for last MCP tool"
+    )
+
     for message in reversed(conversation_history):
         if isinstance(message, dict) and message.get("role") == "assistant":
             last_mcp_tool = message.get("last_mcp_tool_used")
             if last_mcp_tool:
-                logger.info(f"[MCP Tool Extraction] Found last MCP tool in conversation history: {last_mcp_tool}")
+                logger.info(
+                    f"[MCP Tool Extraction] Found last MCP tool in conversation history: {last_mcp_tool}"
+                )
                 return last_mcp_tool
-    
-    logger.debug("[MCP Tool Extraction] No MCP tool usage found in conversation history")
+
+    logger.debug(
+        "[MCP Tool Extraction] No MCP tool usage found in conversation history"
+    )
     return ""

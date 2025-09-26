@@ -32,3 +32,4 @@ azure-search-documents==11.6.0b12
 langchain-mcp-adapters
 deepagents
 xhtml2pdf
+python-dotenv
