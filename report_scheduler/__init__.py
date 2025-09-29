@@ -24,13 +24,12 @@ def main(mytimer: func.TimerRequest) -> None:
     try:
         organizations = get_all_organizations()
         logger.info(f"Total organizations fetched: {len(organizations)}")
-        logger.debug(f"Organizations: {organizations}")
     except Exception as e:
         logger.error(f"Error fetching organizations from Cosmos DB: {str(e)}")
         return
 
     if not organizations:
-        logger.warning("No organizations found.")
+        logger.error("No organizations found.")
         return
 
     start_time = datetime.now(timezone.utc)
@@ -175,8 +174,8 @@ def log_response_result(endpoint: str, response: requests.Response) -> None:
         "response_data": response_json
     }
     
-    if response.status_code == 200:
-        logger.info(f"Successfully called {endpoint}: {log_data}")
+    if response.status_code == 201:
+        logger.info(f"Successfully called {endpoint}")
     elif response.status_code in [401, 403]:
         logger.warning(f"Authentication/Authorization issue with {endpoint}: {log_data}")
     elif response.status_code in [404, 405]:

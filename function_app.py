@@ -71,6 +71,7 @@ async def report_worker(msg: func.QueueMessage) -> None:
 
         # Process the report job
         await process_report_job(job_id, organization_id, dequeue_count)
+        logging.info(f"[ReportWorker] Processed job {job_id} for organization {organization_id}")
 
     except Exception as e:
         logging.error(
