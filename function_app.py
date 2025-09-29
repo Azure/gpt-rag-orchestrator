@@ -1036,17 +1036,17 @@ async def multipage_scrape(req: Request) -> Response:
         )
 
 
-@app.timer_trigger(schedule="0 0 2 * * 0", arg_name="mytimer", run_on_startup=False)
+@app.timer_trigger(schedule="0 0 17 * * *", arg_name="mytimer", run_on_startup=False)
 def report_scheduler_timer(mytimer: func.TimerRequest) -> None:
     """
-    Timer trigger function that runs every Sunday at 2:00 AM UTC.
-    Cron expression: "0 0 2 * * 0" means:
+    Timer trigger function that runs every day at 5:00 PM UTC.
+    Cron expression: "0 0 17 * * *" means:
     - 0 seconds
     - 0 minutes
-    - 2 hours (2 AM)
+    - 17 hours (5 PM)
     - * any day of month
     - * any month
-    - 0 = Sunday (day of week)
+    - * any day of week
     """
     logging.info("Report scheduler timer trigger started")
     
