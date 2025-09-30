@@ -145,7 +145,7 @@ class GraphBuilder:
             }
 
         try:
-            self.conversation_data = get_conversation_data(conversation_id)
+            self.conversation_data = get_conversation_data(conversation_id, user_id)
             logger.info(
                 f"[GraphBuilder Init] Successfully retrieved conversation data for ID: {conversation_id}"
             )

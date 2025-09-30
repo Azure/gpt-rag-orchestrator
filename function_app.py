@@ -18,9 +18,6 @@ from shared.util import (
     enable_organization_subscription,
     update_subscription_logs,
     updateExpirationDate,
-    get_conversations,
-    get_conversation,
-    delete_conversation,
     trigger_indexer_with_retry,
 )
 
@@ -532,41 +529,12 @@ def blob_trigger(myblob: func.InputStream):
 
 @app.route(
     route="conversations",
-    methods=[func.HttpMethod.GET, func.HttpMethod.POST, func.HttpMethod.DELETE],
+    methods=[func.HttpMethod.POST],
 )
 async def conversations(req: Request) -> Response:
     logging.info("Python HTTP trigger function processed a request for conversations.")
 
-    id = req.query_params.get("id")
-
-    if req.method == "GET":
-        try:
-            user_id = req.query_params.get("user_id")
-            if not user_id:
-                return Response(
-                    json.dumps({"error": "user_id query parameter is required"}),
-                    media_type="application/json",
-                    status_code=400,
-                )
-
-            if not id:
-                conversations = get_conversations(user_id)
-            else:
-                conversations = get_conversation(id, user_id)
-            return Response(
-                json.dumps(conversations),
-                media_type="application/json",
-                status_code=200,
-            )
-        except Exception as e:
-            logging.error(f"Error in GET /conversations: {str(e)}")
-            return Response(
-                json.dumps({"error": "Internal server error"}),
-                media_type="application/json",
-                status_code=500,
-            )
-
-    elif req.method == "POST":
+    if req.method == "POST":
         try:
             req_body = await req.json()
             id_from_body = req_body.get("id")
@@ -607,34 +575,6 @@ async def conversations(req: Request) -> Response:
                 media_type="application/json",
                 status_code=500,
             )
-    # need to double check if this one is working
-    elif req.method == "DELETE":
-        try:
-            req_body = await req.json()
-            user_id = req_body.get("user_id")
-            if not user_id:
-                return Response("Missing user_id in request body", status_code=400)
-            if id:
-                try:
-                    delete_conversation(id, user_id)
-                    return Response(
-                        "Conversation deleted successfully", status_code=200
-                    )
-                except Exception as e:
-                    logging.error(f"Error deleting conversation: {str(e)}")
-                    return Response("Error deleting conversation", status_code=500)
-            else:
-                return Response("Missing conversation ID", status_code=400)
-        except json.JSONDecodeError:
-            return Response("Invalid JSON in request body", status_code=400)
-        except Exception as e:
-            logging.error(f"Error in DELETE /conversations: {str(e)}")
-            return Response(
-                json.dumps({"error": "Internal server error"}),
-                media_type="application/json",
-                status_code=500,
-            )
-
     else:
         return Response("Method not allowed", status_code=405)
 

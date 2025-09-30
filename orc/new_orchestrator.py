@@ -137,7 +137,7 @@ class ConversationOrchestrator:
                 f"[orchestrator] Loading conversation data for ID: {conversation_id}"
             )
             conversation_data = get_conversation_data(
-                conversation_id, user_timezone=user_timezone
+                conversation_id, user_info["id"], user_timezone=user_timezone
             )
             memory = self._load_memory(conversation_data.get("memory_data", ""))
 
@@ -468,7 +468,7 @@ class ConversationOrchestrator:
             }
         )
 
-        update_conversation_data(conversation_id, conversation_data)
+        update_conversation_data(conversation_id, user_info["id"], conversation_data)
 
 
 def get_settings(client_principal):

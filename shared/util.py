@@ -73,55 +73,6 @@ def get_secret(secretName):
     )
     return retrieved_secret.value
 
-
-##########################################################
-# HISTORY FUNCTIONS
-##########################################################
-
-
-def get_chat_history_as_text(history, include_last_turn=True, approx_max_tokens=1000):
-    history_text = ""
-    if len(history) == 0:
-        return history_text
-    for h in reversed(history if include_last_turn else history[:-1]):
-        history_text = f"{h['role']}:" + h["content"] + "\n" + history_text
-        if len(history_text) > approx_max_tokens * 4:
-            break
-    return history_text
-
-
-def get_chat_history_as_messages(
-    history,
-    include_previous_questions=True,
-    include_last_turn=True,
-    approx_max_tokens=1000,
-):
-    history_list = []
-    if len(history) == 0:
-        return history_list
-    for h in reversed(history if include_last_turn else history[:-1]):
-        history_item = {"role": h["role"], "content": h["content"]}
-        if "function_call" in h:
-            history_item.update({"function_call": h["function_call"]})
-        if "name" in h:
-            history_item.update({"name": h["name"]})
-        history_list.insert(0, history_item)
-        if len(history_list) > approx_max_tokens * 4:
-            break
-
-    # remove previous questions if needed
-    if not include_previous_questions:
-        new_list = []
-        for idx, item in enumerate(history_list):
-            # keep only assistant messages and the last message
-            # obs: if include_last_turn is True, the last user message is also kept
-            if item["role"] == "assistant" or idx == len(history_list) - 1:
-                new_list.append(item)
-        history_list = new_list
-
-    return history_list
-
-
 ##########################################################
 # GPT FUNCTIONS
 ##########################################################
@@ -134,16 +85,6 @@ def number_of_tokens(messages, model):
     )
     num_tokens = len(encoding.encode(prompt))
     return num_tokens
-
-
-def truncate_to_max_tokens(text, extra_tokens, model):
-    max_tokens = model_max_tokens[model] - extra_tokens
-    tokens_allowed = max_tokens - number_of_tokens(text, model=model)
-    while tokens_allowed < int(AZURE_OPENAI_RESP_MAX_TOKENS) and len(text) > 0:
-        text = text[:-1]
-        tokens_allowed = max_tokens - number_of_tokens(text, model=model)
-    return text
-
 
 # reduce messages to fit in the model's max tokens
 def optmize_messages(chat_history_messages, model):
@@ -400,54 +341,6 @@ def get_aoai_config(model):
     }
     return result
 
-
-def get_conversations(user_id):
-    try:
-        credential = DefaultAzureCredential()
-        db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
-        db = db_client.get_database_client(database=AZURE_DB_NAME)
-        container = db.get_container_client("conversations")
-
-        query = (
-            "SELECT * FROM c WHERE c.conversation_data.interaction.user_id = @user_id"
-        )
-        parameters = [dict(name="@user_id", value=user_id)]
-
-        conversations = container.query_items(
-            query=query, parameters=parameters, enable_cross_partition_query=True
-        )
-
-        # DEFAULT DATE 1 YEAR AGO in case start_date is not present
-        now = datetime.now()
-        one_year_ago = now - timedelta(days=365)
-        default_date = one_year_ago.strftime("%Y-%m-%d %H:%M:%S")
-
-        formatted_conversations = [
-            {
-                "id": con["id"],
-                "start_date": (
-                    con["conversation_data"]["start_date"]
-                    if "start_date" in con["conversation_data"]
-                    else default_date
-                ),
-                "content": con["conversation_data"]["history"][0]["content"],
-                "type": (
-                    con["conversation_data"]["type"]
-                    if "type" in con["conversation_data"]
-                    else "default"
-                ),
-            }
-            for con in conversations
-        ]
-
-        return formatted_conversations
-    except Exception as e:
-        logging.error(
-            f"Error retrieving the conversations for user '{user_id}': {str(e)}"
-        )
-        return []
-
-
 def get_conversation(conversation_id, user_id):
     try:
         credential = DefaultAzureCredential()
@@ -455,7 +348,7 @@ def get_conversation(conversation_id, user_id):
         db = db_client.get_database_client(database=AZURE_DB_NAME)
         container = db.get_container_client("conversations")
         conversation = container.read_item(
-            item=conversation_id, partition_key=conversation_id
+            item=conversation_id, partition_key=user_id
         )
         if conversation["conversation_data"]["interaction"]["user_id"] != user_id:
             return {}
@@ -483,28 +376,6 @@ def get_conversation(conversation_id, user_id):
     except Exception:
         logging.error(f"Error retrieving the conversation '{conversation_id}'")
         return {}
-
-
-def delete_conversation(conversation_id, user_id):
-    try:
-        credential = DefaultAzureCredential()
-        db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
-        db = db_client.get_database_client(database=AZURE_DB_NAME)
-        container = db.get_container_client("conversations")
-        conversation = container.read_item(
-            item=conversation_id, partition_key=conversation_id
-        )
-
-        if conversation["conversation_data"]["interaction"]["user_id"] != user_id:
-            raise Exception("User does not have permission to delete this conversation")
-
-        container.delete_item(item=conversation_id, partition_key=conversation_id)
-
-        return True
-    except Exception as e:
-        logging.error(f"Error deleting conversation '{conversation_id}': {str(e)}")
-        return False
-
 
 def get_next_resource(model):
 
