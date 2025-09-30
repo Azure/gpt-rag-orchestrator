@@ -396,10 +396,10 @@ class ConversationOrchestrator:
                     except StopIteration:
                         break
 
-            elif model == "Claude-4-Sonnet":
+            elif model == "Claude-4.5-Sonnet":
                 logging.info("[orchestrator] Streaming response from Claude 4 Sonnet")
                 response_llm = ChatAnthropic(
-                    model="claude-sonnet-4-20250514",
+                    model="claude-sonnet-4-5-20250929",
                     temperature=0,
                     streaming=True,
                     api_key=os.getenv("ANTHROPIC_API_KEY"),
