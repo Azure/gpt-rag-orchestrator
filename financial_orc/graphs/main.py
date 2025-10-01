@@ -1,10 +1,14 @@
 import os
 import json
+import requests
 from typing import List, Annotated, Sequence, TypedDict, Literal
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import (
+    AIMessage,
     ToolMessage,
     BaseMessage,
+    HumanMessage,
+    SystemMessage,
 )
 from langchain_core.runnables import RunnableConfig
 from langchain_core.documents import Document
@@ -14,6 +18,10 @@ from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
 from langchain_openai import AzureChatOpenAI
+from shared.cosmos_db import (
+    get_conversation_data,
+    update_conversation_data,
+)
 from pydantic import BaseModel
 
 # tools

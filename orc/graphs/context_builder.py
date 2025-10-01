@@ -6,7 +6,6 @@ from orc.graphs.utils import clean_chat_history_for_llm
 from orc.graphs.constants import (
     TOOL_AGENTIC_SEARCH,
     TOOL_DATA_ANALYST,
-    TOOL_DOCUMENT_CHAT,
     TOOL_WEB_FETCH,
 )
 
@@ -22,7 +21,9 @@ class ContextBuilder:
 
     def _get_org_data(self, key: str, label: str) -> str:
         value = self.organization_data.get(key, "")
-        logger.info(f"[Org Data] Retrieved '{label}' (present={bool(value)})")
+        logger.info(
+            f"[Org Data] Retrieved '{label}' (present={bool(value)})"
+        )
         return value
 
     def build_organization_context_prompt(self, history: List[dict]) -> str:
@@ -107,33 +108,17 @@ class ContextBuilder:
             name = tool_call.get("name")
             if name == TOOL_AGENTIC_SEARCH and isinstance(result, dict):
                 docs.append(result.get("results", result))
-
             elif name == TOOL_DATA_ANALYST and isinstance(result, dict):
                 docs.append(result.get("last_agent_message", result))
                 blob_urls = result.get("blob_urls")
-                if (
-                    isinstance(blob_urls, list)
-                    and blob_urls
-                    and isinstance(blob_urls[0], dict)
-                ):
+                if isinstance(blob_urls, list) and blob_urls and isinstance(blob_urls[0], dict):
                     blob_path = blob_urls[0].get("blob_path")
                     if blob_path:
                         logger.info(f"[MCP] Adding blob path to context: {blob_path}")
-                        docs.append(
-                            f"Here is the graph/visualization link: \n\n{blob_path}"
-                        )
-
+                        docs.append(f"Here is the graph/visualization link: \n\n{blob_path}")
             elif name == TOOL_WEB_FETCH and isinstance(result, dict):
                 web_content = result.get("content")
                 docs.append(web_content if web_content else result)
 
-            elif name == TOOL_DOCUMENT_CHAT and isinstance(result, dict):
-                docs.append(result.get("answer", result))
-                files = result.get("files", [])
-                if files and isinstance(files, list):
-                    state.uploaded_file_refs = files
-                    logger.info(
-                        f"[MCP] Updated uploaded_file_refs with {len(files)} files"
-                    )
-
         return docs
+

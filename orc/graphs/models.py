@@ -24,8 +24,6 @@ class ConversationState:
         tool_results: Results from tool execution
         code_thread_id: Thread id for the code interpreter tool
         last_mcp_tool_used: Name of the last MCP tool used
-        blob_names: List of blob names from user uploadd documents 
-        uploaded_file_refs: OpenAI file references from user uploads
     """
 
     question: str
@@ -39,5 +37,3 @@ class ConversationState:
     tool_results: List[Any] = field(default_factory=list)
     code_thread_id: Optional[str] = field(default=None)
     last_mcp_tool_used: str = field(default="")
-    blob_names: List[str] = field(default_factory=list)
-    uploaded_file_refs: List[Dict[str, str]] = field(default_factory=list)

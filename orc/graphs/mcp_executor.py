@@ -15,7 +15,6 @@ from orc.graphs.constants import (
     SECRET_MCP_FUNCTION_KEY,
     TOOL_AGENTIC_SEARCH,
     TOOL_DATA_ANALYST,
-    TOOL_DOCUMENT_CHAT,
     TOOL_WEB_FETCH,
     TOOL_PROGRESS_STEP,
 )
@@ -74,16 +73,16 @@ class MCPExecutor:
             return
         self.progress_streamer.emit_progress(step, STEP_MESSAGES[step], percent)
 
-    def _configure_agentic_search_args(self, tool_call: Dict[str, Any], state) -> None:
+    def _configure_agentic_search_args(
+        self, tool_call: Dict[str, Any], state
+    ) -> None:
         if tool_call["name"] == TOOL_AGENTIC_SEARCH:
             tool_call["args"].update(
                 {
                     "organization_id": self.organization_id,
                     "rewritten_query": state.rewritten_query,
                     "reranker_threshold": self.config.reranker_threshold,
-                    "historical_conversation": clean_chat_history_for_llm(
-                        state.messages
-                    ),
+                    "historical_conversation": clean_chat_history_for_llm(state.messages),
                     "web_search_threshold": self.config.web_search_results,
                 }
             )
@@ -100,33 +99,11 @@ class MCPExecutor:
 
     def _configure_web_fetch_args(self, tool_call: Dict[str, Any], state) -> None:
         if tool_call["name"] == TOOL_WEB_FETCH:
-            tool_call["args"].update({"query": state.question})
-
-    def _configure_document_chat_args(self, tool_call: Dict[str, Any], state) -> None:
-        if tool_call["name"] == TOOL_DOCUMENT_CHAT:
-            current_blobs = set(state.blob_names)
-            cached_blobs = set(
-                ref.get("blob_name", "") for ref in state.uploaded_file_refs
-            )  # stored in cosmos from the last run
-
-            # Always send question and blob names
-            args = {
-                "question": state.question,
-                "document_names": state.blob_names,
-            }
-
-            # Only send cached_file_info if blob names match exactly
-            if current_blobs == cached_blobs and state.uploaded_file_refs:
-                args["cached_file_info"] = state.uploaded_file_refs
-                logger.info(
-                    f"Blob validation passed: reusing {len(state.uploaded_file_refs)} cached files"
-                )
-            else:
-                logger.info(
-                    f"Blob validation failed: processing {len(state.blob_names)} fresh documents"
-                )
-
-            tool_call["args"].update(args)
+            tool_call["args"].update(
+                {
+                    "query": state.question
+                }
+            )
 
     async def get_tool_calls(
         self,
@@ -134,38 +111,15 @@ class MCPExecutor:
         llm: AzureChatOpenAI,
         conversation_data: dict,
     ) -> dict:
-        # Rule-based system: Force document_chat when documents are present
-        if hasattr(state, "blob_names") and state.blob_names:
-            logger.info(
-                f"[MCP] Documents present ({len(state.blob_names)} files), forcing document_chat tool"
-            )
-            return {"mcp_tool_used": [{"name": TOOL_DOCUMENT_CHAT, "args": {}}]}
-
-        logger.info("[MCP] Initializing MCP client")
+        logger.info(f"[MCP] Initializing MCP client")
         client = await self._init_mcp_client()
 
-        logger.info("[MCP] Getting tools from MCP client")
+        logger.info(f"[MCP] Getting tools from MCP client")
         tools = await client.get_tools()
         logger.info(f"[MCP] Found {len(tools)} tools")
 
-        # Defensive: Exclude document_chat from LLM tool-planning when no documents are provided.
-        # Rationale: The document_chat tool's schema requires document_names (array) and may be
-        # rejected by Azure when bound as a selectable function. We never want LLM to pick it
-        # without explicit documents anyway.
-        # I don't like this approach but it's the best I can come up with atm
-        if not getattr(state, "blob_names", []):
-            before = len(tools)
-            tools = [t for t in tools if getattr(t, "name", "") != TOOL_DOCUMENT_CHAT]
-            after = len(tools)
-            if after != before:
-                logger.info(
-                    f"[MCP] Filtered out '{TOOL_DOCUMENT_CHAT}' for planning (no documents provided). {before}->{after} tools"
-                )
-
         history = conversation_data.get("history", [])
-        logger.info(
-            f"[MCP] Retrieved {len(history)} conversation history messages for context"
-        )
+        logger.info(f"[MCP] Retrieved {len(history)} conversation history messages for context")
         clean_history = clean_chat_history_for_llm(history)
         logger.info(
             f"[MCP] Cleaned conversation history: {clean_history[:200] if len(clean_history) > 200 else clean_history}"
@@ -182,10 +136,7 @@ class MCPExecutor:
         """
 
         llm_with_tools = llm.bind_tools(tools, tool_choice="any")
-        message = [
-            SystemMessage(content=MCP_SYSTEM_PROMPT),
-            HumanMessage(content=human_prompt),
-        ]
+        message = [SystemMessage(content=MCP_SYSTEM_PROMPT), HumanMessage(content=human_prompt)]
         try:
             response = await llm_with_tools.ainvoke(message)
             logger.info(
@@ -201,15 +152,15 @@ class MCPExecutor:
                 logger.info(
                     f"[MCP] Available tool names: {[tool.name for tool in tools] if tools else 'No tools'}"
                 )
-                logger.info(f"[MCP] Human prompt sent to LLM: {human_prompt[:300]}...")
+                logger.info(
+                    f"[MCP] Human prompt sent to LLM: {human_prompt[:300]}..."
+                )
         except Exception as e:
             logger.error(f"[MCP] Error getting tool calls from LLM: {str(e)}")
             raise RuntimeError(f"[MCP] Error getting tool calls from LLM: {str(e)}")
 
         return {
-            "mcp_tool_used": (
-                response.tool_calls if hasattr(response, "tool_calls") else []
-            ),
+            "mcp_tool_used": response.tool_calls if hasattr(response, "tool_calls") else [],
         }
 
     async def execute_tool_calls(self, state) -> dict:
@@ -236,9 +187,6 @@ class MCPExecutor:
                 self._configure_data_analyst_args(tool_call, state)
             elif tool_name == TOOL_WEB_FETCH:
                 self._configure_web_fetch_args(tool_call, state)
-            elif tool_name == TOOL_DOCUMENT_CHAT:
-                self._configure_document_chat_args(tool_call, state)
-                logger.info(f"Configuration for document chat tool: {tool_call}")
 
             tool = tools_by_name.get(tool_name)
             if tool:
@@ -264,3 +212,4 @@ class MCPExecutor:
             logger.info("[MCP] No tool results to return")
 
         return {"tool_results": tool_results}
+
