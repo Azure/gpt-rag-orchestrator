@@ -66,9 +66,16 @@ async def report_worker(msg: func.QueueMessage) -> None:
         if not all([job_id, organization_id]):
             return
 
+        # Log processing start with dequeue count for monitoring
+        logging.info(f"[ReportWorker] Starting job {job_id} for organization {organization_id} (attempt {dequeue_count})")
+        
+        # Check if this is a retry and log warning
+        if dequeue_count > 1:
+            logging.warning(f"[ReportWorker] Job {job_id} is being retried (attempt {dequeue_count})")
+
         # Process the report job
         await process_report_job(job_id, organization_id, dequeue_count)
-        logging.info(f"[ReportWorker] Processed job {job_id} for organization {organization_id}")
+        logging.info(f"[ReportWorker] Successfully completed job {job_id} for organization {organization_id}")
 
     except Exception as e:
         logging.error(
