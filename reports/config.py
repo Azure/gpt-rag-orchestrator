@@ -13,7 +13,7 @@ from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
 load_dotenv()
 
-ModelType = Literal["o4-mini", "claude-sonnet-4-20250514", "gpt-4.1"]
+ModelType = Literal["o4-mini", "claude-sonnet-4-5-20250929", "gpt-4.1"]
 ReasoningEffort = Literal["low", "medium", "high"]
 ModelClient = Union[AzureChatOpenAI, ChatAnthropic]
 time_range = Literal["day", "week", "month", "year"]
