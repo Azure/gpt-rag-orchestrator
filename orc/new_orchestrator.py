@@ -111,12 +111,10 @@ class ConversationOrchestrator:
         user_info: dict,
         user_settings: Optional[dict] = None,
         user_timezone: str | None = None,
-        blob_names: Optional[List[str]] = None,
     ):
         """Generate response with real-time progress streaming."""
         start_time = time.time()
         conversation_id = conversation_id or str(uuid.uuid4())
-        blob_names = blob_names or []
 
         logging.info(
             f"[orchestrator-generate_response] Starting streaming response for: {question[:50]}..."
@@ -137,7 +135,7 @@ class ConversationOrchestrator:
                 f"[orchestrator] Loading conversation data for ID: {conversation_id}"
             )
             conversation_data = get_conversation_data(
-                conversation_id, user_info["id"], user_timezone=user_timezone
+                conversation_id, user_timezone=user_timezone
             )
             memory = self._load_memory(conversation_data.get("memory_data", ""))
 
@@ -168,11 +166,7 @@ class ConversationOrchestrator:
             )
 
             def run_async_agent():
-                return asyncio.run(
-                    agent.ainvoke(
-                        {"question": question, "blob_names": blob_names}, config
-                    )
-                )
+                return asyncio.run(agent.ainvoke({"question": question}, config))
 
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_async_agent)
@@ -202,8 +196,6 @@ class ConversationOrchestrator:
                 tool_results=response.get("tool_results", []),
                 code_thread_id=response.get("code_thread_id", None),
                 last_mcp_tool_used=response.get("last_mcp_tool_used", ""),
-                blob_names=blob_names,
-                uploaded_file_refs=response.get("uploaded_file_refs", []),
             )
 
             # Get blob URLs for images for data analyst tool
@@ -396,10 +388,10 @@ class ConversationOrchestrator:
                     except StopIteration:
                         break
 
-            elif model == "Claude-4.5-Sonnet":
+            elif model == "Claude-4-Sonnet":
                 logging.info("[orchestrator] Streaming response from Claude 4 Sonnet")
                 response_llm = ChatAnthropic(
-                    model="claude-sonnet-4-5-20250929",
+                    model="claude-sonnet-4-20250514",
                     temperature=0,
                     streaming=True,
                     api_key=os.getenv("ANTHROPIC_API_KEY"),
@@ -445,9 +437,9 @@ class ConversationOrchestrator:
                     "thoughts": [
                         f"""Model Used: {user_settings.get('model', 'gpt-4.1')} / Tool Selected: {state.query_category} / Original Query : {state.question} / Rewritten Query: {state.rewritten_query} / Required Retrieval: {state.requires_retrieval} / Number of documents retrieved: {len(state.context_docs) if state.context_docs else 0} / MCP Tool Used: {tool_name} / Context Retrieved using the rewritten query: / {self._format_context(state.context_docs, display_source=True)}"""
                     ],
+                    # "images_blob_urls": blob_urls,
                     "code_thread_id": state.code_thread_id,
                     "last_mcp_tool_used": state.last_mcp_tool_used,
-                    "uploaded_file_refs": state.uploaded_file_refs,
                 },
             ]
         )
@@ -468,7 +460,7 @@ class ConversationOrchestrator:
             }
         )
 
-        update_conversation_data(conversation_id, user_info["id"], conversation_data)
+        update_conversation_data(conversation_id, conversation_data)
 
 
 def get_settings(client_principal):

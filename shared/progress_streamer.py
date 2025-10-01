@@ -61,7 +61,6 @@ class ProgressSteps:
     AGENTIC_SEARCH = "agentic_search"
     DATA_ANALYSIS = "data_analysis"
     WEB_FETCH = "web_fetch"
-    DOCUMENT_CHAT = "document_chat"
     RESPONSE_GENERATION = "response_generation"
 
 
@@ -71,6 +70,5 @@ STEP_MESSAGES = {
     ProgressSteps.AGENTIC_SEARCH: "FreddAid is on the case - searching for answers...",
     ProgressSteps.DATA_ANALYSIS: "FreddAid's analysis gears are grinding...",
     ProgressSteps.WEB_FETCH: "FreddAid is fetching web content...",
-    ProgressSteps.DOCUMENT_CHAT: "Freddaid is searching your documents...",
     ProgressSteps.RESPONSE_GENERATION: "Composing your response...",
 }

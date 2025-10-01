@@ -178,7 +178,7 @@ class FinancialOrchestrator:
         try:
             # Load conversation state
             logging.info(f"[financial-orc] Loading conversation data")
-            conversation_data = get_conversation_data(conversation_id, user_info["id"], type="financial")
+            conversation_data = get_conversation_data(conversation_id, type="financial")
             logging.info(f"[financial-orc] Loading memory")
             memory = self._load_memory(
                 conversation_data.get("memory_data", ""))
@@ -309,8 +309,7 @@ class FinancialOrchestrator:
         conversation_data["interaction"] = interaction
 
         # Store in CosmosDB
-        #TODO: Add user_id data and send it to the method
-        #update_conversation_data(conversation_id, conversation_data)
+        update_conversation_data(conversation_id, conversation_data)
 
 
 def run(conversation_id, question, documentName, client_principal):
@@ -325,7 +324,7 @@ def run(conversation_id, question, documentName, client_principal):
         # Get existing conversation data from CosmosDB
         logging.info("[financial-orchestrator] Loading conversation data")
         conversation_data = get_conversation_data(
-            conversation_id, client_principal["id"], type="financial")
+            conversation_id, type="financial")
 
         start_time = time.time()
 
@@ -400,8 +399,7 @@ def run(conversation_id, question, documentName, client_principal):
         conversation_data["interaction"] = interaction
 
         # Store in CosmosDB
-        #TODO: Add user_id data and send it to the method
-        #update_conversation_data(conversation_id, conversation_data)
+        update_conversation_data(conversation_id, conversation_data)
 
         yield {
             "conversation_id": conversation_id,

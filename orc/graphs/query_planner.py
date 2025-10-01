@@ -8,7 +8,6 @@ from orc.graphs.utils import (
     clean_chat_history_for_llm,
     extract_last_mcp_tool_from_history,
     extract_thread_id_from_history,
-    extract_uploaded_file_refs_from_history,
 )
 from shared.prompts import (
     MARKETING_ORC_PROMPT,
@@ -105,15 +104,11 @@ class QueryPlanner:
 
         existing_thread_id = extract_thread_id_from_history(history)
         existing_last_mcp_tool = extract_last_mcp_tool_from_history(history)
-        existing_uploaded_file_refs = extract_uploaded_file_refs_from_history(history)
         logger.info(
             f"[Query Rewrite] Initialized code thread_id from history: {existing_thread_id}"
         )
         logger.info(
             f"[Query Rewrite] Retrieved last_mcp_tool_used from history: {existing_last_mcp_tool}"
-        )
-        logger.info(
-            f"[Query Rewrite] Retrieved {len(existing_uploaded_file_refs)} uploaded_file_refs from history"
         )
 
         return {
@@ -126,7 +121,6 @@ class QueryPlanner:
             "messages": state.messages + [HumanMessage(content=question)],
             "code_thread_id": existing_thread_id,
             "last_mcp_tool_used": existing_last_mcp_tool,
-            "uploaded_file_refs": existing_uploaded_file_refs,
         }
 
     async def categorize(self, state, conversation_data: Dict[str, Any]) -> dict:
@@ -168,18 +162,11 @@ class QueryPlanner:
         Reply with **only** the exact category name — no additional text, explanations, or formatting.
         """
 
-        logger.info(
-            "[Query Categorization] Sending async categorization request to LLM"
-        )
+        logger.info("[Query Categorization] Sending async categorization request to LLM")
         response = await self._llm_invoke(
-            [
-                SystemMessage(content=category_prompt),
-                HumanMessage(content=state.question),
-            ]
+            [SystemMessage(content=category_prompt), HumanMessage(content=state.question)]
         )
-        logger.info(
-            f"[Query Categorization] Categorized query as: '{response.content}'"
-        )
+        logger.info(f"[Query Categorization] Categorized query as: '{response.content}'")
         return {"query_category": response.content}
 
     async def route(self, state) -> dict:
@@ -195,16 +182,11 @@ class QueryPlanner:
         """
         logger.info("[Query Routing] Sending routing decision request to LLM")
         response = await self._llm_invoke(
-            [
-                SystemMessage(content=MARKETING_ORC_PROMPT),
-                HumanMessage(content=human_prompt),
-            ]
+            [SystemMessage(content=MARKETING_ORC_PROMPT), HumanMessage(content=human_prompt)]
         )
         llm_suggests_retrieval = response.content.lower().startswith("y")
         logger.info(
             f"[Query Routing] LLM assessment - Not a casual/conversational question, proceed to retrieve documents: {llm_suggests_retrieval}"
         )
-        return {
-            "requires_retrieval": llm_suggests_retrieval,
-            "query_category": "General",
-        }
+        return {"requires_retrieval": llm_suggests_retrieval, "query_category": "General"}
+

@@ -32,7 +32,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     stream=sys.stdout,
-    force=True,
+    force=True,  
 )
 
 logger = logging.getLogger(__name__)
@@ -84,10 +84,12 @@ class GraphConfig:
         max_tokens (int): Maximum number of tokens for the model output. Default is 200000.
     """
 
-    azure_api_version: str = "2025-04-01-preview"
-    azure_deployment: str = "gpt-4.1"
-    support_model_deployment: str = "gpt-5-nano"
-    support_model_reasoning_effort: str = "low"
+    azure_api_version: str = (
+        "2025-04-01-preview"  
+    )   
+    azure_deployment: str = "gpt-4.1"   
+    support_model_deployment: str = "gpt-5-nano"  
+    support_model_reasoning_effort: str = "low"  
 
     retriever_top_k: int = 5
     reranker_threshold: float = 2
@@ -145,12 +147,14 @@ class GraphBuilder:
             }
 
         try:
-            self.conversation_data = get_conversation_data(conversation_id, user_id)
+            self.conversation_data = get_conversation_data(conversation_id)
             logger.info(
                 f"[GraphBuilder Init] Successfully retrieved conversation data for ID: {conversation_id}"
             )
         except Exception:
-            logger.exception("[GraphBuilder Init] Failed to retrieve conversation data")
+            logger.exception(
+                "[GraphBuilder Init] Failed to retrieve conversation data"
+            )
             logger.warning(
                 "[GraphBuilder Init] Using empty conversation data as fallback"
             )
@@ -357,7 +361,6 @@ class GraphBuilder:
             "tool_results": state.tool_results,
             "code_thread_id": updated_thread_id,
             "last_mcp_tool_used": last_mcp_tool_used,
-            "uploaded_file_refs": state.uploaded_file_refs,
         }
 
     def build(self, memory) -> StateGraph:
@@ -427,17 +430,9 @@ class GraphBuilder:
 
     def _route_decision(self, state: ConversationState) -> str:
         """Route query based on knowledge requirement."""
-        # If documents are present, always use tools 
-        if hasattr(state, "blob_names") and state.blob_names:
-            logger.info(
-                f"Documents present ({len(state.blob_names)} files), routing to tool_choice"
-            )
-            return "tool_choice"
-
-        # Original logic for non-document queries
         decision = "tool_choice" if state.requires_retrieval else "return"
         logger.info(
-            f"No documents, routing to: '{decision}' (requires_retrieval: {state.requires_retrieval})"
+            f"[Route Decision] Routing to: '{decision}' (requires_retrieval: {state.requires_retrieval})"
         )
         return decision
 

@@ -79,7 +79,7 @@ def store_agent_error(user_id, error, ask):
     except Exception as e:
         logging.error(f"Error retrieving the conversations: {e}")
 
-def get_conversation_data(conversation_id, user_id, type = None, user_timezone=None):
+def get_conversation_data(conversation_id, type = None, user_timezone=None):
     credential = DefaultAzureCredential()
     db_client = CosmosClient(AZURE_DB_URI, credential=credential)
     db = db_client.get_database_client(database=AZURE_DB_NAME)
@@ -93,7 +93,7 @@ def get_conversation_data(conversation_id, user_id, type = None, user_timezone=N
             logging.warning(f"[CosmosDB] Unknown timezone '{user_timezone}', defaulting to UTC")
     try:
         conversation = container.read_item(
-            item=conversation_id, partition_key=user_id
+            item=conversation_id, partition_key=conversation_id
         )
     except Exception as e:
         logging.info(
@@ -103,7 +103,6 @@ def get_conversation_data(conversation_id, user_id, type = None, user_timezone=N
         conversation = container.create_item(
             body={
                 "id": conversation_id,
-                "user_id": user_id,
                 "conversation_data": {
                     "start_date": datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S"),
                     "history": [],  # Initialize empty history list
@@ -138,7 +137,6 @@ def get_conversation_data(conversation_id, user_id, type = None, user_timezone=N
             container.upsert_item(
                 {
                     "id": conversation_id,
-                    "user_id": user_id,
                     "conversation_data": conversation_data,
                 }
             )
@@ -154,7 +152,7 @@ def get_conversation_data(conversation_id, user_id, type = None, user_timezone=N
     return conversation_data
 
 
-def update_conversation_data(conversation_id, user_id, conversation_data):
+def update_conversation_data(conversation_id, conversation_data):
     try:
         credential = DefaultAzureCredential()
         db_client = CosmosClient(AZURE_DB_URI, credential=credential)
@@ -163,7 +161,6 @@ def update_conversation_data(conversation_id, user_id, conversation_data):
         container.upsert_item(
             {
                 "id": conversation_id,
-                "user_id": user_id,
                 "conversation_data": conversation_data,
             }
         )
