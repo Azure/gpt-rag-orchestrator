@@ -7,7 +7,6 @@ import traceback
 from datetime import datetime, timezone
 
 from azurefunctions.extensions.http.fastapi import Request, StreamingResponse, Response
-from scheduler import main as scheduler_main
 from report_scheduler import main as report_scheduler_main
 
 from shared.util import (
@@ -19,9 +18,6 @@ from shared.util import (
     enable_organization_subscription,
     update_subscription_logs,
     updateExpirationDate,
-    get_conversations,
-    get_conversation,
-    delete_conversation,
     trigger_indexer_with_retry,
 )
 
@@ -31,6 +27,7 @@ from shared.conversation_export import export_conversation
 from webscrapping.multipage_scrape import crawl_website
 from report_worker.processor import extract_message_metadata, process_report_job
 from shared.util import update_report_job_status
+
 # MULTIPAGE SCRAPING CONSTANTS
 DEFAULT_LIMIT = 30
 DEFAULT_MAX_DEPTH = 4
@@ -38,53 +35,62 @@ DEFAULT_MAX_BREADTH = 15
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
+
 @app.function_name(name="report_worker")
 @app.queue_trigger(
-    arg_name="msg", 
+    arg_name="msg",
     queue_name="report-jobs",
-    connection="AZURE_STORAGE_CONNECTION_STRING"
+    connection="AZURE_STORAGE_CONNECTION_STRING",
 )
 async def report_worker(msg: func.QueueMessage) -> None:
     """
     Azure Function triggered by messages in the report-jobs queue.
-    
+
     Processes report generation jobs with proper error handling and retry logic.
     """
-    logging.info('[report-worker] Python Service Bus Queue trigger function processed a request.')
+    logging.info(
+        "[report-worker] Python Service Bus Queue trigger function processed a request."
+    )
 
     job_id = None
     organization_id = None
     dequeue_count = 1
-    
+
     try:
         # Extract message metadata and required fields
-        job_id, organization_id, dequeue_count, message_id = extract_message_metadata(msg)
-        
+        job_id, organization_id, dequeue_count, message_id = extract_message_metadata(
+            msg
+        )
+
         # Return early if message parsing failed
         if not all([job_id, organization_id]):
             return
-            
+
         # Process the report job
         await process_report_job(job_id, organization_id, dequeue_count)
-            
+        logging.info(f"[ReportWorker] Processed job {job_id} for organization {organization_id}")
+
     except Exception as e:
         logging.error(
             f"[ReportWorker] Unexpected error for job {job_id} "
             f"(dequeue_count: {dequeue_count}): {str(e)}\n"
             f"Traceback: {traceback.format_exc()}"
         )
-        
+
         # Update job status if we have the info
         if job_id and organization_id:
             error_payload = {
                 "error_type": "unexpected",
-                "error_message": str(e), 
+                "error_message": str(e),
                 "dequeue_count": dequeue_count,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            update_report_job_status(job_id, organization_id, 'FAILED', error_payload=error_payload)
-        
+            update_report_job_status(
+                job_id, organization_id, "FAILED", error_payload=error_payload
+            )
+
         # Don't re-raise - let message go to poison queue
+
 
 @app.route(route="orc", methods=[func.HttpMethod.POST])
 async def stream_response(req: Request) -> StreamingResponse:
@@ -95,6 +101,7 @@ async def stream_response(req: Request) -> StreamingResponse:
     question = req_body.get("question")
     conversation_id = req_body.get("conversation_id")
     user_timezone = req_body.get("user_timezone")
+    blob_names = req_body.get("blob_names", [])
     client_principal_id = req_body.get("client_principal_id")
     client_principal_name = req_body.get("client_principal_name")
     client_principal_organization = req_body.get("client_principal_organization")
@@ -131,7 +138,7 @@ async def stream_response(req: Request) -> StreamingResponse:
             organization_id=organization_id
         )
         try:
-            logging.info(f"[FunctionApp] Processing conversation")
+            logging.info("[FunctionApp] Processing conversation")
             return StreamingResponse(
                 orchestrator.generate_response_with_progress(
                     conversation_id=conversation_id,
@@ -139,6 +146,7 @@ async def stream_response(req: Request) -> StreamingResponse:
                     user_info=client_principal,
                     user_settings=settings,
                     user_timezone=user_timezone,
+                    blob_names=blob_names,
                 ),
                 media_type="text/event-stream",
             )
@@ -521,41 +529,12 @@ def blob_trigger(myblob: func.InputStream):
 
 @app.route(
     route="conversations",
-    methods=[func.HttpMethod.GET, func.HttpMethod.POST, func.HttpMethod.DELETE],
+    methods=[func.HttpMethod.POST],
 )
 async def conversations(req: Request) -> Response:
     logging.info("Python HTTP trigger function processed a request for conversations.")
 
-    id = req.query_params.get("id")
-
-    if req.method == "GET":
-        try:
-            user_id = req.query_params.get("user_id")
-            if not user_id:
-                return Response(
-                    json.dumps({"error": "user_id query parameter is required"}),
-                    media_type="application/json",
-                    status_code=400,
-                )
-
-            if not id:
-                conversations = get_conversations(user_id)
-            else:
-                conversations = get_conversation(id, user_id)
-            return Response(
-                json.dumps(conversations),
-                media_type="application/json",
-                status_code=200,
-            )
-        except Exception as e:
-            logging.error(f"Error in GET /conversations: {str(e)}")
-            return Response(
-                json.dumps({"error": "Internal server error"}),
-                media_type="application/json",
-                status_code=500,
-            )
-
-    elif req.method == "POST":
+    if req.method == "POST":
         try:
             req_body = await req.json()
             id_from_body = req_body.get("id")
@@ -596,34 +575,6 @@ async def conversations(req: Request) -> Response:
                 media_type="application/json",
                 status_code=500,
             )
-    # need to double check if this one is working
-    elif req.method == "DELETE":
-        try:
-            req_body = await req.json()
-            user_id = req_body.get("user_id")
-            if not user_id:
-                return Response("Missing user_id in request body", status_code=400)
-            if id:
-                try:
-                    delete_conversation(id, user_id)
-                    return Response(
-                        "Conversation deleted successfully", status_code=200
-                    )
-                except Exception as e:
-                    logging.error(f"Error deleting conversation: {str(e)}")
-                    return Response("Error deleting conversation", status_code=500)
-            else:
-                return Response("Missing conversation ID", status_code=400)
-        except json.JSONDecodeError:
-            return Response("Invalid JSON in request body", status_code=400)
-        except Exception as e:
-            logging.error(f"Error in DELETE /conversations: {str(e)}")
-            return Response(
-                json.dumps({"error": "Internal server error"}),
-                media_type="application/json",
-                status_code=500,
-            )
-
     else:
         return Response("Method not allowed", status_code=405)
 
@@ -1025,17 +976,17 @@ async def multipage_scrape(req: Request) -> Response:
         )
 
 
-@app.timer_trigger(schedule="0 0 2 * * 0", arg_name="mytimer", run_on_startup=False)
+@app.timer_trigger(schedule="0 0 17 * * *", arg_name="mytimer", run_on_startup=False)
 def report_scheduler_timer(mytimer: func.TimerRequest) -> None:
     """
-    Timer trigger function that runs every Sunday at 2:00 AM UTC.
-    Cron expression: "0 0 2 * * 0" means:
+    Timer trigger function that runs every day at 5:00 PM UTC.
+    Cron expression: "0 0 17 * * *" means:
     - 0 seconds
     - 0 minutes
-    - 2 hours (2 AM)
+    - 17 hours (5 PM)
     - * any day of month
     - * any month
-    - 0 = Sunday (day of week)
+    - * any day of week
     """
     logging.info("Report scheduler timer trigger started")
     
