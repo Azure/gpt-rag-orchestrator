@@ -75,7 +75,15 @@ Ensure the deployment identity has these roles at the correct scope (subscriptio
 
 </details>
 
-## Deploying the app with azd (recommended)
+## Deployment steps
+
+Make sure you're logged in to Azure before anything else:
+
+```bash
+az login
+```
+
+### Deploying the app with azd (recommended)
 
 Initialize the template:
 ```shell
@@ -94,11 +102,11 @@ azd deploy
 
 Aqui está uma versão mais clara, direta e consistente da instrução:
 
-## Deploying the app with a shell script
+### Deploying the app with a shell script
 
 To deploy using a script, first clone the repository, set the App Configuration endpoint, and then run the deployment script.
 
-#### PowerShell (Windows)
+##### PowerShell (Windows)
 
 ```powershell
 git clone https://github.com/Azure/gpt-rag-orchestrator.git
@@ -107,7 +115,7 @@ cd gpt-rag-orchestrator
 .\scripts\deploy.ps1
 ```
 
-#### Bash (Linux/macOS)
+##### Bash (Linux/macOS)
 ```bash
 git clone https://github.com/Azure/gpt-rag-orchestrator.git
 export APP_CONFIG_ENDPOINT="https://<your-app-config-name>.azconfig.io"
