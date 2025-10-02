@@ -31,7 +31,7 @@ Examples of available strategies include the **Single Agent RAG Strategy** and t
 
 ## Prerequisites
 
-Provision the infrastructure first by following the GPT-RAG repository instructions [GPT-RAG](https://github.com/azure/gpt-rag/tree/feature/vnext-architecture). This ensures all required Azure resources (e.g., Container App, Storage, AI Search) are in place before deploying the web application.
+Before deploying the application, you must provision the infrastructure as described in the [GPT-RAG](https://github.com/azure/gpt-rag) repo. This includes creating all necessary Azure resources required to support the application runtime.
 
 <details markdown="block">
 <summary>Click to view <strong>software</strong> prerequisites</summary>
@@ -75,45 +75,45 @@ Ensure the deployment identity has these roles at the correct scope (subscriptio
 
 </details>
 
-## How to deploy the orchestrator service
+## Deploying the app with azd (recommended)
 
-Make sure you're logged in to Azure before anything else:
-
-```bash
-az login
+Initialize the template:
+```shell
+azd init -t azure/gpt-rag-orchestrator 
 ```
+> [!IMPORTANT]
+> Use the **same environment name** with `azd init` as in the infrastructure deployment to keep components consistent.
 
-Clone this repository.
-
-### If you used `azd provision`
-
-Just run:
-
+Update env variables then deploy:
 ```shell
 azd env refresh
 azd deploy 
 ```
-
 > [!IMPORTANT]
-> Make sure you use the **same** subscription, resource group, environment name, and location from `azd provision`.
+> Run `azd env refresh` with the **same subscription** and **resource group** used in the infrastructure deployment.
 
-### If you did **not** use `azd provision`
+Aqui está uma versão mais clara, direta e consistente da instrução:
 
-You need to set the App Configuration endpoint and run the deploy script.
+## Deploying the app with a shell script
 
-#### Bash (Linux/macOS):
+To deploy using a script, first clone the repository, set the App Configuration endpoint, and then run the deployment script.
 
-```bash
-export APP_CONFIG_ENDPOINT="https://<your-app-config-name>.azconfig.io"
-./scripts/deploy.sh
-```
-
-#### PowerShell (Windows):
+#### PowerShell (Windows)
 
 ```powershell
+git clone https://github.com/Azure/gpt-rag-orchestrator.git
 $env:APP_CONFIG_ENDPOINT = "https://<your-app-config-name>.azconfig.io"
+cd gpt-rag-orchestrator
 .\scripts\deploy.ps1
 ```
+
+#### Bash (Linux/macOS)
+```bash
+git clone https://github.com/Azure/gpt-rag-orchestrator.git
+export APP_CONFIG_ENDPOINT="https://<your-app-config-name>.azconfig.io"
+cd gpt-rag-orchestrator
+./scripts/deploy.sh
+````
 
 ## Previous Releases
 
@@ -122,7 +122,7 @@ $env:APP_CONFIG_ENDPOINT = "https://<your-app-config-name>.azconfig.io"
 
 ## 🤝 Contributing
 
-We appreciate contributions! See [CONTRIBUTING.md](https://github.com/Azure/GPT-RAG/blob/main/CONTRIBUTING.md) for guidelines on the Contributor License Agreement (CLA), code of conduct, and submitting pull requests.
+We appreciate contributions! See [CONTRIBUTING](https://github.com/Azure/gpt-rag/blob/main/CONTRIBUTING.md) for guidelines on submitting pull requests.
 
 ## Trademarks
 
