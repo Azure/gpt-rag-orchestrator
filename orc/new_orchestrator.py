@@ -22,7 +22,7 @@ from langchain_core.messages import (
     SystemMessage as LangchainSystemMessage,
 )
 
-from shared.util import get_setting
+from shared.util import get_setting, get_verbosity_instruction
 from shared.progress_streamer import ProgressStreamer, ProgressSteps, STEP_MESSAGES
 
 from shared.prompts import (
@@ -274,6 +274,8 @@ class ConversationOrchestrator:
 
         system_prompt = MARKETING_ANSWER_PROMPT
 
+        verbosity_instruction = get_verbosity_instruction(user_settings)
+
         # Add context to the system prompt
         additional_context = f"""
 
@@ -329,6 +331,9 @@ class ConversationOrchestrator:
         Here are the instructions:
         - Never create a separate "Sources"/"References"/"Data Sources" section at the end in your answer. The citation system will break if you do this.
         {organization_data.get('additionalInstructions','')}
+
+        {verbosity_instruction}
+
         <----------- END OF Important User Instructions ------------>
 
         <----------- SYSTEM PROMPT FOR TOOL CALLING ------------>
@@ -476,9 +481,11 @@ def get_settings(client_principal):
     data = get_setting(client_principal)
     temperature = None if "temperature" not in data else data["temperature"]
     model = None if "model" not in data else data["model"]
+    detail_level = None if "detail_level" not in data else data["detail_level"]
     settings = {
         "temperature": temperature,
         "model": model,
+        "detail_level": detail_level,
     }
     logging.info(f"[orchestrator] settings: {settings}")
     return settings

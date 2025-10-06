@@ -1,6 +1,7 @@
 # utility functions
 import html
 from dotenv import load_dotenv
+
 load_dotenv()
 import re
 import json
@@ -12,7 +13,7 @@ import tiktoken
 import time
 import urllib.parse
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from azure.cosmos import CosmosClient
 from azure.keyvault.secrets import SecretClient
@@ -20,8 +21,8 @@ from azure.identity import DefaultAzureCredential
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 from .exceptions import MissingRequiredFieldError
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
-from shared.blob_client_async import get_blob_service_client
-from shared.cosmos_client_async import get_client, get_db, get_container
+from shared.cosmos_client_async import get_db, get_container
+from orc.graphs.constants import VERBOSITY_PROMPTS, VerbosityLevel
 
 
 # logging level
@@ -46,7 +47,9 @@ AZURE_DB_ID = os.environ.get("AZURE_DB_ID")
 AZURE_DB_NAME = os.environ.get("AZURE_DB_NAME")
 AZURE_DB_URI = f"https://{AZURE_DB_ID}.documents.azure.com:443/"
 
-AZURE_REPORT_JOBS_CONTAINER = os.environ.get("AZURE_REPORT_JOBS_CONTAINER", "reportJobs")
+AZURE_REPORT_JOBS_CONTAINER = os.environ.get(
+    "AZURE_REPORT_JOBS_CONTAINER", "reportJobs"
+)
 
 model_max_tokens = {
     "gpt-35-turbo": 4096,
@@ -73,6 +76,7 @@ def get_secret(secretName):
     )
     return retrieved_secret.value
 
+
 ##########################################################
 # GPT FUNCTIONS
 ##########################################################
@@ -85,6 +89,7 @@ def number_of_tokens(messages, model):
     )
     num_tokens = len(encoding.encode(prompt))
     return num_tokens
+
 
 # reduce messages to fit in the model's max tokens
 def optmize_messages(chat_history_messages, model):
@@ -341,15 +346,14 @@ def get_aoai_config(model):
     }
     return result
 
+
 def get_conversation(conversation_id, user_id):
     try:
         credential = DefaultAzureCredential()
         db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
         db = db_client.get_database_client(database=AZURE_DB_NAME)
         container = db.get_container_client("conversations")
-        conversation = container.read_item(
-            item=conversation_id, partition_key=user_id
-        )
+        conversation = container.read_item(item=conversation_id, partition_key=user_id)
         if conversation["conversation_data"]["interaction"]["user_id"] != user_id:
             return {}
         formatted_conversation = {
@@ -376,6 +380,7 @@ def get_conversation(conversation_id, user_id):
     except Exception:
         logging.error(f"Error retrieving the conversation '{conversation_id}'")
         return {}
+
 
 def get_next_resource(model):
 
@@ -438,9 +443,9 @@ def get_blocked_list():
         )
         blocked_list = key_value["blocked_words"]
         blocked_list = [word.lower() for word in blocked_list]
-    except Exception as e:
+    except Exception:
         logging.info(
-            f"[util__module] get_blocked_list: no blocked words list (keyvalue store with 'blocked_list' id does not exist)."
+            "[util__module] get_blocked_list: no blocked words list (keyvalue store with 'blocked_list' id does not exist)."
         )
     return blocked_list
 
@@ -454,7 +459,9 @@ def get_setting(client_principal):
     if not client_principal["id"]:
         return {}
 
-    logging.info("[Util] User ID found. Getting settings for user: " + client_principal["id"])
+    logging.info(
+        "[Util] User ID found. Getting settings for user: " + client_principal["id"]
+    )
 
     setting = {}
     credential = DefaultAzureCredential()
@@ -471,7 +478,7 @@ def get_setting(client_principal):
         )
         if result:
             setting = result[0]
-    except Exception as e:
+    except Exception:
         logging.info(
             f"[util__module] get_setting: no settings found for user {client_principal['id']} (keyvalue store with '{client_principal['id']}' id does not exist)."
         )
@@ -490,9 +497,9 @@ def get_settings():
         )
         settings = list(settings)
 
-    except Exception as e:
+    except Exception:
         logging.info(
-            f"[util__module] get_settings: no settings found (keyvalue store with 'settings' id does not exist)."
+            "[util__module] get_settings: no settings found (keyvalue store with 'settings' id does not exist)."
         )
     return settings
 
@@ -582,7 +589,7 @@ def set_settings(client_principal, temperature, frequency_penalty, presence_pena
                     f"Failed to create settings document for user {client_principal['id']}. Error: {str(e)}"
                 )
     else:
-        logging.info(f"[util__module] set_settings: user_id not provided.")
+        logging.info("[util__module] set_settings: user_id not provided.")
 
 
 ##########################################################
@@ -746,9 +753,9 @@ def get_users(organization_id):
         )
         users = list(users)
 
-    except Exception as e:
+    except Exception:
         logging.info(
-            f"[get_users] get_users: no users found (keyvalue store with 'users' id does not exist)."
+            "[get_users] get_users: no users found (keyvalue store with 'users' id does not exist)."
         )
     return users
 
@@ -833,7 +840,7 @@ def get_set_user(client_principal):
                 item=client_principal["id"], partition_key=client_principal["id"]
             )
             logging.info(f"[get_user] user_id {client_principal['id']} found.")
-        except Exception as e:
+        except Exception:
             logging.info(
                 f"[get_user] sent an inexistent user_id, saving new {client_principal['id']}."
             )
@@ -874,7 +881,8 @@ def get_organization(organization_id):
         return {"error": "Organization ID not found."}
 
     logging.info(
-        "[Util] Organization ID found. Getting data for organization: " + organization_id
+        "[Util] Organization ID found. Getting data for organization: "
+        + organization_id
     )
 
     organization = {}
@@ -1050,7 +1058,7 @@ def create_organization_without_subscription(user_id, organization_name):
         user = container.read_item(item=user_id, partition_key=user_id)
         user["data"]["organizationId"] = result["id"]
         container.replace_item(item=user["id"], body=user)
-        logging.info(f"[util__module] Successfully updated user organizationId")
+        logging.info("[util__module] Successfully updated user organizationId")
     except Exception as e:
         logging.error(
             f"[util__module] Failed to update user organizationId. Error: {str(e)}"
@@ -1100,7 +1108,7 @@ def update_organization_subscription(
             user = container.read_item(item=user_id, partition_key=user_id)
             user["data"]["organizationId"] = result["id"]
             container.replace_item(item=user["id"], body=user)
-            logging.info(f"[util__module] Successfully updated user organizationId")
+            logging.info("[util__module] Successfully updated user organizationId")
         except Exception as e:
             logging.error(
                 f"[util__module] Failed to update user organizationId. Error: {str(e)}"
@@ -1130,7 +1138,7 @@ def update_organization_subscription(
                 logging.error(
                     f"Failed to update suscription information for organization {organization_id}. Error: {str(e)}"
                 )
-        except Exception as e:
+        except Exception:
             logging.info(
                 f"[util__module] update_organization_subscription: {organization_id} not found"
             )
@@ -1139,8 +1147,11 @@ def update_organization_subscription(
 def get_organization_by_subscription_id(subscription_id, organizations_container):
     query = "SELECT * FROM c WHERE c.subscriptionId = @subscription_id"
     parameters = [{"name": "@subscription_id", "value": subscription_id}]
-    result = organizations_container.query_items(query=query, parameters=parameters, enable_cross_partition_query=True)
+    result = organizations_container.query_items(
+        query=query, parameters=parameters, enable_cross_partition_query=True
+    )
     return list(result)
+
 
 def create_audit_log_entry(auditlogs_container, entry):
     try:
@@ -1159,19 +1170,19 @@ def update_subscription_logs(
     current_plan=None,
     modified_by=None,
     modified_by_name=None,
-    status_financial_assistant=None
+    status_financial_assistant=None,
 ):
     """
-        Logs subscription-related events to the audit container.
+    Logs subscription-related events to the audit container.
 
-        Parameters:
-        - subscription_id (str): ID of the subscription being modified.
-        - action (str): Action type (e.g., 'New Subscription', 'Subscription Tier Change').
-        - previous_plan (str, optional): The plan before a change (required for 'Subscription Tier Change').
-        - current_plan (str, optional): The plan after a change.
-        - modified_by (str, optional): User ID of the person making the change.
-        - modified_by_name (str, optional): Name of the person making the change.
-        - status_financial_assistant (str, optional): Status of the financial assistant feature.
+    Parameters:
+    - subscription_id (str): ID of the subscription being modified.
+    - action (str): Action type (e.g., 'New Subscription', 'Subscription Tier Change').
+    - previous_plan (str, optional): The plan before a change (required for 'Subscription Tier Change').
+    - current_plan (str, optional): The plan after a change.
+    - modified_by (str, optional): User ID of the person making the change.
+    - modified_by_name (str, optional): Name of the person making the change.
+    - status_financial_assistant (str, optional): Status of the financial assistant feature.
     """
     if not subscription_id:
         return {"error": "Subscription ID not provided."}
@@ -1182,17 +1193,18 @@ def update_subscription_logs(
     db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
     db = db_client.get_database_client(database=AZURE_DB_NAME)
 
-
     organizations_container = db.get_container_client("organizations")
     auditlogs_container = db.get_container_client("auditLogs")
 
     try:
-        
-        result = get_organization_by_subscription_id(subscription_id, organizations_container)
+
+        result = get_organization_by_subscription_id(
+            subscription_id, organizations_container
+        )
         if not result:
             logging.warning(f"Subscription ID {subscription_id} not found.")
             return {"error": "Subscription ID not found in organizations container."}
-        
+
         organization = result[0]
         organization_id = organization.get("id")
         organization_name = organization.get("name")
@@ -1200,8 +1212,8 @@ def update_subscription_logs(
         if not organization_name or not organization_owner:
             logging.warning(f"Missing required fields in organization: {organization}")
             return {"error": "Missing 'name' or 'owner' fields in organization data."}
-        
-    # Create audit log entry
+
+        # Create audit log entry
         audit_log_entry = {
             "id": str(uuid.uuid4()),
             "organizationName": organization_name,
@@ -1220,14 +1232,15 @@ def update_subscription_logs(
     except Exception as e:
         logging.error(f"Error in update_subscription_logs: {str(e)}")
         return {"error": f"An error occurred: {str(e)}"}
-    
+
+
 def handle_subscription_logs(subscription_id, event_type):
     """
-        Logs subscription-related events to the audit container.
+    Logs subscription-related events to the audit container.
 
-        Parameters:
-        - subscription_id (str): Subscription ID.
-        - event_type (str): Event type (paused, resumed, deleted).
+    Parameters:
+    - subscription_id (str): Subscription ID.
+    - event_type (str): Event type (paused, resumed, deleted).
     """
     if not subscription_id:
         return {"error": "Subscription ID not provided."}
@@ -1238,17 +1251,18 @@ def handle_subscription_logs(subscription_id, event_type):
     db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
     db = db_client.get_database_client(database=AZURE_DB_NAME)
 
-
     organizations_container = db.get_container_client("organizations")
     auditlogs_container = db.get_container_client("auditLogs")
 
     try:
-        
-        result = get_organization_by_subscription_id(subscription_id, organizations_container)
+
+        result = get_organization_by_subscription_id(
+            subscription_id, organizations_container
+        )
         if not result:
             logging.warning(f"Subscription ID {subscription_id} not found.")
             return {"error": "Subscription ID not found in organizations container."}
-        
+
         organization = result[0]
         organization_id = organization.get("id")
         organization_name = organization.get("name")
@@ -1272,7 +1286,10 @@ def handle_subscription_logs(subscription_id, event_type):
             f"[handleSubscriptionEvent] Audit log created for subscription {subscription_id}, action: {event_type}"
         )
 
-        return {"success": True, "message": f"Audit log created for {event_type} event."}
+        return {
+            "success": True,
+            "message": f"Audit log created for {event_type} event.",
+        }
 
     except Exception as e:
         logging.error(f"[handleSubscriptionEvent] Error creating audit log: {str(e)}")
@@ -1281,13 +1298,13 @@ def handle_subscription_logs(subscription_id, event_type):
 
 def handle_new_subscription_logs(userId, organizationId, userName, organizationName):
     """
-        Logs events related to a new subscription to the audit container.
+    Logs events related to a new subscription to the audit container.
 
-        Parameters:
-        - userId (str): user ID.
-        - organizationId (str): organization ID.
-        - userName (str): user Name.
-        - organizationName (str): organization Name
+    Parameters:
+    - userId (str): user ID.
+    - organizationId (str): organization ID.
+    - userName (str): user Name.
+    - organizationName (str): organization Name
     """
     credential = DefaultAzureCredential()
     db_client = CosmosClient(AZURE_DB_URI, credential, consistency_level="Session")
@@ -1299,24 +1316,23 @@ def handle_new_subscription_logs(userId, organizationId, userName, organizationN
     try:
         audit_log_entry = {
             "id": str(uuid.uuid4()),
-            "modified_by_name":userName,
-            "modified_by":userId,
+            "modified_by_name": userName,
+            "modified_by": userId,
             "organizationName": organizationName,
             "organization_id": organizationId,
-            "action": 'Subscription created',
+            "action": "Subscription created",
             "changeTime": int(datetime.now(timezone.utc).timestamp()),
         }
 
         auditlogs_container.create_item(body=audit_log_entry)
-        logging.info(
-            f"[handleSubscriptionEvent] Audit log created"
-        )
+        logging.info("[handleSubscriptionEvent] Audit log created")
 
-        return {"success": True, "message": f"Audit log created"}
+        return {"success": True, "message": "Audit log created"}
 
     except Exception as e:
         logging.error(f"[handleSubscriptionEvent] Error creating audit log: {str(e)}")
         return {"error": f"An error occurred: {str(e)}"}
+
 
 def create_invitation(invited_user_email, organization_id, role):
     if not invited_user_email:
@@ -1436,6 +1452,7 @@ def get_invitation(invited_user_email):
         logging.error(f"[get_invitation] something went wrong. {str(e)}")
     return invitation
 
+
 def trigger_indexer_run(indexer_name: str) -> bool:
     """Trigger Azure AI Search indexer run to process new documents
     Args:
@@ -1452,22 +1469,23 @@ def trigger_indexer_run(indexer_name: str) -> bool:
             logging.error("Missing required environment variables for indexer run")
             return False
 
-        headers = {
-            "Content-Type": "application/json",
-            "api-key": api_key
-        }
+        headers = {"Content-Type": "application/json", "api-key": api_key}
 
         # Endpoint to run the indexer
         indexer_endpoint = f"https://{search_service}.search.windows.net/indexers/{indexer_name}/run?api-version={api_version}"
-        
+
         logging.info(f"Triggering indexer run for {indexer_name}")
         response = requests.post(indexer_endpoint, headers=headers)
-        
-        if response.status_code == 202:  # 202 is the expected status code for indexer run
+
+        if (
+            response.status_code == 202
+        ):  # 202 is the expected status code for indexer run
             logging.info(f"Successfully triggered indexer run for {indexer_name}")
             return True
         else:
-            logging.error(f"Failed to trigger indexer run. Status code: {response.status_code}, Response: {response.text}")
+            logging.error(
+                f"Failed to trigger indexer run. Status code: {response.status_code}, Response: {response.text}"
+            )
             return False
 
     except Exception as e:
@@ -1480,47 +1498,56 @@ async def trigger_indexer_with_retry_async(indexer_name: str, blob_name: str) ->
     Trigger indexer with async retry logic to handle concurrent execution conflicts.
     Uses fixed intervals: 1 minute, 5 minutes, and 10 minutes.
     More efficient as it doesn't block the thread while waiting.
-    
+
     Args:
         indexer_name (str): Name of the indexer to trigger
         blob_name (str): Name of the blob being processed (for logging)
-        
+
     Returns:
         bool: True if indexer was triggered successfully, False otherwise
     """
-    
+
     # Define retry intervals: 1 min, 5 min, 10 min
     retry_intervals = [60, 300, 600]  # seconds
     total_attempts = len(retry_intervals) + 1  # Initial attempt + 3 retries
-    
+
     for attempt in range(total_attempts):
         success = trigger_indexer_run(indexer_name)
-        
+
         if success:
             if attempt > 0:
-                logging.info(f"[blob_trigger] Indexer '{indexer_name}' triggered successfully on attempt {attempt + 1} for blob: {blob_name}")
+                logging.info(
+                    f"[blob_trigger] Indexer '{indexer_name}' triggered successfully on attempt {attempt + 1} for blob: {blob_name}"
+                )
             return True
-        
+
         if attempt < len(retry_intervals):
             wait_seconds = retry_intervals[attempt]
             wait_minutes = wait_seconds // 60
-            logging.info(f"[blob_trigger] Indexer busy, retrying in {wait_minutes} minute(s) (attempt {attempt + 1}/{total_attempts}) for blob: {blob_name}")
+            logging.info(
+                f"[blob_trigger] Indexer busy, retrying in {wait_minutes} minute(s) (attempt {attempt + 1}/{total_attempts}) for blob: {blob_name}"
+            )
             await asyncio.sleep(wait_seconds)  # Non-blocking async sleep
-    
-    logging.warning(f"[blob_trigger] Failed to trigger indexer '{indexer_name}' after {total_attempts} attempts over 26 minutes for blob: {blob_name}")
+
+    logging.warning(
+        f"[blob_trigger] Failed to trigger indexer '{indexer_name}' after {total_attempts} attempts over 26 minutes for blob: {blob_name}"
+    )
     return False
+
 
 def trigger_indexer_with_retry(indexer_name: str, blob_name: str) -> bool:
     """
     Synchronous wrapper for async retry function to maintain compatibility.
     Uses fixed retry intervals: 1 minute, 5 minutes, and 10 minutes.
     """
-    
+
     # Run the async function in a new event loop
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        return loop.run_until_complete(trigger_indexer_with_retry_async(indexer_name, blob_name))
+        return loop.run_until_complete(
+            trigger_indexer_with_retry_async(indexer_name, blob_name)
+        )
     except Exception as e:
         logging.error(f"[blob_trigger] Error in async retry logic: {str(e)}")
         return False
@@ -1531,88 +1558,95 @@ def trigger_indexer_with_retry(indexer_name: str, blob_name: str) -> bool:
 def get_report_job(job_id: str, organization_id: str) -> Optional[Dict[str, Any]]:
     """
     Retrieve a report job from Cosmos DB.
-    
+
     Args:
         job_id: Unique identifier for the job
         organization_id: Organization ID (used as partition key)
-        
+
     Returns:
         Job document or None if not found
     """
     try:
         db = get_db(AZURE_DB_NAME)
         container_client = get_container(db, AZURE_REPORT_JOBS_CONTAINER)
-        
+
         job = container_client.read_item(item=job_id, partition_key=organization_id)
         return job
-        
+
     except CosmosResourceNotFoundError:
-        logging.warning(f"Report job {job_id} not found for organization {organization_id}")
+        logging.warning(
+            f"Report job {job_id} not found for organization {organization_id}"
+        )
         return None
     except Exception as e:
         logging.error(f"Error retrieving report job {job_id}: {str(e)}")
         return None
 
+
 def update_report_job_status(
-    job_id: str, 
-    organization_id: str, 
-    status: str, 
+    job_id: str,
+    organization_id: str,
+    status: str,
     result_metadata: Optional[Dict[str, Any]] = None,
-    error_payload: Optional[Dict[str, Any]] = None
+    error_payload: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
     Update the status and result of a report job.
-    
+
     Args:
         job_id: Unique identifier for the job
         organization_id: Organization ID (used as partition key)
         status: New status (QUEUED, RUNNING, SUCCEEDED, FAILED)
         result_metadata: Metadata about the generated report (for SUCCEEDED status)
         error_payload: Error information (for FAILED status)
-        
+
     Returns:
         True if update successful, False otherwise
     """
     try:
         db = get_db(AZURE_DB_NAME)
         container_client = get_container(db, AZURE_REPORT_JOBS_CONTAINER)
-        
+
         # Get the current job
         job = container_client.read_item(item=job_id, partition_key=organization_id)
-        
+
         # Update status and timestamp
         job["status"] = status
         job["updated_at"] = datetime.now(timezone.utc).isoformat()
-        
+
         # Add result metadata for successful jobs
         if status == "SUCCEEDED" and result_metadata:
             job["result"] = result_metadata
             job["completed_at"] = datetime.now(timezone.utc).isoformat()
-            
+
         # Add error information for failed jobs
         elif status == "FAILED" and error_payload:
             job["error"] = error_payload
             job["failed_at"] = datetime.now(timezone.utc).isoformat()
-            
+
         # Update start time for running jobs
         elif status == "RUNNING":
             job["started_at"] = datetime.now(timezone.utc).isoformat()
-        
+
         # Save the updated job
         container_client.replace_item(item=job_id, body=job)
         logging.info(f"Updated report job {job_id} to status {status}")
         return True
-        
+
     except CosmosResourceNotFoundError:
-        logging.error(f"Report job {job_id} not found for organization {organization_id}")
+        logging.error(
+            f"Report job {job_id} not found for organization {organization_id}"
+        )
         return False
     except Exception as e:
         logging.error(f"Error updating report job {job_id}: {str(e)}")
         return False
-    
+
 
 # Precompiled regex for unicode escape sequences like \uXXXX
 UNICODE_ESCAPE_RE = re.compile(r"\\u([0-9a-fA-F]{4})")
+
+
 def normalize_markdown(md_raw: str) -> str:
     if md_raw and md_raw[0] in "\"'" and md_raw[-1] == md_raw[0]:
         try:
@@ -1624,3 +1658,37 @@ def normalize_markdown(md_raw: str) -> str:
     md = UNICODE_ESCAPE_RE.sub(lambda m: chr(int(m.group(1), 16)), md)
     md = html.unescape(md)
     return md.strip()
+
+
+def get_verbosity_instruction(
+    user_settings: dict, default: VerbosityLevel = VerbosityLevel.BALANCED
+) -> str:
+    """
+    Get the verbosity instruction based on user settings.
+
+    Args:
+        user_settings: User settings dictionary
+        default: Default verbosity level if not set in user settings
+
+    Returns:
+        Corresponding verbosity instruction string
+    """
+    verbosity_value = user_settings.get("detail_level")
+
+    logging.info(f"[Util] User verbosity setting: {verbosity_value}")
+
+    if not verbosity_value:
+        logging.info(
+            f"[Util] No verbosity setting found, using default: {default.value}"
+        )
+        return VERBOSITY_PROMPTS[default]
+
+    try:
+        verbosity_level = VerbosityLevel(verbosity_value)
+        return VERBOSITY_PROMPTS[verbosity_level]
+    except ValueError:
+        logging.warning(
+            f"Invalid verbosity level '{verbosity_value}', using {default.value} instead. "
+            f"Valid levels: {[level.value for level in VerbosityLevel]}"
+        )
+        return VERBOSITY_PROMPTS[default]
