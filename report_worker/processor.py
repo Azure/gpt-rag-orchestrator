@@ -7,13 +7,133 @@ Separated from function_app.py for better organization and readability.
 
 import logging
 import json
+import asyncio
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Tuple
+from azure.storage.blob.aio import BlobLeaseClient
+from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 
 from shared.util import get_report_job, update_report_job_status
 from shared.markdown_to_pdf import dict_to_pdf
 from shared.blob_client_async import get_blob_service_client
 from .registry import get_generator
+
+
+async def acquire_job_lock(job_id: str, max_wait: int = 1800) -> Tuple[bool, Optional[BlobLeaseClient]]:
+    """
+    Try to acquire an exclusive lock for job processing using Azure Blob lease.
+
+    Args:
+        job_id: Unique identifier for the job
+        max_wait: Maximum time to wait in seconds (default 30 minutes)
+
+    Returns:
+        Tuple of (lock_acquired: bool, lease_client: Optional[BlobLeaseClient])
+    """
+    blob_service_client = await get_blob_service_client()
+    container_name = "report-locks"
+    blob_name = f"{job_id}.lock"
+
+    # Ensure container exists
+    container_client = blob_service_client.get_container_client(container_name)
+    try:
+        await container_client.get_container_properties()
+    except ResourceNotFoundError:
+        try:
+            await container_client.create_container()
+            logging.info(f"[LockManager] Created container: {container_name}")
+        except ResourceExistsError:
+            pass  # Container created by another worker
+
+    # Get blob client
+    blob_client = container_client.get_blob_client(blob_name)
+
+    # Ensure lock blob exists
+    try:
+        await blob_client.get_blob_properties()
+    except ResourceNotFoundError:
+        try:
+            await blob_client.upload_blob(b"lock", overwrite=False)
+        except ResourceExistsError:
+            pass  # Blob created by another worker
+
+    # Try to acquire lease
+    lease_client = BlobLeaseClient(blob_client)
+    waited = 0
+    poll_interval = 5  # Check every 5 seconds
+
+    while waited < max_wait:
+        try:
+            # Try to acquire a 60-second lease
+            await lease_client.acquire(lease_duration=60)
+            logging.info(f"[LockManager] Acquired lock for job {job_id}")
+            return True, lease_client
+        except Exception as e:
+            logging.warning(f"[LockManager] Lock acquisition failed for job {job_id}: {type(e).__name__}: {str(e)}")
+            logging.debug(f"[LockManager] Lock unavailable for job {job_id}, waiting... ({waited}s elapsed)")
+            await asyncio.sleep(poll_interval)
+            waited += poll_interval
+
+    logging.warning(f"[LockManager] Could not acquire lock for job {job_id} after {max_wait}s")
+    return False, None
+
+
+async def release_job_lock(lease_client: Optional[BlobLeaseClient], job_id: str):
+    """
+    Release the job lock.
+
+    Args:
+        lease_client: The blob lease client holding the lock
+        job_id: Job identifier for logging
+    """
+    if not lease_client:
+        return
+
+    try:
+        await lease_client.release()
+        logging.info(f"[LockManager] Released lock for job {job_id}")
+    except Exception as e:
+        logging.warning(f"[LockManager] Error releasing lock for job {job_id}: {str(e)}")
+
+
+async def wait_for_job_completion_or_lock(
+    job_id: str,
+    organization_id: str,
+    max_wait: int = 1800
+) -> Tuple[bool, str, Optional[BlobLeaseClient]]:
+    """
+    Wait for either lock acquisition or job completion by another worker.
+
+    Args:
+        job_id: Unique identifier for the job
+        organization_id: Organization requesting the report
+        max_wait: Maximum time to wait in seconds
+
+    Returns:
+        Tuple of (lock_acquired: bool, job_status: str, lease_client: Optional[BlobLeaseClient])
+    """
+    poll_interval = 10  # Check job status every 10 seconds
+    waited = 0
+
+    while waited < max_wait:
+        # Check if job is already completed
+        job = get_report_job(job_id, organization_id)
+        if job:
+            current_status = job.get('status', '').upper()
+            if current_status in ['SUCCEEDED', 'FAILED']:
+                logging.info(
+                    f"[LockManager] Job {job_id} already completed with status {current_status}"
+                )
+                return False, current_status, None
+
+        # Try to acquire lock
+        lock_acquired, lease_client = await acquire_job_lock(job_id, max_wait=poll_interval)
+        if lock_acquired:
+            return True, 'RUNNING', lease_client
+
+        waited += poll_interval
+
+    return False, 'TIMEOUT', None
 
 
 async def process_report_job(
@@ -40,26 +160,28 @@ async def process_report_job(
     # Fetch job from Cosmos DB
     job = get_report_job(job_id, organization_id)
     if not job:
-        logging.error(f"[ReportWorker] Job {job_id} not found in database")
-        return
+        error_msg = f"Job {job_id} not found in database for organization {organization_id}"
+        logging.error(f"[ReportWorker] {error_msg}")
+        raise ValueError(error_msg)
         
     logging.info(f"[ReportWorker] Retrieved job {job_id}: {job.get('report_key', 'unknown')}")
     
     # Check job status for idempotency
     current_status = job.get('status', '').upper()
-    if current_status != 'QUEUED':
+    if current_status in ['SUCCEEDED', 'FAILED']:
         logging.info(
-            f"[ReportWorker] Job {job_id} status is {current_status}, skipping processing"
+            f"[ReportWorker] Job {job_id} already completed with status {current_status}, skipping processing"
         )
         return
-        
     # Update job status to RUNNING
-    success = update_report_job_status(job_id, organization_id, 'RUNNING')
-    if not success:
-        logging.error(f"[ReportWorker] Failed to update job {job_id} status to RUNNING")
-        raise Exception(f"Failed to update job {job_id} status to RUNNING")
-        
-    logging.info(f"[ReportWorker] Updated job {job_id} status to RUNNING")
+    if current_status == 'QUEUED':
+        success = update_report_job_status(job_id, organization_id, 'RUNNING')
+        if not success:
+            logging.error(f"[ReportWorker] Failed to update job {job_id} status to RUNNING")
+            raise Exception(f"Failed to update job {job_id} status to RUNNING")
+        logging.info(f"[ReportWorker] Updated job {job_id} status to RUNNING")
+    else:
+        logging.info(f"[ReportWorker] Job {job_id} is already RUNNING, proceeding with processing")
     
     # Get report generator
     report_key = job.get('report_key')
@@ -83,10 +205,32 @@ async def process_report_job(
         return
         
     logging.info(f"[ReportWorker] Found generator for {report_key}: {generator.__class__.__name__}")
-    
+
     # Generate the report
     parameters = job.get('params', {})
-    
+
+    # Acquire distributed lock to prevent concurrent generation (prevents 429 rate limit errors)
+    logging.info(f"[ReportWorker] Acquiring lock for job {job_id}")
+    lock_acquired, job_status, lease_client = await wait_for_job_completion_or_lock(
+        job_id, organization_id, max_wait=1800  # Wait up to 30 minutes
+    )
+
+    # Check if job was completed by another worker
+    if job_status in ['SUCCEEDED', 'FAILED']:
+        logging.info(f"[ReportWorker] Job {job_id} already completed with status {job_status}")
+        return
+
+    # Check if we got the lock
+    if not lock_acquired:
+        error_msg = f"Could not acquire lock for job {job_id} after 30 minutes"
+        logging.error(f"[ReportWorker] {error_msg}")
+        update_report_job_status(job_id, organization_id, 'FAILED', error_payload={
+            "error_type": "transient",
+            "error_message": error_msg,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        raise TimeoutError(error_msg)
+
     try:
         # Generate markdown content using the appropriate generator
         logging.info(f"[ReportWorker] Generating markdown content for job {job_id}")
@@ -135,7 +279,7 @@ async def process_report_job(
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
         return
-        
+
     except Exception as e:
         logging.error(f"[ReportWorker] Error generating report: {str(e)}")
         update_report_job_status(job_id, organization_id, 'FAILED', error_payload={
@@ -145,6 +289,10 @@ async def process_report_job(
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
         raise  # Re-raise to trigger Azure Storage Queue retry
+
+    finally:
+        # Always release the lock when we're done
+        await release_job_lock(lease_client, job_id)
 
 
 async def _store_pdf_in_blob(
