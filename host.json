@@ -12,6 +12,16 @@
     "id": "Microsoft.Azure.Functions.ExtensionBundle",
     "version": "[4.0.0, 5.0.0)"
   },
+  "extensions": {
+    "durableTask": {
+      "hubName": "DurableFunctionsHub",
+      "storageProvider": {
+        "type": "azureStorage"
+      },
+      "maxConcurrentActivityFunctions": 10,
+      "maxConcurrentOrchestratorFunctions": 50
+    }
+  },
   "http": {
     "routePrefix": "api",
     "maxConcurrentRequests": 100,
@@ -20,12 +30,12 @@
   },
   "functionTimeout": "00:10:00",
   "queues": {
-      "batchSize": 1,
-      "newBatchThreshold": 0,
-      "maxPollingInterval": "00:00:10",
-      "maxDequeueCount": 3,
-      "visibilityTimeout": "00:15:00",
-      "messageEncoding": "none"
-    },
-    "functionAppScaleLimit": 1
+    "batchSize": 1,
+    "newBatchThreshold": 0,
+    "maxPollingInterval": "00:00:02",
+    "maxDequeueCount": 5,
+    "visibilityTimeout": "00:00:30",
+    "messageEncoding": "none"
+  },
+  "functionAppScaleLimit": 1
 }
