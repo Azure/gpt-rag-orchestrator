@@ -17,6 +17,8 @@ from azure.identity import DefaultAzureCredential
 import os
 
 AZURE_DB_ID = os.getenv("AZURE_DB_ID")
+AZURE_DB_NAME = os.getenv("AZURE_DB_NAME")
+
 
 def get_cosmos_client():
     """Get Cosmos DB client using Managed Identity"""
@@ -26,7 +28,7 @@ def fetch_items_for_org(container_name: str, organization_id: str):
     """Fetch all items from a Cosmos container for a specific organization"""
     try:
         client = get_cosmos_client()
-        database = client.get_database_client(AZURE_DB_ID)
+        database = client.get_database_client(AZURE_DB_NAME)
         container = database.get_container_client(container_name)
 
         query = "SELECT * FROM c WHERE c.organization_id = @organization_id"
@@ -52,7 +54,7 @@ def create_batch_jobs(include_brands=True, include_products=True, include_compet
 
     try:
         client = get_cosmos_client()
-        database = client.get_database_client(AZURE_DB_ID)
+        database = client.get_database_client(AZURE_DB_NAME)
         org_container = database.get_container_client("organizations")
 
         all_orgs = list(org_container.query_items(
@@ -226,4 +228,4 @@ def create_batch_jobs(include_brands=True, include_products=True, include_compet
 
 if __name__ == "__main__":
     result = create_batch_jobs()
-    print(f"\ Done! Created {result['total_created']} jobs")
+    print(f"\n Done! Created {result['total_created']} jobs")
