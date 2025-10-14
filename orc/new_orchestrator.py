@@ -345,6 +345,12 @@ class ConversationOrchestrator:
         if state.query_category in CATEGORY_PROMPT:
             system_prompt += CATEGORY_PROMPT[state.query_category]
 
+        # Exclude augmented query for balanced or brief verbosity settings
+        detail_level = user_settings.get("detail_level", "balanced")
+        augmented_query_text = (
+            "" if detail_level in ["balanced", "brief"] else state.augmented_query
+        )
+
         prompt = f"""
         
         You're provided user's question and the augmented version of the question to help you understand the user's intent better. 
@@ -355,8 +361,8 @@ class ConversationOrchestrator:
 
         ORIGINAL QUESTION: {state.question}
 
-        
-        AUGMENTED VERSION OF THE QUESTION: {state.augmented_query}
+
+        AUGMENTED VERSION OF THE QUESTION: {augmented_query_text}
         <----------- END OF USER QUESTION & AUGMENTED VERSION ------------>
 
         <----------- USER INSTRUCTIONS ------------>
