@@ -2184,28 +2184,47 @@ Augmented Query: "Explain CRISPR technology in the context of genetic engineerin
 
 ##### Verbose Config Prompts #####
 VERBOSITY_MODE_BRIEF = """
-** VERBOSITY LEVEL INSTRUCTIONS:**
-MODE: Brief
-**Objective:** Your goal is maximum efficiency. Prioritize speed, directness, and conciseness above all else. Deliver an information-dense summary.
-**Key Constraints:**
-* **Structure:** Answer the core question immediately. Use bullet points or numbered lists for all key information.
-* **Content:** Provide only the essential facts and data. Do not elaborate explanations.
-* **Exclusions:** Do not use introductory or concluding phrases (e.g., "Certainly...", "In summary...").
-* **Length:** Strictly limit your response to a maximum of two (2) paragraphs. DO NOT EXCEED THIS LIMIT. No matter how much information you have, you must condense all the important points to fit within this constraint.
+**VERBOSITY LEVEL: Brief**
 
+**FORMAT RULES:**
+- Lead with 1-2 sentence direct answer
+- Use bullet points or numbered lists (NOT paragraphs)
+- Maximum 5-7 bullets total
+- Each bullet: 1 sentence max
+
+**CONTENT RULES:**
+- Essential facts only - no elaboration
+- Skip intro/outro phrases ("Certainly...", "In summary...")
+- Omit explanations unless critical to understanding
+- Dense, scannable information
+
+**Example Structure:**
+[Direct answer in 1-2 sentences]
+- Key point 1
+- Key point 2
+- Key point 3
 """
 
 VERBOSITY_MODE_BALANCED = """
-** VERBOSITY LEVEL INSTRUCTIONS:**
-MODE: Balanced
-**Objective:** To deliver a helpful, comprehensive answer in a structured and concise format.
-**Key Constraints:**
-* **Length:** Strictly limit your response to a maximum of three (3) paragraphs. No matter how much information you have, you must condense all the important points to fit within this constraint.
-* **Structure:** Each paragraph must begin with a clear topic sentence that states its main point. Focus on a single, distinct idea within each paragraph. Utilize bullet points or numbered lists to organize complex information for clarity.
-* **Content:** Provide essential context to ensure understanding, but avoid unnecessary tangents or overly elaborate details.
-* **Formatting:** Use **bold** or *italics* to emphasize key terms and concepts, enhancing readability.
+**VERBOSITY LEVEL: Balanced**
 
+**FORMAT RULES:**
+- Brief intro (1-2 sentences) stating main answer
+- Organize with clear headers or numbered sections when helpful
+- Use bullet points for lists of items/features/steps
+- Maximum 8-10 bullets OR 3 short paragraphs (4-5 sentences each)
 
+**CONTENT RULES:**
+- Include context needed for understanding
+- Explain "why" for complex topics, not just "what"
+- Use **bold** for key terms
+- Use *italics* for emphasis sparingly
+- Balance depth with readability
+
+**AVOID:**
+- Dense walls of text
+- Excessive detail on minor points
+- Redundant information
 """
 
 VERBOSITY_MODE_DETAILED = """
