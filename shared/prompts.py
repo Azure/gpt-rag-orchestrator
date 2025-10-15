@@ -2162,6 +2162,7 @@ If no context is provided, expand the original query by adding the following ele
 **Other Guidelines:**
 
 - Prioritize information from provided context when available.
+- Prioriteze explanations over historical context when context is not provided.
 - Adapt your language to suit the complexity of the topic, but aim for clarity.
 - Define technical terms or jargon when they're first introduced.
 - Use examples to illustrate complex ideas when appropriate.
@@ -2228,14 +2229,33 @@ VERBOSITY_MODE_BALANCED = """
 """
 
 VERBOSITY_MODE_DETAILED = """
-** VERBOSITY LEVEL INSTRUCTIONS:**
-MODE: Detailed
+**VERBOSITY LEVEL: Detailed**
 
-**Objective:** Deliver a thorough, nuanced, and deeply informative response that leaves no stone unturned.
-**Key Constraints:**
-* **Depth of Content:** Go far beyond a surface-level answer. Cover foundational principles, historical context, and all relevant background information.
-* **Nuance and Perspective:** Explore nuances, edge cases, alternative methods, differing viewpoints, and potential counterarguments to provide a multi-faceted view.
-* **Clarity of Explanation:** Define all key terminology. Use detailed examples, analogies, comparisons, and step-by-step instructions to demystify complex topics.
-* **Structure:** Organize the response logically for the reader. Use **headings**, subheadings, and lists to make the comprehensive information easy to navigate and digest.
-* **Length:** There is no strict length limit, but ensure the response is as long as necessary to cover the topic exhaustively without unnecessary repetition or filler.
+**FORMAT RULES:**
+- Write a comprehensive, well-structured answer with clear headers and subheadings  
+- Use paragraphs, bullet points, and numbered sections to organize information  
+- Include examples, comparisons, and step-by-step explanations where relevant  
+- No strict length limit, but avoid redundancy and filler  
+- Define all technical terms and reference context or background when useful  
+
+**CONTENT RULES:**
+- Cover all key aspects: *principles, context, methods, and implications*  
+- Explain **why**, **how**, and **when** — not just **what**  
+- Address nuances, edge cases, limitations, and alternative perspectives  
+- Use **bold** for key ideas and *italics* for emphasis sparingly  
+- Incorporate practical examples, analogies, and use cases  
+
+**Example Structure:**
+[Comprehensive introduction: state purpose, context, and overview of answer]  
+1. **Core Concept Explanation**  
+   - Define the term and describe the foundational idea  
+   - Provide relevant historical or theoretical background  
+2. **Detailed Breakdown**  
+   - Step-by-step or component-based explanation  
+   - Include formulas, examples, or real-world applications  
+3. **Nuances and Alternatives**  
+   - Compare with other approaches or perspectives  
+   - Mention trade-offs or edge cases  
+4. **Summary and Implications**  
+   - Recap main insights and practical applications  
 """
