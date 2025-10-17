@@ -2136,51 +2136,61 @@ Craft a *2–3 minute verbal pitch script*, as though presenting to a CMO. Your 
 Your task is to *transform business challenges into compelling creative stories that captivate clients and deliver results.* Speak as if the next big campaign depends on your pitch—because it does.
 """
 
-AUGMENTED_QUERY_PROMPT = """ 
-Input Processing:
 
-Analyze the input query to identify the core concept or topic.
-Check whether the query provides context.
-If context is provided, use it as the primary basis for augmentation and explanation. It contains all the historical conversation in this thread.
+AUGMENTED_QUERY_PROMPT = """
+**TASK:** Generate an *augmented version* of the input query that enhances its clarity, depth, and contextual richness.
 
+---
 
-If context is provided:
+### STEP 1 — INPUT ANALYSIS
+1. Identify the **main concept** and **intent** of the user query.  
+2. Detect whether **context** is provided (conversation history)
+3. If context is provided, use it as the primary basis for augmentation and explanation. It contains all the historical conversation in this thread.
 
-Use the given context to frame the query more specifically.
-Identify other aspects of the topic not covered in the provided context that enrich the explanation.
+---
 
-If no context is provided, expand the original query by adding the following elements, as applicable:
+### STEP 2 — AUGMENTATION RULES
 
-- Include definitions about every word, such as adjective or noun, and the meaning of each keyword, concept, and phrase including synonyms and antonyms.
-- Include historical context or background information, if relevant.
-- Identify key components or subtopics within the main concept.
-- Request information about practical applications or real-world relevance.
-- Ask for comparisons with related concepts or alternatives, if applicable.
-- Inquire about current developments or future prospects in the field.
-- Don't be too verbose, keep it concise and to the point. Max 100 words.
+**If CONTEXT IS PROVIDED:**
+- Reframe the query to align precisely with the context.  
+- Emphasize aspects directly connected to that context.  
+- Add 1–2 complementary subtopics not explicitly mentioned.  
+- Maintain topic integrity — avoid drift.  
 
-**Other Guidelines:**
+**If CONTEXT IS NOT PROVIDED:**
+- Expand the query with concise coverage of:
+  - Definitions of main terms (include part of speech and synonyms).  
+  - Identify key components or subtopics within the main concept.  
+  - Practical applications or real-world significance.  
+  - Comparisons with related ideas.  
+  - Current developments or future outlooks.  
+- Enforce ≤100 words maximum.
 
-- Prioritize information from provided context when available.
-- Prioriteze explanations over historical context when context is not provided.
-- Adapt your language to suit the complexity of the topic, but aim for clarity.
-- Define technical terms or jargon when they're first introduced.
-- Use examples to illustrate complex ideas when appropriate.
-- For scientific or technical topics, briefly mention the level of scientific consensus if relevant.
-- Use Markdown formatting for better readability when appropriate.
+---
 
-**Example Input-Output:**
+### STEP 3 — OUTPUT FORMAT
+Output should be **one continuous augmented query** (not a list). And it should only inlcude the augmented query, nothing else.
+Follow this template:
 
-**Example 1 (With provided context):**
+> **Augmented Query:** "[Enhanced version of the question here.]"
 
-Input: "Explain the impact of the Gutenberg Press"
-Context Provided: "The query is part of a discussion about revolutionary inventions in medieval Europe and their long-term effects on society and culture."
-Augmented Query: "Explain the impact of the Gutenberg Press in the context of revolutionary inventions in medieval Europe. Cover its role in the spread of information, its effects on literacy and education, its influence on the Reformation, and its long-term impact on European society and culture. Compare it to other medieval inventions in terms of societal influence."
+Use **clear, complete sentences**. Avoid repeating the same phrasing from the input.  
+Prefer informative and actionable phrasing (e.g., “Explain how…”, “Analyze why…”).  
 
-**Example 2 (Without provided context):**
+---
 
-Input: "Explain CRISPR technology"
-Augmented Query: "Explain CRISPR technology in the context of genetic engineering and its potential applications in medicine and biotechnology. Cover its discovery, how it works at a molecular level, its current uses in research and therapy, ethical considerations surrounding its use, and potential future developments in the field."
+### EXAMPLES
+
+**With Context:**  
+Input: "Explain the impact of the Gutenberg Press"  
+Context: "Part of a discussion about revolutionary inventions in medieval Europe."  
+Output:  
+> **Augmented Query:** "Explain the impact of the Gutenberg Press as a revolutionary invention in medieval Europe, focusing on how it transformed literacy, education, religion, and communication across society."
+
+**Without Context:**  
+Input: "Explain CRISPR technology"  
+Output:  
+> **Augmented Query:** "Explain CRISPR technology as a tool for gene editing, including its discovery, mechanism, current medical applications, ethical challenges, and potential future advancements."
 """
 
 ##### Verbose Config Prompts #####
