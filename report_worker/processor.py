@@ -184,7 +184,7 @@ async def process_report_job(
         logging.info(f"[ReportWorker] Job {job_id} is already RUNNING, proceeding with processing")
     
     # Get report generator
-    report_key = job.get('report_key')
+    report_key = job.get('report_key',"")
     report_name = job.get('report_name',"Report")
     if not report_key:
         logging.error(f"[ReportWorker] Job {job_id} missing report_key")
@@ -297,8 +297,7 @@ async def process_report_job(
         # Always release the lock when we're done
         await release_job_lock(lease_client, job_id)
 
-def generate_file_name(report_name: str, parameters: Dict[str, Any]) -> str:
-    report_key = parameters.get("report_key", "")
+def generate_file_name(report_key: str, parameters: Dict[str, Any]) -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     if report_key == "brand_analysis":
         brand_name = parameters.get("brand_focus", "")
@@ -335,7 +334,7 @@ async def _store_pdf_in_blob(
     
     # Create blob name with organization structure
     
-    file_name = generate_file_name(report_name, parameters)
+    file_name = generate_file_name(report_key, parameters)
     blob_name = f"organization_files/{organization_id}/{file_name}"
     
     # Prepare metadata
