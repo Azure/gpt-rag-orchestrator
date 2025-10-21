@@ -35,6 +35,8 @@ class Telemetry:
 
     log_level : int = logging.WARNING
     azure_log_level : int = logging.WARNING
+    azure_http_log_level : int = logging.CRITICAL
+    azure_http_logs_disabled : bool = True
     langchain_log_level : int = logging.NOTSET
     api_name : str = None
     telemetry_connection_string : str = None
@@ -54,20 +56,39 @@ class Telemetry:
 
         # Azure SDK loggers level (default WARNING unless overridden)
         azure_level = Telemetry.translate_log_level(config.get('AZURE_LOG_LEVEL', 'WARNING'))
-        for name in ("azure", "azure.identity", "azure.core"):
+        for name in (
+            "azure",
+            "azure.identity",
+            "azure.core",
+            "azure.monitor",
+        ):
             lg = logging.getLogger(name)
-            lg.setLevel(azure_level if level != logging.DEBUG else logging.DEBUG)
-            # Ensure a clean state under --reload (avoid stacked filters)
+            lg.setLevel(azure_level)
+            lg.propagate = False
             lg.filters = []
+            lg.handlers.clear()
+            lg.addHandler(logging.NullHandler())
 
-        # Azure HTTP pipeline logger: verbose only in DEBUG; replace filters to avoid stacking
-        http_logger = logging.getLogger("azure.core.pipeline.policies.http_logging_policy")
-        if level == logging.DEBUG:
-            http_logger.setLevel(logging.DEBUG)
-            http_logger.filters = [DebugModeFilter()]
+        # Azure HTTP pipeline logger: completely silent unless AZURE_HTTP_LOG_LEVEL is provided
+            try:
+                http_level_override = config.get_value('AZURE_HTTP_LOG_LEVEL', default=None, allow_none=True, type=str)
+            except Exception:
+                http_level_override = None
+        if http_level_override is not None:
+            http_level = Telemetry.translate_log_level(http_level_override)
+            http_disabled = False
         else:
-            http_logger.setLevel(azure_level if azure_level >= logging.WARNING else logging.WARNING)
-            http_logger.filters = []
+            http_level = logging.CRITICAL
+            http_disabled = True
+
+        http_logger = logging.getLogger("azure.core.pipeline.policies.http_logging_policy")
+        http_logger.setLevel(http_level)
+        http_logger.disabled = http_disabled
+        http_logger.propagate = not http_disabled
+        http_logger.handlers = []
+        http_logger.filters = []
+        if http_disabled:
+            http_logger.addHandler(logging.NullHandler())
         #logging.getLogger("httpx").setLevel(config.get_value('HTTPX_LOGLEVEL', 'ERROR').upper())
         #logging.getLogger("httpcore").setLevel(config.get_value('HTTPCORE_LOGLEVEL', 'ERROR').upper())
         #logging.getLogger("openai._base_client").setLevel(config.get_value('OPENAI_BASE_CLIENT_LOGLEVEL', 'WARNING').upper())
@@ -197,6 +218,16 @@ class Telemetry:
         Telemetry.azure_log_level = Telemetry.translate_log_level(
             config.get("AZURE_LOG_LEVEL", default="WARNING")
         )
+        try:
+            http_level_override = config.get_value("AZURE_HTTP_LOG_LEVEL", default=None, allow_none=True, type=str)
+        except Exception:
+            http_level_override = None
+        if http_level_override is not None:
+            Telemetry.azure_http_log_level = Telemetry.translate_log_level(http_level_override)
+            Telemetry.azure_http_logs_disabled = False
+        else:
+            Telemetry.azure_http_log_level = logging.CRITICAL
+            Telemetry.azure_http_logs_disabled = True
 
         enable_console_logging = str(config.get("ENABLE_CONSOLE_LOGGING", default='true')).lower()
 
@@ -254,12 +285,14 @@ class Telemetry:
                 # Keep Azure SDK logs quiet unless explicitly raised
                 'azure': {
                     'level': Telemetry.azure_log_level,
-                    'propagate': True
+                    'handlers': [],
+                    'propagate': False,
                 },
                 # Gate the very chatty HTTP pipeline logger
                 'azure.core.pipeline.policies.http_logging_policy': {
-                    'level': logging.DEBUG if Telemetry.log_level == logging.DEBUG else logging.WARNING,
-                    'propagate': True
+                    'level': Telemetry.azure_http_log_level,
+                    'handlers': [] if Telemetry.azure_http_logs_disabled else ['console'],
+                    'propagate': not Telemetry.azure_http_logs_disabled,
                 },
                 '': {
                     'handlers': ['console'],

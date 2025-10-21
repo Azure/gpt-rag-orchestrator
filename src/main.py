@@ -29,6 +29,19 @@ from util.tools import is_azure_environment
 
 ## Early minimal logging (INFO) until config is loaded; refined by Telemetry.configure_basic
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+# Suppress Azure SDK HTTP logging immediately (before any Azure imports)
+for _azure_logger in [
+    "azure.core.pipeline.policies.http_logging_policy",
+    "azure.identity",
+    "azure.core",
+    "azure"
+]:
+    logger = logging.getLogger(_azure_logger)
+    logger.setLevel(logging.CRITICAL)
+    logger.propagate = False
+    logger.disabled = True
+    logger.handlers.clear()
     
 # Load version from VERSION file 
 VERSION_FILE = Path(__file__).resolve().parent.parent / "VERSION"
