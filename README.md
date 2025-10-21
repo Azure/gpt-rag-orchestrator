@@ -27,7 +27,9 @@ The orchestrator uses **Azure AI Foundry Agent Service** for single-agent and co
 
 Developers can extend the orchestrator by creating a new subclass of `BaseAgentStrategy`, implementing the required `initiate_agent_flow` method (along with any additional helpers), and registering it in `AgentStrategyFactory.get_strategy` under a unique key.
 
-Examples of available strategies include the **Single Agent RAG Strategy** and the **[NL2SQL Strategy](docs/nl2sql_strategy.md)**.
+## Documentation
+
+For comprehensive information about GPT-RAG, including architecture details, configuration guides, best practices, troubleshooting resources, deployment guidance, customization options, and advanced usage scenarios, please refer to the [official project documentation](https://azure.github.io/GPT-RAG/).
 
 ## Prerequisites
 
@@ -46,36 +48,7 @@ The machine used to customize and or deploy the service should have:
 * VS Code (recommended): [Download VS Code](https://code.visualstudio.com/download)
 </details>
 
-
-<details markdown="block">
-<summary>Click to view <strong>permissions</strong> requirements</summary>
-<br>
-To customize the service, your user should have the following roles:
-
-| Resource                | Role                                | Description                                 |
-| :---------------------- | :---------------------------------- | :------------------------------------------ |
-| App Configuration Store | App Configuration Data Owner        | Full control over configuration settings    |
-| Container Registry      | AcrPush                             | Push and pull container images              |
-| Key Vault               | Key Vault Contributor               | Manage Key Vault Secrets                    |
-| AI Search Service       | Search Service Contributor          | Create or update search service components  |
-| AI Search Service       | Search Index Data Contributor       | Read and write index data                   |
-| Storage Account         | Storage Blob Data Contributor       | Read and write blob data                    |
-| AI Foundry Project      | Azure AI Project User               | Access and work with the AI Foundry project |
-| Cosmos DB               | Cosmos DB Built-in Data Contributor | Read and write documents in Cosmos DB       |
-
-To deploy the service, assign these roles to your user or service principal:
-
-| Resource                                   | Role                             | Description           |
-| :----------------------------------------- | :------------------------------- | :-------------------- |
-| App Configuration Store                    | App Configuration Data Reader    | Read config           |
-| Container Registry                         | AcrPush                          | Push images           |
-| Azure Container App                        | Azure Container Apps Contributor | Manage Container Apps |
-
-Ensure the deployment identity has these roles at the correct scope (subscription or resource group).
-
-</details>
-
-## Deployment steps
+## How to deploy the orchestrator service
 
 Make sure you're logged in to Azure before anything else:
 
@@ -115,13 +88,9 @@ cd gpt-rag-orchestrator
 .\scripts\deploy.ps1
 ```
 
-##### Bash (Linux/macOS)
-```bash
-git clone https://github.com/Azure/gpt-rag-orchestrator.git
-export APP_CONFIG_ENDPOINT="https://<your-app-config-name>.azconfig.io"
-cd gpt-rag-orchestrator
-./scripts/deploy.sh
-````
+## Found an Issue?
+
+Encountered an error or bug? Help us improve the quality of this accelerator by reporting issues or suggesting enhancements on our **[GitHub Issues page](https://github.com/Azure/GPT-RAG/issues)**. Your feedback helps make GPT-RAG better for everyone!
 
 ## Previous Releases
 
