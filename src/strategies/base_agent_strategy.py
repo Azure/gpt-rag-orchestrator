@@ -4,13 +4,14 @@ import os
 import re
 import json
 
-from typing import Dict, AsyncIterator
+from typing import Any, Dict, AsyncIterator, Mapping, Optional
 from abc import ABC, abstractmethod
 from azure.identity.aio import ChainedTokenCredential, AzureCliCredential, ManagedIdentityCredential
 from azure.ai.projects.aio import AIProjectClient
 from connectors.appconfig import AppConfigClient
 from connectors.cosmosdb import CosmosDBClient
 from dependencies import get_config
+from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
 from pathlib import Path
 from .agent_strategies import AgentStrategies
 
@@ -82,13 +83,55 @@ class BaseAgentStrategy(ABC):
             AsyncIterator[str]: An async iterator over chunks of the agent’s response.
         """
 
-    async def _read_prompt(self, prompt_name, placeholders=None):
-        
-        if self.prompt_source == 'file':
-            return await self._read_prompt_file(prompt_name, placeholders)
-        
-        elif self.prompt_source == 'cosmos':
-            return await self._read_prompt_cosmos(prompt_name, placeholders)
+    async def _read_prompt(
+        self,
+        prompt_name: str,
+        placeholders: Optional[Mapping[str, str]] = None,
+        *,
+        use_jinja2: Optional[bool] = None,
+        jinja2_context: Optional[Mapping[str, Any]] = None,
+    ) -> str:
+        """Load and process a prompt from the configured source."""
+
+        placeholders_dict: Dict[str, str] = dict(placeholders or {})
+
+        if self.prompt_source == "file":
+            prompt_dir = Path(self._prompt_dir())
+            jinja2_path = prompt_dir / f"{prompt_name}.jinja2"
+            txt_path = prompt_dir / f"{prompt_name}.txt"
+
+            if use_jinja2 is True:
+                if not jinja2_path.exists():
+                    raise FileNotFoundError(
+                        f"Jinja2 template '{prompt_name}.jinja2' not found in {prompt_dir}"
+                    )
+                context = dict(jinja2_context or placeholders_dict)
+                return await self._read_prompt_jinja2(prompt_name, context)
+
+            if use_jinja2 is False:
+                if not txt_path.exists():
+                    raise FileNotFoundError(
+                        f"Prompt file '{prompt_name}.txt' not found in {prompt_dir}"
+                    )
+                return await self._read_prompt_file(prompt_name, placeholders_dict)
+
+            # Auto-detect format when use_jinja2 is None
+            if jinja2_path.exists():
+                context = dict(jinja2_context or placeholders_dict)
+                return await self._read_prompt_jinja2(prompt_name, context)
+
+            if txt_path.exists():
+                return await self._read_prompt_file(prompt_name, placeholders_dict)
+
+            raise FileNotFoundError(
+                f"Prompt '{prompt_name}' not found in {prompt_dir}. "
+                f"Tried: {prompt_name}.jinja2, {prompt_name}.txt"
+            )
+
+        if self.prompt_source == "cosmos":
+            return await self._read_prompt_cosmos(prompt_name, placeholders_dict)
+
+        raise ValueError(f"Unsupported prompt_source: {self.prompt_source!r}")
 
     async def _read_prompt_file(self, prompt_name, placeholders=None):
         """
@@ -198,6 +241,16 @@ class BaseAgentStrategy(ABC):
         return prompt
     
     def _prompt_dir(self):
+        """
+        Get the directory path for prompts based on strategy type.
+        
+        Returns:
+            str: Absolute path to the strategy's prompt directory
+            
+        Raises:
+            ValueError: If strategy_type is not defined
+            FileNotFoundError: If the prompt directory does not exist
+        """
         # __file__ is .../src/strategies/base_agent_strategy.py
         # go up to the 'src' folder, then into 'prompts/<strategy>'
         src_folder = Path(__file__).resolve().parent.parent  # .../src
@@ -207,7 +260,72 @@ class BaseAgentStrategy(ABC):
         if not prompt_folder.exists():
             raise FileNotFoundError(f"Prompt directory not found: {prompt_folder}")
         return str(prompt_folder)
-    
+
+    async def _read_prompt_jinja2(self, prompt_name, context=None):
+        """
+        Load and render a Jinja2 template for prompts.
+        
+        This method supports Jinja2 templates with conditional logic, loops, and variables.
+        Templates should have .jinja2 extension and be located in the strategy's prompt directory.
+        
+        **Prompt Directory Structure**:
+        - Templates are stored in `prompts/<strategy_type>/` directory
+        - Template files use `.jinja2` extension (e.g., `main.jinja2`)
+        
+        **Template Context**:
+        - Pass a dictionary with variables that will be available in the template
+        - Common variables: enable_agentic_retrieval, user_context, config values, etc.
+        
+        **Example Template Usage**:
+        ```jinja2
+        {% if enable_agentic_retrieval %}
+        Use agentic retrieval instructions...
+        {% else %}
+        Use traditional search instructions...
+        {% endif %}
+        ```
+        
+        **Parameters**:
+        - prompt_name (str): The base name of the template file (without .jinja2 extension)
+        - context (dict, optional): Dictionary of variables to pass to the template
+        
+        **Returns**:
+        - str: Rendered prompt content
+        
+        **Raises**:
+        - FileNotFoundError: If the template file does not exist
+        - TemplateError: If there's a syntax error in the template
+        """
+        
+        # Setup Jinja2 environment
+        prompt_dir = self._prompt_dir()
+        
+        try:
+            env = Environment(
+                loader=FileSystemLoader(prompt_dir),
+                undefined=StrictUndefined,  # Raises error if undefined variable is used
+                trim_blocks=True,           # Remove first newline after template tag
+                lstrip_blocks=True          # Strip leading spaces/tabs from block tags
+            )
+            
+            # Try to load the template
+            template_name = f"{prompt_name}.jinja2"
+            template = env.get_template(template_name)
+            
+            logging.info(f"[base_agent_strategy] Rendering Jinja2 template: {os.path.join(prompt_dir, template_name)}")
+            
+            # Render with provided context
+            rendered = template.render(context or {})
+            
+            return rendered.strip()
+            
+        except FileNotFoundError:
+            logging.error(f"[base_agent_strategy] Jinja2 template '{prompt_name}' not found in {prompt_dir}")
+            raise FileNotFoundError(f"Jinja2 template '{prompt_name}.jinja2' not found in {prompt_dir}")
+        except TemplateError as e:
+            logging.error(f"[base_agent_strategy] Error rendering Jinja2 template '{prompt_name}': {e}")
+            raise TemplateError(f"Error rendering template '{prompt_name}': {e}")
+
     def _get_model(self, model_name: str = 'CHAT_DEPLOYMENT_NAME') -> Dict:
         model_deployments = self.cfg.get("MODEL_DEPLOYMENTS", default='[]').replace("'", "\"")
 
