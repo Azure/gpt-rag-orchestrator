@@ -2245,7 +2245,8 @@ VERBOSITY_MODE_DETAILED = """
 - Write a comprehensive, well-structured answer with clear headers and subheadings  
 - Use paragraphs, bullet points, and numbered sections to organize information  
 - Include examples, comparisons, and step-by-step explanations where relevant  
-- No strict length limit, but avoid redundancy and filler  
+- Maximum 3 short paragraphs or 400 words length limit. 
+- Avoid redundancy and filler    
 - Define all technical terms and reference context or background when useful  
 
 **CONTENT RULES:**
