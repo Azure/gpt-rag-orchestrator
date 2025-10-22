@@ -19,12 +19,6 @@ Part of the [GPT-RAG](https://github.com/Azure/gpt-rag) solution.
 
 The **GPT-RAG Orchestrator** service is an agentic orchestration layer built on Azure AI Foundry Agent Service and the Semantic Kernel framework. It enables agent-based RAG workflows by coordinating multiple specialized agents—each with a defined role—to collaboratively generate accurate, context-aware responses for complex user queries.
 
-### How the Orchestrator Works
-
-The orchestrator uses **Azure AI Foundry Agent Service** for single-agent and connected-agent flows, leveraging its managed runtime for agent lifecycle, state management, and tool orchestration. For multi-agent scenarios, it integrates the **Semantic Kernel Agent Framework** to compose and coordinate specialized agents working together on tasks. Custom agent strategies enable developers to add domain-specific logic without modifying the core orchestration code.
-
-Developers can extend the orchestrator by creating a new subclass of `BaseAgentStrategy`, implementing the required `initiate_agent_flow` method (along with any additional helpers), and registering it in `AgentStrategyFactory.get_strategy` under a unique key.
-
 ## Documentation
 
 For comprehensive information about GPT-RAG, including architecture details, configuration guides, best practices, troubleshooting resources, deployment guidance, customization options, and advanced usage scenarios, please refer to the [official project documentation](https://azure.github.io/GPT-RAG/).
