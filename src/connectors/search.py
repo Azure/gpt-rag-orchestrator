@@ -48,3 +48,50 @@ class SearchClient:
                     logging.error(f"[search] {resp.status} {text}")
                     raise RuntimeError(f"Search failed: {resp.status} {text}")
                 return await resp.json()
+
+    async def get_document(self, index_name: str, document_id: str, select_fields: list = None) -> dict:
+        """
+        Retrieves a single document by ID from the index.
+        GET /indexes/{index_name}/docs/{document_id}
+        
+        Args:
+            index_name: Name of the search index
+            document_id: Document key/ID
+            select_fields: Optional list of fields to retrieve (e.g., ['filepath', 'title'])
+            
+        Returns:
+            Document dictionary with requested fields
+        """
+        # Build URL with optional $select parameter
+        url = (
+            f"{self.endpoint}"
+            f"/indexes/{index_name}/docs('{document_id}')"
+            f"?api-version={self.api_version}"
+        )
+        
+        if select_fields:
+            fields_str = ",".join(select_fields)
+            url += f"&$select={fields_str}"
+        
+        # Get bearer token
+        try:
+            token = (await self.credential.get_token("https://search.azure.com/.default")).token
+        except Exception:
+            logging.exception("[search] failed to acquire token for get_document")
+            raise
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}"
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as resp:
+                text = await resp.text()
+                if resp.status == 404:
+                    logging.warning(f"[search] Document not found: {document_id}")
+                    return None
+                if resp.status >= 400:
+                    logging.error(f"[search] {resp.status} {text}")
+                    raise RuntimeError(f"Get document failed: {resp.status} {text}")
+                return await resp.json()
