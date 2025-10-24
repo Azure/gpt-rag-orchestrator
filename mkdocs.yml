@@ -1,0 +1,15 @@
+
+site_name: Project Documentation
+site_description: Official documentation for the project
+site_author: Author Name
+
+theme:
+  name: material
+  language: en
+  palette:
+    scheme: default
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - toc.integrate
+    - content.code.annotate
