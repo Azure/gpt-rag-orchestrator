@@ -120,7 +120,8 @@ async def start_orch(req: Request, client: df.DurableOrchestrationClient):
     instance_id = await client.start_new(orch, client_input=payload)
     return Response(content=json.dumps({"instanceId": instance_id}), media_type="application/json")
 
-@app.timer_trigger(schedule="0 0 2 * * 0", arg_name="mytimer", run_on_startup=False)  # Every Sunday at 2:00 AM UTC
+#@app.timer_trigger(schedule="0 0 2 * * 0", arg_name="mytimer", run_on_startup=False)  # Every Sunday at 2:00 AM UTC
+@app.timer_trigger(schedule="0 30 * * * *", arg_name="mytimer", run_on_startup=False)  # Every hour at 30 minutes past
 @app.durable_client_input(client_name="client")
 async def batch_jobs_timer(mytimer: func.TimerRequest, client: df.DurableOrchestrationClient) -> None:
     """
