@@ -2136,50 +2136,61 @@ Craft a *2–3 minute verbal pitch script*, as though presenting to a CMO. Your 
 Your task is to *transform business challenges into compelling creative stories that captivate clients and deliver results.* Speak as if the next big campaign depends on your pitch—because it does.
 """
 
-AUGMENTED_QUERY_PROMPT = """ 
-Input Processing:
 
-Analyze the input query to identify the core concept or topic.
-Check whether the query provides context.
-If context is provided, use it as the primary basis for augmentation and explanation. It contains all the historical conversation in this thread.
+AUGMENTED_QUERY_PROMPT = """
+**TASK:** Generate an *augmented version* of the input query that enhances its clarity, depth, and contextual richness.
 
+---
 
-If context is provided:
+### STEP 1 — INPUT ANALYSIS
+1. Identify the **main concept** and **intent** of the user query.  
+2. Detect whether **context** is provided (conversation history)
+3. If context is provided, use it as the primary basis for augmentation and explanation. It contains all the historical conversation in this thread.
 
-Use the given context to frame the query more specifically.
-Identify other aspects of the topic not covered in the provided context that enrich the explanation.
+---
 
-If no context is provided, expand the original query by adding the following elements, as applicable:
+### STEP 2 — AUGMENTATION RULES
 
-- Include definitions about every word, such as adjective or noun, and the meaning of each keyword, concept, and phrase including synonyms and antonyms.
-- Include historical context or background information, if relevant.
-- Identify key components or subtopics within the main concept.
-- Request information about practical applications or real-world relevance.
-- Ask for comparisons with related concepts or alternatives, if applicable.
-- Inquire about current developments or future prospects in the field.
-- Don't be too verbose, keep it concise and to the point. Max 100 words.
+**If CONTEXT IS PROVIDED:**
+- Reframe the query to align precisely with the context.  
+- Emphasize aspects directly connected to that context.  
+- Add 1–2 complementary subtopics not explicitly mentioned.  
+- Maintain topic integrity — avoid drift.  
 
-**Other Guidelines:**
+**If CONTEXT IS NOT PROVIDED:**
+- Expand the query with concise coverage of:
+  - Definitions of main terms (include part of speech and synonyms).  
+  - Identify key components or subtopics within the main concept.  
+  - Practical applications or real-world significance.  
+  - Comparisons with related ideas.  
+  - Current developments or future outlooks.  
+- Enforce ≤100 words maximum.
 
-- Prioritize information from provided context when available.
-- Adapt your language to suit the complexity of the topic, but aim for clarity.
-- Define technical terms or jargon when they're first introduced.
-- Use examples to illustrate complex ideas when appropriate.
-- For scientific or technical topics, briefly mention the level of scientific consensus if relevant.
-- Use Markdown formatting for better readability when appropriate.
+---
 
-**Example Input-Output:**
+### STEP 3 — OUTPUT FORMAT
+Output should be **one continuous augmented query** (not a list). And it should only inlcude the augmented query, nothing else.
+Follow this template:
 
-**Example 1 (With provided context):**
+> **Augmented Query:** "[Enhanced version of the question here.]"
 
-Input: "Explain the impact of the Gutenberg Press"
-Context Provided: "The query is part of a discussion about revolutionary inventions in medieval Europe and their long-term effects on society and culture."
-Augmented Query: "Explain the impact of the Gutenberg Press in the context of revolutionary inventions in medieval Europe. Cover its role in the spread of information, its effects on literacy and education, its influence on the Reformation, and its long-term impact on European society and culture. Compare it to other medieval inventions in terms of societal influence."
+Use **clear, complete sentences**. Avoid repeating the same phrasing from the input.  
+Prefer informative and actionable phrasing (e.g., “Explain how…”, “Analyze why…”).  
 
-**Example 2 (Without provided context):**
+---
 
-Input: "Explain CRISPR technology"
-Augmented Query: "Explain CRISPR technology in the context of genetic engineering and its potential applications in medicine and biotechnology. Cover its discovery, how it works at a molecular level, its current uses in research and therapy, ethical considerations surrounding its use, and potential future developments in the field."
+### EXAMPLES
+
+**With Context:**  
+Input: "Explain the impact of the Gutenberg Press"  
+Context: "Part of a discussion about revolutionary inventions in medieval Europe."  
+Output:  
+> **Augmented Query:** "Explain the impact of the Gutenberg Press as a revolutionary invention in medieval Europe, focusing on how it transformed literacy, education, religion, and communication across society."
+
+**Without Context:**  
+Input: "Explain CRISPR technology"  
+Output:  
+> **Augmented Query:** "Explain CRISPR technology as a tool for gene editing, including its discovery, mechanism, current medical applications, ethical challenges, and potential future advancements."
 """
 
 ##### Verbose Config Prompts #####
@@ -2228,14 +2239,34 @@ VERBOSITY_MODE_BALANCED = """
 """
 
 VERBOSITY_MODE_DETAILED = """
-** VERBOSITY LEVEL INSTRUCTIONS:**
-MODE: Detailed
+**VERBOSITY LEVEL: Detailed**
 
-**Objective:** Deliver a thorough, nuanced, and deeply informative response that leaves no stone unturned.
-**Key Constraints:**
-* **Depth of Content:** Go far beyond a surface-level answer. Cover foundational principles, historical context, and all relevant background information.
-* **Nuance and Perspective:** Explore nuances, edge cases, alternative methods, differing viewpoints, and potential counterarguments to provide a multi-faceted view.
-* **Clarity of Explanation:** Define all key terminology. Use detailed examples, analogies, comparisons, and step-by-step instructions to demystify complex topics.
-* **Structure:** Organize the response logically for the reader. Use **headings**, subheadings, and lists to make the comprehensive information easy to navigate and digest.
-* **Length:** There is no strict length limit, but ensure the response is as long as necessary to cover the topic exhaustively without unnecessary repetition or filler.
+**FORMAT RULES:**
+- Write a comprehensive, well-structured answer with clear headers and subheadings  
+- Use paragraphs, bullet points, and numbered sections to organize information  
+- Include examples, comparisons, and step-by-step explanations where relevant  
+- Maximum 3 short paragraphs or 400 words length limit. 
+- Avoid redundancy and filler    
+- Define all technical terms and reference context or background when useful  
+
+**CONTENT RULES:**
+- Cover all key aspects: *principles, context, methods, and implications*  
+- Explain **why**, **how**, and **when** — not just **what**  
+- Address nuances, edge cases, limitations, and alternative perspectives  
+- Use **bold** for key ideas and *italics* for emphasis sparingly  
+- Incorporate practical examples, analogies, and use cases  
+
+**Example Structure:**
+[Comprehensive introduction: state purpose, context, and overview of answer]  
+1. **Core Concept Explanation**  
+   - Define the term and describe the foundational idea  
+   - Provide relevant historical or theoretical background  
+2. **Detailed Breakdown**  
+   - Step-by-step or component-based explanation  
+   - Include formulas, examples, or real-world applications  
+3. **Nuances and Alternatives**  
+   - Compare with other approaches or perspectives  
+   - Mention trade-offs or edge cases  
+4. **Summary and Implications**  
+   - Recap main insights and practical applications  
 """

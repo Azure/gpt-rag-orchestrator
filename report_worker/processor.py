@@ -184,7 +184,8 @@ async def process_report_job(
         logging.info(f"[ReportWorker] Job {job_id} is already RUNNING, proceeding with processing")
     
     # Get report generator
-    report_key = job.get('report_key')
+    report_key = job.get('report_key',"")
+    report_name = job.get('report_name',"Report")
     if not report_key:
         logging.error(f"[ReportWorker] Job {job_id} missing report_key")
         update_report_job_status(job_id, organization_id, 'FAILED', error_payload={
@@ -249,7 +250,9 @@ async def process_report_job(
             pdf_bytes=pdf_bytes,
             job_id=job_id,
             organization_id=organization_id,
-            report_key=report_key
+            report_key=report_key,
+            report_name=report_name,
+            parameters=parameters
         )
         
         logging.info(f"[ReportWorker] Successfully generated report for job {job_id}")
@@ -294,12 +297,25 @@ async def process_report_job(
         # Always release the lock when we're done
         await release_job_lock(lease_client, job_id)
 
+def generate_file_name(report_key: str, parameters: Dict[str, Any]) -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    if report_key == "brand_analysis":
+        brand_name = parameters.get("brand_focus", "")
+        return f"Brand_Analysis_{brand_name}_{timestamp}.pdf"
+    elif report_key == "competitor_analysis":
+        return f"Competitor_Analysis_{timestamp}.pdf"
+    elif report_key == "product_analysis":
+        category_name = "_".join([x.get("category", "").replace(" ", "_") for x in parameters.get("categories", [])])
+        return f"Product_Analysis_{category_name}_{timestamp}.pdf"
+    return f"Report_{report_key}_{timestamp}.pdf"
 
 async def _store_pdf_in_blob(
     pdf_bytes: bytes,
     job_id: str,
     organization_id: str,
-    report_key: str
+    report_key: str,
+    parameters: Dict[str, Any],
+    report_name: str
 ) -> Dict[str, Any]:
     """
     Store PDF in Azure Blob Storage and return metadata.
@@ -317,8 +333,8 @@ async def _store_pdf_in_blob(
     container_name = "documents"
     
     # Create blob name with organization structure
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    file_name = f"report_{job_id}_{timestamp}.pdf"
+    
+    file_name = generate_file_name(report_key, parameters)
     blob_name = f"organization_files/{organization_id}/{file_name}"
     
     # Prepare metadata
@@ -326,7 +342,7 @@ async def _store_pdf_in_blob(
         "organization_id": organization_id,
         "report_id": job_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "report_key": report_key,
+        "report_key": report_key
     }
     
     logging.info(f"[ReportWorker] Storing PDF in blob: {blob_name}")
