@@ -38,7 +38,7 @@ jobs:
       - name: Run evaluation
         run: |
           chmod +x evaluations/evaluate.sh
-          ./evaluations/evaluate.sh --skip-eval
+          ./evaluations/evaluate.sh
 
       - name: Upload evaluation results
         uses: actions/upload-artifact@v4
