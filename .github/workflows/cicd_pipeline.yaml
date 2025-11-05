@@ -3,7 +3,7 @@ name: CI/CD Dev Pipeline
 on:
   push:
     branches:
-      - develop
+      - genaiops-workshop
 
 jobs:
   deploy:

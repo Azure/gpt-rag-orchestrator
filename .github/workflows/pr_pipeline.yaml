@@ -3,7 +3,7 @@ name: Pull Request Pipeline
 on:
   pull_request:
     branches:
-      - develop
+      - genaiops-workshop
 
 jobs:
   evaluations:
