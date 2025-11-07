@@ -697,7 +697,7 @@ def upload_to_blob_storage(content, filename, user_id, content_type="text/html")
         
         # Get a user delegation key to sign the SAS token, valid for 7 days
         delegation_key_start_time = datetime.now(timezone.utc)
-        delegation_key_expiry_time = delegation_key_start_time + timedelta(years=10)
+        delegation_key_expiry_time = delegation_key_start_time + timedelta(days=3650)
         
         user_delegation_key = blob_service_client.get_user_delegation_key(
             key_start_time=delegation_key_start_time,
