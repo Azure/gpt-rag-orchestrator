@@ -120,20 +120,20 @@ async def start_orch(req: Request, client: df.DurableOrchestrationClient):
     instance_id = await client.start_new(orch, client_input=payload)
     return Response(content=json.dumps({"instanceId": instance_id}), media_type="application/json")
 
-@app.timer_trigger(schedule="0 0 2 * * 0", arg_name="mytimer", run_on_startup=False)  # Every Sunday at 2:00 AM UTC
+@app.timer_trigger(schedule="0 0 6 * * 0", arg_name="mytimer", run_on_startup=False)  # Every Sunday at 6:00 AM UTC
 @app.durable_client_input(client_name="client")
 async def batch_jobs_timer(mytimer: func.TimerRequest, client: df.DurableOrchestrationClient) -> None:
     """
-    Timer trigger that runs every Sunday at 2:00 AM UTC.
-    Cron expression: "0 0 2 * * 0" means:
+    Timer trigger that runs every Sunday at 6:00 AM UTC.
+    Cron expression: "0 0 6 * * 0" means:
     - 0 seconds
     - 0 minutes
-    - 2 hours (2:00 AM)
+    - 6 hours (6:00 AM)
     - * any day of month
     - * any month
     - 0 Sunday
     """
-    logging.info("Batch jobs timer trigger started - Sunday 2:00 AM UTC")
+    logging.info("Batch jobs timer trigger started - Sunday 6:00 AM UTC")
 
     try:
         # Step 1: Create batch jobs
@@ -978,25 +978,3 @@ async def multipage_scrape(req: Request) -> Response:
             media_type="application/json",
             status_code=500,
         )
-
-
-# @app.timer_trigger(schedule="0 0 17 * * *", arg_name="mytimer", run_on_startup=False)
-# def report_scheduler_timer(mytimer: func.TimerRequest) -> None:
-#     """
-#     Timer trigger function that runs every day at 5:00 PM UTC.
-#     Cron expression: "0 0 17 * * *" means:
-#     - 0 seconds
-#     - 0 minutes
-#     - 17 hours (5 PM)
-#     - * any day of month
-#     - * any month
-#     - * any day of week
-#     """
-#     logging.info("Report scheduler timer trigger started")
-    
-#     try:
-#         report_scheduler_main(mytimer)
-#         logging.info("Report scheduler completed successfully")
-#     except Exception as e:
-#         logging.error(f"Report scheduler failed: {str(e)}")
-#         raise
