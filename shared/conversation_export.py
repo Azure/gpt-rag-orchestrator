@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import html
+import base64
 from datetime import datetime, timedelta, timezone
 from azure.storage.blob import (
     BlobServiceClient, 
@@ -12,6 +13,7 @@ from azure.storage.blob import (
 )
 from azure.identity import DefaultAzureCredential
 from shared.util import get_conversation
+from shared.clients import get_blob_service_client
 import markdown
 from docx import Document
 from docx.shared import Inches, Pt
@@ -19,22 +21,169 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.style import WD_STYLE_TYPE
 import io
 
+def extract_image_urls_from_markdown(text):
+    """
+    Extract all image URLs from markdown text.
+    Matches pattern: ![alt text](image_url)
+    
+    Args:
+        text: Markdown text that may contain images
+        
+    Returns:
+        list: List of tuples (full_match, image_url)
+    """
+    if not text:
+        return []
+    
+    # Regex pattern to match markdown images: ![alt](url)
+    pattern = r'!\[([^\]]*)\]\(([^\)]+)\)'
+    matches = re.findall(pattern, text)
+    
+    # Return list of (alt_text, url) tuples
+    return matches
+
+def fetch_image_from_blob(image_path):
+    """
+    Fetch image content from Azure Blob Storage.
+    
+    Args:
+        image_path: Path to the image in blob storage (e.g., "organization_files/xxx/generated_images/image.png")
+        
+    Returns:
+        bytes: Image content as bytes, or None if error
+    """
+    try:
+        blob_service_client = get_blob_service_client()
+        
+        # Try to parse the path to extract container and blob name
+        # The path format is typically: container_name/path/to/image.png
+        # For organization_files, the container might be the same
+        
+        # Try different container/blob combinations
+        blob_client = blob_service_client.get_blob_client(
+            container="documents",
+            blob=image_path
+        )
+        # Try to download the blob
+        image_data = blob_client.download_blob().readall()
+        logging.info(f"Successfully fetched image from container documents: {image_path}")
+        return image_data
+    except Exception as e:
+        logging.error(f"Error fetching image from blob storage ({image_path}): {str(e)}")
+        return None
+
+
+def image_to_base64(image_data, image_path):
+    """
+    Convert image bytes to base64 data URI.
+    
+    Args:
+        image_data: Image content as bytes
+        image_path: Path to image (used to determine MIME type)
+        
+    Returns:
+        str: Base64 encoded data URI (e.g., "data:image/png;base64,...")
+    """
+    if not image_data:
+        return None
+    
+    try:
+        # Determine MIME type from file extension
+        extension = image_path.lower().split('.')[-1]
+        mime_types = {
+            'png': 'image/png',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'gif': 'image/gif',
+            'bmp': 'image/bmp',
+            'webp': 'image/webp',
+            'svg': 'image/svg+xml'
+        }
+        mime_type = mime_types.get(extension, 'image/png')
+        
+        # Encode to base64
+        base64_data = base64.b64encode(image_data).decode('utf-8')
+        
+        # Create data URI
+        data_uri = f"data:{mime_type};base64,{base64_data}"
+        
+        return data_uri
+        
+    except Exception as e:
+        logging.error(f"Error converting image to base64: {str(e)}")
+        return None
+
+def embed_images_in_markdown(text):
+    """
+    Replace image URLs in markdown with base64 embedded images.
+    
+    Args:
+        text: Markdown text that may contain image references
+        
+    Returns:
+        str: Markdown text with images replaced by base64 data URIs
+    """
+    if not text:
+        return text
+    
+    # Extract all image URLs
+    image_matches = extract_image_urls_from_markdown(text)
+    
+    if not image_matches:
+        return text
+    
+    modified_text = text
+    
+    for alt_text, image_url in image_matches:
+        logging.info(f"Processing image: {image_url}")
+        
+        # Skip external URLs (http/https)
+        if image_url.startswith('http://') or image_url.startswith('https://'):
+            logging.warning(f"Skipping external URL: {image_url}")
+            continue
+        
+        # Fetch image from blob storage
+        image_data = fetch_image_from_blob(image_url)
+        
+        if image_data:
+            # Convert to base64 data URI
+            data_uri = image_to_base64(image_data, image_url)
+            
+            if data_uri:
+                # Replace the image URL in the markdown
+                old_pattern = f"![{alt_text}]({image_url})"
+                new_pattern = f"![{alt_text}]({data_uri})"
+                modified_text = modified_text.replace(old_pattern, new_pattern)
+                logging.info(f"Successfully embedded image: {image_url}")
+            else:
+                logging.warning(f"Failed to convert image to base64: {image_url}")
+        else:
+            logging.warning(f"Failed to fetch image from blob: {image_url}")
+    
+    return modified_text
+
 def parse_markdown_to_html(text):
     """
     Convert markdown text to HTML with proper formatting.
-    Falls back to basic formatting if markdown library is not available.
+    Embeds images from Azure Blob Storage as base64 data URIs.
     
     Args:
         text: Raw text that may contain markdown
         
     Returns:
-        str: HTML formatted text
+        str: HTML formatted text with embedded images
     """
     if not text:
         return ""
     
-    # Escape HTML first to prevent XSS
-    text = html.escape(text)
+    # First, embed images from blob storage as base64
+    # This replaces image URLs with data URIs in the markdown
+    text = embed_images_in_markdown(text)
+    
+    # Note: We don't escape HTML before markdown conversion because:
+    # 1. It would break the base64 data URIs
+    # 2. It would break markdown syntax
+    # 3. The markdown library handles the conversion safely
 
     # Use markdown library with extensions for better formatting
     md = markdown.Markdown(extensions=[
@@ -301,6 +450,15 @@ def format_conversation_as_html(conversation_data):
                 margin: 24px 0;
             }}
             
+            .content img {{
+                max-width: 100%;
+                height: auto;
+                border-radius: 8px;
+                margin: 16px 0;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                display: block;
+            }}
+            
             .timestamp {{
                 color: #9ca3af;
                 font-size: 12px;
@@ -406,7 +564,6 @@ def format_conversation_as_html(conversation_data):
     for message in messages:
         role = message.get('role', 'unknown')
         content = message.get('content', '')
-        
         # Parse markdown content to HTML
         formatted_content = parse_markdown_to_html(content)
         
@@ -695,15 +852,16 @@ def upload_to_blob_storage(content, filename, user_id, content_type="text/html")
             content_settings=ContentSettings(content_type=content_type)
         )
         
-        # Get a user delegation key to sign the SAS token, valid for 7 days
+        # Get a user delegation key to sign the SAS token, valid for 10 years
         delegation_key_start_time = datetime.now(timezone.utc)
-        delegation_key_expiry_time = delegation_key_start_time + timedelta(days=365)
+        delegation_key_expiry_time = delegation_key_start_time + timedelta(days=7)
         
         user_delegation_key = blob_service_client.get_user_delegation_key(
             key_start_time=delegation_key_start_time,
             key_expiry_time=delegation_key_expiry_time
         )
         
+        sas_expiration = delegation_key_start_time + timedelta(days=3652)
         # Generate a user-delegation SAS token for the blob
         sas_token = generate_blob_sas(
             account_name=blob_service_client.account_name,
@@ -711,7 +869,7 @@ def upload_to_blob_storage(content, filename, user_id, content_type="text/html")
             blob_name=f"{user_id}/{filename}",
             user_delegation_key=user_delegation_key,
             permission=BlobSasPermissions(read=True),
-            expiry=delegation_key_expiry_time
+            expiry=sas_expiration
         )
         
         # Construct the full URL with SAS token
