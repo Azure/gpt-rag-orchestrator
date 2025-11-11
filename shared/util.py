@@ -22,7 +22,6 @@ from tenacity import retry, wait_random_exponential, stop_after_attempt
 from .exceptions import MissingRequiredFieldError
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
 from shared.cosmos_client_async import get_db, get_container
-from orc.graphs.constants import VERBOSITY_PROMPTS, VerbosityLevel
 
 
 # logging level
@@ -1539,7 +1538,7 @@ def normalize_markdown(md_raw: str) -> str:
 
 
 def get_verbosity_instruction(
-    user_settings: dict, default: VerbosityLevel = VerbosityLevel.BALANCED
+    user_settings: dict, default = None
 ) -> str:
     """
     Get the verbosity instruction based on user settings.
@@ -1551,6 +1550,12 @@ def get_verbosity_instruction(
     Returns:
         Corresponding verbosity instruction string
     """
+    # Import here to avoid circular dependency
+    from orc.graphs.constants import VERBOSITY_PROMPTS, VerbosityLevel
+    
+    if default is None:
+        default = VerbosityLevel.BALANCED
+    
     verbosity_value = user_settings.get("detail_level")
 
     logging.info(f"[Util] User verbosity setting: {verbosity_value}")
