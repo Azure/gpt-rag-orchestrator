@@ -25,7 +25,6 @@ from shared.util import (
 )
 
 from orc import ConversationOrchestrator, get_settings
-from financial_orc import orchestrator as financial_orchestrator
 from shared.conversation_export import export_conversation
 from webscrapping.multipage_scrape import crawl_website
 from report_worker.processor import extract_message_metadata, process_report_job
