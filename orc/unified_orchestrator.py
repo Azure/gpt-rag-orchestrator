@@ -21,6 +21,9 @@ import re
 import time
 import json
 import traceback
+import aiohttp
+import asyncio
+import queue
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Annotated
 from datetime import datetime, timezone
@@ -36,6 +39,7 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     SystemMessage,
+    ToolMessage,
 )
 from langchain_core.tools import StructuredTool
 from langchain_openai import AzureChatOpenAI
@@ -60,6 +64,7 @@ from shared.prompts import (
     CREATIVE_COPYWRITER_PROMPT,
     QUERY_REWRITING_PROMPT,
     AUGMENTED_QUERY_PROMPT,
+    FA_HELPDESK_PROMPT,
     MCP_SYSTEM_PROMPT,
 )
 
@@ -101,6 +106,7 @@ class ConversationState:
     # Input
     question: str
     blob_names: List[str] = field(default_factory=list)
+    is_data_analyst_mode: bool = False
 
     # Query Processing
     rewritten_query: str = ""
@@ -837,6 +843,7 @@ class QueryPlanner:
         - Marketing Plan
         - Brand Positioning Statement
         - Creative Copywriter
+        - Help Desk
         - General
 
         Args:
@@ -858,6 +865,7 @@ class QueryPlanner:
 
             - Creative Brief
             - Marketing Plan
+            - Help Desk
             - Brand Positioning Statement
             - Creative Copywriter
             - General
@@ -870,7 +878,8 @@ class QueryPlanner:
             - **Creative Brief**: Look for project kickoffs, campaign overviews, client objectives, audience targeting, timelines, deliverables, or communication goals.
             - **Marketing Plan**: Look for references to strategy, goals, budget, channels, timelines, performance metrics, or ROI.
             - **Brand Positioning Statement**: Watch for messages about defining brand essence, values, personality, competitive differentiation, or target audience perception.
-            - **Creative Copywriter**: Use this category when the user asks for help creating or refining marketing text. This includes taglines, headlines, ad copy, email subject lines, social captions, website copy, or product descriptions. Trigger this if the user is brainstorming, writing, or editing text with a creative, promotional purpose.
+            - **Creative Copywriter**: Use this category when users ask meta-questions about your fundamental functions, purpose, or identity. This applies to inquiries such as "What can you do?", "What are your capabilities?", or "How do you work?". This category is distinct from standard user commands or requests for technical support.
+            - **Help Desk**: Use this category when users ask "What can you do?", "What are your capabilities?", or similar questions about your functions.
             - **General**: If the input lacks context, doesn't relate to marketing deliverables, or is unclear or unrelated to the above.
 
             If the question or context is not clearly related to any of the above categories, always return "General".
@@ -1323,6 +1332,7 @@ class ResponseGenerator:
             "Marketing Plan": MARKETING_PLAN_PROMPT,
             "Brand Positioning Statement": BRAND_POSITION_STATEMENT_PROMPT,
             "Creative Copywriter": CREATIVE_COPYWRITER_PROMPT,
+            "Help Desk": FA_HELPDESK_PROMPT,
         }
 
         if state.query_category in category_prompts:
@@ -1608,6 +1618,189 @@ class ConversationOrchestrator:
                 f"[ErrorHandler] Failed to store error: {store_error}",
                 extra={"original_error": str(error), "context": context},
             )
+
+    @traceable(run_type="tool", name="data_analyst_stream")
+    async def _stream_data_analyst(
+        self,
+        query: str, # rewritten by claude before sending to the mcp server
+        organization_id: str,
+        code_thread_id: Optional[str],
+        user_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """
+        Call data_analyst streaming endpoint and emit thinking tokens.
+
+        Args:
+            query: User's query
+            organization_id: Organization ID
+            code_thread_id: Optional thread ID
+            user_id: Optional user ID
+
+        Returns:
+            Dict with complete response matching tool result format
+        """
+        logger.info(
+            f"[StreamDataAnalyst] Starting streaming call for query: {query[:100]}"
+        )
+        is_local = os.getenv("ENVIRONMENT", "").lower() == "local"
+        if is_local:
+            base_url = "http://localhost:7073"
+        else:
+            mcp_function_name = os.getenv("MCP_FUNCTION_NAME")
+            mcp_function_secret = get_secret("mcp-host--functionkey")
+            base_url = f"https://{mcp_function_name}.azurewebsites.net"
+
+        stream_url = f"{base_url}/api/data-analyst-stream"
+
+        payload = {
+            "query": query,
+            "organization_id": organization_id,
+            "code_thread_id": code_thread_id,
+            "user_id": user_id,
+        }
+
+        # Add function key for production
+        headers = {"Content-Type": "application/json"}
+        params = {}
+        if not is_local:
+            params["code"] = mcp_function_secret
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    stream_url,
+                    json=payload,
+                    headers=headers,
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=300),
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(
+                            f"[StreamDataAnalyst] HTTP {response.status}: {error_text}"
+                        )
+                        raise RuntimeError(
+                            f"Streaming endpoint returned {response.status}"
+                        )
+
+                    logger.info("[StreamDataAnalyst] Connected to SSE stream")
+
+                    complete_data = None
+                    buffer = ""
+                    async for chunk in response.content.iter_any():
+                        if not chunk:
+                            continue
+
+                        # Decode and add to buffer
+                        buffer += chunk.decode("utf-8")
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            line = line.strip()
+
+                            if not line or not line.startswith("data:"):
+                                continue
+
+                            # Extract JSON after "data: "
+                            json_str = line[5:].strip()
+
+                            if json_str == "[DONE]":
+                                break
+
+                            try:
+                                chunk_data = json.loads(json_str)
+                                chunk_type = chunk_data.get("type")
+
+                                if chunk_type == "thinking":
+                                    thinking_data = {
+                                        "type": "thinking",
+                                        "content": chunk_data.get("content", ""),
+                                        "timestamp": time.time(),
+                                    }
+                                    self._progress_queue.append(
+                                        f"__THINKING__{json.dumps(thinking_data)}__THINKING__\n"
+                                    )
+
+                                # Forward content tokens to UI (all content from data analyst treated as thinking)
+                                elif chunk_type == "content":
+                                    content_data = {
+                                        "type": "data_analyst_content",
+                                        "content": chunk_data.get("content", ""),
+                                        "timestamp": time.time(),
+                                    }
+                                    self._progress_queue.append(
+                                        f"__PROGRESS__{json.dumps(content_data)}__PROGRESS__\n"
+                                    )
+
+                                elif chunk_type == "complete":
+                                    complete_data = chunk_data.get("data", {})
+                                    logger.info(
+                                        "[StreamDataAnalyst] Received complete event"
+                                    )
+
+                                elif chunk_type == "done":
+                                    logger.info("[StreamDataAnalyst] Stream done")
+                                    break
+
+                                elif chunk_type == "error":
+                                    error_msg = chunk_data.get("error", "Unknown error")
+                                    logger.error(
+                                        f"[StreamDataAnalyst] Stream error: {error_msg}"
+                                    )
+                                    raise RuntimeError(f"Streaming error: {error_msg}")
+
+                            except json.JSONDecodeError as e:
+                                logger.warning(
+                                    f"[StreamDataAnalyst] Failed to parse chunk: {json_str[:100]}"
+                                )
+                                continue
+
+            if not complete_data:
+                raise RuntimeError("Stream ended without complete data")
+
+            logger.info(
+                f"[StreamDataAnalyst] Complete: success={complete_data.get('success')}, "
+                f"artifacts={len(complete_data.get('artifacts', []))}"
+            )
+
+            return {
+                "success": complete_data.get("success", False),
+                "code_thread_id": complete_data.get("container_id", ""),
+                "images_processed": self._transform_artifacts_to_images(
+                    complete_data.get("artifacts", [])
+                ),
+                "blob_urls": self._transform_artifacts_to_blobs(
+                    complete_data.get("artifacts", [])
+                ),
+                "last_agent_message": complete_data.get("response", ""),
+                "error": complete_data.get("error"),
+            }
+
+        except Exception as e:
+            logger.error(f"[StreamDataAnalyst] Error: {e}", exc_info=True)
+            raise
+
+    def _transform_artifacts_to_images(self, artifacts: List[Dict]) -> List[Dict]:
+        """Transform streaming artifacts to images_processed format."""
+        return [
+            {
+                "file_id": art.get("blob_path", ""),
+                "filename": art.get("filename", "unknown"),
+                "size_bytes": art.get("size", 0),
+                "content_type": "image/png",
+            }
+            for art in artifacts
+        ]
+
+    def _transform_artifacts_to_blobs(self, artifacts: List[Dict]) -> List[Dict]:
+        """Transform streaming artifacts to blob_urls format."""
+        return [
+            {
+                "filename": art.get("filename", "unknown"),
+                "blob_url": art.get("blob_url", ""),
+                "blob_path": art.get("blob_path", ""),
+            }
+            for art in artifacts
+        ]
 
     def _init_planning_llm(self) -> AzureChatOpenAI:
         """
@@ -2052,6 +2245,14 @@ class ConversationOrchestrator:
                 logger.info(
                     f"[Prepare Tools Node] Forced document_chat for {len(state.blob_names)} documents"
                 )
+            # Force data_analyst if data analyst mode is active
+            elif state.is_data_analyst_mode:
+                self.wrapped_tools = [
+                    t for t in self.wrapped_tools if t.name == "data_analyst"
+                ]
+                logger.info(
+                    "[Prepare Tools Node] Forced data_analyst tool (data analyst mode active)"
+                )
 
             logger.info(
                 f"[Prepare Tools Node] Prepared {len(self.wrapped_tools)} tools"
@@ -2207,6 +2408,15 @@ If user requests a chart after using the data_analyst tool, always trigger the d
                     self.wrapped_tools,
                     tool_choice={"type": "tool", "name": "document_chat"},
                 )
+            elif (
+                len(self.wrapped_tools) == 1
+                and self.wrapped_tools[0].name == "data_analyst"
+            ):
+                logger.info("[Plan Tools Node] Forcing data_analyst tool usage")
+                model_with_tools = self.tool_calling_llm.bind_tools(
+                    self.wrapped_tools,
+                    tool_choice={"type": "tool", "name": "data_analyst"},
+                )
             else:
                 model_with_tools = self.tool_calling_llm.bind_tools(self.wrapped_tools)
 
@@ -2252,7 +2462,8 @@ If user requests a chart after using the data_analyst tool, always trigger the d
         Execute tools node: Execute tools requested by the model.
 
         Uses ToolNode to execute the tools that were requested in the most
-        recent AIMessage. Returns updated messages with ToolMessage results.
+        recent AIMessage. For data_analyst, uses streaming endpoint directly.
+        Returns updated messages with ToolMessage results.
 
         Args:
             state: Current conversation state
@@ -2264,10 +2475,15 @@ If user requests a chart after using the data_analyst tool, always trigger the d
 
         # Detect which tool is being executed from the last message
         tool_name = None
+        tool_call_id = None
+        tool_args = {}
         if state.messages and len(state.messages) > 0:
             last_message = state.messages[-1]
             if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-                tool_name = last_message.tool_calls[0].get("name")
+                tool_call = last_message.tool_calls[0]
+                tool_name = tool_call.get("name")
+                tool_call_id = tool_call.get("id")
+                tool_args = tool_call.get("args", {})
 
         # Emit tool-specific execution message
         if tool_name:
@@ -2294,14 +2510,42 @@ If user requests a chart after using the data_analyst tool, always trigger the d
         )
 
         try:
-            tool_node = ToolNode(self.wrapped_tools)
-            result = await tool_node.ainvoke(state)
+            if tool_name == "data_analyst":
+                logger.info("[Execute Tools Node] Using streaming for data_analyst")
 
-            logger.info(
-                f"[Execute Tools Node] Executed tools, got {len(result.get('messages', []))} result messages"
-            )
+                query = tool_args.get("query", state.question)
+                org_id = self.organization_id
+                code_thread_id = state.code_thread_id
+                user_id = (
+                    self.current_user_info.get("id") if self.current_user_info else None
+                )
 
-            return result
+                result_data = await self._stream_data_analyst(
+                    query=query,
+                    organization_id=org_id,
+                    code_thread_id=code_thread_id,
+                    user_id=user_id,
+                )
+
+                tool_message = ToolMessage(
+                    content=json.dumps(result_data),
+                    tool_call_id=tool_call_id,
+                    name="data_analyst",
+                )
+
+                logger.info("[Execute Tools Node] data_analyst streaming complete")
+
+                return {"messages": [tool_message]}
+
+            else:
+                tool_node = ToolNode(self.wrapped_tools)
+                result = await tool_node.ainvoke(state)
+
+                logger.info(
+                    f"[Execute Tools Node] Executed tools, got {len(result.get('messages', []))} result messages"
+                )
+
+                return result
 
         except Exception as e:
             logger.error(f"[Execute Tools Node] Error executing tools: {e}")
@@ -2710,54 +2954,83 @@ If user requests a chart after using the data_analyst tool, always trigger the d
         )
 
         try:
-            async for event in graph.astream_events(state, config, version="v2"):
-                # Process different event types
-                event_type = event.get("event", "")
+            output_queue = asyncio.Queue()
+            graph_done = asyncio.Event()
 
-                # Log event for debugging
-                logger.debug(
-                    f"[Graph Event] Type: {event_type}",
-                    extra={
-                        "conversation_id": self.current_conversation_id,
-                        "event_type": event_type,
-                        "event_name": event.get("name", ""),
-                    },
-                )
-                if event_type == "on_chain_start":
-                    node_name = event.get("name", "")
-                    logger.info(
-                        f"[Graph Event] Node started: {node_name}",
-                        extra={
-                            "conversation_id": self.current_conversation_id,
-                            "node_name": node_name,
-                        },
+            async def progress_monitor():
+                """Monitor progress queue and forward items."""
+                try:
+                    while not graph_done.is_set():
+                        while self._progress_queue:
+                            item = self._progress_queue.pop(0)
+                            await output_queue.put(("progress", item))
+
+                        # Small delay to avoid busy waiting
+                        await asyncio.sleep(0.05) 
+
+                    # Final flush after graph completes
+                    while self._progress_queue:
+                        item = self._progress_queue.pop(0)
+                        await output_queue.put(("progress", item))
+
+                except Exception as e:
+                    logger.error(f"Progress monitor error: {e}", exc_info=True)
+
+            async def graph_executor():
+                """Execute graph and forward events."""
+                try:
+                    async for event in graph.astream_events(
+                        state, config, version="v2"
+                    ):
+                        event_type = event.get("event", "")
+
+                        if event_type == "on_chain_start":
+                            node_name = event.get("name", "")
+                            logger.info(f"[Graph Event] Node started: {node_name}")
+                        elif event_type == "on_chain_end":
+                            node_name = event.get("name", "")
+                            logger.info(f"[Graph Event] Node completed: {node_name}")
+                        elif event_type == "on_chain_error":
+                            error = event.get("data", {}).get("error", "Unknown error")
+                            logger.error(f"[Graph Event] Error: {error}")
+                            raise RuntimeError(f"Graph execution error: {error}")
+
+                except Exception as e:
+                    await output_queue.put(("error", e))
+                finally:
+                    graph_done.set()
+                    await output_queue.put(("done", None))
+
+            # Start both tasks
+            monitor_task = asyncio.create_task(progress_monitor())
+            graph_task = asyncio.create_task(graph_executor())
+
+            # Yield items as they become available
+            while True:
+                try:
+                    item_type, item_data = await asyncio.wait_for(
+                        output_queue.get(), timeout=0.1
                     )
 
-                elif event_type == "on_chain_end":
-                    node_name = event.get("name", "")
-                    logger.info(
-                        f"[Graph Event] Node completed: {node_name}",
-                        extra={
-                            "conversation_id": self.current_conversation_id,
-                            "node_name": node_name,
-                        },
-                    )
+                    if item_type == "progress":
+                        yield item_data
+                    elif item_type == "error":
+                        raise item_data
+                    elif item_type == "done":
+                        break
 
-                elif event_type == "on_chain_error":
-                    error = event.get("data", {}).get("error", "Unknown error")
-                    logger.error(
-                        f"[Graph Event] Error: {error}",
-                        extra={
-                            "conversation_id": self.current_conversation_id,
-                            "error": str(error),
-                        },
-                    )
-                    raise RuntimeError(f"Graph execution error: {error}")
+                except asyncio.TimeoutError:
+                    if graph_done.is_set() and output_queue.empty():
+                        break
+                    continue
 
-                # Yield progress updates from the queue
-                while self._progress_queue:
-                    item = self._progress_queue.pop(0)
-                    yield item
+            # Ensure both tasks complete
+            await graph_task
+            monitor_task.cancel()
+            try:
+                await monitor_task
+            except asyncio.CancelledError:
+                pass
 
             # Yield any remaining items in the progress queue
             while self._progress_queue:
@@ -2794,6 +3067,7 @@ If user requests a chart after using the data_analyst tool, always trigger the d
         user_settings: Optional[Dict[str, Any]] = None,
         user_timezone: Optional[str] = None,
         blob_names: Optional[List[str]] = None,
+        is_data_analyst_mode: Optional[bool] = None,
     ):
         """
         Main entry point for generating responses with progress streaming.
@@ -2812,6 +3086,7 @@ If user requests a chart after using the data_analyst tool, always trigger the d
             user_settings: User preferences (temperature, model, detail_level)
             user_timezone: User's timezone
             blob_names: List of uploaded file names
+            is_data_analyst_mode: Whether data analyst mode is active
 
         Yields:
             Progress updates (__PROGRESS__), metadata (__METADATA__), and response tokens
@@ -2820,6 +3095,7 @@ If user requests a chart after using the data_analyst tool, always trigger the d
         conversation_id = conversation_id or str(uuid.uuid4())
         blob_names = blob_names or []
         user_settings = user_settings or {}
+        is_data_analyst_mode = is_data_analyst_mode or False
 
         log_info(f"[ConversationOrchestrator] Starting conversation: {conversation_id}")
         log_info(f"[ConversationOrchestrator] Question: {question[:100]}...")
@@ -2880,7 +3156,11 @@ If user requests a chart after using the data_analyst tool, always trigger the d
                 },
             )
 
-            initial_state = ConversationState(question=question, blob_names=blob_names)
+            initial_state = ConversationState(
+                question=question,
+                blob_names=blob_names,
+                is_data_analyst_mode=is_data_analyst_mode,
+            )
 
             # Create memory saver for checkpointing
             memory = MemorySaver()
