@@ -141,10 +141,11 @@ class OrchestratorConfig:
     planning_max_tokens: int = 50000  # account for conversation history
     planning_api_version: str = "2025-04-01-preview"
 
-    # Response Model Configuration (Anthropic Claude Sonnet)
+    # Response Model Configuration (Anthropic Claude Sonnet with Extended Thinking)
     response_model: str = "claude-sonnet-4-5-20250929"
-    response_temperature: float = 0.3
+    response_temperature: float = 1.0  # Must be 1.0 for extended thinking
     response_max_tokens: int = 64000
+    thinking_budget: int = 3000
 
     # Tool Calling Model Configuration (Anthropic Claude Haiku - faster/cheaper)
     tool_calling_model: str = "claude-haiku-4-5"
@@ -636,7 +637,7 @@ class ContextBuilder:
                                 if blob_path:
                                     blob_urls.append(blob_path)
                                     context_docs.append(
-                                        f"Here is the graph/visualization link: \n\n{blob_path}"
+                                        f"Here is the graph/visualization link - This link is used to render a UI image. Do not change any character in this link, or the image rendering will break: \n\n{blob_path}"
                                     )
                                     logger.debug(
                                         f"[ContextBuilder] Added blob URL from message: {blob_path}"
@@ -1381,7 +1382,7 @@ class ResponseGenerator:
         """
         logger.debug("[ResponseGenerator] Building user prompt")
 
-        user_prompt = f"Original Question: {state.question}"
+        user_prompt = state.question
 
         # Check detail_level setting
         detail_level = user_settings.get("detail_level", "balanced")
@@ -1403,25 +1404,20 @@ class ResponseGenerator:
         return user_prompt
 
     @traceable(run_type="llm", name="claude_generate_response")
-    async def generate_streaming_response(
-        self, system_prompt: str, user_prompt: str, temperature: Optional[float] = None
-    ):
+    async def generate_streaming_response(self, system_prompt: str, user_prompt: str):
         """
         Generate streaming response from Claude with extended thinking.
 
         Uses Anthropic Claude (claude-sonnet-4-5-20250929) for streaming.
-        Enables extended thinking and streams both thinking tokens and answer tokens.
-
-        Thinking tokens are formatted as: __THINKING__text__THINKING__
-        Answer tokens are streamed as-is.
+        Enables extended thinking but only yields text content (reasoning blocks are hidden).
+        Temperature is fixed at 1.0 (set in LLM init) as required for extended thinking.
 
         Args:
             system_prompt: System prompt
             user_prompt: User prompt
-            temperature: Optional temperature override from user settings
 
         Yields:
-            Response tokens (thinking and answer)
+            Response text tokens
         """
         logger.info("[ResponseGenerator] Starting streaming response generation")
 
@@ -1431,17 +1427,28 @@ class ResponseGenerator:
                 HumanMessage(content=user_prompt),
             ]
 
-            logger.debug("[ResponseGenerator] Invoking Claude with streaming enabled")
+            logger.debug(
+                "[ResponseGenerator] Invoking Claude with extended thinking and streaming enabled"
+            )
+            # Don't pass temperature to astream() - already set in LLM init (must be 1.0 for thinking)
+            async for chunk in self.claude_llm.astream(messages):
+                if hasattr(chunk, "content"):
+                    # Content can be a string or a list of content blocks
+                    if isinstance(chunk.content, str) and chunk.content:
+                        yield chunk.content
+                    elif isinstance(chunk.content, list):
+                        # Handle content blocks (reasoning/thinking, text, etc.)
+                        for block in chunk.content:
+                            if isinstance(block, dict):
+                                block_type = block.get("type")
 
-            async for chunk in self.claude_llm.astream(
-                messages, temperature=temperature
-            ):
-                if hasattr(chunk, "content") and chunk.content:
-                    # Check if this is a thinking token
-                    # Claude's extended thinking tokens are typically marked differently
-                    # For now, we'll stream all content as answer tokens
-                    # If Claude provides thinking tokens in a specific format, we can detect and wrap them
-                    yield chunk.content
+                                # Only yield text blocks (skip reasoning blocks)
+                                if block_type == "text":
+                                    text_content = block.get("text", "")
+                                    if text_content:
+                                        yield text_content
+                            elif isinstance(block, str) and block:
+                                yield block
 
             logger.info("[ResponseGenerator] Completed streaming response generation")
 
@@ -1622,7 +1629,7 @@ class ConversationOrchestrator:
     @traceable(run_type="tool", name="data_analyst_stream")
     async def _stream_data_analyst(
         self,
-        query: str, # rewritten by claude before sending to the mcp server
+        query: str,  # rewritten by claude before sending to the mcp server
         organization_id: str,
         code_thread_id: Optional[str],
         user_id: Optional[str],
@@ -1832,13 +1839,13 @@ class ConversationOrchestrator:
 
     def _init_response_llm(self) -> ChatAnthropic:
         """
-        Initialize Anthropic Claude Sonnet LLM for response generation.
+        Initialize Anthropic Claude Sonnet LLM for response generation with extended thinking.
 
         Returns:
-            Configured ChatAnthropic instance
+            Configured ChatAnthropic instance with extended thinking enabled
         """
         logger.info(
-            "[ConversationOrchestrator] Initializing response LLM (Claude Sonnet)"
+            "[ConversationOrchestrator] Initializing response LLM (Claude Sonnet with extended thinking)"
         )
 
         api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -1853,6 +1860,7 @@ class ConversationOrchestrator:
             api_key=api_key,
             max_tokens=self.config.response_max_tokens,
             max_retries=3,
+            thinking={"type": "enabled", "budget_tokens": self.config.thinking_budget},
         )
 
     def _init_tool_calling_llm(self) -> ChatAnthropic:
@@ -2673,7 +2681,7 @@ If user requests a chart after using the data_analyst tool, always trigger the d
         progress_data = {
             "type": "progress",
             "step": "response_generation",
-            "message": "Generating response...",
+            "message": "Finalizing Thoughts & Generating Response...",
             "progress": 70,
             "timestamp": time.time(),
         }
@@ -2705,7 +2713,6 @@ If user requests a chart after using the data_analyst tool, always trigger the d
             async for token in self.response_generator.generate_streaming_response(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                temperature=self.config.response_temperature,
             ):
                 response_text += token
                 self._progress_queue.append(token)
@@ -2966,7 +2973,7 @@ If user requests a chart after using the data_analyst tool, always trigger the d
                             await output_queue.put(("progress", item))
 
                         # Small delay to avoid busy waiting
-                        await asyncio.sleep(0.05) 
+                        await asyncio.sleep(0.05)
 
                     # Final flush after graph completes
                     while self._progress_queue:
