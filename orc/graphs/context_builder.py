@@ -120,7 +120,7 @@ class ContextBuilder:
                     if blob_path:
                         logger.info(f"[MCP] Adding blob path to context: {blob_path}")
                         docs.append(
-                            f"Here is the graph/visualization link: \n\n{blob_path}"
+                            f"Here is the graph/visualization link - NEVER CHANGE THE NAME OF THE IMAGE/LINK - THIS IS ABSOLUTELY CRITICAL: \n\n{blob_path}"
                         )
 
             elif name == TOOL_WEB_FETCH and isinstance(result, dict):

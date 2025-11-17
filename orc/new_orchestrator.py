@@ -382,7 +382,7 @@ class ConversationOrchestrator:
             if model == "gpt-4.1":
                 logging.info("[orchestrator] Streaming response from Azure Chat OpenAI")
                 response_llm = AzureChatOpenAI(
-                    temperature=user_settings.get("temperature", 0.4),
+                    temperature=user_settings.get("temperature", 0.3),
                     openai_api_version="2025-01-01-preview",
                     azure_deployment=model,
                     streaming=True,
@@ -411,10 +411,11 @@ class ConversationOrchestrator:
                 logging.info("[orchestrator] Streaming response from Claude 4 Sonnet")
                 response_llm = ChatAnthropic(
                     model="claude-sonnet-4-5-20250929",
-                    temperature=0,
+                    temperature=user_settings.get("temperature", 0.3),
                     streaming=True,
                     api_key=os.getenv("ANTHROPIC_API_KEY"),
-                    max_tokens=10000,
+                    max_tokens=64000,
+                    max_retries=3,
                 )
                 tokens = response_llm.stream(
                     [

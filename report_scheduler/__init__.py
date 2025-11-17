@@ -14,7 +14,7 @@ TIMEOUT_SECONDS = 120
 MAX_RETRIES = 3
 
 def main(mytimer: func.TimerRequest) -> None:
-    """Main function for report scheduler - runs at 2:00 AM UTC every Sunday"""
+    """Main function for report scheduler - runs at 6:00 AM UTC every Sunday"""
     
     # Check if the environment variable is set
     if not WEB_APP_URL:

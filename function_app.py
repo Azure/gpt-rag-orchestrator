@@ -24,8 +24,7 @@ from shared.util import (
     trigger_indexer_with_retry,
 )
 
-from orc import new_orchestrator
-from financial_orc import orchestrator as financial_orchestrator
+from orc import ConversationOrchestrator, get_settings
 from shared.conversation_export import export_conversation
 from webscrapping.multipage_scrape import crawl_website
 from report_worker.processor import extract_message_metadata, process_report_job
@@ -120,20 +119,20 @@ async def start_orch(req: Request, client: df.DurableOrchestrationClient):
     instance_id = await client.start_new(orch, client_input=payload)
     return Response(content=json.dumps({"instanceId": instance_id}), media_type="application/json")
 
-@app.timer_trigger(schedule="0 0 2 * * 0", arg_name="mytimer", run_on_startup=False)  # Every Sunday at 2:00 AM UTC
+@app.timer_trigger(schedule="0 0 6 * * 0", arg_name="mytimer", run_on_startup=False)  # Every Sunday at 6:00 AM UTC
 @app.durable_client_input(client_name="client")
 async def batch_jobs_timer(mytimer: func.TimerRequest, client: df.DurableOrchestrationClient) -> None:
     """
-    Timer trigger that runs every Sunday at 2:00 AM UTC.
-    Cron expression: "0 0 2 * * 0" means:
+    Timer trigger that runs every Sunday at 6:00 AM UTC.
+    Cron expression: "0 0 6 * * 0" means:
     - 0 seconds
     - 0 minutes
-    - 2 hours (2:00 AM)
+    - 6 hours (6:00 AM)
     - * any day of month
     - * any month
     - 0 Sunday
     """
-    logging.info("Batch jobs timer trigger started - Sunday 2:00 AM UTC")
+    logging.info("Batch jobs timer trigger started - Sunday 6:00 AM UTC")
 
     try:
         # Step 1: Create batch jobs
@@ -159,6 +158,7 @@ async def stream_response(req: Request) -> StreamingResponse:
     conversation_id = req_body.get("conversation_id")
     user_timezone = req_body.get("user_timezone")
     blob_names = req_body.get("blob_names", [])
+    is_data_analyst_mode = req_body.get("is_data_analyst_mode", False)
     client_principal_id = req_body.get("client_principal_id")
     client_principal_name = req_body.get("client_principal_name")
     client_principal_organization = req_body.get("client_principal_organization")
@@ -182,7 +182,7 @@ async def stream_response(req: Request) -> StreamingResponse:
         )
 
     # print configuration settings for the user
-    settings = new_orchestrator.get_settings(client_principal)
+    settings = get_settings(client_principal)
     logging.info(f"[function_app] Configuration settings: {settings}")
 
     # validate settings
@@ -191,7 +191,7 @@ async def stream_response(req: Request) -> StreamingResponse:
     settings["model"] = settings.get("model") or "gpt-4.1"
     logging.info(f"[function_app] Validated settings: {settings}")
     if question:
-        orchestrator = new_orchestrator.ConversationOrchestrator(
+        orchestrator = ConversationOrchestrator(
             organization_id=organization_id
         )
         try:
@@ -204,6 +204,7 @@ async def stream_response(req: Request) -> StreamingResponse:
                     user_settings=settings,
                     user_timezone=user_timezone,
                     blob_names=blob_names,
+                    is_data_analyst_mode=is_data_analyst_mode,
                 ),
                 media_type="text/event-stream",
             )
@@ -468,67 +469,69 @@ async def webhook(req: Request) -> Response:
         content=json.dumps({"success": True}), media_type="application/json"
     )
 
-@app.blob_trigger(
-    arg_name="myblob",
-    path="documents/{name}",
-    connection="AZURE_STORAGE_CONNECTION_STRING",
-)
-def blob_trigger(myblob: func.InputStream):
-    """
-    Azure Blob Storage trigger that processes uploaded documents and triggers search index updates.
+if not os.getenv("ENVIRONMENT"):
+    @app.blob_trigger(
+        arg_name="myblob",
+        path="documents/{name}",
+        connection="AZURE_STORAGE_CONNECTION_STRING",
+    )
+    def blob_trigger(myblob: func.InputStream):
+        """
+        Azure Blob Storage trigger that processes uploaded documents and triggers search index updates.
+        Only active when ENVIRONMENT variable is not set.
 
-    Args:
-        myblob (func.InputStream): The uploaded blob file stream
-    """
-    try:
-        # Extract file information
-        blob_name = myblob.name
-        file_extension = os.path.splitext(blob_name)[1].lower() if blob_name else ""
+        Args:
+            myblob (func.InputStream): The uploaded blob file stream
+        """
+        try:
+            # Extract file information
+            blob_name = myblob.name
+            file_extension = os.path.splitext(blob_name)[1].lower() if blob_name else ""
 
-        logging.info(
-            f"[blob_trigger] Processing blob: {blob_name}, Extension: {file_extension}"
-        )
-
-        # Define supported file types for indexing
-        supported_extensions = {
-            ".pdf",
-            ".docx",
-            ".doc",
-            ".txt",
-            ".md",
-            ".html",
-            ".pptx",
-        }
-
-        if file_extension not in supported_extensions:
             logging.info(
-                f"[blob_trigger] File type {file_extension} not supported for indexing. Supported types: {supported_extensions}"
+                f"[blob_trigger] Processing blob: {blob_name}, Extension: {file_extension}"
             )
-            return
 
-        # Get indexer name from environment or use default
-        indexer_name = f'{os.getenv("AZURE_AI_SEARCH_INDEX_NAME")}-test-indexer'  # TODO: change to the actual indexer name once moved to prod
+            # Define supported file types for indexing
+            supported_extensions = {
+                ".pdf",
+                ".docx",
+                ".doc",
+                ".txt",
+                ".md",
+                ".html",
+                ".pptx",
+            }
 
-        logging.info(
-            f"[blob_trigger] Triggering indexer '{indexer_name}' for supported document: {blob_name}"
-        )
+            if file_extension not in supported_extensions:
+                logging.info(
+                    f"[blob_trigger] File type {file_extension} not supported for indexing. Supported types: {supported_extensions}"
+                )
+                return
 
-        # Trigger the indexer with retry logic for concurrent runs
-        indexer_success = trigger_indexer_with_retry(indexer_name, blob_name)
+            # Get indexer name from environment or use default
+            indexer_name = f'{os.getenv("AZURE_AI_SEARCH_INDEX_NAME")}-test-indexer'  # TODO: change to the actual indexer name once moved to prod
 
-        if indexer_success:
             logging.info(
-                f"[blob_trigger] Successfully triggered indexer '{indexer_name}' for blob: {blob_name}"
-            )
-        else:
-            logging.warning(
-                f"[blob_trigger] Could not trigger indexer '{indexer_name}' for blob: {blob_name}. File will be indexed in next scheduled run."
+                f"[blob_trigger] Triggering indexer '{indexer_name}' for supported document: {blob_name}"
             )
 
-    except Exception as e:
-        logging.error(
-            f"[blob_trigger] Unexpected error processing blob {myblob.name if myblob else 'unknown'}: {str(e)}"
-        )
+            # Trigger the indexer with retry logic for concurrent runs
+            indexer_success = trigger_indexer_with_retry(indexer_name, blob_name)
+
+            if indexer_success:
+                logging.info(
+                    f"[blob_trigger] Successfully triggered indexer '{indexer_name}' for blob: {blob_name}"
+                )
+            else:
+                logging.warning(
+                    f"[blob_trigger] Could not trigger indexer '{indexer_name}' for blob: {blob_name}. File will be indexed in next scheduled run."
+                )
+
+        except Exception as e:
+            logging.error(
+                f"[blob_trigger] Unexpected error processing blob {myblob.name if myblob else 'unknown'}: {str(e)}"
+            )
 
 
 @app.route(
@@ -978,25 +981,3 @@ async def multipage_scrape(req: Request) -> Response:
             media_type="application/json",
             status_code=500,
         )
-
-
-# @app.timer_trigger(schedule="0 0 17 * * *", arg_name="mytimer", run_on_startup=False)
-# def report_scheduler_timer(mytimer: func.TimerRequest) -> None:
-#     """
-#     Timer trigger function that runs every day at 5:00 PM UTC.
-#     Cron expression: "0 0 17 * * *" means:
-#     - 0 seconds
-#     - 0 minutes
-#     - 17 hours (5 PM)
-#     - * any day of month
-#     - * any month
-#     - * any day of week
-#     """
-#     logging.info("Report scheduler timer trigger started")
-    
-#     try:
-#         report_scheduler_main(mytimer)
-#         logging.info("Report scheduler completed successfully")
-#     except Exception as e:
-#         logging.error(f"Report scheduler failed: {str(e)}")
-#         raise

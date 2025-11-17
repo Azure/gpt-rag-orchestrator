@@ -1,4 +1,5 @@
 import logging
+import re
 import sys
 from typing import List, Any, Optional
 from dotenv import load_dotenv
@@ -127,7 +128,9 @@ def clean_chat_history_for_llm(chat_history: List[Any]) -> str:
             continue
 
         if content:
-            formatted_history.append(f"{display_role}: {content}")
+            # Clean markdown images from content before adding to formatted history
+            cleaned_content = re.sub(r'!\[([^\]]*)\]\(([^\)]+)\)', '', content)
+            formatted_history.append(f"{display_role}: {cleaned_content}")
 
     logger.info(
         f"[Chat History Cleaning] Formatted {len(formatted_history)} messages for LLM consumption"
