@@ -1551,7 +1551,7 @@ def get_verbosity_instruction(
         Corresponding verbosity instruction string
     """
     # Import here to avoid circular dependency
-    from orc.graphs.constants import VERBOSITY_PROMPTS, VerbosityLevel
+    from orc.unified_orchestrator.enums import VERBOSITY_PROMPTS, VerbosityLevel
     
     if default is None:
         default = VerbosityLevel.BALANCED
