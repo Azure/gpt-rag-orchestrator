@@ -254,42 +254,4 @@ class ResponseGenerator:
             )
             error_message = "I apologize, but I encountered an error while generating the response. Please try again."
             yield error_message
-
-    def sanitize_response(self, text: str) -> str:
-        """
-        Remove Azure Storage URLs from response text.
-
-        Removes any URLs containing the Azure Storage account URL to prevent
-        exposing internal storage paths to users.
-
-        Args:
-            text: Response text to sanitize
-
-        Returns:
-            Sanitized response text with storage URLs removed
-        """
-        logger.debug("[ResponseGenerator] Sanitizing response")
-
-        if not self.storage_url or not text:
-            logger.debug("[ResponseGenerator] No sanitization needed")
-            return text
-
-        # Escape special regex characters in storage URL
-        escaped_storage_url = re.escape(self.storage_url)
-
-        # Pattern to match URLs containing the storage URL
-        # This will match the entire URL including any query parameters
-        pattern = rf"{escaped_storage_url}[^\s\)]*"
-
-        # Count matches before sanitization
-        matches = re.findall(pattern, text)
-        if matches:
-            logger.info(
-                f"[ResponseGenerator] Found {len(matches)} storage URLs to sanitize"
-            )
-            sanitized_text = re.sub(pattern, "[URL removed for security]", text)
-            logger.debug("[ResponseGenerator] Sanitization complete")
-            return sanitized_text
-        else:
-            logger.debug("[ResponseGenerator] No storage URLs found in response")
-            return text
+            

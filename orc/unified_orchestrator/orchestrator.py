@@ -1251,10 +1251,8 @@ class ConversationOrchestrator:
             logger.error(f"[Generate Response Node] Error generating response: {e}")
             response_text = "I apologize, but I encountered an error while generating the response. Please try again."
             self._progress_queue.append(response_text)
-
-        # Sanitize and store
-        sanitized_response = self.response_generator.sanitize_response(response_text)
-        self.current_response_text = sanitized_response
+        
+        self.current_response_text = response_text
 
         return {}
 
