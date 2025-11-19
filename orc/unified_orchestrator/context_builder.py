@@ -283,7 +283,13 @@ class ContextBuilder:
                                 if blob_path:
                                     blob_urls.append(blob_path)
                                     context_docs.append(
-                                        f"Here is the graph/visualization link - This link is used to render a UI image. Do not change any character in this link, or the image rendering will break: \n\n{blob_path}"
+                                        f"""
+                                        Below is the graph/visualization link - This link is used to render a UI image. Do not change any character in this link, or the image rendering will break.
+                                        In this scenario, if the link is a power point presentation (.pptx), cite it the same way as an image citation. This is a special case.
+                                        <link>
+                                        {blob_path}
+                                        </link>
+                                        """
                                     )
                                     logger.debug(
                                         f"[ContextBuilder] Added blob URL from message: {blob_path}"
