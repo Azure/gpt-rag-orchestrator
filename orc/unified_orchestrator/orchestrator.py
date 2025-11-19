@@ -311,7 +311,7 @@ class ConversationOrchestrator:
                     json=payload,
                     headers=headers,
                     params=params,
-                    timeout=aiohttp.ClientTimeout(total=300),
+                    timeout=aiohttp.ClientTimeout(total=600),
                 ) as response:
                     if response.status != 200:
                         error_text = await response.text()
