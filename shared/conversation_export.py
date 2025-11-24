@@ -412,6 +412,7 @@ def format_conversation_as_html(conversation_data):
                 text-decoration: none;
                 border-bottom: 1px solid transparent;
                 transition: border-color 0.2s;
+                display: none;
             }}
             
             .content a:hover {{
