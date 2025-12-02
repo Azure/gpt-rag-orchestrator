@@ -75,3 +75,12 @@ class CosmosDBClient:
                 document = None
                 logging.warning(f"[cosmosdb] could not update document: {e}", exc_info=True)
             return document
+        
+    async def update_or_create_document(self, container, key, body=None) -> dict: 
+        existing_doc = await self.get_document(container, key)
+        if existing_doc:
+            if body:
+                existing_doc.update(body)
+            return await self.update_document(container, existing_doc)
+        else:
+            return await self.create_document(container, key, body)

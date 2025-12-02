@@ -2,6 +2,7 @@ from .single_agent_rag_strategy import SingleAgentRAGStrategy
 from .agent_strategies import AgentStrategies
 from .mcp_strategy import McpStrategy
 from .nl2sql_strategy import NL2SQLStrategy
+from .realtime_voice_strategy import RealTimeVoiceStrategy
 
 class AgentStrategyFactory:
     @staticmethod
@@ -15,6 +16,8 @@ class AgentStrategyFactory:
             return await McpStrategy.create()
         if key == AgentStrategies.NL2SQL.value:
             return NL2SQLStrategy()
+        if key == AgentStrategies.REALTIME_VOICE.value:
+            return RealTimeVoiceStrategy()
         # if key == AgentStrategies.MULTIMODAL.value:
             # return ...
         # if key == AgentStrategies.MULTIAGENT.value:
