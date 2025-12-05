@@ -74,6 +74,17 @@ __pycache__/
 __blobstorage__
 __queuestorage__
 __azurite_db*__.json
+__azurite_db_blob__.json
+__azurite_db_blob_extent__.json
+__blobstorage__/
+.python_packages
+.vscode
+.azure
+note.md
+__azurite_db_queue__.json
+__azurite_db_table__.json
+__azurite_db_queue_extent__.json
+AzuriteConfig
 
 .azure
 shared/data/company_name.json
