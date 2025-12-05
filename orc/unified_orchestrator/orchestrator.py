@@ -672,17 +672,6 @@ class ConversationOrchestrator:
         log_info("[Categorize Node] Starting categorization")
 
         try:
-            progress_data = {
-                "type": "progress",
-                "step": "categorize",
-                "message": "Categorizing your request...",
-                "progress": 30,
-                "timestamp": time.time(),
-            }
-            self._progress_queue.append(
-                f"__PROGRESS__{json.dumps(progress_data)}__PROGRESS__\n"
-            )
-
             categorize_result = await self.query_planner.categorize_query(
                 state=state,
                 conversation_data=self.current_conversation_data,
@@ -715,18 +704,6 @@ class ConversationOrchestrator:
 
             # Store error in Cosmos DB
             self._store_error(e, "query_categorization_error")
-
-            # Emit warning progress
-            warning_data = {
-                "type": "progress",
-                "step": "categorize",
-                "message": "Using general category (categorization failed)...",
-                "progress": 30,
-                "timestamp": time.time(),
-            }
-            self._progress_queue.append(
-                f"__PROGRESS__{json.dumps(warning_data)}__PROGRESS__\n"
-            )
 
             # Fallback to General category
             return {
@@ -1428,9 +1405,10 @@ class ConversationOrchestrator:
         # Define edges
         graph.add_edge(START, "initialize")
         graph.add_edge("initialize", "rewrite")
+        graph.add_edge("initialize", "categorize")
         graph.add_edge("rewrite", "augment")
-        graph.add_edge("augment", "categorize")
-        graph.add_edge("categorize", "prepare_tools")
+        graph.add_edge("categorize", "augment")
+        graph.add_edge("augment", "prepare_tools")
         graph.add_edge("prepare_tools", "prepare_messages")
         graph.add_edge("prepare_messages", "plan_tools")
 
