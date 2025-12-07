@@ -78,6 +78,7 @@ class StateManager:
             code_thread_id = None  # data analyst
             last_mcp_tool_used = ""  # all tools in general
             uploaded_file_refs = []  # chat w doc tool
+            conversation_summary = conversation_data.get("conversation_summary", "")
 
             history = conversation_data.get("history", [])
 
@@ -112,6 +113,7 @@ class StateManager:
             conversation_data["code_thread_id"] = code_thread_id
             conversation_data["last_mcp_tool_used"] = last_mcp_tool_used
             conversation_data["uploaded_file_refs"] = uploaded_file_refs
+            conversation_data["conversation_summary"] = conversation_summary
 
             return conversation_data
 
@@ -128,6 +130,7 @@ class StateManager:
                 "code_thread_id": None,
                 "last_mcp_tool_used": "",
                 "uploaded_file_refs": [],
+                "conversation_summary": "",
             }
 
     def save_conversation(
@@ -139,6 +142,7 @@ class StateManager:
         response_time: float,
         response_text: str,
         thoughts: Dict[str, Any],
+        conversation_summary: Optional[str] = None,
     ) -> None:
         """
         Save conversation data to Cosmos DB.
@@ -155,6 +159,7 @@ class StateManager:
             response_time: Time taken to generate response
             response_text: Generated response text
             thoughts: Diagnostic information for debugging
+            conversation_summary: Updated conversation summary (if any)
         """
         logger.info(f"[StateManager] Saving conversation: {conversation_id}")
 
@@ -205,6 +210,12 @@ class StateManager:
                 "response_time": response_time,
                 "organization_id": self.organization_id,
             }
+
+            if conversation_summary is not None:
+                conversation_data["conversation_summary"] = conversation_summary
+                logger.debug(
+                    f"[StateManager] Saved conversation_summary ({len(conversation_summary.split())} words)"
+                )
 
             update_conversation_data(
                 conversation_id=conversation_id,

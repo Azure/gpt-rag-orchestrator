@@ -45,6 +45,7 @@ class ConversationState:
     )
     last_mcp_tool_used: str = ""
     uploaded_file_refs: List[Dict[str, str]] = field(default_factory=list)
+    conversation_summary: str = ""
 
 
 @dataclass

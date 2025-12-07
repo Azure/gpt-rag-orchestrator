@@ -8,7 +8,6 @@ import traceback
 from datetime import datetime, timezone
 
 from azurefunctions.extensions.http.fastapi import Request, StreamingResponse, Response
-from report_scheduler import main as report_scheduler_main
 from scheduler.batch_processor import load_and_process_jobs
 from scheduler.create_batch_jobs import create_batch_jobs
 
@@ -38,13 +37,12 @@ DEFAULT_MAX_BREADTH = 15
 # Use DFApp for Durable Functions support
 app = df.DFApp(http_auth_level=func.AuthLevel.FUNCTION)
 
-# Must import AFTER app is created to avoid circular imports
+# Must import AFTER app is created to register durable functions
 import report_worker.activities  # GenerateReportActivity, LoadScheduledJobsActivity
 import orchestrators.main_orchestrator 
 import orchestrators.tenant_orchestrator  
 import orchestrators.oneshot_orchestrator  
 import entities.rate_limiter_entity  
-
 ENABLE_LEGACY = os.getenv("ENABLE_LEGACY_QUEUE_WORKER") == "1"
 
 if ENABLE_LEGACY:

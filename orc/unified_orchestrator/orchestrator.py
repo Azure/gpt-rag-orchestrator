@@ -15,7 +15,6 @@ import traceback
 import aiohttp
 import asyncio
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
 
 from langsmith import traceable
 from langgraph.checkpoint.memory import MemorySaver
@@ -26,9 +25,9 @@ from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 from langchain_openai import AzureChatOpenAI
 from langchain_anthropic import ChatAnthropic
 
-from shared.cosmos_db import store_agent_error
+from shared.cosmos_db import store_agent_error, update_conversation_data
 from shared.util import get_organization, get_secret
-from shared.prompts import MCP_SYSTEM_PROMPT
+from shared.prompts import MCP_SYSTEM_PROMPT, CONVERSATION_SUMMARIZATION_PROMPT
 
 from .models import ConversationState, OrchestratorConfig
 from .state_manager import StateManager
@@ -387,7 +386,7 @@ class ConversationOrchestrator:
                                     )
                                     raise RuntimeError(f"Streaming error: {error_msg}")
 
-                            except json.JSONDecodeError as e:
+                            except json.JSONDecodeError:
                                 logger.warning(
                                     f"[StreamDataAnalyst] Failed to parse chunk: {json_str[:100]}"
                                 )
@@ -464,10 +463,12 @@ class ConversationOrchestrator:
             code_thread_id = conversation_data.get("code_thread_id")
             last_mcp_tool_used = conversation_data.get("last_mcp_tool_used", "")
             uploaded_file_refs = conversation_data.get("uploaded_file_refs", [])
+            conversation_summary = conversation_data.get("conversation_summary", "")
 
             logger.info(
                 f"[Initialize Node] Loaded conversation with code_thread_id: {code_thread_id}, "
-                f"last_tool: {last_mcp_tool_used}, cached_files: {len(uploaded_file_refs)}",
+                f"last_tool: {last_mcp_tool_used}, cached_files: {len(uploaded_file_refs)}, "
+                f"summary_words: {len(conversation_summary.split()) if conversation_summary else 0}",
                 extra={
                     "conversation_id": self.current_conversation_id,
                     "code_thread_id": code_thread_id,
@@ -483,6 +484,7 @@ class ConversationOrchestrator:
                 "code_thread_id": code_thread_id,
                 "last_mcp_tool_used": last_mcp_tool_used,
                 "uploaded_file_refs": uploaded_file_refs,
+                "conversation_summary": conversation_summary,
             }
 
         except Exception as e:
@@ -517,11 +519,13 @@ class ConversationOrchestrator:
                 "code_thread_id": None,
                 "last_mcp_tool_used": "",
                 "uploaded_file_refs": [],
+                "conversation_summary": "",
             }
             return {
                 "code_thread_id": None,
                 "last_mcp_tool_used": "",
                 "uploaded_file_refs": [],
+                "conversation_summary": "",
             }
 
 
@@ -1235,6 +1239,62 @@ class ConversationOrchestrator:
 
 
 
+    async def _summarize_and_save_background(
+        self,
+        question: str,
+        answer: str,
+        existing_summary: str,
+    ) -> None:
+        """
+        Background task to summarize conversation and save to Cosmos DB.
+
+        Args:
+            question: The user's question
+            answer: The generated response
+            existing_summary: The existing conversation summary (if any)
+        """
+        try:
+            logger.info(
+                "[Summarizer] Starting background summarization",
+                extra={"conversation_id": self.current_conversation_id},
+            )
+
+            prompt = CONVERSATION_SUMMARIZATION_PROMPT.format(
+                existing_summary=existing_summary or "(No existing summary)",
+                question=question,
+                answer=answer,
+            )
+
+            response = await self.planning_llm.ainvoke(prompt)
+            summary = response.content.strip()
+
+            logger.info(
+                f"[Summarizer] Completed summarization ({len(summary.split())} words)",
+                extra={"conversation_id": self.current_conversation_id},
+            )
+
+            self.current_conversation_data["conversation_summary"] = summary
+            update_conversation_data(
+                conversation_id=self.current_conversation_id,
+                user_id=self.current_user_info.get("id"),
+                conversation_data=self.current_conversation_data,
+            )
+            logger.info(
+                "[Summarizer] Saved summary to Cosmos DB",
+                extra={"conversation_id": self.current_conversation_id},
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[Summarizer] Background summarization failed: {e}",
+                extra={
+                    "conversation_id": self.current_conversation_id,
+                    "error_type": type(e).__name__,
+                },
+                exc_info=True,
+            )
+
+
     async def _save_node(self, state: ConversationState) -> Dict[str, Any]:
         """
         Save node: Persist conversation to Cosmos DB.
@@ -1242,6 +1302,7 @@ class ConversationOrchestrator:
         Updates conversation history with user question and assistant response.
         Includes thoughts and metadata in assistant message. Serializes LangGraph
         memory and saves to Cosmos DB. Emits completion progress (100%).
+        Also kicks off background summarization task.
 
         Args:
             self: ConversationOrchestrator instance
@@ -1345,6 +1406,14 @@ class ConversationOrchestrator:
         self._progress_queue.append(
             f"__PROGRESS__{json.dumps(progress_data)}__PROGRESS__\n"
         )
+        asyncio.create_task(
+            self._summarize_and_save_background(
+                question=state.question,
+                answer=self.current_response_text,
+                existing_summary=state.conversation_summary,
+            )
+        )
+        logger.info("[Save Node] Kicked off background summarization task")
 
         # Return empty dict (no state updates)
         return {}

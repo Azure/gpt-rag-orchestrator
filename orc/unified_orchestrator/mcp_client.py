@@ -7,7 +7,7 @@ It manages tool discovery, context injection, and tool wrapping for LangChain in
 
 import os
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 
 from langchain_core.tools import StructuredTool
 from langchain_mcp_adapters.client import MultiServerMCPClient

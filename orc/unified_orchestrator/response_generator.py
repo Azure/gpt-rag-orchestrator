@@ -11,7 +11,6 @@ Responsibilities:
 - Sanitize responses (remove storage URLs)
 """
 
-import re
 import logging
 from typing import Dict, Any
 
@@ -77,6 +76,7 @@ class ResponseGenerator:
 
         Includes:
         - Organization context (segments, brand, industry)
+        - Conversation summary (condensed context from previous turns)
         - Retrieved context documents with citations
         - Conversation history
         - Category-specific prompts based on query category
@@ -99,6 +99,17 @@ class ResponseGenerator:
         # Add organization context
         org_context = context_builder.build_organization_context()
         system_prompt += f"\n\n{org_context}"
+
+        if state.conversation_summary:
+            system_prompt += f"""
+                <----------- CONVERSATION SUMMARY ------------>
+                The following is a summary of the conversation so far:
+                {state.conversation_summary}
+                <----------- END OF CONVERSATION SUMMARY ------------>
+                """
+            logger.debug(
+                "[ResponseGenerator] Added conversation summary to system prompt"
+            )
 
         # Add conversation history if available
         if conversation_history:
