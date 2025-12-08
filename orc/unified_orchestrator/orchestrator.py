@@ -824,8 +824,21 @@ class ConversationOrchestrator:
         formatted_history = self.context_builder.format_conversation_history(history)
 
         last_tool_used = state.last_mcp_tool_used or ""
+        conversation_summary = state.conversation_summary
 
         system_msg = MCP_SYSTEM_PROMPT
+
+        if conversation_summary:
+            system_msg += f"""
+
+    <----------- CONVERSATION SUMMARY ------------>
+    Here is the summary of the conversation so far:
+    {conversation_summary}
+    <----------- END OF CONVERSATION SUMMARY ------------>
+    """
+            logger.info(
+                f"[Prepare Messages Node] Added conversation summary ({len(conversation_summary.split())} words) to system prompt"
+            )
 
         if formatted_history:
             system_msg += f"""
