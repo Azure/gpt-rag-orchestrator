@@ -36,7 +36,7 @@ class Orchestrator:
         cfg = get_config()
 
         # agentic strategy
-        agentic_strategy_name = "realtime" # cfg.get("AGENT_STRATEGY", "single_agent_rag")
+        agentic_strategy_name = cfg.get("AGENT_STRATEGY", "single_agent_rag")
         instance.agentic_strategy = await AgentStrategyFactory.get_strategy(agentic_strategy_name)
         if not instance.agentic_strategy:
             raise EnvironmentError("AGENT_STRATEGY must be set")
@@ -92,7 +92,7 @@ class Orchestrator:
         self.agentic_strategy.conversation_id = self.conversation_id
 
         if self.conversation_id:
-            print(f"Saving action {action.type} for conversation {action.payload}")
+            logging.info(f"Saving action {action.type} for conversation {action.payload}")
             await self.database_client.update_or_create_document(self.database_container, self.conversation_id, action.payload)  
             return {"status": "success", "message": f"Action {action.type} saved for conversation {self.conversation_id}"}
         await self.agentic_strategy.initiate_agent_flow("")
