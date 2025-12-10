@@ -2,7 +2,7 @@
 local/
 .local/
 .vscode/
-
+.del.ps1
 # Evaluations
 eval-input.jsonl 
 eval-results.json

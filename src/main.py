@@ -134,6 +134,11 @@ async def orchestrator_endpoint(
         user_context=user_context
     )
 
+    if op_type == "rt_voice":
+        # For real-time voice, return a simple acknowledgment (streaming handled elsewhere)
+        result = await orchestrator.realtime_voice_action_handler(action=body.rt_action_request)
+        return {"status": "success", "message": "Real-time voice session initialized","result": result}
+    
     async def sse_event_generator():
         try:
             _qid = getattr(body, "question_id", None) 

@@ -5,6 +5,7 @@ from typing import Dict, Optional
 from connectors.cosmosdb import CosmosDBClient
 from strategies.agent_strategy_factory import AgentStrategyFactory
 from strategies.base_agent_strategy import BaseAgentStrategy
+from plugins.realtime.realtime_types import RTActionRequest
 from dependencies import get_config
 from opentelemetry.trace import SpanKind
 from telemetry import Telemetry
@@ -83,6 +84,20 @@ class Orchestrator:
                 await self.database_client.update_document(self.database_container, self.agentic_strategy.conversation)
 
             logging.debug(f"Finished conversation {self.conversation_id}")
+
+    async def realtime_voice_action_handler(self, action: RTActionRequest):
+        """
+        Handle real-time voice actions using the agentic strategy.
+        """
+        self.agentic_strategy.conversation_id = self.conversation_id
+
+        if self.conversation_id:
+            logging.info(f"Saving action {action.type} for conversation {action.payload}")
+            await self.database_client.update_or_create_document(self.database_container, self.conversation_id, action.payload)  
+            return {"status": "success", "message": f"Action {action.type} saved for conversation {self.conversation_id}"}
+        await self.agentic_strategy.initiate_agent_flow("")
+        return await self.agentic_strategy.handle_realtime_voice_action(action)
+    
 
     async def save_feedback(self, feedback: Dict):
         """

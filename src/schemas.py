@@ -1,6 +1,10 @@
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
+class RTActionRequest(BaseModel):
+    type: str
+    payload: Dict[str, Any]
+
 class OrchestratorRequest(BaseModel):
     # Core ask/question fields
     ask: Optional[str] = Field(
@@ -65,6 +69,10 @@ class OrchestratorRequest(BaseModel):
         default_factory=dict,
         description="Custom user context to pass along to orchestrator. (Optional)",
         example={}
+    )
+    rt_action_request: Optional[RTActionRequest] = Field(
+        None,
+        description="Real-time voice action request. (Optional)"
     )
 
     class Config:
