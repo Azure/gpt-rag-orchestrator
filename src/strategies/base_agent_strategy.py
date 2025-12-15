@@ -214,10 +214,11 @@ class BaseAgentStrategy(ABC):
             return prompt
 
     async def _read_prompt_cosmos(self, prompt_name, placeholders=None):
- 
-        logging.info(f"[base_agent_strategy] Using cosmo prompt : {self.strategy_type.value} : {prompt_name}")
 
-        prompt_json = await self.cosmos.get_document("prompts", f"{self.strategy_type.value}_{prompt_name}")
+        namespace = self._prompt_namespace()
+        logging.info(f"[base_agent_strategy] Using cosmo prompt : {namespace} : {prompt_name}")
+
+        prompt_json = await self.cosmos.get_document("prompts", f"{namespace}_{prompt_name}")
         prompt = prompt_json.get("content", "")
             
         # Replace placeholders provided in the 'placeholders' dictionary
@@ -239,6 +240,16 @@ class BaseAgentStrategy(ABC):
             prompt = prompt.replace(f"{{{{{placeholder_name}}}}}", placeholder_content)
             
         return prompt
+
+    def _prompt_namespace(self) -> str:
+        """Return the prompt namespace to use for this strategy.
+
+        This preserves prompt compatibility when strategy keys evolve (e.g. v1 aliases).
+        """
+
+        if getattr(self, "strategy_type", None) == AgentStrategies.SINGLE_AGENT_RAG_V1:
+            return AgentStrategies.SINGLE_AGENT_RAG.value
+        return self.strategy_type.value
     
     def _prompt_dir(self):
         """
@@ -256,7 +267,7 @@ class BaseAgentStrategy(ABC):
         src_folder = Path(__file__).resolve().parent.parent  # .../src
         if not hasattr(self, 'strategy_type'):
             raise ValueError("strategy_type is not defined")     
-        prompt_folder = src_folder / "prompts" / self.strategy_type.value
+        prompt_folder = src_folder / "prompts" / self._prompt_namespace()
         if not prompt_folder.exists():
             raise FileNotFoundError(f"Prompt directory not found: {prompt_folder}")
         return str(prompt_folder)

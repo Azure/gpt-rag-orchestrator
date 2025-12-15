@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [v2.3.0] – 2025-12-15
+### Added
+- Refactored Single Agent Strategy to simplify citation handling. [#161](https://github.com/Azure/gpt-rag-orchestrator/pull/161)
+- Simplified MCP Strategy. [#159](https://github.com/Azure/gpt-rag-orchestrator/pull/159)
+### Tested
+- Compatibility with Azure direct models for inference
+
 ## [v2.2.1] – 2025-10-21
 ### Added
 - Added more troubleshooting logs.
