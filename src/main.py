@@ -141,7 +141,7 @@ async def orchestrator_endpoint(
                 yield f"{chunk}"
         except Exception as e:
             logging.exception("Error in SSE generator")
-            yield f"event: error\ndata: {str(e)}\n\n"
+            yield "event: error\ndata: An internal server error occurred.\n\n"
 
     return StreamingResponse(
         sse_event_generator(),
@@ -155,3 +155,4 @@ FastAPIInstrumentor.instrument_app(app)
 # Run the app locally (avoid nested event loop when started by uvicorn CLI)
 if __name__ == "__main__" and not is_azure_environment():
     uvicorn.run(app, host="0.0.0.0", port=9000, log_level="info", timeout_keep_alive=60)
+
