@@ -1,4 +1,4 @@
-from .single_agent_rag_strategy import SingleAgentRAGStrategy
+from .single_agent_rag_strategy_v1 import SingleAgentRAGStrategyV1
 from .agent_strategies import AgentStrategies
 from .mcp_strategy import McpStrategy
 from .nl2sql_strategy import NL2SQLStrategy
@@ -9,8 +9,8 @@ class AgentStrategyFactory:
         """
         Return an instance of the strategy class corresponding to the given key.
         """
-        if key == AgentStrategies.SINGLE_AGENT_RAG.value:
-            return SingleAgentRAGStrategy()
+        if key in (AgentStrategies.SINGLE_AGENT_RAG.value, AgentStrategies.SINGLE_AGENT_RAG_V1.value):
+            return SingleAgentRAGStrategyV1()
         if key == AgentStrategies.MCP.value:
             return await McpStrategy.create()
         if key == AgentStrategies.NL2SQL.value:

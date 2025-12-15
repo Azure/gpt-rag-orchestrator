@@ -13,8 +13,7 @@ azure-search-documents==11.7.0b1
 
 # AI and NLP dependencies
 tiktoken==0.7.0
-openai==1.76.2
-prompty==0.1.50
+openai==2.9.0
 
 # Semantic Kernel dependencies
 semantic-kernel[mcp]==1.34.0
