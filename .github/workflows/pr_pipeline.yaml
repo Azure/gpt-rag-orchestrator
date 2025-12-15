@@ -12,9 +12,9 @@ jobs:
       name: dev
 
     env:
-      AZURE_CLIENT_SECRET:   ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
-      AZURE_TENANT_ID:       ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
-      AZURE_CLIENT_ID:       ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+      AZURE_CLIENT_SECRET:   ${{ secrets.AZURE_CREDENTIALS_CLIENT_SECRET }}
+      AZURE_TENANT_ID:       ${{ secrets.AZURE_CREDENTIALS_TENANT_ID }}
+      AZURE_CLIENT_ID:       ${{ secrets.AZURE_CREDENTIALS_CLIENT_ID }}
       APP_CONFIG_ENDPOINT:   ${{ vars.APP_CONFIG_ENDPOINT }}
 
     steps:
