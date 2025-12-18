@@ -25,7 +25,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 from langchain_openai import AzureChatOpenAI
 from langchain_anthropic import ChatAnthropic
 
-from shared.cosmos_db import store_agent_error, update_conversation_data
+from shared.cosmos_db import CosmosDBClient
 from shared.util import get_organization, get_secret
 from shared.prompts import MCP_SYSTEM_PROMPT, CONVERSATION_SUMMARIZATION_PROMPT
 
@@ -72,6 +72,7 @@ class ConversationOrchestrator:
         self.organization_id = organization_id
         self.config = config or OrchestratorConfig()
         self.storage_url = os.environ.get("AZURE_STORAGE_ACCOUNT_URL")
+        self.cosmos_client = CosmosDBClient()
 
         logger.info(
             f"[ConversationOrchestrator] Initializing for org: {organization_id}"
@@ -136,7 +137,7 @@ class ConversationOrchestrator:
             Configured AzureChatOpenAI instance
         """
         logger.info(
-            "[ConversationOrchestrator] Initializing planning LLM (Azure OpenAI)"
+            "[ConversationOrchestrator] Initializing planning LLM"
         )
 
         endpoint = os.getenv("O1_ENDPOINT")
@@ -247,7 +248,7 @@ class ConversationOrchestrator:
                 error_data["error_type"] = context
                 error_data["stack_trace"] = traceback.format_exc()
 
-            store_agent_error(**error_data)
+            self.cosmos_client.store_agent_error(**error_data)
             logger.debug(f"[ErrorHandler] Stored error for context: {context}")
 
         except Exception as store_error:
@@ -1287,7 +1288,7 @@ class ConversationOrchestrator:
             )
 
             self.current_conversation_data["conversation_summary"] = summary
-            update_conversation_data(
+            self.cosmos_client.update_conversation_data(
                 conversation_id=self.current_conversation_id,
                 user_id=self.current_user_info.get("id"),
                 conversation_data=self.current_conversation_data,
@@ -1306,6 +1307,104 @@ class ConversationOrchestrator:
                 },
                 exc_info=True,
             )
+
+
+    async def _user_credit_tracking_node(self, state: ConversationState) -> Dict[str, Any]:
+        """
+        User Credit Tracking node: Track and update user credit consumption.
+        Args:
+            self: ConversationOrchestrator instance
+            state: Current conversation state
+
+        Returns:
+            Empty dictionary (no state updates)
+        """
+        logger.info(
+            f"[User Credit Tracking Node] Starting credit tracking for "
+            f"mode: {state.last_mcp_tool_used}, category: {state.query_category}"
+        )
+
+        try:
+            credit_table_result = self.cosmos_client.get_credit_table()
+
+            if not credit_table_result:
+                logger.warning(
+                    "[User Credit Tracking Node] Failed to retrieve credit table, skipping credit tracking"
+                )
+                return {}
+
+            credit_table = credit_table_result[0]
+
+            mode_used = state.last_mcp_tool_used
+            tool_used = state.query_category
+
+            mode_cost = 0
+            tool_cost = 0
+
+            # assumed this is the way we define the schema in cosmos
+            mode_cost = credit_table["mode"].get(mode_used, 0)
+            logger.debug(
+                f"[User Credit Tracking Node] Mode '{mode_used}' cost: {mode_cost}"
+            )
+
+
+            tool_cost = credit_table["tools"].get(tool_used, 0)
+            logger.debug(
+                f"[User Credit Tracking Node] Tool '{tool_used}' cost: {tool_cost}"
+            )
+
+            total_cost = mode_cost + tool_cost
+
+            logger.info(
+                f"[User Credit Tracking Node] Total credit cost: {total_cost} "
+                f"(mode: {mode_cost}, tool: {tool_cost})"
+            )
+
+            if total_cost == 0:
+                logger.info(
+                    "[User Credit Tracking Node] No credit cost, skipping update"
+                )
+                return {}
+
+            org_id = self.organization_id
+            user_id = self.current_user_info.get("id")
+
+            if not user_id:
+                logger.warning(
+                    "[User Credit Tracking Node] No user_id available, skipping credit update"
+                )
+                return {}
+
+            result = self.cosmos_client.update_user_credit(
+                organization_id=org_id,
+                user_id=user_id,
+                credit_consumed=total_cost
+            )
+
+            if result:
+                logger.info(
+                    f"[User Credit Tracking Node] Successfully updated credit for user {user_id}, "
+                    f"consumed: {total_cost}"
+                )
+            else:
+                logger.error(
+                    f"[User Credit Tracking Node] Failed to update credit for user {user_id}"
+                )
+
+        except Exception as e:
+            logger.error(
+                f"[User Credit Tracking Node] Error during credit tracking: {str(e)}",
+                extra={
+                    "conversation_id": self.current_conversation_id,
+                    "user_id": self.current_user_info.get("id") if self.current_user_info else None,
+                    "organization_id": self.organization_id,
+                    "error_type": type(e).__name__,
+                },
+                exc_info=True,
+            )
+            # Don't fail the workflow, credit tracking is non-critical
+
+        return {}
 
 
     async def _save_node(self, state: ConversationState) -> Dict[str, Any]:
@@ -1467,10 +1566,11 @@ class ConversationOrchestrator:
         graph.add_node("execute_tools", self._execute_tools_node)
         graph.add_node("extract_context", self._extract_context_node)
         graph.add_node("generate_response", self._generate_response_node)
-        graph.add_node("save", self._save_node)
+        graph.add_node("save_conversation", self._save_node)
+        graph.add_node("user_credit_tracking", self._user_credit_tracking_node)
 
         logger.debug(
-            "[ConversationOrchestrator] Added 11 nodes to graph",
+            "[ConversationOrchestrator] Added 12 nodes to graph",
             extra={"conversation_id": self.current_conversation_id},
         )
 
@@ -1507,11 +1607,12 @@ class ConversationOrchestrator:
         # After tool execution, go directly to context extraction
         graph.add_edge("execute_tools", "extract_context")
         graph.add_edge("extract_context", "generate_response")
-        graph.add_edge("generate_response", "save")
-        graph.add_edge("save", END)
+        graph.add_edge("generate_response", "save_conversation")
+        graph.add_edge("save_conversation", "user_credit_tracking")
+        graph.add_edge("user_credit_tracking", END)
 
         logger.debug(
-            "[ConversationOrchestrator] Defined graph edges with single-pass tool execution",
+            "[ConversationOrchestrator] Defined graph edges with single-pass tool execution and credit tracking",
             extra={"conversation_id": self.current_conversation_id},
         )
         compiled_graph = graph.compile(checkpointer=memory)
@@ -1722,7 +1823,9 @@ class ConversationOrchestrator:
             user_id = user_info.get("id")
 
             self.state_manager = StateManager(
-                organization_id=self.organization_id, user_id=user_id
+                organization_id=self.organization_id,
+                user_id=user_id,
+                cosmos_client=self.cosmos_client
             )
 
             self.context_builder = ContextBuilder(

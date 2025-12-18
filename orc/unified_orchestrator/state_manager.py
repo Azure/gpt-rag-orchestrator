@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
-from shared.cosmos_db import get_conversation_data, update_conversation_data
+from shared.cosmos_db import CosmosDBClient
 from .models import ConversationState
 
 logger = logging.getLogger(__name__)
@@ -26,16 +26,18 @@ class StateManager:
     - Persist metadata and thoughts
     """
 
-    def __init__(self, organization_id: str, user_id: str):
+    def __init__(self, organization_id: str, user_id: str, cosmos_client: CosmosDBClient):
         """
         Initialize StateManager.
 
         Args:
             organization_id: Organization identifier
             user_id: User identifier
+            cosmos_client: CosmosDBClient instance for database operations
         """
         self.organization_id = organization_id
         self.user_id = user_id
+        self.cosmos_client = cosmos_client
         logger.info(
             f"[StateManager] Initialized for org: {organization_id}, user: {user_id}"
         )
@@ -63,7 +65,7 @@ class StateManager:
         logger.info(f"[StateManager] Loading conversation: {conversation_id}")
 
         try:
-            conversation_data = get_conversation_data(
+            conversation_data = self.cosmos_client.get_conversation_data(
                 conversation_id=conversation_id,
                 user_id=self.user_id,
                 user_timezone=user_timezone,
@@ -217,7 +219,7 @@ class StateManager:
                     f"[StateManager] Saved conversation_summary ({len(conversation_summary.split())} words)"
                 )
 
-            update_conversation_data(
+            self.cosmos_client.update_conversation_data(
                 conversation_id=conversation_id,
                 user_id=self.user_id,
                 conversation_data=conversation_data,
