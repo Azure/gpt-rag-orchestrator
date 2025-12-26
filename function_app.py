@@ -108,6 +108,17 @@ if ENABLE_LEGACY:
 
             # Don't re-raise - let message go to poison queue
 
+@app.route(route="health", methods=[func.HttpMethod.GET])
+async def health_check(req: Request) -> Response:
+    """
+    Health check endpoint for Azure App Service health monitoring.
+    pinged by Azure's health check feature at 1-minute intervals
+
+    Returns:
+        200 OK when the application is healthy
+    """
+    return Response("OK", status_code=200, media_type="text/plain")
+
 @app.route(route="start-orch", methods=[func.HttpMethod.POST])
 @app.durable_client_input(client_name="client")
 async def start_orch(req: Request, client: df.DurableOrchestrationClient):
