@@ -7,7 +7,7 @@ This document explains how the report worker operates using Azure Durable Functi
 - Scheduled or ad-hoc jobs are orchestrated with Azure Durable Functions.
 - Jobs are grouped by tenant and processed with a Durable Entity rate limiter (default global concurrency: 1).
 - Each job is executed by a deterministic activity that transitions status, generates a report (markdown → PDF), and writes results to Blob Storage and Cosmos DB.
-- Idempotency and duplicate suppression rely on Cosmos DB ETag checks plus a Blob lease lock.
+- Idempotency and duplicate suppression rely on Cosmos DB ETag checks with optimistic concurrency control.
 
 High-level sequence:
 1. Load due jobs and start `MainOrchestrator`.
@@ -71,13 +71,7 @@ File: `report_worker/activities.py`
 - Calls the processor (`process_report_job`) and records success/failure in Cosmos.
 - Returns a normalized result: `{ job_id, organization_id, status: SUCCEEDED|FAILED|SKIPPED, ... }`.
 
-Note: The activity expects the job document to already exist in Cosmos DB (status `QUEUED`). If it does not exist, processing will fail with a not-found error. Include `etag` from the job document to enable strict claim (idempotency); omitting `etag` relies on status checks and the blob lease lock.
-
-### LoadScheduledJobsActivity
-File: `report_worker/activities.py`
-
-- Optional helper to create a deterministic job list (brands/products/competitors) outside the orchestrator code.
-- The weekly timer currently loads due jobs directly via `shared/cosmos_jobs`.
+Note: The activity expects the job document to already exist in Cosmos DB (status `QUEUED`). If it does not exist, processing will fail with a not-found error. Always include `etag` from the job document to enable strict optimistic concurrency control and prevent duplicate execution.
 
 ## Processor (Job Execution)
 
@@ -86,17 +80,13 @@ File: `report_worker/processor.py`
 Steps per job:
 1. Read the job from Cosmos DB. If not found, fail.
 2. If status is not `QUEUED`, skip (idempotent re-entry).
-3. Update status to `RUNNING` and set `started_at`.
-4. Acquire a distributed lock using a Blob lease (`report-locks/{job_id}.lock`).
-   - If another worker completes the job during wait, return early.
-   - If no lock after 30 minutes, mark as `FAILED` (transient) and raise `TimeoutError`.
-5. Select a markdown generator via `report_worker/registry.get_generator(report_key)`.
+3. Update status to `RUNNING` and set `started_at` (note: ETag-based transition already performed in activity).
+4. Select a markdown generator via `report_worker/registry.get_generator(report_key)`.
    - Generators return markdown only; conversion and storage are centralized.
-6. Convert markdown → HTML → PDF using `shared/markdown_to_pdf.dict_to_pdf`.
-7. Store PDF in Blob Storage: `documents/organization_files/{organization_id}/report_{job_id}_{timestamp}.pdf`.
+5. Convert markdown → HTML → PDF using `shared/markdown_to_pdf.dict_to_pdf`.
+6. Store PDF in Blob Storage: `documents/organization_files/{organization_id}/report_{job_id}_{timestamp}.pdf`.
    - Metadata: `{organization_id, report_id, timestamp, report_key}`.
-8. Update job in Cosmos to `SUCCEEDED` with `result` metadata.
-9. Always release the Blob lease in `finally`.
+7. Update job in Cosmos to `SUCCEEDED` with `result` metadata.
 
 On errors:
 - Deterministic errors (e.g., missing `report_key` or generator) set `FAILED` with `error_type: "deterministic"`.
@@ -197,8 +187,8 @@ Transitions:
 
 ## Idempotency & Concurrency Controls
 
-- ETag Guard: `try_mark_job_running` performs If-Match replace of the job document to claim processing. Prevents duplicate runners for the same `QUEUED` job.
-- Blob Lease Lock: Processor acquires a short lease on `report-locks/{job_id}.lock` to prevent concurrent work across workers/functions.
+- ETag Guard: `try_mark_job_running` performs If-Match replace of the job document to claim processing. Provides atomic, optimistic concurrency control preventing duplicate runners for the same `QUEUED` job.
+- Rate Limiter Entity: Durable Entity enforces global and per-tenant concurrency limits at orchestration level. Prevents API rate limit errors and ensures fair resource distribution.
 - Durable Retries: Transient failures bubble to Durable which retries per `RetryOptions`.
 - Global Concurrency: Defaults to 1 via `RateLimiter.global_limit` and `WAVE_SIZE`. Increase for parallelism as needed.
 - Activity Timeout: 30 minutes per job (prevents indefinite execution).

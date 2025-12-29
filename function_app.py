@@ -38,7 +38,7 @@ DEFAULT_MAX_BREADTH = 15
 app = df.DFApp(http_auth_level=func.AuthLevel.FUNCTION)
 
 # Must import AFTER app is created to register durable functions
-import report_worker.activities  # GenerateReportActivity, LoadScheduledJobsActivity
+import report_worker.activities  # GenerateReportActivity
 import orchestrators.main_orchestrator 
 import orchestrators.tenant_orchestrator  
 import orchestrators.oneshot_orchestrator  
