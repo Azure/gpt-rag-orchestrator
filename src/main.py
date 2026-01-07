@@ -14,7 +14,7 @@ from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 from orchestration.orchestrator import Orchestrator
 from connectors.appconfig import AppConfigClient
-from dependencies import get_config, validate_auth
+from dependencies import get_config, validate_auth, validate_access_token, get_user_groups_from_graph
 from telemetry import Telemetry
 from schemas import OrchestratorRequest, ORCHESTRATOR_RESPONSES
 from constants import APPLICATION_INSIGHTS_CONNECTION_STRING, APP_NAME
@@ -90,6 +90,7 @@ async def orchestrator_endpoint(
     body: OrchestratorRequest,
     x_api_key: Optional[str] = Header(None, alias="X-API-KEY"),
     dapr_api_token: Optional[str] = Header(None, alias="dapr-api-token"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ):
     """
     Accepts JSON payload with ask/question, optional conversation_id and context,
@@ -98,6 +99,78 @@ async def orchestrator_endpoint(
 
     # Determine operation type first (defensive: body may not include type)
     op_type = getattr(body, "type", None)
+
+    # Extract and validate user info from access token if authentication is enabled
+    user_context = body.user_context or {}
+    enable_authentication = cfg.get("ENABLE_AUTHENTICATION", default=False, type=bool)
+    
+    logging.debug("[Orchestrator] ENABLE_AUTHENTICATION: %s", enable_authentication)
+    
+    if enable_authentication:
+        logging.debug("[Orchestrator] Authorization enabled, validating access token...")
+        
+        # Extract token from Authorization header (OAuth 2.0 RFC 6750)
+        if not authorization:
+            logging.warning("[Orchestrator] No Authorization header provided")
+            raise HTTPException(status_code=401, detail="Missing Authorization header")
+        
+        # Extract Bearer token from "Bearer <token>" format
+        if not authorization.startswith("Bearer "):
+            logging.warning("[Orchestrator] Invalid Authorization header format")
+            raise HTTPException(status_code=401, detail="Invalid Authorization header format")
+        
+        access_token = authorization[7:]  # Remove "Bearer " prefix
+        logging.debug("[Orchestrator] Access token received, length: %d chars", len(access_token))
+        
+        try:
+            # Validate token and extract user info
+            user_info = await validate_access_token(access_token)
+            user_context["principal_id"] = user_info.get("oid")
+            user_context["principal_name"] = user_info.get("preferred_username")
+            user_context["user_name"] = user_info.get("name")
+            
+            logging.debug("[Orchestrator] User info extracted: OID=%s, Username=%s, Name=%s", 
+                         user_info.get("oid"), user_info.get("preferred_username"), user_info.get("name"))
+            
+            # Fetch user groups from Graph API
+            logging.debug("[Orchestrator] Fetching user groups from Graph API...")
+            groups = await get_user_groups_from_graph(user_info.get("oid"))
+            user_context["groups"] = groups
+            
+            logging.debug("[Orchestrator] User groups: %s", groups)
+            
+            # Check authorization based on groups/principals
+            allowed_names = [n.strip() for n in cfg.get("ALLOWED_USER_NAMES", default="").split(",") if n.strip()]
+            allowed_ids = [id.strip() for id in cfg.get("ALLOWED_USER_PRINCIPALS", default="").split(",") if id.strip()]
+            allowed_groups = [g.strip() for g in cfg.get("ALLOWED_GROUP_NAMES", default="").split(",") if g.strip()]
+            
+            logging.debug("[Orchestrator] Authorization checks - Allowed names: %s, IDs: %s, Groups: %s", 
+                         allowed_names, allowed_ids, allowed_groups)
+            
+            is_authorized = (
+                not (allowed_names or allowed_ids or allowed_groups) or
+                user_info.get("preferred_username") in allowed_names or
+                user_info.get("oid") in allowed_ids or
+                any(g in allowed_groups for g in groups)
+            )
+            
+            if not is_authorized:
+                logging.warning("[Orchestrator] ❌ Access denied for user %s (%s)", 
+                               user_info.get("oid"), user_info.get("preferred_username"))
+                raise HTTPException(status_code=403, detail="You are not authorized to perform this action")
+            
+            logging.info("[Orchestrator] ✅ Authorization successful for user %s", user_info.get("preferred_username"))
+        except HTTPException:
+            raise
+        except Exception as e:
+            logging.error("[Orchestrator] Error validating user token: %s", e)
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+    else:
+        # No authorization required; treat as anonymous
+        logging.debug("[Orchestrator] Authorization disabled, treating as anonymous")
+        user_context["principal_id"] = "anonymous"
+        user_context["principal_name"] = "anonymous"
+        user_context["groups"] = []
 
     # Feedback submissions: allow missing ask/question; validate only what's required
     if op_type == "feedback":
@@ -108,7 +181,7 @@ async def orchestrator_endpoint(
             raise HTTPException(status_code=400, detail="No 'conversation_id' field in request body")
 
         # Create orchestrator instance and save feedback
-        orchestrator = await Orchestrator.create(conversation_id=conversation_id)
+        orchestrator = await Orchestrator.create(conversation_id=conversation_id, user_context=user_context)
         # Build feedback dict defensively; optional fields may be absent
         _qid = getattr(body, "question_id", None)
         feedback = {
@@ -126,8 +199,6 @@ async def orchestrator_endpoint(
     ask = (getattr(body, "ask", None) or getattr(body, "question", None))
     if not ask:
         raise HTTPException(status_code=400, detail="No 'ask' or 'question' field in request body")
-
-    user_context = body.user_context or {}
 
     orchestrator = await Orchestrator.create(
         conversation_id=body.conversation_id,
