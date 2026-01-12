@@ -9,8 +9,7 @@
     },
     "logLevel": {
       "default": "Information",
-      "Azure.Data.Tables": "Warning",
-      "Azure.Storage.Queues": "Warning",
+      "Azure.Core": "Warning",
       "DurableTask.AzureStorage": "Warning",
       "DurableTask.Core": "Warning"
     }
