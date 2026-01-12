@@ -6,6 +6,13 @@
         "isEnabled": true,
         "excludedTypes": "Request"
       }
+    },
+    "logLevel": {
+      "default": "Information",
+      "Azure.Data.Tables": "Warning",
+      "Azure.Storage.Queues": "Warning",
+      "DurableTask.AzureStorage": "Warning",
+      "DurableTask.Core": "Warning"
     }
   },
   "extensionBundle": {
@@ -32,7 +39,7 @@
   "queues": {
     "batchSize": 1,
     "newBatchThreshold": 0,
-    "maxPollingInterval": "00:00:02",
+    "maxPollingInterval": "00:00:30",
     "maxDequeueCount": 5,
     "visibilityTimeout": "00:00:30",
     "messageEncoding": "none"
