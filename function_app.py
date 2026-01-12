@@ -229,69 +229,26 @@ async def stream_response(req: Request) -> StreamingResponse:
             media_type="application/json",
         )
 
-if not os.getenv("ENVIRONMENT"):
-    @app.blob_trigger(
-        arg_name="myblob",
-        path="documents/{name}",
-        connection="AZURE_STORAGE_CONNECTION_STRING",
-    )
-    def blob_trigger(myblob: func.InputStream):
-        """
-        Azure Blob Storage trigger that processes uploaded documents and triggers search index updates.
-        Only active when ENVIRONMENT variable is not set.
+@app.function_name(name="blob_event_grid_trigger")
+@app.event_grid_trigger(arg_name="event")
+def blob_event_grid_trigger(event: func.EventGridEvent):
+    """
+    Event Grid trigger that triggers the search indexer when blob events are received.
+    Filtering is handled at the infrastructure level.
+    """
+    try:
+        indexer_name = f'{os.getenv("AZURE_AI_SEARCH_INDEX_NAME")}-test-indexer'
+        logging.info(f"[blob_event_grid] Event received, triggering indexer '{indexer_name}'")
 
-        Args:
-            myblob (func.InputStream): The uploaded blob file stream
-        """
-        try:
-            # Extract file information
-            blob_name = myblob.name
-            file_extension = os.path.splitext(blob_name)[1].lower() if blob_name else ""
+        indexer_success = trigger_indexer_with_retry(indexer_name, event.subject)
 
-            logging.info(
-                f"[blob_trigger] Processing blob: {blob_name}, Extension: {file_extension}"
-            )
+        if indexer_success:
+            logging.info(f"[blob_event_grid] Successfully triggered indexer '{indexer_name}'")
+        else:
+            logging.warning(f"[blob_event_grid] Could not trigger indexer '{indexer_name}'")
 
-            # Define supported file types for indexing
-            supported_extensions = {
-                ".pdf",
-                ".docx",
-                ".doc",
-                ".txt",
-                ".md",
-                ".html",
-                ".pptx",
-            }
-
-            if file_extension not in supported_extensions:
-                logging.info(
-                    f"[blob_trigger] File type {file_extension} not supported for indexing. Supported types: {supported_extensions}"
-                )
-                return
-
-            # Get indexer name from environment or use default
-            indexer_name = f'{os.getenv("AZURE_AI_SEARCH_INDEX_NAME")}-test-indexer'  # TODO: change to the actual indexer name once moved to prod
-
-            logging.info(
-                f"[blob_trigger] Triggering indexer '{indexer_name}' for supported document: {blob_name}"
-            )
-
-            # Trigger the indexer with retry logic for concurrent runs
-            indexer_success = trigger_indexer_with_retry(indexer_name, blob_name)
-
-            if indexer_success:
-                logging.info(
-                    f"[blob_trigger] Successfully triggered indexer '{indexer_name}' for blob: {blob_name}"
-                )
-            else:
-                logging.warning(
-                    f"[blob_trigger] Could not trigger indexer '{indexer_name}' for blob: {blob_name}. File will be indexed in next scheduled run."
-                )
-
-        except Exception as e:
-            logging.error(
-                f"[blob_trigger] Unexpected error processing blob {myblob.name if myblob else 'unknown'}: {str(e)}"
-            )
+    except Exception as e:
+        logging.error(f"[blob_event_grid] Error: {str(e)}, Event ID: {event.id}")
 
 
 @app.route(
