@@ -12,13 +12,18 @@ azure-ai-agents>=1.2.0b4
 azure-search-documents==11.7.0b1
 
 # AI and NLP dependencies
-tiktoken==0.7.0
+tiktoken==0.8.0
 openai==2.9.0
 
 # Semantic Kernel dependencies
 semantic-kernel[mcp]==1.34.0
 aiohttp==3.12.14
 pydantic==2.11.4
+
+# Authentication and token validation
+PyJWT==2.8.0
+cryptography>=42.0.0
+httpx>=0.27.0
 
 # Utility dependencies
 tenacity

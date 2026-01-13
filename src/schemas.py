@@ -44,22 +44,18 @@ class OrchestratorRequest(BaseModel):
     )
     client_principal_id: Optional[str] = Field(
         None,
-        description="Unique ID of the authenticated user, if available. (Optional)",
+        description="[DEPRECATED] Unique ID of the authenticated user.",
         example="3d18e02b-d957-4cc5-85e6-e595cd53eec6"
     )
     client_principal_name: Optional[str] = Field(
         None,
-        description="Display name of the authenticated user, if available. (Optional)",
+        description="[DEPRECATED] Display name of the authenticated user.",
         example="jdoe@microsoft.com"
     )
     client_group_names: Optional[List[str]] = Field(
         default_factory=list,
-        description="List of groups the user belongs to, for authorization. (Optional)",
+        description="[DEPRECATED] List of groups the user belongs to.",
         example=['project-a', 'admins']
-    )
-    access_token: Optional[str] = Field(
-        None,
-        description="OAuth2 access token if authentication is provided. (Optional)"
     )
     user_context: Optional[Dict[str, Any]] = Field(
         default_factory=dict,
