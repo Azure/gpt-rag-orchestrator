@@ -5,6 +5,7 @@ import logging
 import os
 import json
 import httpx
+import hmac
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta
 from fastapi import HTTPException, Header
@@ -39,6 +40,15 @@ def get_config(action: str = None) -> AppConfigClient:
 
     return __config
 
+
+def _normalize_token(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    v = str(value).strip()
+    if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+        v = v[1:-1].strip()
+    return v or None
+
 async def validate_auth(
     dapr_api_token: str = Header(None, alias="dapr-api-token"),
     x_api_key: str = Header(None, alias="X-API-KEY")
@@ -51,9 +61,24 @@ async def validate_auth(
     """
 
     # 1) Check dapr-api-token first if provided
-    expected_dapr = os.getenv("APP_API_TOKEN") or "dev-token"
-    if dapr_api_token is not None:
-        if dapr_api_token != expected_dapr:
+    provided_dapr = _normalize_token(dapr_api_token)
+    if provided_dapr is not None:
+        candidates = [
+            _normalize_token(os.getenv("APP_API_TOKEN")),
+            _normalize_token(os.getenv("DAPR_API_TOKEN")),
+            "dev-token",
+        ]
+        candidates = [c for c in candidates if c]
+
+        # Diagnostics without leaking secrets
+        logging.debug(
+            "[Auth] dapr-api-token provided (len=%d). Env candidates: APP_API_TOKEN=%s, DAPR_API_TOKEN=%s",
+            len(provided_dapr),
+            "set" if os.getenv("APP_API_TOKEN") else "missing",
+            "set" if os.getenv("DAPR_API_TOKEN") else "missing",
+        )
+
+        if not any(hmac.compare_digest(provided_dapr, c) for c in candidates):
             logging.warning("Invalid Dapr token")
             raise HTTPException(status_code=401, detail="Invalid Dapr token")
         return True

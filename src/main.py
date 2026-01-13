@@ -50,6 +50,28 @@ try:
 except FileNotFoundError:
     APP_VERSION = "0.0.0"
 
+
+def _startup_banner() -> None:
+    name = "GPT-RAG Orchestrator"
+    version = None
+    try:
+        if VERSION_FILE.exists():
+            version = VERSION_FILE.read_text().strip() or None
+    except Exception:
+        version = None
+
+    title = f"{name}{(' v' + version) if version else ''}"
+    banner_lines = [
+        "",
+        "╔══════════════════════════════════════════════╗",
+        f"║  {title}".ljust(47) + "║",
+        "║  FastAPI Orchestrator API                    ║",
+        "╚══════════════════════════════════════════════╝",
+        "",
+    ]
+    for line in banner_lines:
+        logging.info(line)
+
 # 2) Create configuration client (sets cfg.auth_failed=True if auth is unavailable)
 cfg: AppConfigClient = get_config()
 
@@ -68,6 +90,7 @@ if getattr(cfg, "auth_failed", False):
 # ----------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _startup_banner()
     Telemetry.configure_monitoring(cfg, APPLICATION_INSIGHTS_CONNECTION_STRING, APP_NAME)
     yield  # <-- application runs here
     # cleanup logic after shutdown
