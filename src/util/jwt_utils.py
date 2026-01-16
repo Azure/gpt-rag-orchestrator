@@ -26,6 +26,11 @@ def extract_bearer_token(header_value: Optional[str]) -> Optional[str]:
         return None
 
     token = token.strip()
+
+    # Some proxies/frameworks may wrap header values in quotes.
+    if (token.startswith('"') and token.endswith('"')) or (token.startswith("'") and token.endswith("'")):
+        token = token[1:-1].strip()
+
     return token or None
 
 
