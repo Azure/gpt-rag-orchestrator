@@ -28,6 +28,28 @@ function Write-Yellow($msg) {
 function Write-ErrorColored($msg) {
     Write-Host $msg -ForegroundColor Red
 }
+
+function Invoke-ExternalCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter()][string[]]$Arguments = @(),
+        [Parameter(Mandatory = $true)][string]$What
+    )
+
+    Write-Verbose ("Running: {0} {1}" -f $FilePath, ($Arguments -join ' '))
+    $output = & $FilePath @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+
+    if ($exitCode -ne 0) {
+        Write-ErrorColored ("❌ Failed: {0} (exit {1})" -f $What, $exitCode)
+        if ($output) {
+            Write-Host ($output | Out-String)
+        }
+        exit 1
+    }
+
+    return $output
+}
 #endregion
 
 #region Debug toggle
@@ -146,7 +168,6 @@ function Get-ConfigValue {
             --key $Key `
             --label $label `
             --auth-mode login `
-            --endpoint "https://appcs-$($env:RESOURCE_TOKEN).azconfig.io" `
             --query value -o tsv 2>&1
         $exitCode = $LASTEXITCODE
     } catch {
@@ -196,14 +217,8 @@ Write-Host ""
 
 #region Login to ACR
 Write-Green ("🔐 Logging into ACR ({0} in {1})…" -f $values.CONTAINER_REGISTRY_NAME, $values.AZURE_RESOURCE_GROUP)
-try {
-    az acr login --name $values.CONTAINER_REGISTRY_NAME --resource-group $values.AZURE_RESOURCE_GROUP
-    Write-Green "✅ Logged into ACR."
-} catch {
-    $errMsg = $_.Exception.Message
-    Write-Yellow ("⚠️  Failed to login to ACR: {0}" -f $errMsg)
-    exit 1
-}
+Invoke-ExternalCommand -FilePath 'az' -Arguments @('acr','login','--name',$values.CONTAINER_REGISTRY_NAME,'--resource-group',$values.AZURE_RESOURCE_GROUP) -What 'ACR login'
+Write-Green "✅ Logged into ACR."
 Write-Host ""
 #endregion
 
@@ -218,32 +233,16 @@ if ($env:tag) {
         if ($LASTEXITCODE -eq 0 -and $gitTag) {
             $tag = $gitTag.Trim()
             Write-Verbose ("Using Git short HEAD as tag: {0}" -f $tag)
-        } else {
-            Write-Yellow "Could not get Git short HEAD. Generating random tag."
-            $randomNumber = Get-Random -Minimum 100000 -Maximum 999999
-            $tag = "GPT$randomNumber"
-            Write-Verbose ("Generated random tag: {0}" -f $tag)
-        }
-    } catch {
-        $errMsg = $_.Exception.Message
-        Write-Yellow ("Error running Git: {0}. Generating random tag." -f $errMsg)
-        $randomNumber = Get-Random -Minimum 100000 -Maximum 999999
-        $tag = "GPT$randomNumber"
-        Write-Verbose ("Generated random tag: {0}" -f $tag)
-    }
-}
 
-#endregion#region Determine tag
-Write-Blue "Defining tag..."
-if ($env:tag) {
-    $tag = $env:tag.Trim()
-    Write-Verbose ("Using tag from environment: {0}" -f $tag)
-} else {
-    try {
-        $gitTag = & git rev-parse --short HEAD 2>$null
-        if ($LASTEXITCODE -eq 0 -and $gitTag) {
-            $tag = $gitTag.Trim()
-            Write-Verbose ("Using Git short HEAD as tag: {0}" -f $tag)
+            # If working tree is dirty, append a timestamp so local changes actually deploy.
+            try {
+                $dirty = & git status --porcelain 2>$null
+                if ($LASTEXITCODE -eq 0 -and $dirty) {
+                    $suffix = Get-Date -Format 'yyyyMMddHHmmss'
+                    $tag = "$tag-dirty-$suffix"
+                    Write-Verbose ("Git working tree is dirty; using tag: {0}" -f $tag)
+                }
+            } catch { }
         } else {
             Write-Yellow "Could not get Git short HEAD. Generating random tag."
             $randomNumber = Get-Random -Minimum 100000 -Maximum 999999
@@ -264,75 +263,58 @@ if ($env:tag) {
 $fullImageName = "$($values.CONTAINER_REGISTRY_LOGIN_SERVER)/azure-gpt-rag/orchestrator:$tag"
 Write-Green "🛠️  Building Docker image…"
 if (Get-Command docker -ErrorAction SilentlyContinue) {
-    try {
-        docker build -t $fullImageName .
-        Write-Green "✅ Docker build succeeded."
-    } catch {
-        $errMsg = $_.Exception.Message
-        Write-Yellow ("⚠️  Docker build failed: {0}" -f $errMsg)
+    $buildOut = & docker build -t $fullImageName . 2>&1
+    $buildExit = $LASTEXITCODE
+    if ($buildExit -ne 0) {
+        Write-ErrorColored ("❌ Docker build failed (exit {0})." -f $buildExit)
+        if ($buildOut) { Write-Host ($buildOut | Out-String) }
         exit 1
     }
+    Write-Green "✅ Docker build succeeded."
 } else {
     Write-Blue "⚠️  Docker CLI not found locally. Falling back to 'az acr build'."
-    try {
-        az acr build `
-            --registry $values.CONTAINER_REGISTRY_NAME `
-            --image "azure-gpt-rag/orchestrator:$tag" `
-            --file Dockerfile `
-            .
-        Write-Green "✅ ACR cloud build succeeded."
-    } catch {
-        $errMsg = $_.Exception.Message
-        Write-Yellow ("⚠️  ACR build failed: {0}" -f $errMsg)
-        exit 1
-    }
+    Invoke-ExternalCommand -FilePath 'az' -Arguments @('acr','build','--registry',$values.CONTAINER_REGISTRY_NAME,'--image',"azure-gpt-rag/orchestrator:$tag",'--file','Dockerfile','.') -What 'ACR cloud build'
+    Write-Green "✅ ACR cloud build succeeded."
 }
 Write-Host ""
 #endregion
 
 #Make sure container registry is registered
 Write-Green "🔄 Updating container app registry…"
-try {
-    $ids = $(az containerapp identity show `
-        --name $values.ORCHESTRATOR_APP_NAME `
-        --resource-group $values.AZURE_RESOURCE_GROUP `
-        --output json) | ConvertFrom-Json
+$idsJson = Invoke-ExternalCommand -FilePath 'az' -Arguments @('containerapp','identity','show','--name',$values.ORCHESTRATOR_APP_NAME,'--resource-group',$values.AZURE_RESOURCE_GROUP,'--output','json') -What 'fetch container app identity'
+$ids = ($idsJson | Out-String) | ConvertFrom-Json
 
-    if ($ids.type.tostring().contains("UserAssigned"))
-    {
-        az containerapp registry set `
-            --name $values.ORCHESTRATOR_APP_NAME `
-            --resource-group $values.AZURE_RESOURCE_GROUP `
-            --server "$($values.CONTAINER_REGISTRY_NAME).azurecr.io" `
-            --identity "/subscriptions/$($values.SUBSCRIPTION_ID)/resourceGroups/$($values.AZURE_RESOURCE_GROUP)/providers/Microsoft.ManagedIdentity/userAssignedIdentities/uai-ca-$($values.RESOURCE_TOKEN)-orchestrator" `
-    }
-    else {
-        az containerapp registry set `
-        --name $values.ORCHESTRATOR_APP_NAME `
-        --resource-group $values.AZURE_RESOURCE_GROUP `
-        --server "$($values.CONTAINER_REGISTRY_NAME).azurecr.io" `
-        --identity "system"
-    }
-    
-
-    Write-Green "✅ Container app updated."
-} catch {
-    $errMsg = $_.Exception.Message
-    Write-Yellow ("⚠️  Failed to update container app: {0}" -f $errMsg)
-    exit 1
+if ($ids.type.tostring().contains("UserAssigned")) {
+    Invoke-ExternalCommand -FilePath 'az' -Arguments @(
+        'containerapp','registry','set',
+        '--name',$values.ORCHESTRATOR_APP_NAME,
+        '--resource-group',$values.AZURE_RESOURCE_GROUP,
+        '--server',"$($values.CONTAINER_REGISTRY_NAME).azurecr.io",
+        '--identity',"/subscriptions/$($values.SUBSCRIPTION_ID)/resourceGroups/$($values.AZURE_RESOURCE_GROUP)/providers/Microsoft.ManagedIdentity/userAssignedIdentities/uai-ca-$($values.RESOURCE_TOKEN)-orchestrator"
+    ) -What 'set container app registry (user-assigned identity)'
+} else {
+    Invoke-ExternalCommand -FilePath 'az' -Arguments @(
+        'containerapp','registry','set',
+        '--name',$values.ORCHESTRATOR_APP_NAME,
+        '--resource-group',$values.AZURE_RESOURCE_GROUP,
+        '--server',"$($values.CONTAINER_REGISTRY_NAME).azurecr.io",
+        '--identity','system'
+    ) -What 'set container app registry (system identity)'
 }
+
+Write-Green "✅ Container app registry updated."
 
 #region Push Docker image (if local build used)
 if (Get-Command docker -ErrorAction SilentlyContinue) {
     Write-Green "📤 Pushing image…"
-    try {
-        docker push $fullImageName
-        Write-Green "✅ Image pushed."
-    } catch {
-        $errMsg = $_.Exception.Message
-        Write-Yellow ("⚠️  Docker push failed: {0}" -f $errMsg)
+    $pushOut = & docker push $fullImageName 2>&1
+    $pushExit = $LASTEXITCODE
+    if ($pushExit -ne 0) {
+        Write-ErrorColored ("❌ Docker push failed (exit {0})." -f $pushExit)
+        if ($pushOut) { Write-Host ($pushOut | Out-String) }
         exit 1
     }
+    Write-Green "✅ Image pushed."
     Write-Host ""
 } else {
     # If using az acr build, image is already in ACR
@@ -343,38 +325,21 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 
 #region Update Container App
 Write-Green "🔄 Updating container app…"
-try {
-    az containerapp update `
-        --name $values.ORCHESTRATOR_APP_NAME `
-        --resource-group $values.AZURE_RESOURCE_GROUP `
-        --image $fullImageName
-    Write-Green "✅ Container app updated."
-} catch {
-    $errMsg = $_.Exception.Message
-    Write-Yellow ("⚠️  Failed to update container app: {0}" -f $errMsg)
-    exit 1
-}
+Invoke-ExternalCommand -FilePath 'az' -Arguments @('containerapp','update','--name',$values.ORCHESTRATOR_APP_NAME,'--resource-group',$values.AZURE_RESOURCE_GROUP,'--image',$fullImageName) -What 'update container app image'
+Write-Green "✅ Container app updated."
 
 #get the current revision
 Write-Blue "🔍 Fetching current revision…"
-$currentRevision = az containerapp revision list `
-    --name $values.ORCHESTRATOR_APP_NAME `
-    --resource-group $values.AZURE_RESOURCE_GROUP `
-    --query "[0].name" -o tsv
+$currentRevisionOut = Invoke-ExternalCommand -FilePath 'az' -Arguments @('containerapp','revision','list','--name',$values.ORCHESTRATOR_APP_NAME,'--resource-group',$values.AZURE_RESOURCE_GROUP,'--query','[0].name','-o','tsv') -What 'fetch current revision'
+$currentRevision = ($currentRevisionOut | Out-String).Trim()
+if ([string]::IsNullOrWhiteSpace($currentRevision)) {
+    Write-ErrorColored '❌ Could not determine current revision; stopping.'
+    exit 1
+}
 
 
 #region Restart Container App
 Write-Green "🔄 Restarting container app…"
-try {
-    az containerapp revision restart `
-        --name $values.ORCHESTRATOR_APP_NAME `
-        --resource-group $values.AZURE_RESOURCE_GROUP `
-        --revision $currentRevision
-        
-    Write-Green "✅ Container app restarted."
-} catch {
-    $errMsg = $_.Exception.Message
-    Write-Yellow ("⚠️  Failed to restart container app: {0}" -f $errMsg)
-    exit 1
-}
+Invoke-ExternalCommand -FilePath 'az' -Arguments @('containerapp','revision','restart','--name',$values.ORCHESTRATOR_APP_NAME,'--resource-group',$values.AZURE_RESOURCE_GROUP,'--revision',$currentRevision) -What 'restart container app revision'
+Write-Green "✅ Container app restarted."
 #endregion

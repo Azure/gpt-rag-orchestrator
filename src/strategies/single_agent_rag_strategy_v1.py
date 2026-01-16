@@ -251,6 +251,22 @@ class SingleAgentRAGStrategyV1(BaseAgentStrategy):
         async with self.project_client as project_client:
             # Step 0: Register custom retrieval function for auto-execution
             if self.search_client:
+                # Provide request-scoped auth context for permission trimming.
+                # The access token is kept in memory only and must not be persisted.
+                try:
+                    allow_anonymous = self.cfg.get("ALLOW_ANONYMOUS", default=True, type=bool)
+                except Exception:
+                    allow_anonymous = True
+
+                request_access_token = getattr(self, "request_access_token", None)
+                try:
+                    self.search_client.set_request_context(
+                        api_access_token=request_access_token,
+                        allow_anonymous=allow_anonymous,
+                    )
+                except Exception:
+                    logging.debug("[Retrieval][Trimming] Failed to set SearchClient request context", exc_info=True)
+
                 project_client.agents.enable_auto_function_calls({self.search_client.search_knowledge_base})
             
             # Step 1: Manage thread lifecycle (create or reuse)
