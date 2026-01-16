@@ -17,7 +17,7 @@ openai==2.9.0
 
 # Semantic Kernel dependencies
 semantic-kernel[mcp]==1.34.0
-aiohttp==3.12.14
+aiohttp==3.13.3
 pydantic==2.11.4
 
 # Authentication and token validation
