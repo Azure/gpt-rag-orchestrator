@@ -29,6 +29,10 @@ async def validate_auth(
     3) 403 Forbidden should be used only by downstream authorization checks (not here).
     """
 
+    # Skip auth in development if DISABLE_AUTH is set
+    if os.getenv("DISABLE_AUTH", "").lower() == "true":
+        return True
+
     # 1) Check dapr-api-token first if provided
     expected_dapr = os.getenv("APP_API_TOKEN") or "dev-token"
     if dapr_api_token is not None:

@@ -1,0 +1,34 @@
+## Negotiation Scenario: Enterprise SaaS Software Sale
+
+**Product Type**: Cloud-based enterprise software (ERP, CRM, HCM, or similar)
+**Typical Deal Size**: $500K - $2M annual contract value
+**Sales Cycle**: 3-6 months typical
+
+### Key Value Propositions
+- 30% reduction in manual processes through automation
+- Real-time analytics and reporting dashboards
+- Seamless integration with existing systems (SAP, Salesforce, etc.)
+- 99.9% uptime SLA with enterprise-grade security
+- Dedicated customer success manager
+
+### Buyer Context
+- Company is actively evaluating 3-4 competing vendors
+- Current system is 8-12 years old and showing limitations
+- Budget has been approved but is competitive
+- Implementation timeline: 6 months preferred, 9 months maximum
+- Key stakeholders: IT, Finance, Operations, and end users
+
+### Common Objections to Expect
+1. **Migration Risk**: "What about data migration? We can't afford downtime."
+2. **Training Costs**: "What's the real cost of getting our 500 users trained?"
+3. **Vendor Lock-in**: "How do we avoid being trapped in your ecosystem?"
+4. **TCO Concerns**: "Your competitor quoted 20% less. Why should we pay more?"
+5. **Implementation Timeline**: "Can you really deliver in 6 months?"
+
+### Negotiation Levers
+- Multi-year discount (typically 15-25% for 3-year commitment)
+- Payment terms (annual vs. monthly, net-30 vs. net-60)
+- Implementation services (bundled vs. separate)
+- Training credits
+- Additional user licenses
+- Premium support tier

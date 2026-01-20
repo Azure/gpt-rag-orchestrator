@@ -81,7 +81,7 @@ app = FastAPI(
 
 @app.post(
     "/orchestrator",
-    dependencies=[Depends(validate_auth)], 
+    # dependencies=[Depends(validate_auth)],  # Disabled for local development
     summary="Ask orchestrator a question",
     response_description="Returns the orchestrator’s response in real time, streamed via SSE.",
     responses=ORCHESTRATOR_RESPONSES
@@ -100,7 +100,7 @@ async def orchestrator_endpoint(
     op_type = getattr(body, "type", None)
 
     # Feedback submissions: allow missing ask/question; validate only what's required
-    if op_type == "feedback":
+    if op_type == "feedback": 
         # Handle feedback submission
         conversation_id = body.conversation_id
         if not conversation_id:

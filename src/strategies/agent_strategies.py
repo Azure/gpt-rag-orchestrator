@@ -7,5 +7,7 @@ class AgentStrategies(Enum):
     # Add additional strategies here
     MULTIAGENT = "multiagent"
     MCP        = "mcp"
+    MAF        = "maf"
     MULTIMODAL = "multimodal"
-    NL2SQL     = "nl2sql"
+    NEGOTIATION = "negotiation"
+    # NL2SQL     = "nl2sql"
