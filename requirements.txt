@@ -7,16 +7,21 @@ azure-mgmt-storage==22.1.1
 azure-storage-blob==12.25.1
 azure-appconfiguration==1.7.1
 azure.appconfiguration.provider
-azure-ai-projects==1.1.0b3
+azure-ai-projects>=2.0.0b2
 azure-ai-agents>=1.2.0b4
-azure-search-documents==11.7.0b1
+azure-search-documents>=11.7.0b2
+
+# Microsoft Agent Framework dependencies
+agent-framework-azure-ai==1.0.0b260116
+agent-framework-azure-ai-search==1.0.0b260116
+agent-framework-core==1.0.0b260116
 
 # AI and NLP dependencies
 tiktoken==0.7.0
 openai==2.9.0
 
 # Semantic Kernel dependencies
-semantic-kernel[mcp]==1.34.0
+semantic-kernel[mcp]>=1.34.0
 aiohttp==3.12.14
 pydantic==2.11.4
 
@@ -35,8 +40,7 @@ uvicorn==0.34.1
 # NL2SQL dependencies
 sqlparse==0.5.1
 pyodbc==5.1.0
-#opentelemetry
-azure-monitor-opentelemetry
-azure-monitor-opentelemetry-exporter
-opentelemetry-instrumentation-httpx==0.52b1
+#opentelemetry - use latest compatible versions
+azure-monitor-opentelemetry>=1.8.0
+opentelemetry-instrumentation-httpx
 opentelemetry-instrumentation-fastapi
