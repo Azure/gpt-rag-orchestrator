@@ -39,6 +39,6 @@ RUN pip install --upgrade pip \
 
 # 7. Copy app code, expose port, and launch
 COPY . .
-EXPOSE 80
+EXPOSE 8000
 ENV PYTHONPATH="/app/src"
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
