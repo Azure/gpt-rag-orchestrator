@@ -1,9 +1,9 @@
 # Use the official slim Python 3.12 image
-FROM mcr.microsoft.com/devcontainers/python:dev-3.12
+FROM python:3.12-slim
 
 # 1. Install prerequisites for HTTPS, GPG and lsb_release
 RUN apt-get update \
-    && apt-get install -y \
+    && apt-get install -y --no-install-recommends \
          curl \
          apt-transport-https \
          gnupg2 \
@@ -24,8 +24,9 @@ RUN ACCEPT_EULA=Y apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 4. Install ca-certificates and update them
-RUN apt-get install ca-certificates -y
-RUN update-ca-certificates
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # 5. Create and activate a virtual environment for Python deps
 WORKDIR /app
