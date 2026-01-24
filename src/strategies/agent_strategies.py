@@ -9,5 +9,4 @@ class AgentStrategies(Enum):
     MCP        = "mcp"
     MAF        = "maf"
     MULTIMODAL = "multimodal"
-    NEGOTIATION = "negotiation"
     # NL2SQL     = "nl2sql"
