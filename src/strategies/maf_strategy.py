@@ -1,8 +1,12 @@
 """
-Minimal Microsoft Agent Framework (MAF) strategy using Azure AI Foundry Agent Service.
+Microsoft Agent Framework (MAF) Strategy using Azure AI Foundry.
 
-This is a simplified conversational agent without RAG/tools for basic conversation capabilities.
-Extension points are available for adding tools, RAG, and Bing grounding in future iterations.
+This strategy implements a general-purpose conversational agent with:
+- Memory persistence for user profile (across sessions)
+- Optional agentic search over documents
+- Extensible context providers for custom capabilities
+
+This serves as a blank canvas for building custom agent capabilities.
 """
 
 import logging
@@ -16,231 +20,264 @@ for _azure_logger in [
     "azure.core",
     "azure"
 ]:
-    logger = logging.getLogger(_azure_logger)
-    logger.setLevel(logging.CRITICAL)
-    logger.propagate = False
-    logger.disabled = True
-    logger.handlers.clear()
+    _logger = logging.getLogger(_azure_logger)
+    _logger.setLevel(logging.CRITICAL)
+    _logger.propagate = False
+    _logger.disabled = True
+    _logger.handlers.clear()
 
-from azure.ai.agents.models import ListSortOrder, MessageTextContent
+from agent_framework import ChatAgent
+from agent_framework.azure import AzureAIAgentClient, AzureAISearchContextProvider
 
 from .base_agent_strategy import BaseAgentStrategy
 from .agent_strategies import AgentStrategies
+from .maf_plugins import UserProfile, UserProfileMemory
 from dependencies import get_config
 
 
+# ============================================================================
+# Main MAF Strategy
+# ============================================================================
+
 class MafStrategy(BaseAgentStrategy):
     """
-    Minimal conversational agent using Azure AI Foundry Agent Service.
+    General-purpose agent strategy using Microsoft Agent Framework.
 
-    This strategy provides basic conversation capabilities without RAG or tools.
-    It manages thread lifecycle for conversation continuity and supports both
-    persistent agents (via AGENT_ID) and temporary agents created per-session.
+    This strategy serves as a blank canvas for building custom agent capabilities:
+    1. Maintaining persistent memory of the user's profile
+    2. Optional agentic search over documents
+    3. Extensible context providers for custom functionality
     """
 
-    async def create():
-        """Factory method to create an instance of MafStrategy."""
-        logging.debug("[Agent Flow] Creating MafStrategy instance...")
-        return MafStrategy()
+    AGENT_INSTRUCTIONS = """You are a helpful AI assistant. Your role is to assist users with their
+questions and tasks.
+
+Your capabilities:
+1. **Conversation**: Engage in helpful, informative conversations
+2. **Profile Awareness**: Remember user information to provide personalized assistance
+3. **Knowledge Search**: Search your knowledge base when relevant to answer questions
+
+Guidelines:
+- Provide clear, helpful, and accurate responses
+- Ask clarifying questions when needed
+- Be concise but thorough in your explanations"""
 
     def __init__(self):
-        """Initialize the MAF strategy with minimal configuration."""
+        """Initialize the MAF strategy."""
         super().__init__()
 
-        logging.debug("[Init] Initializing MafStrategy...")
+        logging.debug("[MafStrategy] Initializing...")
 
         cfg = get_config()
         self.strategy_type = AgentStrategies.MAF
 
-        # Allow the user to specify an existing agent ID (optional)
-        self.existing_agent_id = cfg.get("AGENT_ID", "") or None
+        # Ensure credential is set (use config's async credential as fallback)
+        if not hasattr(self, 'credential') or self.credential is None:
+            self.credential = cfg.aiocredential
+            logging.debug("[MafStrategy] Using credential from AppConfigClient")
 
-        # No tools for minimal version - extension point for future iterations
-        self.tools_list = []
-        self.tool_resources = {}
+        # Azure AI Search configuration for agentic retrieval (optional)
+        self.search_endpoint = cfg.get("SEARCH_SERVICE_QUERY_ENDPOINT")
+        self.search_index_name = cfg.get("SEARCH_INDEX_NAME")
+        self.search_knowledge_base = cfg.get("KNOWLEDGE_BASE_NAME")
 
-        logging.debug("[Init] MafStrategy initialized (no tools)")
+        # Memory storage keys (in CosmosDB)
+        self.user_profile_container = "maf_user_profiles"
+
+        # Runtime state
+        self._agent: Optional[ChatAgent] = None
+        self._chat_client: Optional[AzureAIAgentClient] = None
+        self._user_memory: Optional[UserProfileMemory] = None
+        self._search_provider: Optional[AzureAISearchContextProvider] = None
+
+        logging.debug("[MafStrategy] Initialized")
+
+    async def _get_or_create_chat_client(self) -> AzureAIAgentClient:
+        """Get or create the Azure AI Agent client."""
+        if self._chat_client is None:
+            logging.debug(f"[MafStrategy] Creating AzureAIAgentClient with endpoint: {self.project_endpoint}")
+            logging.debug(f"[MafStrategy] Credential type: {type(self.credential)}")
+            self._chat_client = AzureAIAgentClient(
+                project_endpoint=self.project_endpoint,
+                model_deployment_name=self.model_name,
+                credential=self.credential,
+            )
+        return self._chat_client
+
+    async def _load_user_profile(self, user_id: str) -> UserProfile:
+        """Load user profile from CosmosDB or return empty profile."""
+        try:
+            doc = await self.cosmos.get_document(self.user_profile_container, user_id)
+            if doc and "profile_data" in doc:
+                return UserProfile.model_validate_json(doc["profile_data"])
+        except Exception as e:
+            logging.debug(f"[MafStrategy] No existing user profile found: {e}")
+        return UserProfile()
+
+    async def _save_user_profile(self, user_id: str, profile: UserProfile):
+        """Save user profile to CosmosDB."""
+        try:
+            doc = {
+                "id": user_id,
+                "profile_data": profile.model_dump_json(),
+                "updated_at": time.time()
+            }
+            await self.cosmos.upsert_document(self.user_profile_container, doc)
+            logging.debug(f"[MafStrategy] Saved user profile for {user_id}")
+        except Exception as e:
+            logging.error(f"[MafStrategy] Failed to save user profile: {e}")
+
+    async def _create_search_provider(self) -> Optional[AzureAISearchContextProvider]:
+        """Create the Azure AI Search context provider for agentic retrieval."""
+        if not self.search_endpoint:
+            logging.debug("[MafStrategy] No search endpoint configured, skipping agentic search")
+            return None
+
+        try:
+            search_config = {
+                "endpoint": self.search_endpoint,
+                "credential": self.credential,
+                "mode": "agentic",
+                "retrieval_reasoning_effort": "medium",
+            }
+
+            # Use knowledge base or index name based on configuration
+            if self.search_knowledge_base:
+                search_config["knowledge_base_name"] = self.search_knowledge_base
+            elif self.search_index_name:
+                search_config["index_name"] = self.search_index_name
+
+            return AzureAISearchContextProvider(**search_config)
+
+        except Exception as e:
+            logging.error(f"[MafStrategy] Failed to create search provider: {e}")
+            return None
+
+    def _build_session_summary(self) -> str:
+        """Build a summary of loaded profiles for session start."""
+        parts = []
+
+        # User profile summary
+        if self._user_memory and self._user_memory.has_minimum_context():
+            parts.append("**Your Profile:**")
+            parts.append(self._user_memory._build_profile_summary())
+        else:
+            parts.append("**Your Profile:** Not yet configured.")
+
+        return "\n".join(parts)
 
     async def initiate_agent_flow(self, user_message: str):
         """
         Initiate the agent flow for a conversational interaction.
 
         Steps:
-        1. Get or create thread (conversation continuity)
-        2. Get or create agent
-        3. Send user message
-        4. Stream response
-        5. Consolidate history
-        6. Cleanup temporary agent if needed
+        1. Initialize/load memories for user profile
+        2. Create agent with context providers
+        3. If first message, provide session summary
+        4. Process user message and stream response
+        5. Save updated profile
         """
         flow_start = time.time()
-        logging.debug(f"[Agent Flow] initiate_agent_flow called with user_message: {user_message!r}")
+        logging.debug(f"[MafStrategy] initiate_agent_flow called with: {user_message!r}")
+
         conv = self.conversation
-        thread_id = conv.get("thread_id")
+        is_new_session = not conv.get("session_initialized", False)
 
-        async with self.project_client as project_client:
-            # Step 1: Manage thread lifecycle (create or reuse)
-            thread = await self._get_or_create_thread(project_client, thread_id)
-            conv["thread_id"] = thread.id
-
-            # Step 2: Create or reuse agent
-            agent, created_agent = await self._get_or_create_agent(project_client)
-            conv["agent_id"] = agent.id
-
-            # Step 3: Send user message to thread
-            await self._send_user_message(project_client, thread.id, user_message)
-
-            # Step 4: Stream agent response
-            async for chunk in self._stream_agent_response(
-                project_client, agent.id, thread.id
-            ):
-                yield chunk
-
-            # Step 5: Consolidate conversation history
-            await self._consolidate_conversation_history(project_client, thread.id)
-
-            # Step 6: Cleanup temporary agent if created
-            if created_agent:
-                await self._cleanup_agent(project_client, agent.id)
-
-            logging.info(f"[Agent Flow] Total flow time: {round(time.time() - flow_start, 2)}s")
-
-    # ============================================================
-    # Agent Flow Helper Methods
-    # ============================================================
-
-    async def _get_or_create_thread(self, project_client, thread_id: Optional[str]):
-        """Create a new thread or retrieve an existing one."""
-        try:
-            if thread_id:
-                logging.debug(f"[Agent Flow] Retrieving existing thread: {thread_id}")
-                thread = await project_client.agents.threads.get(thread_id)
-                logging.info(f"[Agent Flow] Reused thread: {thread.id}")
-            else:
-                logging.debug("[Agent Flow] Creating new thread")
-                thread = await project_client.agents.threads.create()
-                logging.info(f"[Agent Flow] Created new thread: {thread.id}")
-            return thread
-        except Exception as e:
-            logging.error(f"[Agent Flow] Thread operation failed: {e}", exc_info=True)
-            raise Exception(f"Thread creation failed: {str(e)}") from e
-
-    async def _get_or_create_agent(self, project_client):
-        """Create a new agent or retrieve an existing one."""
-        created_agent = False
+        # Get user ID from conversation context
+        user_id = conv.get("user_id", "default_user")
 
         try:
-            if self.existing_agent_id:
-                logging.debug(f"[Agent Flow] Retrieving existing agent: {self.existing_agent_id}")
-                agent = await project_client.agents.get_agent(self.existing_agent_id)
-                logging.info(f"[Agent Flow] Reused agent: {agent.id}")
-            else:
-                logging.debug("[Agent Flow] Creating new agent")
+            # Initialize chat client
+            chat_client = await self._get_or_create_chat_client()
 
-                prompt_context = {
-                    "strategy": self.strategy_type.value,
-                    "user_context": self.user_context or {},
-                }
-
-                instructions = await self._read_prompt("main")
-
-                agent = await project_client.agents.create_agent(
-                    model=self.model_name,
-                    name="maf-agent",
-                    instructions=instructions,
-                    tools=self.tools_list,
-                    tool_resources=self.tool_resources
+            # Load or initialize user profile memory
+            if self._user_memory is None:
+                user_profile = await self._load_user_profile(user_id)
+                self._user_memory = UserProfileMemory(
+                    chat_client=chat_client,
+                    user_profile=user_profile
                 )
-                created_agent = True
-                logging.info(f"[Agent Flow] Created new agent: {agent.id}")
+                logging.info(f"[MafStrategy] Loaded user profile for {user_id}")
 
-            return agent, created_agent
+            # Initialize search provider if not done
+            if self._search_provider is None:
+                self._search_provider = await self._create_search_provider()
+
+            # Build context providers list
+            context_providers = [self._user_memory]
+            if self._search_provider:
+                context_providers.append(self._search_provider)
+
+            # Read base instructions
+            base_instructions = await self._read_prompt("main")
+            instructions = base_instructions if base_instructions else self.AGENT_INSTRUCTIONS
+
+            # Create or reuse agent
+            async with AzureAIAgentClient(
+                project_endpoint=self.project_endpoint,
+                model_deployment_name=self.model_name,
+                credential=self.credential,
+            ) as client:
+                async with ChatAgent(
+                    chat_client=client,
+                    instructions=instructions,
+                    context_providers=context_providers,
+                ) as agent:
+
+                    # Get or create thread
+                    thread_id = conv.get("thread_id")
+                    if thread_id:
+                        # Resume existing thread
+                        thread = agent.get_new_thread(service_thread_id=thread_id)
+                    else:
+                        # Create new thread
+                        thread = agent.get_new_thread()
+                        # service_thread_id may be None until first run; we'll update after
+                        if thread.service_thread_id:
+                            conv["thread_id"] = thread.service_thread_id
+
+                    # If new session with existing profile, provide summary
+                    if is_new_session and self._user_memory.has_minimum_context():
+                        conv["session_initialized"] = True
+                        session_summary = self._build_session_summary()
+                        yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
+                    elif is_new_session:
+                        conv["session_initialized"] = True
+
+                    # Stream the agent response
+                    full_response = ""
+                    async for chunk in agent.run_stream(user_message, thread=thread):
+                        if chunk.text:
+                            full_response += chunk.text
+                            yield chunk.text
+
+                    # Capture thread_id if it was set during the run
+                    if not conv.get("thread_id") and thread.service_thread_id:
+                        conv["thread_id"] = thread.service_thread_id
+
+                    # Store in conversation history
+                    if "messages" not in conv:
+                        conv["messages"] = []
+                    conv["messages"].append({"role": "user", "text": user_message})
+                    conv["messages"].append({"role": "assistant", "text": full_response})
+
+            # Save updated profile
+            await self._save_user_profile(user_id, self._user_memory.user_profile)
+
+            logging.info(f"[MafStrategy] Flow completed in {round(time.time() - flow_start, 2)}s")
+
         except Exception as e:
-            logging.error(f"[Agent Flow] Agent operation failed: {e}", exc_info=True)
-            raise Exception(f"Agent creation failed: {str(e)}") from e
+            logging.error(f"[MafStrategy] Agent flow failed: {e}", exc_info=True)
+            yield f"I encountered an error processing your request: {str(e)}. Please try again."
 
-    async def _send_user_message(self, project_client, thread_id: str, user_message: str):
-        """Send user message to the thread."""
-        try:
-            logging.debug(f"[Agent Flow] Sending message to thread {thread_id}")
-            await project_client.agents.messages.create(
-                thread_id=thread_id,
-                role="user",
-                content=user_message
-            )
-            logging.debug("[Agent Flow] User message sent")
-        except Exception as e:
-            logging.error(f"[Agent Flow] Failed to send message: {e}", exc_info=True)
-            raise Exception(f"Message sending failed: {str(e)}") from e
+    async def clear_session(self):
+        """Clear the current session state (but preserve persisted profile)."""
+        conv = self.conversation
+        conv["session_initialized"] = False
+        conv["thread_id"] = None
+        conv["messages"] = []
 
-    async def _stream_agent_response(self, project_client, agent_id: str, thread_id: str):
-        """Stream agent response chunks."""
-        try:
-            stream_start = time.time()
+        self._agent = None
+        self._user_memory = None
 
-            async with await project_client.agents.runs.stream(
-                thread_id=thread_id,
-                agent_id=agent_id
-            ) as stream:
-                async for event_type, event_data, raw in stream:
-                    # Stream message deltas
-                    if event_type == "thread.message.delta" and hasattr(event_data, "text"):
-                        chunk = event_data.text
-                        if chunk:
-                            yield chunk
-
-                    # Handle run failure
-                    if event_type == "thread.run.failed":
-                        err = event_data.last_error.message
-                        logging.error(f"[Stream] Run failed: {err}")
-                        raise Exception(err)
-
-            logging.info(f"[Stream] Streaming completed in {round(time.time() - stream_start, 2)}s")
-
-        except Exception as e:
-            logging.error(f"[Stream] Streaming failed: {e}", exc_info=True)
-            raise Exception(f"Agent response streaming failed: {str(e)}") from e
-
-    async def _consolidate_conversation_history(self, project_client, thread_id: str):
-        """Fetch and consolidate conversation history from thread."""
-        try:
-            logging.debug("[Agent Flow] Consolidating conversation history")
-            conv = self.conversation
-            conv["messages"] = []
-
-            messages = project_client.agents.messages.list(
-                thread_id=thread_id,
-                order=ListSortOrder.ASCENDING
-            )
-
-            msg_count = 0
-            async for msg in messages:
-                if not msg.content:
-                    continue
-
-                last_content = msg.content[-1]
-                if isinstance(last_content, MessageTextContent):
-                    text_val = last_content.text.value
-                    msg_count += 1
-                    conv["messages"].append({
-                        "role": msg.role,
-                        "text": text_val
-                    })
-
-            logging.info(f"[Agent Flow] Retrieved {msg_count} messages")
-
-            if self.user_context:
-                conv['user_context'] = self.user_context
-        except Exception as e:
-            logging.error(f"[Agent Flow] Failed to consolidate history: {e}", exc_info=True)
-            # Non-critical - log and continue
-
-    async def _cleanup_agent(self, project_client, agent_id: str):
-        """Delete temporary agent after completion."""
-        try:
-            logging.debug(f"[Agent Flow] Deleting agent: {agent_id}")
-            await project_client.agents.delete_agent(agent_id)
-            logging.debug("[Agent Flow] Agent deleted")
-        except Exception as e:
-            logging.error(f"[Agent Flow] Failed to delete agent: {e}", exc_info=True)
-            # Non-critical - log and continue
+        logging.info("[MafStrategy] Session cleared")
