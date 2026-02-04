@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [v2.4.1] – 2026-02-04
+### Fix
+- Updated the Docker image to install Microsoft's current public signing key, addressing build failures related to SHA-1 signature rejection introduced by newer Debian/apt verification policies.
+- Fixed Docker build compatibility on ARM-based machines by explicitly setting the target platform to `linux/amd64`, preventing Azure Container Apps deployment failures.
+### Changed
+- Pinned the Docker base image to `mcr.microsoft.com/devcontainers/python:3.12-bookworm` to ensure stable package verification behavior across environments.
+  
 ## [v2.4.0] – 2026-01-15
 ### Added
 - End-to-end document-level security: added Microsoft Entra ID authentication in the UI and end-user access token validation in the orchestrator to establish user identity and authorization context.
