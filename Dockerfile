@@ -3,7 +3,7 @@ FROM python:3.12-slim
 
 # 1. Install OS prerequisites used to add external APT repositories and verify packages
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+    && apt-get install -y \
          curl \
       apt-transport-https \
          gnupg2 \
@@ -25,10 +25,8 @@ RUN apt-get update \
        unixodbc unixodbc-dev msodbcsql18 ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-# 4. Install ca-certificates and update them
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-    && update-ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# 4. Update the OS CA certificate store
+RUN update-ca-certificates
 
 # 5. Create and activate a virtual environment for Python deps
 WORKDIR /app
