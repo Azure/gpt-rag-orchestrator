@@ -263,7 +263,7 @@ if ($env:tag) {
 $fullImageName = "$($values.CONTAINER_REGISTRY_LOGIN_SERVER)/azure-gpt-rag/orchestrator:$tag"
 Write-Green "🛠️  Building Docker image…"
 if (Get-Command docker -ErrorAction SilentlyContinue) {
-    $buildOut = & docker build -t $fullImageName . 2>&1
+    $buildOut = & docker build --platform linux/amd64 -t $fullImageName . 2>&1
     $buildExit = $LASTEXITCODE
     if ($buildExit -ne 0) {
         Write-ErrorColored ("❌ Docker build failed (exit {0})." -f $buildExit)
