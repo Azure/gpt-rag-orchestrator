@@ -38,7 +38,7 @@ fastapi==0.115.12
 uvicorn==0.34.1
 
 # NL2SQL dependencies
-sqlparse==0.5.1
+sqlparse==0.5.4
 pyodbc==5.1.0
 #opentelemetry
 azure-monitor-opentelemetry
