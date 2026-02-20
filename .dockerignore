@@ -1,0 +1,24 @@
+# Python virtual envs
+.venv/
+**/.venv/
+
+# Python caches
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local/IDE
+.vscode/
+.idea/
+
+# Git
+.git/
+
+# Azure Developer CLI local state
+.azure/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -24,8 +24,12 @@ class AppConfigClient:
 
     def __init__(self):
         """
-        Bulk-loads all keys labeled 'orchestrator' and 'gpt-rag' into an in-memory dict,
-        giving precedence to 'orchestrator' where a key exists in both.
+        Bulk-loads all keys into an in-memory dict from the most common labels used by GPT-RAG:
+        - 'orchestrator' (legacy / shared deployments)
+        - 'gpt-rag-orchestrator' (service-specific)
+        - 'gpt-rag' (base / shared)
+
+        Precedence is determined by the order of selectors (earlier wins for duplicate keys).
         """
         # Defaults
         self.disabled = False
@@ -33,8 +37,10 @@ class AppConfigClient:
         self.client = {}
 
         # ==== Load all config parameters in one place ====
-        self.tenant_id = os.environ.get('AZURE_TENANT_ID', "*")
-        self.client_id = os.environ.get('AZURE_CLIENT_ID', "*")
+        # NOTE: Do not default to "*" for client_id.
+        # Passing an invalid client_id to ManagedIdentityCredential can break auth in Container Apps.
+        self.tenant_id = os.environ.get('AZURE_TENANT_ID')
+        self.client_id = os.environ.get('AZURE_CLIENT_ID')
 
         self.allow_env_vars = False
         if "allow_environment_variables" in os.environ:
@@ -49,29 +55,59 @@ class AppConfigClient:
             self.disabled = True
             return
 
+        # Safe endpoint info for troubleshooting
+        try:
+            _endpoint_host = endpoint.replace("https://", "").replace("http://", "").split("/")[0]
+        except Exception:
+            _endpoint_host = "<unknown>"
+
         # Prepare credentials for endpoint-based access
+        # If AZURE_CLIENT_ID is set, it targets a specific user-assigned identity.
+        # If not set, fall back to the platform-provided managed identity (system-assigned).
+        identity_mode = "user-assigned" if self.client_id else "system-assigned"
+        mi_cred = ManagedIdentityCredential(client_id=self.client_id) if self.client_id else ManagedIdentityCredential()
+        aio_mi_cred = (
+            AsyncManagedIdentityCredential(client_id=self.client_id)
+            if self.client_id
+            else AsyncManagedIdentityCredential()
+        )
+
         self.credential = ChainedTokenCredential(
-            ManagedIdentityCredential(client_id=self.client_id),
+            mi_cred,
             AzureCliCredential()
         )
         self.aiocredential = AsyncChainedTokenCredential(
-            AsyncManagedIdentityCredential(client_id=self.client_id),
+            aio_mi_cred,
             AsyncAzureCliCredential()
         )
 
+        # Prefer more specific labels first.
+        loaded_labels = ["orchestrator", "gpt-rag-orchestrator", "gpt-rag", "<no-label>"]
+        legacy_orchestrator_label_selector = SettingSelector(label_filter='orchestrator', key_filter='*')
         orchestrator_label_selector = SettingSelector(label_filter='gpt-rag-orchestrator', key_filter='*')
         base_label_selector = SettingSelector(label_filter='gpt-rag', key_filter='*')
         no_label_selector = SettingSelector(label_filter=None, key_filter='*')
 
+        logging.info(
+            "Azure App Configuration init: endpoint_host=%s identity=%s allow_env_vars=%s labels=%s",
+            _endpoint_host,
+            identity_mode,
+            self.allow_env_vars,
+            ",".join(loaded_labels),
+        )
+
         # Try to load from Azure App Configuration. If auth fails, don't spam stack traces.
         try:
             self.client = load(
-                selects=[orchestrator_label_selector, base_label_selector, no_label_selector],
+                selects=[legacy_orchestrator_label_selector, orchestrator_label_selector, base_label_selector, no_label_selector],
                 endpoint=endpoint,
                 credential=self.credential,
                 key_vault_options=AzureAppConfigurationKeyVaultOptions(credential=self.credential)
             )
-            logging.info("Azure App Configuration loaded successfully.")
+            logging.info(
+                "Azure App Configuration loaded successfully (keys_loaded=%d).",
+                len(self.client or {}),
+            )
         except ClientAuthenticationError:
             # Not logged in / MSI unavailable -> disable remote config, log a friendly message.
             logging.warning(
