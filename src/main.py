@@ -14,6 +14,11 @@ from pydantic import BaseModel
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
+from dotenv import load_dotenv
+
+# Load local .env variables into os.environ before anything else starts
+load_dotenv()
+
 from orchestration.orchestrator import Orchestrator
 from connectors.appconfig import AppConfigClient
 from dependencies import get_config, validate_auth, validate_access_token

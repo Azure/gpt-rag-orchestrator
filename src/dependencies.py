@@ -202,7 +202,7 @@ async def validate_auth(
 
     # 2) Fallback to API key if no dapr token
     try:
-        expected_api_key = get_config().get("ORCHESTRATOR_APP_APIKEY", default=os.getenv("ORCHESTRATOR_APP_APIKEY"))
+        expected_api_key = get_config().get_value("ORCHESTRATOR_APP_APIKEY", default=os.getenv("ORCHESTRATOR_APP_APIKEY"))
     except Exception:
         expected_api_key = os.getenv("ORCHESTRATOR_APP_APIKEY")
 
