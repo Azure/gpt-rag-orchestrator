@@ -3,7 +3,7 @@ import logging
 import time
 
 from typing import Dict, Optional
-from connectors.cosmosdb import CosmosDBClient
+from connectors.cosmosdb import get_cosmosdb_client
 from strategies.agent_strategy_factory import AgentStrategyFactory
 from strategies.base_agent_strategy import BaseAgentStrategy
 from dependencies import get_config
@@ -25,7 +25,7 @@ class Orchestrator:
         cfg = get_config()
         
         # database
-        self.database_client = CosmosDBClient()
+        self.database_client = get_cosmosdb_client()
         self.database_container = cfg.get("CONVERSATIONS_DATABASE_CONTAINER", "conversations")
         
     @classmethod

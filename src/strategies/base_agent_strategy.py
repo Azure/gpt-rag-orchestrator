@@ -8,7 +8,7 @@ from typing import Any, Dict, AsyncIterator, Mapping, Optional
 from abc import ABC, abstractmethod
 from azure.ai.projects.aio import AIProjectClient
 from connectors.appconfig import AppConfigClient
-from connectors.cosmosdb import CosmosDBClient
+from connectors.cosmosdb import get_cosmosdb_client
 from connectors.identity_manager import get_identity_manager
 from dependencies import get_config
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
@@ -53,7 +53,7 @@ class BaseAgentStrategy(ABC):
             credential=self.credential
         )
 
-        self.cosmos = CosmosDBClient()
+        self.cosmos = get_cosmosdb_client()
 
         self.user_context = {}
 

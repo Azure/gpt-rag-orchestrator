@@ -2,6 +2,7 @@
 local/
 .local/
 .vscode/
+.claude/
 
 # Evaluations
 eval-input.jsonl 

@@ -21,7 +21,7 @@ class SearchResult(BaseModel):
 class SearchClient:
     """
     Azure Cognitive Search client with hybrid search support.
-    
+
     Handles:
     - Basic search operations (term, vector, hybrid)
     - Document retrieval by ID
@@ -37,7 +37,7 @@ class SearchClient:
         self.endpoint = self.cfg.get("SEARCH_SERVICE_QUERY_ENDPOINT")
         self.api_version = self.cfg.get("AZURE_SEARCH_API_VERSION", "2024-07-01")
         self.credential = self.cfg.aiocredential
-        
+
         # Hybrid search configuration
         self.search_top_k = int(self.cfg.get('SEARCH_RAGINDEX_TOP_K', 3))
         self.search_approach = self.cfg.get('SEARCH_APPROACH', 'hybrid')
@@ -56,7 +56,10 @@ class SearchClient:
 
         # Last OBO error summary (for clear logs / strict-mode failures)
         self._last_obo_error: Optional[str] = None
-        
+
+        # Shared aiohttp session — reuses TCP connections across all HTTP calls
+        self._session: Optional[aiohttp.ClientSession] = None
+
         # Initialize GenAIModelClient for embeddings (only if needed for vector/hybrid search)
         self.aoai_client = None
         if self.search_approach in ["vector", "hybrid"]:
@@ -74,11 +77,17 @@ class SearchClient:
 
         if not self.endpoint:
             raise ValueError("SEARCH_SERVICE_QUERY_ENDPOINT not set in config")
-        
+
         logging.info("[SearchClient] ✅ Initialized with hybrid search support")
         logging.info("[SearchClient]    Index: %s", self.index_name)
         logging.info("[SearchClient]    Approach: %s", self.search_approach)
         logging.info("[SearchClient]    Top K: %s", self.search_top_k)
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Returns a shared aiohttp session, creating one lazily if needed."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
 
     def set_request_context(self, *, api_access_token: Optional[str], allow_anonymous: bool) -> None:
         """Sets per-request context used for permission trimming.
@@ -150,8 +159,8 @@ class SearchClient:
         fp = self._token_fingerprint(api_access_token)
         logging.debug("[Retrieval][OBO] Requesting Search delegated token via OBO (assertion_fp=%s)", fp)
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(token_url, data=form) as resp:
+        session = await self._get_session()
+        async with session.post(token_url, data=form) as resp:
                 raw = await resp.text()
                 if resp.status >= 400:
                     # Token endpoint errors often include trace_id/correlation_id.
@@ -274,8 +283,8 @@ class SearchClient:
         if search_user_token:
             headers["x-ms-query-source-authorization"] = f"Bearer {search_user_token}"
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=body) as resp:
+        session = await self._get_session()
+        async with session.post(url, headers=headers, json=body) as resp:
                 text = await resp.text()
                 if resp.status >= 400:
                     logging.error(f"[search] {resp.status} {text}")
@@ -318,8 +327,8 @@ class SearchClient:
             "Authorization": f"Bearer {token}"
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as resp:
+        session = await self._get_session()
+        async with session.get(url, headers=headers) as resp:
                 text = await resp.text()
                 if resp.status == 404:
                     logging.warning(f"[search] Document not found: {document_id}")
@@ -498,5 +507,15 @@ class SearchClient:
                 
         except Exception as e:
             logging.error("[Citations] ❌ Error fetching document from index: %s", e, exc_info=True)
-        
+
         return None
+
+
+_search_client_instance = None
+
+def get_search_client() -> SearchClient:
+    """Returns a singleton SearchClient to reuse connections and config."""
+    global _search_client_instance
+    if _search_client_instance is None:
+        _search_client_instance = SearchClient()
+    return _search_client_instance

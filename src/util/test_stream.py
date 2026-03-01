@@ -5,7 +5,7 @@ async def main():
     async with httpx.AsyncClient() as client:
         try:
             async with client.stream(
-                "POST", 
+                "POST",
                 "http://127.0.0.1:9000/orchestrator",
                 json={"ask":"Segun el documento, cual es la diferencia entre model family, model version y model variant?", "conversation_id":None},
                 headers={"dapr-api-token": "dev-token"}

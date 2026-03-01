@@ -33,8 +33,106 @@ from .base_agent_strategy import BaseAgentStrategy
 from .agent_strategies import AgentStrategies
 
 from dependencies import get_config
-from connectors.search import SearchClient
-from connectors.aifoundry import GenAIModelClient
+from connectors.search import get_search_client
+from connectors.aifoundry import get_genai_client
+
+# Module-level singleton for AgentsClient — eliminates per-request TCP/TLS + token overhead
+_agents_client: Optional[AgentsClient] = None
+_cached_agent: Optional[Any] = None  # Pre-created/fetched agent reused across all requests
+
+
+async def prewarm_agents_client() -> None:
+    """Pre-warm the AgentsClient HTTP pipeline and create/fetch a reusable agent.
+
+    1. Forces TCP/TLS handshake and token acquisition so the first real request
+       doesn't pay the ~5-6s cold-start penalty.
+    2. Creates (or fetches) the agent at startup so _setup_agent() returns in ~0ms.
+    """
+    global _agents_client, _cached_agent
+    cfg = get_config()
+    endpoint = cfg.get("AI_FOUNDRY_PROJECT_ENDPOINT")
+    if not endpoint:
+        logging.warning("[Startup] AI_FOUNDRY_PROJECT_ENDPOINT not set; skipping AgentsClient pre-warm")
+        return
+
+    from connectors.identity_manager import get_identity_manager
+    credential = get_identity_manager().get_aio_credential()
+
+    _agents_client = AgentsClient(endpoint=endpoint, credential=credential)
+    try:
+        # list_agents returns AsyncItemPaged (async iterable, not awaitable).
+        # Iterate the first item to force HTTP connection + token acquisition.
+        async for _ in _agents_client.list_agents(limit=1):
+            break
+        logging.info("[Startup] ✅ AgentsClient pre-warmed (HTTP pipeline ready)")
+    except Exception as e:
+        logging.warning("[Startup] ⚠️ AgentsClient pre-warm API call failed (client still created): %s", e)
+
+    # --- Pre-create or fetch the agent so every request gets it in ~0ms ---
+    agent_id = cfg.get("AGENT_ID", "") or None
+    if agent_id:
+        # AGENT_ID configured: fetch the pre-existing agent
+        try:
+            _cached_agent = await _agents_client.get_agent(agent_id)
+            logging.info("[Startup] ✅ Persistent agent pre-fetched (AGENT_ID=%s)", agent_id)
+        except Exception as e:
+            logging.warning("[Startup] ⚠️ Could not pre-fetch agent %s: %s", agent_id, e)
+    else:
+        # No AGENT_ID: create a reusable agent at startup (eliminates create+delete per request)
+        try:
+            from connectors.search import get_search_client
+            from pathlib import Path
+            from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+            tools_list = []
+            tool_resources = {}
+
+            # Add SearchClient function tool
+            aisearch_enabled = cfg.get("SEARCH_RETRIEVAL_ENABLED", True, type=bool)
+            if aisearch_enabled:
+                try:
+                    search_client = get_search_client()
+                    retrieval_tool = FunctionTool(functions={search_client.search_knowledge_base})
+                    tools_list.extend(retrieval_tool.definitions)
+                except Exception as e:
+                    logging.warning("[Startup] Could not add search tool: %s", e)
+
+            # Add BingGroundingTool
+            bing_enabled = cfg.get("BING_RETRIEVAL_ENABLED", False, type=bool)
+            bing_conn = cfg.get("BING_CONNECTION_ID", "") if bing_enabled else ""
+            if bing_conn:
+                bing = BingGroundingTool(connection_id=bing_conn, count=5)
+                tools_list.append(bing.definitions[0])
+
+            # Render instructions via Jinja2
+            src_folder = Path(__file__).resolve().parent.parent
+            prompt_dir = src_folder / "prompts" / "single_agent_rag"
+            env = Environment(
+                loader=FileSystemLoader(str(prompt_dir)),
+                undefined=StrictUndefined,
+                trim_blocks=True,
+                lstrip_blocks=True,
+            )
+            template = env.get_template("main.jinja2")
+            instructions = template.render({
+                "strategy": "single_agent_rag",
+                "user_context": {},
+                "bing_grounding_enabled": bool(bing_conn),
+                "aisearch_enabled": aisearch_enabled,
+            }).strip()
+
+            model_name = cfg.get("CHAT_DEPLOYMENT_NAME")
+            _cached_agent = await _agents_client.create_agent(
+                model=model_name,
+                name="gpt-rag-agent-v2",
+                instructions=instructions,
+                tools=tools_list,
+                tool_resources=tool_resources,
+            )
+            logging.info("[Startup] ✅ Reusable agent created and cached (id=%s)", _cached_agent.id)
+        except Exception as e:
+            logging.warning("[Startup] ⚠️ Could not pre-create agent (will create per-request): %s", e)
+
 
 class SingleAgentRAGStrategyV2(BaseAgentStrategy):
     """
@@ -72,12 +170,12 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
             self.search_client = None
         else:
             try:
-                self.search_client = SearchClient()
-                logging.info("[Init V2] ✅ SearchClient initialized")
+                self.search_client = get_search_client()
+                logging.info("[Init V2] ✅ SearchClient initialized (singleton)")
             except Exception as e:
                 logging.error("[Init V2] ❌ Could not initialize SearchClient: %s", e)
                 raise
-                
+
         # --- Initialize BingGroundingTool ---
         bing_enabled = self.cfg.get("BING_RETRIEVAL_ENABLED", False, type=bool)
         if bing_enabled:
@@ -89,9 +187,9 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                 logging.debug(f"[Init V2] Added BingGroundingTool: {bing_def}")
             else:
                 logging.error("[Init V2] BING_CONNECTION_ID not set")
-                
-        # Initialize Direct LLM Client for Bypass scenario
-        self.llm_client = GenAIModelClient()
+
+        # Initialize Direct LLM Client for Bypass scenario (singleton)
+        self.llm_client = get_genai_client()
 
     async def initiate_agent_flow(self, user_message: str):
         """
@@ -299,91 +397,104 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                 if tool_def not in self.tools_list:
                     self.tools_list.append(tool_def)
         
-        async with AgentsClient(
-            endpoint=self.project_endpoint,
-            credential=self.credential
-        ) as agents_client:
-            
-            # MAF Features: Auto-functions
-            if self.search_client:
-                # OBO prep
-                allow_anonymous = self.cfg.get("ALLOW_ANONYMOUS", default=True, type=bool)
-                request_access_token = getattr(self, "request_access_token", None)
-                try:
-                    self.search_client.set_request_context(api_access_token=request_access_token, allow_anonymous=allow_anonymous)
-                except Exception:
-                    pass
-                
-                # Removed automatic enable_auto_function_calls to prevent native SDK double-execution
-                # since the custom streaming bypass pipeline gracefully intercepts and handles `requires_action` natively.
-
-            # Create or get thread
-            t0 = time.time()
-            if thread_id:
-                thread = await agents_client.threads.get(thread_id)
-            else:
-                thread = await agents_client.threads.create()
-                conv["thread_id"] = thread.id
-            logging.info(f"[Agent Flow V2][Telemetry] Thread setup took: {time.time() - t0:.2f}s")
-                
-            # Create or get agent
-            t1 = time.time()
-            if self.existing_agent_id:
-                agent = await agents_client.get_agent(self.existing_agent_id)
-                create_agent = False
-            else:
-                bing_enabled = bool(self.cfg.get("BING_CONNECTION_ID", ""))
-                aisearch_enabled = self.cfg.get("SEARCH_RETRIEVAL_ENABLED", True, type=bool)
-                
-                prompt_context = {
-                    "strategy": self.strategy_type.value,
-                    "user_context": self.user_context or {},
-                    "bing_grounding_enabled": bing_enabled,
-                    "aisearch_enabled": aisearch_enabled,
-                }
-                instructions = await self._read_prompt("main", use_jinja2=True, jinja2_context=prompt_context)
-                
-                agent = await agents_client.create_agent(
-                    model=self.model_name,
-                    name="gpt-rag-agent-v2",
-                    instructions=instructions,
-                    tools=self.tools_list,
-                    tool_resources=self.tool_resources
-                )
-                create_agent = True
-                conv["agent_id"] = agent.id
-            logging.info(f"[Agent Flow V2][Telemetry] Agent setup took: {time.time() - t1:.2f}s")
-                
-            # Send message
-            t2 = time.time()
-            await agents_client.messages.create(
-                thread_id=thread.id,
-                role="user",
-                content=user_message
+        # Reuse singleton AgentsClient — eliminates per-request TCP/TLS + token acquisition overhead
+        global _agents_client
+        if _agents_client is None:
+            _agents_client = AgentsClient(
+                endpoint=self.project_endpoint,
+                credential=self.credential
             )
-            logging.info(f"[Agent Flow V2][Telemetry] Message creation took: {time.time() - t2:.2f}s")
-            
-            logging.info(f"[Agent Flow V2] Streaming from MAF SDK V2 Event Handlers...")
-            self._stream_start_time = stream_start
-            t_stream = time.time()
-            
+        agents_client = _agents_client
+
+        # MAF Features: Auto-functions
+        if self.search_client:
+            # OBO prep
+            allow_anonymous = self.cfg.get("ALLOW_ANONYMOUS", default=True, type=bool)
+            request_access_token = getattr(self, "request_access_token", None)
             try:
-                # MAF Feature: Native Real-time event streaming
-                async with await agents_client.runs.stream(
-                    thread_id=thread.id,
-                    agent_id=agent.id
-                ) as stream:
-                    async for chunk in self._process_stream(agents_client, stream, thread.id):
-                        yield chunk
-                        
-            except Exception as e:
-                err_msg = traceback.format_exc()
-                logging.error(f"[Agent Flow V2] MAF Streaming failed: {err_msg}")
-                yield f"[ERROR in MAF Streaming]: {e}\n{err_msg}"
-                
-            # Cleanup Agent
-            if create_agent:
-                try:
-                    await agents_client.delete_agent(agent.id)
-                except Exception:
-                    pass
+                self.search_client.set_request_context(api_access_token=request_access_token, allow_anonymous=allow_anonymous)
+            except Exception:
+                pass
+
+        # Determine if we need to create an agent this request
+        # Priority: _cached_agent (pre-warmed) > existing_agent_id (config) > create new
+        create_agent = not self.existing_agent_id and _cached_agent is None
+        instructions = None
+        if create_agent:
+            # Fallback: pre-warm didn't cache an agent — render instructions for per-request creation
+            bing_enabled = bool(self.cfg.get("BING_CONNECTION_ID", ""))
+            aisearch_enabled = self.cfg.get("SEARCH_RETRIEVAL_ENABLED", True, type=bool)
+            prompt_context = {
+                "strategy": self.strategy_type.value,
+                "user_context": self.user_context or {},
+                "bing_grounding_enabled": bing_enabled,
+                "aisearch_enabled": aisearch_enabled,
+            }
+            instructions = await self._read_prompt("main", use_jinja2=True, jinja2_context=prompt_context)
+
+        # Parallel thread + agent setup — agent resolves from cache in ~0ms when pre-warmed
+        import asyncio
+        t0 = time.time()
+
+        async def _setup_thread():
+            if thread_id:
+                return await agents_client.threads.get(thread_id)
+            return await agents_client.threads.create()
+
+        async def _setup_agent():
+            # 1. Pre-warmed cache (created or fetched at startup) — ~0ms
+            if _cached_agent is not None:
+                return _cached_agent
+            # 2. AGENT_ID configured but not cached (pre-warm failed) — GET ~2s
+            if self.existing_agent_id:
+                return await agents_client.get_agent(self.existing_agent_id)
+            # 3. No cache, no AGENT_ID — create per-request (fallback) — POST ~3s
+            return await agents_client.create_agent(
+                model=self.model_name,
+                name="gpt-rag-agent-v2",
+                instructions=instructions,
+                tools=self.tools_list,
+                tool_resources=self.tool_resources,
+            )
+
+        thread, agent = await asyncio.gather(_setup_thread(), _setup_agent())
+
+        if not thread_id:
+            conv["thread_id"] = thread.id
+        if create_agent:
+            conv["agent_id"] = agent.id
+        logging.info(f"[Agent Flow V2][Telemetry] Thread + Agent parallel setup took: {time.time() - t0:.2f}s")
+
+        # Send message
+        t2 = time.time()
+        await agents_client.messages.create(
+            thread_id=thread.id,
+            role="user",
+            content=user_message
+        )
+        logging.info(f"[Agent Flow V2][Telemetry] Message creation took: {time.time() - t2:.2f}s")
+
+        logging.info(f"[Agent Flow V2] Streaming from MAF SDK V2 Event Handlers...")
+        self._stream_start_time = stream_start
+        t_stream = time.time()
+
+        try:
+            # MAF Feature: Native Real-time event streaming
+            async with await agents_client.runs.stream(
+                thread_id=thread.id,
+                agent_id=agent.id
+            ) as stream:
+                async for chunk in self._process_stream(agents_client, stream, thread.id):
+                    yield chunk
+
+        except Exception as e:
+            err_msg = traceback.format_exc()
+            logging.error(f"[Agent Flow V2] MAF Streaming failed: {err_msg}")
+            yield f"[ERROR in MAF Streaming]: {e}\n{err_msg}"
+
+        # Cleanup Agent — only if created per-request (not cached/persistent)
+        if create_agent:
+            try:
+                await agents_client.delete_agent(agent.id)
+            except Exception:
+                pass

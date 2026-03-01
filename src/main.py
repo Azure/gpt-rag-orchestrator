@@ -204,14 +204,15 @@ async def lifespan(app: FastAPI):
     logging.info("[Startup] Pre-warming clients to eliminate cold-start latency...")
     warmup_start = time.time()
     try:
-        from connectors.search import SearchClient
+        from connectors.search import get_search_client
+        from connectors.cosmosdb import get_cosmosdb_client
         from connectors.identity_manager import get_identity_manager
         import asyncio
 
         # 1. Warm up Identity Singleton
         identity_manager = get_identity_manager()
         credential = identity_manager.get_aio_credential()
-        
+
         # 2. Pre-fetch Azure Identity Token silently (warms up AAD/MSAL)
         try:
             logging.info("[Startup] Pre-fetching Azure Search Entra ID token...")
@@ -219,10 +220,20 @@ async def lifespan(app: FastAPI):
         except Exception as te:
             logging.warning(f"[Startup] Token pre-fetch failed: {te}")
 
-        # 3. Warm up Azure Search (caches the 'is_index_empty' result)
-        search_client = SearchClient()
+        # 3. Warm up SearchClient singleton (reused across all requests)
+        search_client = get_search_client()
         logging.info("[Startup] Waking up Azure AI Search Index and checking empty status...")
         await search_client.is_index_empty()
+
+        # 4. Warm up CosmosDBClient singleton (persistent connection)
+        get_cosmosdb_client()
+
+        # 5. Pre-warm AgentsClient (forces TCP/TLS + token so first request is fast)
+        try:
+            from strategies.single_agent_rag_strategy_v2 import prewarm_agents_client
+            await prewarm_agents_client()
+        except Exception as ae:
+            logging.warning(f"[Startup] ⚠️ AgentsClient pre-warm failed: {ae}")
 
         logging.info(f"[Startup] ✅ Application pre-warming completed in {time.time() - warmup_start:.2f}s")
     except Exception as e:
