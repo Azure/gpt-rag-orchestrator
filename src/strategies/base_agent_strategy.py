@@ -6,10 +6,10 @@ import json
 
 from typing import Any, Dict, AsyncIterator, Mapping, Optional
 from abc import ABC, abstractmethod
-from azure.identity.aio import ChainedTokenCredential, AzureCliCredential, ManagedIdentityCredential
 from azure.ai.projects.aio import AIProjectClient
 from connectors.appconfig import AppConfigClient
 from connectors.cosmosdb import CosmosDBClient
+from connectors.identity_manager import get_identity_manager
 from dependencies import get_config
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
 from pathlib import Path
@@ -43,14 +43,9 @@ class BaseAgentStrategy(ABC):
                 "Both AI_FOUNDRY_PROJECT_ENDPOINT and CHAT_DEPLOYMENT_NAME must be set"
             )
 
-        # Azure AD/Entra ID client ID (optional, for managed identity)
-        client_id = os.environ.get("AZURE_CLIENT_ID")
-
-        # Build chained token credential: CLI first, then managed identity
-        self.credential = ChainedTokenCredential(
-            AzureCliCredential(),
-            ManagedIdentityCredential(client_id=client_id)
-        )
+        # Azure AD/Entra ID credentials from Singleton
+        identity_manager = get_identity_manager()
+        self.credential = identity_manager.get_aio_credential()
 
         # Initialize the async AIProjectClient
         self.project_client = AIProjectClient(

@@ -2,16 +2,12 @@ import logging
 import time
 import tiktoken
 
-from azure.identity import (
-    ManagedIdentityCredential,
-    AzureCliCredential,
-    ChainedTokenCredential,
-    get_bearer_token_provider
-)
+from azure.identity import get_bearer_token_provider
 from azure.ai.projects import AIProjectClient
 from azure.core.exceptions import HttpResponseError
-from openai import AzureOpenAI, RateLimitError
+from openai import AsyncAzureOpenAI, RateLimitError
 from dependencies import get_config
+from connectors.identity_manager import get_identity_manager
 
 class GenAIModelClient:
     """
@@ -46,21 +42,19 @@ class GenAIModelClient:
         if not self.embedding_deployment:
             raise ValueError("EMBEDDING_DEPLOYMENT_NAME not set in config")
 
-        # Azure AD (Entra ID) authentication
-        credential = ChainedTokenCredential(
-            ManagedIdentityCredential(),
-            AzureCliCredential()
-        )
+        # Azure AD (Entra ID) authentication via Singleton
+        identity_manager = get_identity_manager()
+        credential = identity_manager.get_credential()
 
         # Foundry client for chat/completions
         self.foundry_client = AIProjectClient(endpoint=self.foundry_project_endpoint, credential=credential)
 
-        # Azure OpenAI client for embeddings (default)
+        # Azure OpenAI Async client for embeddings (default)
         token_provider = get_bearer_token_provider(
             credential,
             "https://cognitiveservices.azure.com/.default"
         )
-        self.openai_client = AzureOpenAI(
+        self.openai_client = AsyncAzureOpenAI(
             api_version=self.openai_api_version,
             azure_endpoint=self.model_endpoint,
             azure_ad_token_provider=token_provider,
@@ -112,16 +106,17 @@ class GenAIModelClient:
 
         if self.embeddings_backend == "azure_openai":
             try:
-                resp = self.openai_client.embeddings.create(
+                resp = await self.openai_client.embeddings.create(
                     input=text,
                     model=self.embedding_deployment
                 )
                 return resp.data[0].embedding
             except RateLimitError as e:
+                import asyncio
                 if retry_after and (hdr := e.response.headers.get("retry-after-ms")):
                     ms = int(hdr)
                     logging.warning(f"[genai] embeddings rate-limit, sleeping {ms}ms")
-                    time.sleep(ms / 1000)
+                    await asyncio.sleep(ms / 1000)
                     return await self.get_embeddings(text, retry_after=False)
                 logging.error("[genai] embeddings rate limit without header or second failure", exc_info=True)
                 raise
@@ -140,3 +135,14 @@ class GenAIModelClient:
         avg_chars = len(text) / len(tokens)
         cut = int(max_tokens * avg_chars)
         return text[:cut]
+
+_genai_client_instance = None
+
+def get_genai_client() -> GenAIModelClient:
+    """
+    Returns a unified singleton instance of the GenAIModelClient to reuse HTTP connections.
+    """
+    global _genai_client_instance
+    if _genai_client_instance is None:
+        _genai_client_instance = GenAIModelClient()
+    return _genai_client_instance

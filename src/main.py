@@ -194,8 +194,40 @@ if getattr(cfg, "auth_failed", False):
 # ----------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import time
     _startup_banner()
     Telemetry.configure_monitoring(cfg, APPLICATION_INSIGHTS_CONNECTION_STRING, APP_NAME)
+    
+    # ---------------------------------------------------------
+    # Pre-warming Clients to reduce Cold Start Latency
+    # ---------------------------------------------------------
+    logging.info("[Startup] Pre-warming clients to eliminate cold-start latency...")
+    warmup_start = time.time()
+    try:
+        from connectors.search import SearchClient
+        from connectors.identity_manager import get_identity_manager
+        import asyncio
+
+        # 1. Warm up Identity Singleton
+        identity_manager = get_identity_manager()
+        credential = identity_manager.get_aio_credential()
+        
+        # 2. Pre-fetch Azure Identity Token silently (warms up AAD/MSAL)
+        try:
+            logging.info("[Startup] Pre-fetching Azure Search Entra ID token...")
+            await credential.get_token("https://search.azure.com/.default")
+        except Exception as te:
+            logging.warning(f"[Startup] Token pre-fetch failed: {te}")
+
+        # 3. Warm up Azure Search (caches the 'is_index_empty' result)
+        search_client = SearchClient()
+        logging.info("[Startup] Waking up Azure AI Search Index and checking empty status...")
+        await search_client.is_index_empty()
+
+        logging.info(f"[Startup] ✅ Application pre-warming completed in {time.time() - warmup_start:.2f}s")
+    except Exception as e:
+        logging.warning(f"[Startup] ⚠️ Pre-warming encountered an issue, but startup will proceed: {e}", exc_info=True)
+
     yield  # <-- application runs here
     # cleanup logic after shutdown
 
@@ -227,6 +259,10 @@ async def orchestrator_endpoint(
 
     # Determine operation type first (defensive: body may not include type)
     op_type = getattr(body, "type", None)
+
+    import time
+    request_start_time = time.time()
+    auth_start_time = request_start_time
 
     # Anonymous-mode toggle (mirrors frontend behavior):
     # - If ALLOW_ANONYMOUS=true, requests without Authorization can proceed as anonymous.
@@ -381,6 +417,9 @@ async def orchestrator_endpoint(
             )
             raise HTTPException(status_code=401, detail="Missing Authorization header")
 
+    auth_duration = time.time() - auth_start_time
+    logging.info(f"[Timing][main.py] Authentication & Authorization took {auth_duration:.3f}s")
+
     # One INFO line per request: quickly answers "was this anonymous? who was it?" without DEBUG.
     try:
         principal_name = (user_context.get("principal_name") or "").strip()
@@ -437,11 +476,13 @@ async def orchestrator_endpoint(
     if not ask:
         raise HTTPException(status_code=400, detail="No 'ask' or 'question' field in request body")
 
+    orchestrator_create_start = time.time()
     orchestrator = await Orchestrator.create(
         conversation_id=body.conversation_id,
         user_context=user_context,
         request_access_token=access_token if authorization else None,
     )
+    logging.info(f"[Timing][main.py] Orchestrator.create took {time.time() - orchestrator_create_start:.3f}s")
 
     async def sse_event_generator():
         try:

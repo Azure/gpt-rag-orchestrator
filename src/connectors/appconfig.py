@@ -1,13 +1,13 @@
 import os
 import logging
-
 from typing import Any
-from azure.identity import ChainedTokenCredential, ManagedIdentityCredential, AzureCliCredential
-from azure.identity.aio import (
-    ChainedTokenCredential as AsyncChainedTokenCredential,
-    ManagedIdentityCredential as AsyncManagedIdentityCredential,
-    AzureCliCredential as AsyncAzureCliCredential,
+from azure.core.exceptions import ClientAuthenticationError
+from azure.appconfiguration.provider import (
+    AzureAppConfigurationKeyVaultOptions,
+    load,
+    SettingSelector,
 )
+from connectors.identity_manager import get_identity_manager
 from azure.core.exceptions import ClientAuthenticationError
 from azure.appconfiguration.provider import (
     AzureAppConfigurationKeyVaultOptions,
@@ -62,24 +62,9 @@ class AppConfigClient:
             _endpoint_host = "<unknown>"
 
         # Prepare credentials for endpoint-based access
-        # If AZURE_CLIENT_ID is set, it targets a specific user-assigned identity.
-        # If not set, fall back to the platform-provided managed identity (system-assigned).
-        identity_mode = "user-assigned" if self.client_id else "system-assigned"
-        mi_cred = ManagedIdentityCredential(client_id=self.client_id) if self.client_id else ManagedIdentityCredential()
-        aio_mi_cred = (
-            AsyncManagedIdentityCredential(client_id=self.client_id)
-            if self.client_id
-            else AsyncManagedIdentityCredential()
-        )
-
-        self.credential = ChainedTokenCredential(
-            mi_cred,
-            AzureCliCredential()
-        )
-        self.aiocredential = AsyncChainedTokenCredential(
-            aio_mi_cred,
-            AsyncAzureCliCredential()
-        )
+        identity_manager = get_identity_manager()
+        self.credential = identity_manager.get_credential()
+        self.aiocredential = identity_manager.get_aio_credential()
 
         # Prefer more specific labels first.
         loaded_labels = ["orchestrator", "gpt-rag-orchestrator", "gpt-rag", "<no-label>"]
@@ -91,7 +76,7 @@ class AppConfigClient:
         logging.info(
             "Azure App Configuration init: endpoint_host=%s identity=%s allow_env_vars=%s labels=%s",
             _endpoint_host,
-            identity_mode,
+            "singleton",
             self.allow_env_vars,
             ",".join(loaded_labels),
         )

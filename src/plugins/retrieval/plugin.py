@@ -8,8 +8,8 @@ from typing import Annotated, Optional, List, Dict, Any
 from urllib.parse import urlparse
 
 import aiohttp
-from azure.identity import ManagedIdentityCredential, AzureCliCredential, ChainedTokenCredential
 from semantic_kernel.functions import kernel_function
+from connectors.identity_manager import get_identity_manager
 from dependencies import get_config
 from connectors import AzureOpenAIClient
 from .retrieval_types import (
@@ -32,10 +32,7 @@ class RetrievalPlugin:
 
     async def _get_azure_search_token(self) -> str:
         try:
-            credential = ChainedTokenCredential(
-                ManagedIdentityCredential(),
-                AzureCliCredential()
-            )
+            credential = get_identity_manager().get_credential()
             token_obj = await asyncio.to_thread(credential.get_token, "https://search.azure.com/.default")
             return token_obj.token
         except Exception as e:

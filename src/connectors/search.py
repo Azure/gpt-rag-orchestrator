@@ -8,6 +8,8 @@ from pydantic import BaseModel
 
 from dependencies import get_config
 
+_global_index_empty_cache: Dict[str, bool] = {}
+
 
 class SearchResult(BaseModel):
     """Represents a single search result from AI Search."""
@@ -59,16 +61,15 @@ class SearchClient:
         self.aoai_client = None
         if self.search_approach in ["vector", "hybrid"]:
             try:
-                from connectors.aifoundry import GenAIModelClient
-                self.aoai_client = GenAIModelClient()
+                from connectors.aifoundry import get_genai_client
+                self.aoai_client = get_genai_client()
                 logging.info("[SearchClient] ✅ GenAIModelClient initialized for embeddings")
             except Exception as e:
                 logging.warning("[SearchClient] ⚠️ Could not initialize GenAIModelClient for embeddings: %s", e)
                 logging.warning("[SearchClient] ⚠️ Falling back to term search only")
                 self.search_approach = "term"
 
-        # Cache to prevent slow repeated checks on empty indexes
-        self._index_is_empty: Optional[bool] = None
+        # Cache is now maintained in the _global_index_empty_cache module variable
         # ==== End config block ====
 
         if not self.endpoint:
@@ -333,9 +334,10 @@ class SearchClient:
         Fast check to see if the search index is completely empty, caching the result.
         Returns True if empty, False if it has documents.
         """
-        if self._index_is_empty is not None:
+        global _global_index_empty_cache
+        if self.index_name in _global_index_empty_cache:
             logging.info(f"[Retrieval] Index '{self.index_name}' empty cache hit; bypassing index probe")
-            return self._index_is_empty
+            return _global_index_empty_cache[self.index_name]
 
         try:
             logging.info(f"[Retrieval] Probing if index '{self.index_name}' is empty...")
@@ -356,14 +358,15 @@ class SearchClient:
             
             # If no 'value' or empty list, it's empty
             has_results = len(results.get('value', [])) > 0
-            self._index_is_empty = not has_results
+            is_empty_result = not has_results
+            _global_index_empty_cache[self.index_name] = is_empty_result
             
-            if self._index_is_empty:
+            if is_empty_result:
                 logging.info(f"[Retrieval] Probe confirmed: Index '{self.index_name}' is EMPTY.")
             else:
                 logging.info(f"[Retrieval] Probe confirmed: Index '{self.index_name}' HAS DOCUMENTS.")
                 
-            return self._index_is_empty
+            return is_empty_result
             
         except Exception as e:
             logging.error(f"[Retrieval] Failed to check if index is empty: {e}", exc_info=True)
