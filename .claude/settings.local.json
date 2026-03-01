@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "Bash(python -c \"from azure.ai.projects.aio import AIProjectClient; help\\(AIProjectClient\\)\")",
+      "Bash(python -c \"import azure.ai.projects; print\\(azure.ai.projects.__version__\\)\")"
+    ]
+  }
+}

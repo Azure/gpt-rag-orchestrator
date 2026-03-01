@@ -66,6 +66,9 @@ class SearchClient:
                 logging.warning("[SearchClient] ⚠️ Could not initialize GenAIModelClient for embeddings: %s", e)
                 logging.warning("[SearchClient] ⚠️ Falling back to term search only")
                 self.search_approach = "term"
+
+        # Cache to prevent slow repeated checks on empty indexes
+        self._index_is_empty: Optional[bool] = None
         # ==== End config block ====
 
         if not self.endpoint:
@@ -324,6 +327,48 @@ class SearchClient:
                     logging.error(f"[search] {resp.status} {text}")
                     raise RuntimeError(f"Get document failed: {resp.status} {text}")
                 return await resp.json()
+
+    async def is_index_empty(self):
+        """
+        Fast check to see if the search index is completely empty, caching the result.
+        Returns True if empty, False if it has documents.
+        """
+        if self._index_is_empty is not None:
+            logging.info(f"[Retrieval] Index '{self.index_name}' empty cache hit; bypassing index probe")
+            return self._index_is_empty
+
+        try:
+            logging.info(f"[Retrieval] Probing if index '{self.index_name}' is empty...")
+            # Simple query requesting 1 document with no vector/hybrid overhead
+            search_body: Dict[str, Any] = {
+                "search": "*",
+                "select": "id",
+                "top": 1
+            }
+            
+            search_user_token = await self._get_search_user_token_for_trimming()
+            
+            results = await self.search(
+                index_name=self.index_name,
+                body=search_body,
+                search_user_token=search_user_token,
+            )
+            
+            # If no 'value' or empty list, it's empty
+            has_results = len(results.get('value', [])) > 0
+            self._index_is_empty = not has_results
+            
+            if self._index_is_empty:
+                logging.info(f"[Retrieval] Probe confirmed: Index '{self.index_name}' is EMPTY.")
+            else:
+                logging.info(f"[Retrieval] Probe confirmed: Index '{self.index_name}' HAS DOCUMENTS.")
+                
+            return self._index_is_empty
+            
+        except Exception as e:
+            logging.error(f"[Retrieval] Failed to check if index is empty: {e}", exc_info=True)
+            # Default to not empty if we can't tell, to avoid false bypasses
+            return False
 
     async def search_knowledge_base(self, query: str) -> str:
         """
