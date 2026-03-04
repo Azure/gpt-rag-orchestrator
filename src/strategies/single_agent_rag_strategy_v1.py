@@ -248,11 +248,11 @@ class SingleAgentRAGStrategyV1(BaseAgentStrategy):
         conv = self.conversation
         thread_id = conv.get("thread_id")
 
-        async with self.project_client as project_client:
-            # Step 0: Register custom retrieval function for auto-execution
-            if self.search_client:
-                project_client.agents.enable_auto_function_calls({self.search_client.search_knowledge_base})
-            
+        from azure.ai.agents.aio import AgentsClient
+        async with AgentsClient(
+            endpoint=self._agents_client_endpoint,
+            credential=self._agents_client_credential
+        ) as project_client:
             # Step 1: Manage thread lifecycle (create or reuse)
             thread = await self._get_or_create_thread(project_client, thread_id)
             conv["thread_id"] = thread.id
@@ -299,11 +299,11 @@ class SingleAgentRAGStrategyV1(BaseAgentStrategy):
         try:
             if thread_id:
                 logging.debug(f"[Agent Flow] thread_id exists; calling get(thread_id={thread_id})")
-                thread = await project_client.agents.threads.get(thread_id)
+                thread = await project_client.threads.get(thread_id)
                 logging.info(f"[Agent Flow] Reused thread with ID: {thread.id}")
             else:
                 logging.debug("[Agent Flow] thread_id not found; calling create()")
-                thread = await project_client.agents.threads.create()
+                thread = await project_client.threads.create()
                 logging.info(f"[Agent Flow] Created new thread with ID: {thread.id}")
             
             logging.debug(f"[Agent Flow] Stored thread.id = {thread.id}")
@@ -327,7 +327,7 @@ class SingleAgentRAGStrategyV1(BaseAgentStrategy):
         try:
             if self.existing_agent_id:
                 logging.debug("[Agent Flow] agent_id exists; calling update_agent(...)")
-                agent = await project_client.agents.get_agent(self.existing_agent_id)
+                agent = await project_client.get_agent(self.existing_agent_id)
                 logging.info(f"[Agent Flow] Reused agent with ID: {agent.id}")
             else:
                 logging.debug("[Agent Flow] creating agent(...)")
@@ -348,7 +348,7 @@ class SingleAgentRAGStrategyV1(BaseAgentStrategy):
                     jinja2_context=prompt_context,
                 )
                 
-                agent = await project_client.agents.create_agent(
+                agent = await project_client.create_agent(
                     model=self.model_name,
                     name="gpt-rag-agent",
                     instructions=instructions,
@@ -374,7 +374,7 @@ class SingleAgentRAGStrategyV1(BaseAgentStrategy):
         """
         try:
             logging.debug(f"[Agent Flow] Sending user message into thread {thread_id}: {user_message!r}")
-            await project_client.agents.messages.create(
+            await project_client.messages.create(
                 thread_id=thread_id,
                 role="user",
                 content=user_message
@@ -394,7 +394,7 @@ class SingleAgentRAGStrategyV1(BaseAgentStrategy):
             tool_start = None
             response_start = None
             
-            async with await project_client.agents.runs.stream(
+            async with await project_client.runs.stream(
                 thread_id=thread_id,
                 agent_id=agent_id
             ) as stream:
@@ -425,6 +425,57 @@ class SingleAgentRAGStrategyV1(BaseAgentStrategy):
                         if step_type == "message_creation":
                             response_start = time.time()
                     
+                    # Handle function tool calls that require manual execution
+                    # enable_auto_function_calls does not exist in azure-ai-agents 1.2.0b5;
+                    # we must detect requires_action, call the function, and submit outputs.
+                    if event_type == "thread.run.requires_action":
+                        run_id = event_data.id
+                        tool_calls = event_data.required_action.submit_tool_outputs.tool_calls
+                        tool_outputs = []
+                        for tc in tool_calls:
+                            fn_name = tc.function.name
+                            fn_args = tc.function.arguments
+                            logging.info(f"[Stream] Executing function tool: {fn_name}")
+                            try:
+                                import asyncio as _asyncio
+                                args = json.loads(fn_args) if fn_args else {}
+                                if (
+                                    self.search_client is not None
+                                    and fn_name == self.search_client.search_knowledge_base.__name__
+                                ):
+                                    if _asyncio.iscoroutinefunction(self.search_client.search_knowledge_base):
+                                        result = await self.search_client.search_knowledge_base(**args)
+                                    else:
+                                        result = self.search_client.search_knowledge_base(**args)
+                                    output = json.dumps(result) if not isinstance(result, str) else result
+                                else:
+                                    logging.warning(f"[Stream] Unknown function tool call: {fn_name}")
+                                    output = json.dumps({"error": f"Unknown function: {fn_name}"})
+                            except Exception as fn_exc:
+                                logging.error(f"[Stream] Function tool {fn_name} failed: {fn_exc}", exc_info=True)
+                                output = json.dumps({"error": str(fn_exc)})
+                            tool_outputs.append({"tool_call_id": tc.id, "output": output})
+
+                        # Submit tool outputs and continue streaming the final answer
+                        async with await project_client.runs.submit_tool_outputs_stream(
+                            thread_id=thread_id,
+                            run_id=run_id,
+                            tool_outputs=tool_outputs
+                        ) as tool_stream:
+                            async for t_type, t_data, t_raw in tool_stream:
+                                if t_type == "thread.message.delta" and hasattr(t_data, "text"):
+                                    t_chunk = t_data.text
+                                    if t_chunk and '【' in t_chunk:
+                                        t_chunk = process_bing_citations(t_data)
+                                    if not t_chunk:
+                                        t_chunk = t_raw or ""
+                                    if t_chunk:
+                                        yield t_chunk
+                                if t_type == "thread.run.failed":
+                                    err = t_data.last_error.message
+                                    logging.error(f"[Stream] Run failed after tool output: {err}")
+                                    raise Exception(err)
+
                     # Stream message deltas with citation processing
                     if event_type == "thread.message.delta" and hasattr(event_data, "text"):
                         chunk = event_data.text
@@ -464,7 +515,7 @@ class SingleAgentRAGStrategyV1(BaseAgentStrategy):
             conv = self.conversation
             conv["messages"] = []
             
-            messages = project_client.agents.messages.list(
+            messages = project_client.messages.list(
                 thread_id=thread_id,
                 order=ListSortOrder.ASCENDING
             )
@@ -522,7 +573,7 @@ class SingleAgentRAGStrategyV1(BaseAgentStrategy):
         """
         try:
             logging.debug(f"[Agent Flow] Deleting agent with ID: {agent_id}")
-            await project_client.agents.delete_agent(agent_id)
+            await project_client.delete_agent(agent_id)
             logging.debug("[Agent Flow] Agent deletion complete.")
         except Exception as e:
             logging.error(f"[Agent Flow] Failed to delete agent {agent_id}: {e}", exc_info=True)

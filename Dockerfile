@@ -11,16 +11,30 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. Download and install Microsoft's package feed configuration
-RUN curl -sSL -O https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb \
-    && dpkg -i packages-microsoft-prod.deb \
-    && rm packages-microsoft-prod.deb \
-    && apt-get update
+# RUN curl -sSL -O https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb \
+#     && dpkg -i packages-microsoft-prod.deb \
+#     && rm packages-microsoft-prod.deb \
+#     && apt-get update
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+    | gpg --dearmor \
+    | tee /usr/share/keyrings/microsoft.gpg > /dev/null
+
+RUN echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] \
+    https://packages.microsoft.com/debian/12/prod bookworm main" \
+    > /etc/apt/sources.list.d/microsoft-prod.list
+
 
 # 3. Install ODBC runtime, headers, and the MS ODBC Driver 18
-RUN ACCEPT_EULA=Y apt-get install -y \
-         unixodbc       \
-         unixodbc-dev   \
-         msodbcsql18    \
+# RUN ACCEPT_EULA=Y apt-get install -y \
+#          unixodbc       \
+#          unixodbc-dev   \
+#          msodbcsql18    \
+#     && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && ACCEPT_EULA=Y apt-get install -y \
+    unixodbc \
+    unixodbc-dev \
+    msodbcsql18 \
     && rm -rf /var/lib/apt/lists/*
 
 # 4. Install ca-certificates and update them
@@ -39,6 +53,6 @@ RUN pip install --upgrade pip \
 
 # 7. Copy app code, expose port, and launch
 COPY . .
-EXPOSE 80
+EXPOSE 8080
 ENV PYTHONPATH="/app/src"
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
