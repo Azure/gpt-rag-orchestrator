@@ -7,7 +7,7 @@ azure-mgmt-storage==22.1.1
 azure-storage-blob==12.25.1
 azure-appconfiguration==1.7.1
 azure.appconfiguration.provider
-azure-ai-projects==1.1.0b3
+azure-ai-projects==2.0.0b3
 azure-ai-agents>=1.2.0b4
 azure-search-documents==11.7.0b1
 

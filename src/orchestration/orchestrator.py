@@ -1,8 +1,9 @@
 import uuid
 import logging
+import time
 
 from typing import Dict, Optional
-from connectors.cosmosdb import CosmosDBClient
+from connectors.cosmosdb import get_cosmosdb_client
 from strategies.agent_strategy_factory import AgentStrategyFactory
 from strategies.base_agent_strategy import BaseAgentStrategy
 from dependencies import get_config
@@ -24,7 +25,7 @@ class Orchestrator:
         cfg = get_config()
         
         # database
-        self.database_client = CosmosDBClient()
+        self.database_client = get_cosmosdb_client()
         self.database_container = cfg.get("CONVERSATIONS_DATABASE_CONTAINER", "conversations")
         
     @classmethod
@@ -72,7 +73,8 @@ class Orchestrator:
             if not self.conversation_id:
                 self.conversation_id = str(uuid.uuid4())
                 conversation = {"id": self.conversation_id}
-                await self.database_client.create_document(self.database_container, self.conversation_id, conversation)
+                import asyncio
+                asyncio.create_task(self.database_client.create_document(self.database_container, self.conversation_id, conversation))
             else:
                 conversation = await self.database_client.get_document(self.database_container, self.conversation_id)
                 if conversation is None:
@@ -114,8 +116,18 @@ class Orchestrator:
                 async for chunk in self.agentic_strategy.initiate_agent_flow(ask):
                     yield chunk
             finally:
-                # 4) Persist whatever the strategy has updated (e.g. thread_id)
-                await self.database_client.update_document(self.database_container, self.agentic_strategy.conversation)
+                # 4) Persist whatever the strategy has updated (e.g. thread_id) asynchronously
+                import asyncio
+                
+                async def persist_conversation():
+                    start_time = time.time()
+                    try:
+                        await self.database_client.update_document(self.database_container, self.agentic_strategy.conversation)
+                        logging.info(f"[Orchestrator][Timing] conversation_persist_async_done: {time.time() - start_time:.2f}s")
+                    except Exception as e:
+                        logging.error(f"[Orchestrator] Error asynchronously persisting conversation: {e}")
+                
+                asyncio.create_task(persist_conversation())
 
             logging.info(
                 "[Conversation] Finished: conversation_id=%s question_id=%s",

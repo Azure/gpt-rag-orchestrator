@@ -21,9 +21,9 @@ from .nl2sql_types import (
 )
 
 from connectors import (
-    CosmosDBClient,
-    GenAIModelClient,
-    SearchClient,
+    get_cosmosdb_client,
+    get_genai_client,
+    get_search_client,
     SemanticModelClient,
     SQLDBClient,
     SQLEndpointClient,
@@ -38,8 +38,8 @@ from dependencies import get_config
 
 class NL2SQLPlugin:
     def __init__(self):
-        self.cosmos = CosmosDBClient()
-        self.search = SearchClient()
+        self.cosmos = get_cosmosdb_client()
+        self.search = get_search_client()
         cfg = get_config()
         self.container_name = cfg.get("DATASOURCES_CONTAINER", "datasources")
         self.tables_index = cfg.get("SEARCH_TABLES_INDEX_NAME", "nl2sql-tables")
@@ -197,7 +197,7 @@ class NL2SQLPlugin:
         use_semantic = self.use_semantic
         sem_cfg = self.semantic_config
 
-        aoai = GenAIModelClient()
+        aoai = get_genai_client()
         logging.info("[tables] generating embeddings")
         embeddings = await aoai.get_embeddings(input)
 
@@ -301,7 +301,7 @@ class NL2SQLPlugin:
         use_sem = self.use_semantic
         sem_cfg = self.semantic_config
 
-        aoai = GenAIModelClient()
+        aoai = get_genai_client()
         logging.info("[queries] generating embeddings")
         embeddings = await aoai.get_embeddings(input)
 

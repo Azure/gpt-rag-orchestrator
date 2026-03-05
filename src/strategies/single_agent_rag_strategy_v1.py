@@ -32,7 +32,7 @@ from .base_agent_strategy import BaseAgentStrategy
 from .agent_strategies import AgentStrategies
 
 from dependencies import get_config
-from connectors import SearchClient
+from connectors import get_search_client
 
 # ============================================================
 # Citation Processing Helper
@@ -200,7 +200,7 @@ class SingleAgentRAGStrategyV1(BaseAgentStrategy):
             
             # Initialize SearchClient (handles embeddings internally)
             try:
-                self.search_client = SearchClient()
+                self.search_client = get_search_client()
                 logging.info("[Init] ✅ SearchClient initialized with hybrid search support")
             except Exception as e:
                 logging.error("[Init] ❌ Could not initialize SearchClient: %s", e)
