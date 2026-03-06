@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from dependencies import get_config
 
-_global_index_empty_cache: Dict[str, bool] = {}
+_global_index_empty_cache: Dict[str, Dict[str, Any]] = {}
 
 
 class SearchResult(BaseModel):
@@ -45,6 +45,7 @@ class SearchClient:
         self.search_service = self.cfg.get('SEARCH_SERVICE_NAME')
         self.use_semantic = self.cfg.get('SEARCH_USE_SEMANTIC', 'false').lower() == 'true'
         self.index_name = self.cfg.get("SEARCH_RAG_INDEX_NAME", "ragindex")
+        self.index_empty_cache_ttl_seconds = int(self.cfg.get("SEARCH_EMPTY_CACHE_TTL_SECONDS", 60, type=int))
 
         # Per-request context (kept in memory only)
         self._request_api_access_token: Optional[str] = None
@@ -344,9 +345,32 @@ class SearchClient:
         Returns True if empty, False if it has documents.
         """
         global _global_index_empty_cache
-        if self.index_name in _global_index_empty_cache:
-            logging.info(f"[Retrieval] Index '{self.index_name}' empty cache hit; bypassing index probe")
-            return _global_index_empty_cache[self.index_name]
+        cached_entry = _global_index_empty_cache.get(self.index_name)
+        if cached_entry:
+            # Backward compatibility: older cache shape used raw bool values.
+            if isinstance(cached_entry, bool):
+                logging.info(f"[Retrieval] Index '{self.index_name}' empty cache hit (legacy); bypassing index probe")
+                return cached_entry
+
+            cached_is_empty = bool(cached_entry.get("is_empty", False))
+            cached_at = float(cached_entry.get("checked_at", 0.0))
+            cache_age_seconds = max(0.0, time.time() - cached_at)
+
+            if cache_age_seconds < self.index_empty_cache_ttl_seconds:
+                logging.info(
+                    "[Retrieval] Index '%s' empty cache hit (age=%.1fs, ttl=%ss); bypassing index probe",
+                    self.index_name,
+                    cache_age_seconds,
+                    self.index_empty_cache_ttl_seconds,
+                )
+                return cached_is_empty
+
+            logging.info(
+                "[Retrieval] Index '%s' empty cache expired (age=%.1fs >= ttl=%ss); re-probing",
+                self.index_name,
+                cache_age_seconds,
+                self.index_empty_cache_ttl_seconds,
+            )
 
         try:
             logging.info(f"[Retrieval] Probing if index '{self.index_name}' is empty...")
@@ -368,7 +392,10 @@ class SearchClient:
             # If no 'value' or empty list, it's empty
             has_results = len(results.get('value', [])) > 0
             is_empty_result = not has_results
-            _global_index_empty_cache[self.index_name] = is_empty_result
+            _global_index_empty_cache[self.index_name] = {
+                "is_empty": is_empty_result,
+                "checked_at": time.time(),
+            }
             
             if is_empty_result:
                 logging.info(f"[Retrieval] Probe confirmed: Index '{self.index_name}' is EMPTY.")
@@ -460,6 +487,14 @@ class SearchClient:
                     content=content
                 )
                 results_list.append(search_result.model_dump())
+
+            # If we found results, force cache to non-empty so routing can recover
+            # immediately from any stale empty-cache state.
+            if results_list:
+                _global_index_empty_cache[self.index_name] = {
+                    "is_empty": False,
+                    "checked_at": time.time(),
+                }
             
             logging.info(f"[Retrieval] Found {len(results_list)} results from Azure AI Search")
             return json.dumps({"results": results_list, "query": query})

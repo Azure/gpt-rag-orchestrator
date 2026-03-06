@@ -225,11 +225,16 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         Used for basic Q&A when no search data exists.
         """
         stream_start = time.time()
+
+        aisearch_enabled = self.cfg.get("SEARCH_RETRIEVAL_ENABLED", True, type=bool)
+        bing_enabled = self.cfg.get("BING_RETRIEVAL_ENABLED", False, type=bool)
         
         # Build prompt
         prompt_context = {
             "strategy": self.strategy_type.value,
             "user_context": self.user_context or {},
+            "aisearch_enabled": aisearch_enabled,
+            "bing_grounding_enabled": bing_enabled,
         }
         system_prompt = await self._read_prompt("main", use_jinja2=True, jinja2_context=prompt_context)
         
@@ -246,9 +251,10 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                  
         try:
              # Fast streaming completion
-             response_stream = await self.llm_client.model_client.complete(
+             response_stream = await self.llm_client.openai_client.chat.completions.create(
+                 model=self.llm_client.chat_deployment,
+                 messages=messages,
                  stream=True,
-                 messages=messages
              )
              
              first_token = False

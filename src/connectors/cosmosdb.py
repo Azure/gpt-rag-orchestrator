@@ -1,5 +1,6 @@
 import logging
 from azure.cosmos.aio import CosmosClient
+from azure.cosmos.exceptions import CosmosHttpResponseError
 from dependencies import get_config
 
 class CosmosDBClient:
@@ -70,12 +71,39 @@ class CosmosDBClient:
 
     async def update_document(self, container, document) -> dict:
         container_client = self._get_container(container)
+        doc_id = document.get("id") if isinstance(document, dict) else None
         try:
             document = await container_client.replace_item(item=document["id"], body=document)
             logging.info(f"[cosmosdb] document updated.")
+        except CosmosHttpResponseError as e:
+            document = None
+            status = getattr(e, "status_code", "unknown")
+            if status == 404:
+                # Replace can legitimately fail when the conversation doc was not created yet.
+                logging.warning(
+                    "[cosmosdb] update skipped: document not found (container=%s, id=%s, status=%s)",
+                    container,
+                    doc_id,
+                    status,
+                )
+            else:
+                logging.warning(
+                    "[cosmosdb] update failed (container=%s, id=%s, status=%s): %s",
+                    container,
+                    doc_id,
+                    status,
+                    e.__class__.__name__,
+                )
+            logging.debug("[cosmosdb] update exception detail: %s", e)
         except Exception as e:
             document = None
-            logging.warning(f"[cosmosdb] could not update document: {e}", exc_info=True)
+            logging.warning(
+                "[cosmosdb] could not update document (container=%s, id=%s): %s",
+                container,
+                doc_id,
+                e.__class__.__name__,
+            )
+            logging.debug("[cosmosdb] unexpected update exception detail", exc_info=True)
         return document
 
 
