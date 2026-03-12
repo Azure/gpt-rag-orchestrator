@@ -7,7 +7,7 @@ import json
 from typing import Any, Dict, AsyncIterator, Mapping, Optional
 from abc import ABC, abstractmethod
 from azure.identity.aio import ChainedTokenCredential, AzureCliCredential, ManagedIdentityCredential
-from azure.ai.projects.aio import AIProjectClient
+from azure.ai.agents.aio import AgentsClient
 from connectors.appconfig import AppConfigClient
 from connectors.cosmosdb import CosmosDBClient
 from dependencies import get_config
@@ -52,11 +52,12 @@ class BaseAgentStrategy(ABC):
             ManagedIdentityCredential(client_id=client_id)
         )
 
-        # Initialize the async AIProjectClient
-        self.project_client = AIProjectClient(
-            endpoint=self.project_endpoint,
-            credential=self.credential
-        )
+        # Initialize the async AgentsClient (azure-ai-agents)
+        # Note: do NOT store a single long-lived client — AgentsClient manages an
+        # aiohttp session internally and must be used as an async context manager
+        # per-request. Store only the constructor args here.
+        self._agents_client_endpoint = self.project_endpoint
+        self._agents_client_credential = self.credential
 
         self.cosmos = CosmosDBClient()
 
