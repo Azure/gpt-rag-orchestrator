@@ -116,7 +116,7 @@ class AppConfigClient:
 
         value = None
 
-        allow_env_vars = True
+        allow_env_vars = False
         if "allow_environment_variables" in os.environ:
             allow_env_vars = str(os.environ["allow_environment_variables"]).lower() in ("1", "true", "yes")
 
