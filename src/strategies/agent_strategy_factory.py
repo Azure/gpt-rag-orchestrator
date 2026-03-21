@@ -1,5 +1,6 @@
 from .single_agent_rag_strategy_v1 import SingleAgentRAGStrategyV1
 from .single_agent_rag_strategy_v2 import SingleAgentRAGStrategyV2
+from .maf_strategy import MafStrategy
 from .agent_strategies import AgentStrategies
 from .mcp_strategy import McpStrategy
 from .nl2sql_strategy import NL2SQLStrategy
@@ -14,6 +15,8 @@ class AgentStrategyFactory:
             return await SingleAgentRAGStrategyV2.create()
         if key == AgentStrategies.SINGLE_AGENT_RAG_V1.value:
             return SingleAgentRAGStrategyV1()
+        if key == AgentStrategies.MAF.value:
+            return MafStrategy()
         if key == AgentStrategies.MCP.value:
             return await McpStrategy.create()
         if key == AgentStrategies.NL2SQL.value:
