@@ -8,12 +8,6 @@ from azure.appconfiguration.provider import (
     SettingSelector,
 )
 from connectors.identity_manager import get_identity_manager
-from azure.core.exceptions import ClientAuthenticationError
-from azure.appconfiguration.provider import (
-    AzureAppConfigurationKeyVaultOptions,
-    load,
-    SettingSelector,
-)
 
 from tenacity import retry, wait_random_exponential, stop_after_attempt, RetryError
 
@@ -122,7 +116,7 @@ class AppConfigClient:
 
         value = None
 
-        allow_env_vars = False
+        allow_env_vars = True
         if "allow_environment_variables" in os.environ:
             allow_env_vars = str(os.environ["allow_environment_variables"]).lower() in ("1", "true", "yes")
 
