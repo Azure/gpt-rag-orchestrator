@@ -48,7 +48,7 @@ class Orchestrator:
         cfg = get_config()
 
         # agentic strategy
-        agentic_strategy_name = cfg.get("AGENT_STRATEGY", "single_agent_rag")
+        agentic_strategy_name = cfg.get("AGENT_STRATEGY", "maf_lite")
         instance.agentic_strategy = await AgentStrategyFactory.get_strategy(agentic_strategy_name)
         if not instance.agentic_strategy:
             raise EnvironmentError("AGENT_STRATEGY must be set")
@@ -116,9 +116,7 @@ class Orchestrator:
                 async for chunk in self.agentic_strategy.initiate_agent_flow(ask):
                     yield chunk
             finally:
-                # 4) Persist whatever the strategy has updated (e.g. thread_id) asynchronously
-                import asyncio
-                
+                # 4) Persist whatever the strategy has updated (e.g. thread_id)
                 async def persist_conversation():
                     start_time = time.time()
                     try:
@@ -126,8 +124,8 @@ class Orchestrator:
                         logging.info(f"[Orchestrator][Timing] conversation_persist_async_done: {time.time() - start_time:.2f}s")
                     except Exception as e:
                         logging.error(f"[Orchestrator] Error asynchronously persisting conversation: {e}")
-                
-                asyncio.create_task(persist_conversation())
+
+                await persist_conversation()
 
             logging.info(
                 "[Conversation] Finished: conversation_id=%s question_id=%s",

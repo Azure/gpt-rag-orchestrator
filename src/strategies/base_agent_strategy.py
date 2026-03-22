@@ -239,11 +239,8 @@ class BaseAgentStrategy(ABC):
     def _prompt_namespace(self) -> str:
         """Return the prompt namespace to use for this strategy.
 
-        This preserves prompt compatibility when strategy keys evolve (e.g. v1 aliases).
+        Subclasses may override this to share prompt directories across strategies.
         """
-
-        if getattr(self, "strategy_type", None) == AgentStrategies.SINGLE_AGENT_RAG_V1:
-            return AgentStrategies.SINGLE_AGENT_RAG.value
         return self.strategy_type.value
     
     def _prompt_dir(self):

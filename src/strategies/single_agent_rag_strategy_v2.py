@@ -307,9 +307,9 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                 else:
                     chunk = getattr(event_data, "text", getattr(raw, "text", ""))
                     
-                # Minimal inline Bing citation processor to avoid V1 regex overhead if possible
+                # Minimal inline Bing citation processor to avoid regex overhead if possible
                 if chunk and '【' in chunk:
-                    from .single_agent_rag_strategy_v1 import process_bing_citations
+                    from util.citations import process_bing_citations
                     chunk = process_bing_citations(event_data)
                     
                 if chunk:

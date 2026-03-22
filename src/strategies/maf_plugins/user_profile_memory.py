@@ -81,6 +81,12 @@ class UserProfileMemory(ContextProvider):
         if not user_messages:
             return
 
+        # Agent Service client currently uses a response/context shape that does
+        # not support this structured extraction call reliably in post-invoke hooks.
+        if self._chat_client.__class__.__name__ == "AzureAIAgentClient":
+            logging.debug("[UserProfileMemory] Skipping profile extraction for AzureAIAgentClient")
+            return
+
         try:
             result = await self._chat_client.get_response(
                 messages=messages_list,
@@ -116,7 +122,10 @@ class UserProfileMemory(ContextProvider):
                 logging.debug(f"[UserProfileMemory] Updated user profile: {self.user_profile}")
 
         except Exception as e:
-            logging.warning(f"[UserProfileMemory] Failed to extract user info: {e}")
+            if isinstance(e, AttributeError) and "conversation_id" in str(e):
+                logging.debug(f"[UserProfileMemory] Skipped unsupported extraction path: {e}")
+            else:
+                logging.warning(f"[UserProfileMemory] Failed to extract user info: {e}")
 
     async def invoking(
         self,

@@ -1,0 +1,26 @@
+"""Live integration test for deployed strategies."""
+import sys
+import requests
+import warnings
+warnings.filterwarnings("ignore")
+
+TOKEN = sys.argv[1] if len(sys.argv) > 1 else ""
+FQDN = "https://ca-olvdyl47765js-orchestrator.bluecoast-d297503e.eastus2.azurecontainerapps.io"
+BODY = {"ask": "What is Microsoft Azure?", "user_context": {"user_id": "test_user_refactor"}}
+HEADERS = {"dapr-api-token": "dev-token", "Content-Type": "application/json"}
+if TOKEN:
+    HEADERS["Authorization"] = f"Bearer {TOKEN}"
+
+try:
+    r = requests.post(f"{FQDN}/orchestrator", json=BODY, headers=HEADERS, timeout=(30, 120), stream=True, verify=True)
+    print(f"Status: {r.status_code}")
+    collected = ""
+    for chunk in r.iter_content(chunk_size=256, decode_unicode=True):
+        if chunk:
+            collected += chunk
+            if len(collected) > 800:
+                break
+    print(collected[:800] if collected else "(empty body)")
+    r.close()
+except Exception as e:
+    print(f"Error: {type(e).__name__}: {e}")
