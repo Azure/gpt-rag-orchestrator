@@ -34,6 +34,7 @@ from .agent_strategies import AgentStrategies
 from .composite_context_provider import CompositeContextProvider
 from .search_context_provider import SearchContextProvider
 from .maf_plugins import UserProfile, UserProfileMemory
+from connectors.search import acquire_obo_search_token
 from dependencies import get_config
 
 
@@ -90,6 +91,12 @@ Guidelines:
         # User profiles stored in the conversations container (no extra container needed)
         self.user_profile_container = cfg.get("CONVERSATIONS_DATABASE_CONTAINER", "conversations")
 
+        # Hard cap on output tokens for the main agent response
+        self.max_completion_tokens = int(cfg.get("MAX_COMPLETION_TOKENS", 4096))
+
+        # Reasoning effort for models that support it (e.g. gpt-5-mini)
+        self.reasoning_effort = cfg.get("REASONING_EFFORT", "medium")
+
         # Runtime state
         self._agent: Optional[ChatAgent] = None
         self._search_provider: Optional[SearchContextProvider] = None
@@ -139,12 +146,17 @@ Guidelines:
             return None
 
         try:
+            async def _get_obo_token() -> str | None:
+                token = getattr(self, "request_access_token", None)
+                return await acquire_obo_search_token(token) if token else None
+
             provider = SearchContextProvider(
                 endpoint=self.search_endpoint,
                 credential=self.credential,
                 index_name=self.search_index_name,
                 top_k=self.search_top_k,
                 semantic_configuration_name=self.semantic_search_config,
+                get_obo_token=_get_obo_token,
             )
             logging.info(
                 "[MafAgentServiceStrategy] SearchContextProvider created (index=%s)",
@@ -247,7 +259,11 @@ Guidelines:
 
                     # Stream the agent response
                     full_response = ""
-                    async for chunk in agent.run_stream(user_message, thread=thread):
+                    async for chunk in agent.run_stream(
+                        user_message,
+                        thread=thread,
+                        options={"max_completion_tokens": self.max_completion_tokens, "reasoning_effort": self.reasoning_effort},
+                    ):
                         if chunk.text:
                             full_response += chunk.text
                             yield chunk.text

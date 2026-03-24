@@ -4,17 +4,15 @@ All notable changes to this project will be documented in this file.
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
-### Fixed
-- **MAF Agent Service lifecycle cleanup:** Updated `maf_agent_service` to use request-scoped Agent Service client ownership, preventing leaked async HTTP sessions that produced `Unclosed client session`, `Unclosed connector`, and `SSL shutdown timed out` errors in runtime logs.
-- **User profile extraction warnings in Agent Service path:** Guarded unsupported extraction path in `UserProfileMemory` for `AzureAIAgentClient`, preventing noisy `'dict' object has no attribute 'conversation_id'` warnings in normal operation.
-- **Conversation persist teardown path:** Updated orchestrator stream teardown to persist conversation with awaited completion at end-of-stream, reducing detached-task/span lifecycle noise during request finalization.
-
-## [v2.4.3] - 2026-06-18
 ### Added
 - **MafLiteStrategy (`maf_lite`):** New orchestration strategy using the Microsoft Agent Framework with direct Azure OpenAI model access. Provides the same MAF features (ChatAgent, UserProfileMemory, AzureAISearchContextProvider, retrieval plugins) without requiring Azure AI Foundry Agent Service v2, offering a lighter-weight deployment option.
 - **OpenAIChatClient:** Custom `ChatClientProtocol` adapter wrapping `AsyncAzureOpenAI` for direct model access, used by the `maf_lite` strategy.
 - **Citation utilities module (`src/util/citations.py`):** Extracted citation processing functions into a shared utility module.
 - **Unit test suite:** Added comprehensive unit tests for strategies, factory, citations, and OpenAI chat client (46 tests).
+### Fixed
+- **MAF Agent Service lifecycle cleanup:** Updated `maf_agent_service` to use request-scoped Agent Service client ownership, preventing leaked async HTTP sessions that produced `Unclosed client session`, `Unclosed connector`, and `SSL shutdown timed out` errors in runtime logs.
+- **User profile extraction warnings in Agent Service path:** Guarded unsupported extraction path in `UserProfileMemory` for `AzureAIAgentClient`, preventing noisy `'dict' object has no attribute 'conversation_id'` warnings in normal operation.
+- **Conversation persist teardown path:** Updated orchestrator stream teardown to persist conversation with awaited completion at end-of-stream, reducing detached-task/span lifecycle noise during request finalization.
 
 ### Changed
 - **Renamed `MafStrategy` to `MafAgentServiceStrategy` (`maf_agent_service`):** Clarifies that this strategy uses the Microsoft Agent Framework **with** Azure AI Foundry Agent Service v2. The App Configuration key changed from `maf` to `maf_agent_service`.

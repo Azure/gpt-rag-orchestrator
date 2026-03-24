@@ -78,5 +78,12 @@ class CompositeContextProvider(ContextProvider):
         invoke_exception: Exception | None = None,
         **kwargs: Any,
     ) -> None:
-        for p in self._providers:
-            await p.invoked(request_messages, response_messages, invoke_exception, **kwargs)
+        # Run all providers in parallel (mirrors invoking behaviour)
+        results = await asyncio.gather(
+            *(p.invoked(request_messages, response_messages, invoke_exception, **kwargs)
+              for p in self._providers),
+            return_exceptions=True,
+        )
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.warning("[CompositeContextProvider] Provider %d invoked() failed: %s", i, result)

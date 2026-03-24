@@ -1,6 +1,7 @@
 from .single_agent_rag_strategy_v2 import SingleAgentRAGStrategyV2
 from .maf_agent_service_strategy import MafAgentServiceStrategy
 from .maf_lite_strategy import MafLiteStrategy
+from .multimodal_strategy import MultimodalStrategy
 from .agent_strategies import AgentStrategies
 from .mcp_strategy import McpStrategy
 from .nl2sql_strategy import NL2SQLStrategy
@@ -21,8 +22,8 @@ class AgentStrategyFactory:
             return await McpStrategy.create()
         if key == AgentStrategies.NL2SQL.value:
             return NL2SQLStrategy()
-        # if key == AgentStrategies.MULTIMODAL.value:
-            # return ...
+        if key == AgentStrategies.MULTIMODAL.value:
+            return MultimodalStrategy()
         # if key == AgentStrategies.MULTIAGENT.value:
             # return ...
         raise ValueError(f"Unknown strategy key: {key}")

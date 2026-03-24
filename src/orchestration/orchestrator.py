@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 import logging
 import time
@@ -73,7 +74,6 @@ class Orchestrator:
             if not self.conversation_id:
                 self.conversation_id = str(uuid.uuid4())
                 conversation = {"id": self.conversation_id}
-                import asyncio
                 asyncio.create_task(self.database_client.create_document(self.database_container, self.conversation_id, conversation))
             else:
                 conversation = await self.database_client.get_document(self.database_container, self.conversation_id)
@@ -125,7 +125,7 @@ class Orchestrator:
                     except Exception as e:
                         logging.error(f"[Orchestrator] Error asynchronously persisting conversation: {e}")
 
-                await persist_conversation()
+                asyncio.create_task(persist_conversation())
 
             logging.info(
                 "[Conversation] Finished: conversation_id=%s question_id=%s",

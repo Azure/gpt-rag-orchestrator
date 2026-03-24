@@ -7,12 +7,15 @@ This module provides a reusable context provider that:
 - Provides user context to guide agent responses
 """
 
+import asyncio
 import logging
 from collections.abc import MutableSequence, Sequence
 from typing import Any, Optional, List
 
 from pydantic import BaseModel, Field
 from agent_framework import ContextProvider, Context, ChatClientProtocol, ChatMessage, ChatOptions
+
+
 
 
 # ============================================================================
@@ -56,6 +59,7 @@ class UserProfileMemory(ContextProvider):
         **kwargs: Any
     ):
         self._chat_client = chat_client
+        self._pending_task: Optional[asyncio.Task] = None
         if user_profile:
             self.user_profile = user_profile
         elif kwargs:
@@ -74,19 +78,25 @@ class UserProfileMemory(ContextProvider):
         _invoke_exception: Exception | None = None,
         **_kwargs: Any,
     ) -> None:
-        """Extract user profile information from messages after each agent call."""
+        """Schedule profile extraction as a background task (non-blocking)."""
         messages_list = [request_messages] if isinstance(request_messages, ChatMessage) else list(request_messages)
         user_messages = [msg for msg in messages_list if msg.role.value == "user"]
 
         if not user_messages:
             return
 
-        # Agent Service client currently uses a response/context shape that does
-        # not support this structured extraction call reliably in post-invoke hooks.
         if self._chat_client.__class__.__name__ == "AzureAIAgentClient":
             logging.debug("[UserProfileMemory] Skipping profile extraction for AzureAIAgentClient")
             return
 
+        # Cancel any previous pending extraction
+        if self._pending_task and not self._pending_task.done():
+            self._pending_task.cancel()
+
+        self._pending_task = asyncio.create_task(self._extract_and_update_profile(messages_list))
+
+    async def _extract_and_update_profile(self, messages_list: list[ChatMessage]) -> None:
+        """Extract user profile information from messages (runs as background task)."""
         try:
             result = await self._chat_client.get_response(
                 messages=messages_list,
@@ -103,7 +113,6 @@ class UserProfileMemory(ContextProvider):
 
             if result.value and isinstance(result.value, ExtractedUserInfo):
                 extracted = result.value
-                # Update profile with new information (don't overwrite with None)
                 if extracted.name:
                     self.user_profile.name = extracted.name
                 if extracted.role:
@@ -121,11 +130,22 @@ class UserProfileMemory(ContextProvider):
 
                 logging.debug(f"[UserProfileMemory] Updated user profile: {self.user_profile}")
 
+        except asyncio.CancelledError:
+            logging.debug("[UserProfileMemory] Profile extraction cancelled")
         except Exception as e:
             if isinstance(e, AttributeError) and "conversation_id" in str(e):
                 logging.debug(f"[UserProfileMemory] Skipped unsupported extraction path: {e}")
             else:
                 logging.warning(f"[UserProfileMemory] Failed to extract user info: {e}")
+
+    async def flush(self) -> None:
+        """Await any pending profile extraction task. Call before saving the profile."""
+        if self._pending_task and not self._pending_task.done():
+            try:
+                await self._pending_task
+            except Exception:
+                pass  # Already logged in _extract_and_update_profile
+        self._pending_task = None
 
     async def invoking(
         self,

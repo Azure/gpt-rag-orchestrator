@@ -25,6 +25,7 @@ from azure.ai.agents.models import (
     MessageDeltaChunk,
     MessageDeltaTextUrlCitationAnnotation,
     MessageTextContent,
+    ToolOutput,
 )
 from azure.ai.agents.aio.operations._operations import RunsOperations as RunsOperationsGenerated
 from azure.ai.agents.aio import AgentsClient
@@ -35,6 +36,7 @@ from .agent_strategies import AgentStrategies
 from dependencies import get_config
 from connectors.search import get_search_client
 from connectors.aifoundry import get_genai_client
+from openai import BadRequestError
 
 # Module-level singleton for AgentsClient — eliminates per-request TCP/TLS + token overhead
 _agents_client: Optional[AgentsClient] = None
@@ -141,7 +143,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
     This strategy prioritizes bypassing heavy cloud Agent services when possible (e.g. empty indexes),
     instead relying on local Execution via `GenAIModelClient`.
     
-    When an index has data or complex tools are needed, this uses Microsoft Agent Framework (MAF)
+    When an index has data or complex tools are needed, this uses Azure AI Agents SDK
     with explicit Event Handlers for streaming and local orchestration, avoiding polling loops.
     """
 
@@ -188,6 +190,12 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
             else:
                 logging.error("[Init V2] BING_CONNECTION_ID not set")
 
+        # Hard cap on output tokens for the main agent response
+        self.max_completion_tokens = int(self.cfg.get("MAX_COMPLETION_TOKENS", 4096))
+
+        # Reasoning effort for models that support it (e.g. gpt-5-mini)
+        self.reasoning_effort = self.cfg.get("REASONING_EFFORT", "medium")
+
         # Initialize Direct LLM Client for Bypass scenario (singleton)
         self.llm_client = get_genai_client()
 
@@ -196,7 +204,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         V2 Latency-Optimized Agent Flow.
         Routes locally based on cached index state:
         - If empty: Direct streaming chat completion via GenAIModelClient (Bypass)
-        - If not empty: MAF / Agent V2 streaming with event handlers
+        - If not empty: Azure AI Agents SDK streaming with event handlers
         """
         flow_start = time.time()
         
@@ -212,16 +220,16 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
             async for chunk in self._stream_direct_llm(user_message):
                 yield chunk
         else:
-            # 2. Complex Routing: Use Agent Framework V2
-            logging.info("[Agent Flow V2] 🤖 Routing to Microsoft Agent Framework (Search Index has data or Bing enabled)")
-            async for chunk in self._stream_maf_agent(user_message):
+            # 2. Complex Routing: Use Azure AI Agents SDK
+            logging.info("[Agent Flow V2] 🤖 Routing to Azure AI Agents SDK (Search Index has data or Bing enabled)")
+            async for chunk in self._stream_agent(user_message):
                 yield chunk
                 
         logging.info(f"[Agent Flow V2] Total flow time: {round(time.time() - flow_start, 2)}s")
 
     async def _stream_direct_llm(self, user_message: str):
         """
-        Direct lightweight GenAI client stream, skipping all MAF overhead.
+        Direct lightweight GenAI client stream, skipping all Agent SDK overhead.
         Used for basic Q&A when no search data exists.
         """
         stream_start = time.time()
@@ -251,11 +259,18 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                  
         try:
              # Fast streaming completion
-             response_stream = await self.llm_client.openai_client.chat.completions.create(
+             _kwargs = dict(
                  model=self.llm_client.chat_deployment,
                  messages=messages,
                  stream=True,
+                 max_completion_tokens=self.max_completion_tokens,
+                 reasoning_effort=self.reasoning_effort,
              )
+             try:
+                 response_stream = await self.llm_client.openai_client.chat.completions.create(**_kwargs)
+             except BadRequestError:
+                 _kwargs.pop("reasoning_effort", None)
+                 response_stream = await self.llm_client.openai_client.chat.completions.create(**_kwargs)
              
              first_token = False
              async for update in response_stream:
@@ -285,7 +300,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
             if event_type == "thread.message.delta":
                 if not first_token:
                     start_t = getattr(self, '_stream_start_time', time.time())
-                    logging.info(f"[Agent Flow V2] 🤖 MAF First Token: {time.time() - start_t:.2f}s")
+                    logging.info(f"[Agent Flow V2] 🤖 First Token: {time.time() - start_t:.2f}s")
                     first_token = True
                     
                 chunk = ""
@@ -326,18 +341,18 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                             args = json.loads(tc.function.arguments)
                             t0 = time.time()
                             result = await self.search_client.search_knowledge_base(**args)
-                            result_str = result if isinstance(result, str) else json.dumps(result)
+                            result_str = self._format_search_results(result)
                             logging.info(f"[Agent Flow V2] Retrieval tool executed in {time.time()-t0:.2f}s")
-                            tool_outputs.append({
-                                "tool_call_id": tc.id,
-                                "output": result_str
-                            })
+                            tool_outputs.append(ToolOutput(
+                                tool_call_id=tc.id,
+                                output=result_str
+                            ))
                         except Exception as e:
                             logging.error(f"Error executing tool {tc.function.name}: {e}")
-                            tool_outputs.append({
-                                "tool_call_id": tc.id,
-                                "output": json.dumps({"error": str(e)})
-                            })
+                            tool_outputs.append(ToolOutput(
+                                tool_call_id=tc.id,
+                                output=json.dumps({"error": str(e)})
+                            ))
                 
                 if tool_outputs:
                     tool_outputs_to_submit = tool_outputs
@@ -347,8 +362,9 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                             
             elif event_type == "thread.run.failed":
                 err_msg = getattr(event_data, "last_error", None)
+                err_code = getattr(err_msg, "code", "unknown") if err_msg else "unknown"
                 err_txt = getattr(err_msg, "message", "Unknown Error") if err_msg else "Unknown Error"
-                logging.error(f"[Agent Flow V2] Run failed: {err_txt}")
+                logging.error(f"[Agent Flow V2] Run failed: code={err_code} message={err_txt}")
                 yield f"\n\n[ERROR]: The agent encountered an unexpected error: {err_txt}"
                 
         if tool_outputs_to_submit and run_id_to_submit:
@@ -385,10 +401,43 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                 async for chunk in self._process_stream(agents_client, s2, thread_id):
                     yield chunk
 
-    async def _stream_maf_agent(self, user_message: str):
+    @staticmethod
+    def _format_search_results(raw_result) -> str:
+        """Format search results as markdown with [title](link) headers.
+
+        Mirrors the format used by SearchContextProvider so the model
+        sees citation examples and reproduces them naturally.
         """
-        Microsoft Agent Framework V2 implementation.
-        Uses Event Handlers in azure-ai-projects v2 SDK for real-time streaming,
+        try:
+            data = json.loads(raw_result) if isinstance(raw_result, str) else raw_result
+            results = data.get("results", [])
+            if not results:
+                return raw_result if isinstance(raw_result, str) else json.dumps(raw_result)
+        except (json.JSONDecodeError, AttributeError):
+            return raw_result if isinstance(raw_result, str) else json.dumps(raw_result)
+
+        parts: list[str] = []
+        for doc in results:
+            title = doc.get("title") or "reference"
+            link = doc.get("link") or ""
+            content = doc.get("content") or ""
+            if not content:
+                continue
+            header = f"### [{title}]({link})" if link else f"### {title}"
+            parts.append(f"{header}\n{content}")
+
+        if not parts:
+            return raw_result if isinstance(raw_result, str) else json.dumps(raw_result)
+
+        return (
+            "Retrieved documents. When citing, use the exact format [title](link).\n\n"
+            + "\n\n---\n\n".join(parts)
+        )
+
+    async def _stream_agent(self, user_message: str):
+        """
+        Azure AI Agents SDK streaming implementation.
+        Uses Event Handlers for real-time streaming,
         avoiding polling loops entirely to guarantee sub-millisecond retrieval impact.
         """
         stream_start = time.time()
@@ -412,7 +461,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
             )
         agents_client = _agents_client
 
-        # MAF Features: Auto-functions
+        # Agent SDK Features: Auto-functions
         if self.search_client:
             # OBO prep
             allow_anonymous = self.cfg.get("ALLOW_ANONYMOUS", default=True, type=bool)
@@ -480,23 +529,24 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         )
         logging.info(f"[Agent Flow V2][Telemetry] Message creation took: {time.time() - t2:.2f}s")
 
-        logging.info(f"[Agent Flow V2] Streaming from MAF SDK V2 Event Handlers...")
+        logging.info(f"[Agent Flow V2] Streaming from Azure AI Agents SDK...")
         self._stream_start_time = stream_start
         t_stream = time.time()
 
         try:
-            # MAF Feature: Native Real-time event streaming
+            # Azure AI Agents SDK: Native Real-time event streaming
             async with await agents_client.runs.stream(
                 thread_id=thread.id,
-                agent_id=agent.id
+                agent_id=agent.id,
+                max_completion_tokens=self.max_completion_tokens,
             ) as stream:
                 async for chunk in self._process_stream(agents_client, stream, thread.id):
                     yield chunk
 
         except Exception as e:
             err_msg = traceback.format_exc()
-            logging.error(f"[Agent Flow V2] MAF Streaming failed: {err_msg}")
-            yield f"[ERROR in MAF Streaming]: {e}\n{err_msg}"
+            logging.error(f"[Agent Flow V2] Streaming failed: {err_msg}")
+            yield f"[ERROR in Streaming]: {e}\n{err_msg}"
 
         # Cleanup Agent — only if created per-request (not cached/persistent)
         if create_agent:

@@ -10,6 +10,71 @@ from dependencies import get_config
 
 _global_index_empty_cache: Dict[str, Dict[str, Any]] = {}
 
+# Module-level OBO token cache (shared across callers)
+_obo_cache: Dict[str, Any] = {}
+
+
+async def acquire_obo_search_token(api_access_token: Optional[str], allow_anonymous: bool = True) -> Optional[str]:
+    """Acquire an Azure AI Search OBO token from an incoming API token.
+
+    Reusable helper so any strategy can obtain a search-audience delegated
+    token without duplicating the OBO exchange logic.
+
+    Returns the Bearer token string (without 'Bearer ' prefix) or None.
+    """
+    if not api_access_token:
+        if allow_anonymous:
+            return None
+        raise RuntimeError("Missing user access token and ALLOW_ANONYMOUS=false")
+
+    # Check cache
+    fp = hashlib.sha256(api_access_token.encode()).hexdigest()[:16]
+    cached = _obo_cache.get(fp)
+    if cached and time.time() < cached.get("expires_at", 0):
+        return cached["token"]
+
+    cfg = get_config()
+    tenant_id = (cfg.get_value("OAUTH_AZURE_AD_TENANT_ID", default=None, allow_none=True) or "").strip() or None
+    client_id = (cfg.get_value("OAUTH_AZURE_AD_CLIENT_ID", default=None, allow_none=True) or "").strip() or None
+    client_secret = (cfg.get_value("OAUTH_AZURE_AD_CLIENT_SECRET", default=None, allow_none=True) or "").strip() or None
+
+    if not tenant_id or not client_id or not client_secret:
+        logging.warning("[OBO] Missing Entra config for OBO (tenant=%s client=%s secret=%s)",
+                        "set" if tenant_id else "missing", "set" if client_id else "missing", "set" if client_secret else "missing")
+        if allow_anonymous:
+            return None
+        raise RuntimeError("OBO config incomplete and ALLOW_ANONYMOUS=false")
+
+    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    form = {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "requested_token_use": "on_behalf_of",
+        "scope": "https://search.azure.com/user_impersonation",
+        "assertion": api_access_token,
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(token_url, data=form) as resp:
+            raw = await resp.text()
+            if resp.status >= 400:
+                logging.error("[OBO] Token exchange failed (status=%d body=%s)", resp.status, raw[:300])
+                if allow_anonymous:
+                    return None
+                raise RuntimeError(f"OBO token exchange failed: status={resp.status}")
+            try:
+                data = json.loads(raw)
+            except Exception:
+                logging.error("[OBO] Non-JSON response from token endpoint")
+                return None
+            token = data.get("access_token")
+            if token:
+                ttl = int(data.get("expires_in", 0))
+                _obo_cache[fp] = {"token": token, "expires_at": time.time() + max(0, ttl - 30)}
+                logging.info("[OBO] Acquired Search delegated token")
+            return token
+
 
 class SearchResult(BaseModel):
     """Represents a single search result from AI Search."""
