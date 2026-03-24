@@ -64,7 +64,7 @@ class GenAIModelClient:
         # tokenizer for truncation/estimation
         self._tokenizer = tiktoken.encoding_for_model(self.tokenizer_model_name)
 
-    def get_completion(self, prompt: str, max_tokens: int = 800) -> str:
+    def get_completion(self, prompt: str, max_tokens: int = 1024) -> str:
         """
         Chat/completion using Azure AI Foundry (AIProjectClient).
         """

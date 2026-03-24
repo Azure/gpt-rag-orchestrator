@@ -8,12 +8,6 @@ from azure.appconfiguration.provider import (
     SettingSelector,
 )
 from connectors.identity_manager import get_identity_manager
-from azure.core.exceptions import ClientAuthenticationError
-from azure.appconfiguration.provider import (
-    AzureAppConfigurationKeyVaultOptions,
-    load,
-    SettingSelector,
-)
 
 from tenacity import retry, wait_random_exponential, stop_after_attempt, RetryError
 

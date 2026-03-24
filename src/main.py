@@ -256,7 +256,7 @@ app = FastAPI(
 
 @app.post(
     "/orchestrator",
-    dependencies=[Depends(validate_auth)], 
+    dependencies=[Depends(validate_auth)],
     summary="Ask orchestrator a question",
     response_description="Returns the orchestrator’s response in real time, streamed via SSE.",
     responses=ORCHESTRATOR_RESPONSES

@@ -3,6 +3,31 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [v2.5.0] - 2026-03-24
+### Added
+- **MafLiteStrategy (`maf_lite`):** New orchestration strategy using the Microsoft Agent Framework with direct Azure OpenAI model access. Provides the same MAF features (ChatAgent, UserProfileMemory, AzureAISearchContextProvider, retrieval plugins) without requiring Azure AI Foundry Agent Service v2, offering a lighter-weight deployment option.
+- **OpenAIChatClient:** Custom `ChatClientProtocol` adapter wrapping `AsyncAzureOpenAI` for direct model access, used by the `maf_lite` strategy.
+- **Citation utilities module (`src/util/citations.py`):** Extracted citation processing functions into a shared utility module.
+- **Unit test suite:** Added comprehensive unit tests for strategies, factory, citations, and OpenAI chat client (46 tests).
+
+### Changed
+- **Renamed `MafStrategy` to `MafAgentServiceStrategy` (`maf_agent_service`):** Clarifies that this strategy uses the Microsoft Agent Framework **with** Azure AI Foundry Agent Service v2. The App Configuration key changed from `maf` to `maf_agent_service`.
+- **Strategy lineup table in README:** Added a quick-reference table listing all available strategies with their configuration keys.
+- **Default strategy changed to `maf_lite`:** The fallback strategy when `AGENT_STRATEGY` is not set in App Configuration is now `maf_lite` instead of `single_agent_rag`.
+
+### Fixed
+- **MAF Agent Service lifecycle cleanup:** Updated `maf_agent_service` to use request-scoped Agent Service client ownership, preventing leaked async HTTP sessions that produced `Unclosed client session`, `Unclosed connector`, and `SSL shutdown timed out` errors in runtime logs.
+- **User profile extraction warnings in Agent Service path:** Guarded unsupported extraction path in `UserProfileMemory` for `AzureAIAgentClient`, preventing noisy `'dict' object has no attribute 'conversation_id'` warnings in normal operation.
+- **Conversation persist teardown path:** Updated orchestrator stream teardown to persist conversation with awaited completion at end-of-stream, reducing detached-task/span lifecycle noise during request finalization.
+- **`azure-search-documents` version conflict:** Updated from `11.7.0b1` to `11.7.0b2` to align with `agent-framework-azure-ai-search` dependency.
+- **`opentelemetry-semantic-conventions-ai` version incompatibility:** Pinned to `>=0.4.13,<0.5.0` to prevent `SpanAttributes.LLM_SYSTEM` missing error in `agent-framework-core`.
+- **`opentelemetry-instrumentation-httpx` version conflict:** Unpinned from `==0.52b1` to allow pip to resolve a compatible version with `agent-framework-core` and `semantic-kernel`.
+
+### Removed
+- **`SingleAgentRAGStrategyV1` (`single_agent_rag_v1`):** Removed the legacy V1 RAG strategy and its alias module. The `single_agent_rag` key now exclusively maps to V2.
+
 ## [v2.4.2] - 2026-02-28
 ### Added
 - **Microsoft Agent Framework (MAF) + Azure AI Foundry Agent Service v2:** Upgraded the orchestration platform from `azure-ai-projects==1.1.0b3` to `azure-ai-projects==2.0.0b3`, introducing the new decoupled `AgentsClient` (`azure.ai.agents.aio.AgentsClient`) with native event-handler streaming, replacing the legacy `AIProjectClient` polling-based approach.
