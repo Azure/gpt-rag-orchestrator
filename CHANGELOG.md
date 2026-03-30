@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- Normalized line endings from CRLF to LF across 32 files for cross-platform consistency.
 
 ## [v2.5.0] - 2026-03-24
 ### Added
