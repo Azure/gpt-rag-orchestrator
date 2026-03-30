@@ -238,36 +238,44 @@ When a release branch is created from `develop`, the agent MUST:
 1. convert `Unreleased` into the actual release entry
 2. use the correct version with `v` prefix in the changelog
 3. add the release date
-4. recreate a new empty `Unreleased` section at the top
+4. do NOT add or keep an `Unreleased` section — the release branch (and therefore `main`) must NEVER contain `[Unreleased]`
 5. synchronize the changelog with the `VERSION` file
 
-Required transformation:
+After pushing the release branch, the agent MUST also update `develop`:
+
+6. switch back to `develop`
+7. add a new empty `## [Unreleased]` section at the top of `develop`'s CHANGELOG
+8. commit and push the `develop` update
+
+Required transformation on the **release branch**:
 
 From:
 
 ```md
 ## [Unreleased]
+### Added
+- ...
 ```
 
 To:
 
 ```md
 ## [vX.Y.Z] - YYYY-MM-DD
+### Added
+- ...
 ```
 
-Example:
+Then on **`develop`** (after the release branch is pushed):
 
 ```md
 ## [Unreleased]
 
-## [v2.4.2] - 2026-03-22
-
+## [vX.Y.Z] - YYYY-MM-DD
 ### Added
-- MafLiteStrategy...
-
-### Fixed
-- Agent Service lifecycle cleanup...
+- ...
 ```
+
+**CRITICAL**: The `[Unreleased]` section must ONLY exist on `develop`. It must NEVER appear on a release branch or on `main`. Any content merged to `main` must not contain `[Unreleased]`.
 
 ---
 
@@ -307,9 +315,11 @@ Preferred style:
 Do NOT:
 
 * assign a release number in `develop`
-* remove the `Unreleased` section
+* remove the `Unreleased` section from `develop`
 * create multiple `Unreleased` sections
 * leave the release branch without converting `Unreleased`
+* include `[Unreleased]` on a release branch or on `main` — this section belongs ONLY on `develop`
+* merge an `[Unreleased]` header into `main` (the `main` branch must only contain versioned release entries)
 * mismatch release numbers across branch name, `VERSION`, changelog, and tag naming
 
 ---
