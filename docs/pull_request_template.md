@@ -2,6 +2,8 @@
 
 <!-- Describe the intention of the changes being proposed. What problem does it solve or functionality does it add? -->
 
+> ⚠️ **Important:** All pull requests must target the `develop` branch, not `main`. PRs targeting `main` will be automatically blocked.
+
 ## Contributing guidelines
 
 Please see [Contributing Guidelines](../CONTRIBUTING.md) before creating your Pull Request.
