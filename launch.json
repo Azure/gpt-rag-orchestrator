@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: FastAPI (Uvicorn)",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "/usr/local/bin/python3",
+      "module": "uvicorn",
+      "args": [
+        "src.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "9000",
+        "--reload"
+      ],
+      "env": {
+        "APP_CONFIG_ENDPOINT": "https://replace_by_you_app_conig_name_and_copy_in_dot_vscode_folder.azconfig.io"
+      },
+      "jinja": true,
+      "justMyCode": true
+    }
+  ]
+}

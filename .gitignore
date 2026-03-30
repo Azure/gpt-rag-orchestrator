@@ -1,7 +1,7 @@
 # Local
 local/
 .local/
-.vscode/
+.vscode/launch.json
 .claude/
 
 # Evaluations
