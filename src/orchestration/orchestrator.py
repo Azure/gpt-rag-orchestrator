@@ -3,6 +3,7 @@ import uuid
 import logging
 import time
 
+from datetime import datetime, timezone
 from typing import Dict, Optional
 from connectors.cosmosdb import get_cosmosdb_client
 from strategies.agent_strategy_factory import AgentStrategyFactory
@@ -16,11 +17,12 @@ tracer = Telemetry.get_tracer(__name__)
 class Orchestrator:
     agentic_strategy = BaseAgentStrategy
 
-    def __init__(self, conversation_id: str):
+    def __init__(self, conversation_id: str, principal_id: str = None):
         # initializations
 
         # conversation_id
         self.conversation_id = conversation_id
+        self.principal_id = (principal_id or "").strip() or "anonymous"
 
         # app configuration
         cfg = get_config()
@@ -36,7 +38,10 @@ class Orchestrator:
         user_context: Dict = {},
         request_access_token: Optional[str] = None,
     ):
-        instance = cls(conversation_id=conversation_id)
+        instance = cls(
+            conversation_id=conversation_id,
+            principal_id=(user_context.get("principal_id") or "").strip(),
+        )
 
         # Keep a copy for logging/troubleshooting (do not store secrets here).
         instance.user_context = user_context or {}
@@ -71,14 +76,38 @@ class Orchestrator:
             span.set_attribute('conversation_id', self.conversation_id)
 
             # 1) Load or create our conversation document in Cosmos
+            # For anonymous users, use anonymous-{conversation_id} as partition key to avoid hot partitions
+            # For authenticated users, use their principal_id
             if not self.conversation_id:
                 self.conversation_id = str(uuid.uuid4())
-                conversation = {"id": self.conversation_id}
-                asyncio.create_task(self.database_client.create_document(self.database_container, self.conversation_id, conversation))
+                partition_key = f"anonymous-{self.conversation_id}" if self.principal_id == "anonymous" else self.principal_id
+                default_name = ask[:50] if ask else "Untitled Conversation"
+                conversation = {
+                    "id": self.conversation_id,
+                    "name": default_name,
+                    "principal_id": partition_key,
+                    "lastUpdated": datetime.now(timezone.utc).isoformat(),
+                }
+                asyncio.create_task(self.database_client.create_document(
+                    self.database_container, self.conversation_id, conversation, partition_key=partition_key
+                ))
             else:
-                conversation = await self.database_client.get_document(self.database_container, self.conversation_id)
+                partition_key = f"anonymous-{self.conversation_id}" if self.principal_id == "anonymous" else self.principal_id
+                conversation = await self.database_client.get_document(
+                    self.database_container, self.conversation_id, partition_key=partition_key
+                )
                 if conversation is None:
-                    raise ValueError(f"Conversation {self.conversation_id} not found")
+                    logging.info(f"Conversation {self.conversation_id} not found; creating new conversation")
+                    default_name = ask[:50] if ask else "Untitled Conversation"
+                    conversation = {
+                        "id": self.conversation_id,
+                        "name": default_name,
+                        "principal_id": partition_key,
+                        "lastUpdated": datetime.now(timezone.utc).isoformat(),
+                    }
+                    asyncio.create_task(self.database_client.create_document(
+                        self.database_container, self.conversation_id, conversation, partition_key=partition_key
+                    ))
 
             # Info-level lifecycle log (useful even when LOG_LEVEL=INFO)
             try:
@@ -141,9 +170,12 @@ class Orchestrator:
             raise ValueError("Conversation ID is required to save feedback")
 
         # Retrieve existing conversation document
+        # For anonymous users, use anonymous-{conversation_id} as partition key
+        partition_key = f"anonymous-{self.conversation_id}" if self.principal_id == "anonymous" else self.principal_id
         conversation = await self.database_client.get_document(
             self.database_container,
-            self.conversation_id
+            self.conversation_id,
+            partition_key=partition_key,
         )
         if conversation is None:
             raise ValueError(f"Conversation {self.conversation_id} not found in database")
