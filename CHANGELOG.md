@@ -3,7 +3,23 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v2.6.0] - 2026-03-31
+### Added
+- **Conversation History REST API:** New CRUD endpoints (`GET /conversations`, `GET /conversations/{id}`, `PATCH /conversations/{id}`, `DELETE /conversations/{id}`) enabling front-end conversation list, detail view, rename, and soft-delete operations.
+- **Pydantic response schemas:** Added `ConversationMetadata`, `ConversationListResponse`, and `ConversationDetail` models for typed API responses.
+- **CosmosDB conversation query helpers:** Added `query_user_conversations`, `read_user_conversation`, `update_conversation_name`, and `soft_delete_conversation` module-level functions with parameterized queries.
+- **Conversation history unit tests** (`test_conversation_history.py`).
+
+### Changed
+- **Multi-tenant partition key support:** `CosmosDBClient.get_document` and `create_document` now accept an optional `partition_key` parameter, enabling per-user partition isolation (`principal_id` for authenticated users, `anonymous-{conversation_id}` for unauthenticated users).
+- **Message persistence in strategies:** `SingleAgentRAGStrategyV2` now captures the full streamed response and appends `{"role": "user", "text": ...}` / `{"role": "assistant", "text": ...}` messages to the conversation document for both direct-LLM and Agent SDK paths.
+- **Orchestrator user identity plumbing:** `Orchestrator.__init__` now receives `principal_id` from `user_context`, populates partition key, and stores `name`, `principal_id`, and `lastUpdated` on new conversation documents.
+- **Automatic `lastUpdated` timestamps:** `CosmosDBClient.create_document` and `update_document` now set `lastUpdated` automatically.
+- **Conversation not-found handling:** When a conversation ID is provided but the document does not exist, the orchestrator now creates a new conversation instead of raising an error.
+
+### Improved
+- **Citation prompt rules:** Strengthened citation instructions in `single_agent_rag/main.jinja2` and added `_CITATION_RULES` constant in `SingleAgentRAGStrategyV2` to enforce `[title](link)` format, prevent link omission, and limit citation repetition.
+
 ### Fixed
 - Normalized line endings from CRLF to LF across 32 files for cross-platform consistency.
 

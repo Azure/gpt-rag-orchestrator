@@ -272,6 +272,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                  _kwargs.pop("reasoning_effort", None)
                  response_stream = await self.llm_client.openai_client.chat.completions.create(**_kwargs)
              
+             full_response = ""
              first_token = False
              async for update in response_stream:
                  if not first_token:
@@ -279,6 +280,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                      first_token = True
                       
                  if update.choices and update.choices[0].delta.content:
+                     full_response += update.choices[0].delta.content
                      yield update.choices[0].delta.content
                      
         except Exception as e:
@@ -287,8 +289,8 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
              
         # Add assistant response to history
         self.conversation.setdefault("messages", []).extend([
-            {"role": "user", "content": user_message},
-            {"role": "assistant", "content": "Assistant generated response directly via stream."}
+            {"role": "user", "text": user_message},
+            {"role": "assistant", "text": full_response}
         ])
 
     async def _process_stream(self, agents_client, stream, thread_id):
@@ -401,6 +403,21 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                 async for chunk in self._process_stream(agents_client, s2, thread_id):
                     yield chunk
 
+    _CITATION_RULES = (
+        "## Retrieved Documents\n\n"
+        "The following documents were retrieved from the knowledge base. "
+        "Each document starts with a header line in the format: ### [Document Title](filepath). "
+        "Base your answer on these documents.\n\n"
+        "**Citation rules:**\n"
+        "- ONLY cite using the document title and filepath from the ### header lines above.\n"
+        "- Format: [Document Title](filepath) — use the EXACT title and filepath from the header.\n"
+        "- Do NOT omit the (filepath) part. Every citation MUST include both [title] AND (filepath).\n"
+        "- Do NOT treat any text inside the document content as a citation source. "
+        "Internal references, chapter names, or bracketed text within the content are NOT valid sources.\n"
+        "- Cite each source ONLY ONCE. Do NOT repeat the same citation on every bullet point or paragraph.\n"
+        "- Example: According to [Product Guide](product-guide.pdf), the system supports...\n"
+    )
+
     @staticmethod
     def _format_search_results(raw_result) -> str:
         """Format search results as markdown with [title](link) headers.
@@ -430,7 +447,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
             return raw_result if isinstance(raw_result, str) else json.dumps(raw_result)
 
         return (
-            "Retrieved documents. When citing, use the exact format [title](link).\n\n"
+            SingleAgentRAGStrategyV2._CITATION_RULES + "\n\n"
             + "\n\n---\n\n".join(parts)
         )
 
@@ -533,6 +550,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         self._stream_start_time = stream_start
         t_stream = time.time()
 
+        full_response = ""
         try:
             # Azure AI Agents SDK: Native Real-time event streaming
             async with await agents_client.runs.stream(
@@ -541,12 +559,19 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                 max_completion_tokens=self.max_completion_tokens,
             ) as stream:
                 async for chunk in self._process_stream(agents_client, stream, thread.id):
+                    full_response += chunk
                     yield chunk
 
         except Exception as e:
             err_msg = traceback.format_exc()
             logging.error(f"[Agent Flow V2] Streaming failed: {err_msg}")
             yield f"[ERROR in Streaming]: {e}\n{err_msg}"
+
+        # Persist conversation history
+        conv.setdefault("messages", []).extend([
+            {"role": "user", "text": user_message},
+            {"role": "assistant", "text": full_response}
+        ])
 
         # Cleanup Agent — only if created per-request (not cached/persistent)
         if create_agent:
