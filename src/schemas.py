@@ -1,4 +1,5 @@
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 from pydantic import BaseModel, Field
 
 class OrchestratorRequest(BaseModel):
@@ -87,6 +88,38 @@ class OrchestratorRequest(BaseModel):
                 },
             ]
         }
+
+
+class ConversationMetadata(BaseModel):
+    """Metadata for a conversation in list view (no message content)."""
+    id: str = Field(..., description="Unique identifier of the conversation")
+    name: Optional[str] = Field(None, description="User-provided name for the conversation")
+    created_at: Optional[datetime] = Field(None, alias="_ts", description="Timestamp when the conversation was created")
+    last_updated: Optional[datetime] = Field(None, alias="lastUpdated", description="Timestamp when the last message was added")
+
+    class Config:
+        populate_by_name = True
+
+
+class ConversationListResponse(BaseModel):
+    """Response for GET /conversations list endpoint."""
+    conversations: List[ConversationMetadata] = Field(default_factory=list, description="List of conversations with metadata only")
+    has_more: bool = Field(..., description="Whether there are more conversations available")
+    skip: int = Field(..., description="Number of conversations skipped (pagination offset)")
+    limit: int = Field(..., description="Maximum number of conversations returned")
+
+
+class ConversationDetail(BaseModel):
+    """Full conversation details including all messages."""
+    id: str = Field(..., description="Unique identifier of the conversation")
+    name: Optional[str] = Field(None, description="User-provided name for the conversation")
+    principal_id: Optional[str] = Field(None, description="User ID who owns this conversation")
+    created_at: Optional[datetime] = Field(None, alias="_ts", description="Timestamp when the conversation was created")
+    last_updated: Optional[datetime] = Field(None, alias="lastUpdated", description="Timestamp when the last message was added")
+    messages: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="List of messages in the conversation")
+
+    class Config:
+        populate_by_name = True
 
 
 # Reusable OpenAPI responses for the orchestrator endpoint. Put here so

@@ -21,9 +21,21 @@ load_dotenv()
 
 from orchestration.orchestrator import Orchestrator
 from connectors.appconfig import AppConfigClient
+from connectors.cosmosdb import (
+    query_user_conversations,
+    read_user_conversation,
+    update_conversation_name,
+    soft_delete_conversation,
+)
 from dependencies import get_config, validate_auth, validate_access_token
 from telemetry import Telemetry
-from schemas import OrchestratorRequest, ORCHESTRATOR_RESPONSES
+from schemas import (
+    OrchestratorRequest,
+    ORCHESTRATOR_RESPONSES,
+    ConversationListResponse,
+    ConversationMetadata,
+    ConversationDetail,
+)
 from constants import APPLICATION_INSIGHTS_CONNECTION_STRING, APP_NAME
 from util.tools import is_azure_environment
 from util.jwt_utils import extract_bearer_token
@@ -513,6 +525,257 @@ async def orchestrator_endpoint(
         sse_event_generator(),
         media_type="text/event-stream"
     )
+
+
+# ----------------------------------------
+# Helper function for auth validation on conversation endpoints
+# ----------------------------------------
+async def validate_user_access(authorization: Optional[str], endpoint_name: str) -> str:
+    """
+    Validates user authorization and returns principal_id.
+    Conversation history endpoints always require authentication.
+    
+    Returns:
+        principal_id (OID) of the authenticated user.
+    
+    Raises:
+        HTTPException: If authorization fails or is invalid.
+    """
+    # Check if auth is configured
+    try:
+        _tenant_id = (cfg.get("OAUTH_AZURE_AD_TENANT_ID", default="") or "").strip()
+        _client_id = (
+            (cfg.get("OAUTH_AZURE_AD_CLIENT_ID", default="") or "").strip()
+            or (cfg.get("CLIENT_ID", default="") or "").strip()
+        )
+        auth_configured = bool(_tenant_id and _client_id)
+    except Exception:
+        auth_configured = False
+
+    if not auth_configured:
+        logging.warning(f"{endpoint_name} Authentication required but Entra auth is not configured")
+        raise HTTPException(status_code=401, detail="Authentication is required for this endpoint but is not configured")
+
+    if not authorization or not authorization.startswith("Bearer "):
+        logging.warning(f"{endpoint_name} Missing or invalid Authorization header")
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+
+    access_token = extract_bearer_token(authorization)
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Invalid Authorization header format")
+
+    try:
+        user_info = await validate_access_token(access_token)
+        principal_id = user_info.get("oid")
+
+        # Check authorization based on user principals/names
+        allowed_names = [n.strip() for n in cfg.get("ALLOWED_USER_NAMES", default="").split(",") if n.strip()]
+        allowed_ids = [id.strip() for id in cfg.get("ALLOWED_USER_PRINCIPALS", default="").split(",") if id.strip()]
+
+        is_authorized = (
+            not (allowed_names or allowed_ids) or
+            user_info.get("preferred_username") in allowed_names or
+            principal_id in allowed_ids
+        )
+
+        if not is_authorized:
+            logging.warning(f"{endpoint_name} Access denied for user %s", principal_id)
+            raise HTTPException(status_code=403, detail="You are not authorized to perform this action")
+
+        logging.info(f"{endpoint_name} Authorization successful for user %s", user_info.get("preferred_username"))
+        return principal_id
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"{endpoint_name} Error validating user token: %s", e)
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+# ----------------------------------------
+# Conversation History Endpoints
+# ----------------------------------------
+@app.get(
+    "/conversations",
+    dependencies=[Depends(validate_auth)],
+    summary="List user conversations",
+    response_model=ConversationListResponse,
+    responses={
+        200: {"description": "OK — list of conversations"},
+        401: {"description": "Unauthorized — missing or invalid credentials"},
+        500: {"description": "Internal Server Error"},
+    },
+)
+async def list_conversations(
+    skip: int = 0,
+    limit: int = 10,
+    name: Optional[str] = None,
+    x_api_key: Optional[str] = Header(None, alias="X-API-KEY"),
+    dapr_api_token: Optional[str] = Header(None, alias="dapr-api-token"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+):
+    """Retrieve paginated list of conversations for the authenticated user."""
+    principal_id = await validate_user_access(authorization, "[ListConversations]")
+
+    try:
+        conversation_docs = await query_user_conversations(
+            principal_id=principal_id, skip=skip, limit=limit, name=name,
+        )
+        conversations = [
+            ConversationMetadata(
+                id=doc.get("id"),
+                name=doc.get("name"),
+                created_at=doc.get("_ts"),
+                last_updated=doc.get("lastUpdated"),
+            )
+            for doc in conversation_docs
+        ]
+
+        has_more = len(conversations) == limit
+        return ConversationListResponse(
+            conversations=conversations, has_more=has_more, skip=skip, limit=limit,
+        )
+    except Exception as e:
+        logging.error("[ListConversations] Error retrieving conversations: %s", e)
+        raise HTTPException(status_code=500, detail="Error retrieving conversations")
+
+
+@app.get(
+    "/conversations/{conversation_id}",
+    dependencies=[Depends(validate_auth)],
+    summary="Get specific conversation",
+    response_model=ConversationDetail,
+    responses={
+        200: {"description": "OK — full conversation detail"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Not Found"},
+        500: {"description": "Internal Server Error"},
+    },
+)
+async def get_conversation(
+    conversation_id: str,
+    x_api_key: Optional[str] = Header(None, alias="X-API-KEY"),
+    dapr_api_token: Optional[str] = Header(None, alias="dapr-api-token"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+):
+    """Retrieve full details of a specific conversation including all messages."""
+    principal_id = await validate_user_access(authorization, "[GetConversation]")
+
+    try:
+        conversation_doc = await read_user_conversation(conversation_id, principal_id)
+        if conversation_doc is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        if conversation_doc.get("principal_id") != principal_id:
+            raise HTTPException(status_code=403, detail="You do not have permission to access this conversation")
+
+        return ConversationDetail(
+            id=conversation_doc.get("id"),
+            name=conversation_doc.get("name"),
+            principal_id=conversation_doc.get("principal_id"),
+            created_at=conversation_doc.get("_ts"),
+            last_updated=conversation_doc.get("lastUpdated"),
+            messages=conversation_doc.get("messages", []),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("[GetConversation] Error retrieving conversation: %s", e)
+        raise HTTPException(status_code=500, detail="Error retrieving conversation")
+
+
+@app.patch(
+    "/conversations/{conversation_id}",
+    dependencies=[Depends(validate_auth)],
+    summary="Update conversation name",
+    responses={
+        200: {"description": "OK — conversation updated"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Not Found"},
+        500: {"description": "Internal Server Error"},
+    },
+)
+async def update_conversation(
+    conversation_id: str,
+    body: dict,
+    x_api_key: Optional[str] = Header(None, alias="X-API-KEY"),
+    dapr_api_token: Optional[str] = Header(None, alias="dapr-api-token"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+):
+    """Update a conversation's name."""
+    principal_id = await validate_user_access(authorization, "[UpdateConversation]")
+
+    try:
+        conversation_doc = await read_user_conversation(conversation_id, principal_id)
+        if conversation_doc is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        if conversation_doc.get("principal_id") != principal_id:
+            raise HTTPException(status_code=403, detail="You do not have permission to access this conversation")
+
+        new_name = body.get("name", "").strip()
+        if not new_name:
+            raise HTTPException(status_code=400, detail="Conversation name cannot be empty")
+
+        updated_doc = await update_conversation_name(conversation_id, principal_id, new_name)
+        if updated_doc is None:
+            raise HTTPException(status_code=500, detail="Failed to update conversation")
+
+        return {
+            "id": updated_doc.get("id"),
+            "name": updated_doc.get("name"),
+            "lastUpdated": updated_doc.get("lastUpdated"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("[UpdateConversation] Error updating conversation: %s", e)
+        raise HTTPException(status_code=500, detail="Error updating conversation")
+
+
+@app.delete(
+    "/conversations/{conversation_id}",
+    dependencies=[Depends(validate_auth)],
+    summary="Delete conversation",
+    responses={
+        200: {"description": "OK — conversation deleted"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Not Found"},
+        500: {"description": "Internal Server Error"},
+    },
+)
+async def delete_conversation(
+    conversation_id: str,
+    x_api_key: Optional[str] = Header(None, alias="X-API-KEY"),
+    dapr_api_token: Optional[str] = Header(None, alias="dapr-api-token"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+):
+    """Soft delete a conversation (marks as deleted without removing data)."""
+    principal_id = await validate_user_access(authorization, "[DeleteConversation]")
+
+    try:
+        conversation_doc = await read_user_conversation(conversation_id, principal_id)
+        if conversation_doc is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        if conversation_doc.get("principal_id") != principal_id:
+            raise HTTPException(status_code=403, detail="You do not have permission to access this conversation")
+
+        deleted_doc = await soft_delete_conversation(conversation_id, principal_id)
+        if deleted_doc is None:
+            raise HTTPException(status_code=500, detail="Failed to delete conversation")
+
+        logging.info("[DeleteConversation] User %s deleted conversation %s", principal_id, conversation_id)
+        return {"status": "success", "message": "Conversation deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("[DeleteConversation] Error deleting conversation: %s", e)
+        raise HTTPException(status_code=500, detail="Error deleting conversation")
+
 
 # Instrumentation
 HTTPXClientInstrumentor().instrument()
