@@ -274,38 +274,46 @@ class MultimodalStrategy(BaseAgentStrategy):
         if image_base64 and not image_base64.startswith("data:"):
             image_url = f"data:image/png;base64,{image_base64}"
 
-        response = await asyncio.wait_for(
-            client._client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": _IMAGE_CLASSIFIER_PROMPT},
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": (
-                                    f"User request: {query}\n"
-                                    f"Figure path: {figure_path}\n"
-                                    f"Caption: {caption}\n"
-                                    f"Nearby text: {local_text}"
-                                ),
+        _kwargs = dict(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": _IMAGE_CLASSIFIER_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"User request: {query}\n"
+                                f"Figure path: {figure_path}\n"
+                                f"Caption: {caption}\n"
+                                f"Nearby text: {local_text}"
+                            ),
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": image_url,
+                                "detail": "auto",
                             },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": image_url,
-                                    "detail": "auto",
-                                },
-                            },
-                        ],
-                    },
-                ],
-                max_completion_tokens=200,
-                reasoning_effort=self.reasoning_effort,
-            ),
-            timeout=self.image_classification_timeout_seconds,
+                        },
+                    ],
+                },
+            ],
+            max_completion_tokens=200,
         )
+        try:
+            response = await asyncio.wait_for(
+                client._client.chat.completions.create(**_kwargs),
+                timeout=self.image_classification_timeout_seconds,
+            )
+        except BadRequestError:
+            _kwargs.pop("max_completion_tokens", None)
+            _kwargs["max_tokens"] = 200
+            response = await asyncio.wait_for(
+                client._client.chat.completions.create(**_kwargs),
+                timeout=self.image_classification_timeout_seconds,
+            )
         result = (response.choices[0].message.content or "").strip().upper()
         finish = getattr(response.choices[0], "finish_reason", "?")
         tokens = getattr(getattr(response, "usage", None), "completion_tokens", "?")
@@ -322,15 +330,14 @@ class MultimodalStrategy(BaseAgentStrategy):
     # Post-response image validation guardrail
     # ------------------------------------------------------------------
     _IMAGE_VALIDATION_PROMPT = (
-        "You are a guardrail that validates images an AI assistant chose to embed in its answer. "
-        "Look at the image and decide whether it belongs in a technical answer. "
-        "Return exactly one word: VALID or INVALID.\n\n"
-        "VALID — the image shows: mechanical parts, procedural steps, diagrams, exploded views, "
-        "measurements, tool usage, cross-sections, wiring, specifications, or other informative technical content "
-        "that helps the reader understand the procedure or topic.\n\n"
-        "INVALID — the image is: a cartoon, humorous illustration, decorative artwork, "
-        "book filler drawing, icon, logo, chapter divider, header/footer art, mascot, "
-        "boot/shoe, generic scenery, or any non-technical decoration."
+        "You are a post-response image guardrail. Return exactly VALID or INVALID. "
+        "Do not explain, describe, or answer the user's question. "
+        "VALID only if the image clearly shows technical content such as mechanical parts, "
+        "procedural diagrams, exploded views, measurements, tool usage, cross-sections, "
+        "wiring, specifications, or assembly steps. "
+        "INVALID if it is a cartoon, decorative artwork, book filler, icon, logo, "
+        "chapter divider, header/footer art, mascot, boot/shoe, generic scenery, "
+        "or any non-technical decoration."
     )
 
     async def _validate_response_images(self, response_text: str, query: str) -> str:
@@ -358,27 +365,35 @@ class MultimodalStrategy(BaseAgentStrategy):
             image_url = b64 if b64.startswith("data:") else f"data:image/png;base64,{b64}"
             async with semaphore:
                 try:
-                    resp = await asyncio.wait_for(
-                        client._client.chat.completions.create(
-                            model=self.model_name,
-                            messages=[
-                                {"role": "system", "content": self._IMAGE_VALIDATION_PROMPT},
-                                {
-                                    "role": "user",
-                                    "content": [
-                                        {"type": "text", "text": f"User question: {query}"},
-                                        {
-                                            "type": "image_url",
-                                            "image_url": {"url": image_url, "detail": "auto"},
-                                        },
-                                    ],
-                                },
-                            ],
-                            max_completion_tokens=200,
-                            reasoning_effort=self.reasoning_effort,
-                        ),
-                        timeout=self.image_validation_timeout_seconds,
+                    _kwargs = dict(
+                        model=self.model_name,
+                        messages=[
+                            {"role": "system", "content": self._IMAGE_VALIDATION_PROMPT},
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": f"Answer topic: {query}\nClassify this image: VALID or INVALID."},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {"url": image_url, "detail": "auto"},
+                                    },
+                                ],
+                            },
+                        ],
+                        max_completion_tokens=10,
                     )
+                    try:
+                        resp = await asyncio.wait_for(
+                            client._client.chat.completions.create(**_kwargs),
+                            timeout=self.image_validation_timeout_seconds,
+                        )
+                    except BadRequestError:
+                        _kwargs.pop("max_completion_tokens", None)
+                        _kwargs["max_tokens"] = 10
+                        resp = await asyncio.wait_for(
+                            client._client.chat.completions.create(**_kwargs),
+                            timeout=self.image_validation_timeout_seconds,
+                        )
                     result = (resp.choices[0].message.content or "").strip().upper()
                     finish = getattr(resp.choices[0], "finish_reason", "?")
                     tokens = getattr(getattr(resp, "usage", None), "completion_tokens", "?")
@@ -436,12 +451,12 @@ class MultimodalStrategy(BaseAgentStrategy):
                     {"role": "user", "content": user_message},
                 ],
                 max_completion_tokens=200,
-                reasoning_effort=self.reasoning_effort,
             )
             try:
                 resp = await client._client.chat.completions.create(**_kwargs)
             except BadRequestError:
-                _kwargs.pop("reasoning_effort", None)
+                _kwargs.pop("max_completion_tokens", None)
+                _kwargs["max_tokens"] = 200
                 resp = await client._client.chat.completions.create(**_kwargs)
             result = (resp.choices[0].message.content or "").strip().upper()
             intent = "greeting" if "GREETING" in result else "question"
@@ -530,7 +545,16 @@ class MultimodalStrategy(BaseAgentStrategy):
                     role = msg.get("role", "user")
                     text = msg.get("text") or msg.get("content") or ""
                     if text:
-                        input_messages.append(ChatMessage(role=role, text=text))
+                        # Strip image markdown from assistant history so old
+                        # ![...](path) references don't act as few-shot examples
+                        # that teach the model to mention figures by name only
+                        # (without embedding them), and to prevent stale image
+                        # paths that aren't in the current search context.
+                        if role == "assistant":
+                            text = _IMAGE_RE.sub("", text)
+                            text = re.sub(r'\n{3,}', '\n\n', text).strip()
+                        if text:
+                            input_messages.append(ChatMessage(role=role, text=text))
                 input_messages.append(ChatMessage(role="user", text=user_message))
                 logging.info(
                     "[MultimodalStrategy] history_messages: %d (total input: %d)",

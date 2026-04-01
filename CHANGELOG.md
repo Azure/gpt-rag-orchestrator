@@ -3,7 +3,13 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v2.6.1] - 2026-04-01
+### Fixed
+- **Multimodal image rendering:** Fixed images not appearing in multimodal responses caused by `reasoning_effort` parameter being rejected by gpt-5-nano in the image classifier, validator, and intent classification calls. Removed the unsupported parameter from all three LLM classification calls.
+- **Image validation guardrail:** Fixed the post-response image validator returning verbose 200-token descriptions instead of "VALID"/"INVALID" classifications. Strengthened the validation prompt, reframed the user message to prevent Q&A-style responses, and reduced `max_completion_tokens` from 200 to 10.
+- **Inline image placement:** Fixed images being grouped at the bottom of responses in a "Visual Guides" section instead of appearing inline. Added a few-shot example to the system prompt demonstrating correct inline placement with introductory sentences, and reinforced inline rules in both the main prompt and the search context provider prompt.
+- **Search retry without OBO:** Added fallback logic in `MultimodalSearchContextProvider` to retry search without the `x_ms_query_source_authorization` header when the OBO token exchange fails, preventing total search failure when admin consent is not granted.
+- **Assistant history few-shot poisoning:** Stripped `![](path)` markdown from old assistant messages in conversation history to prevent them from acting as few-shot examples that teach the model to omit image embedding.
 
 ## [v2.6.0] - 2026-03-31
 ### Added
