@@ -56,7 +56,8 @@ _CONTEXT_PROMPT = (
     "- For images you INCLUDE, embed using markdown: ![Figure N](image_path) — use the figure number from the filename (e.g., `![Figure 92.1](path)`).\n"
     "- Use the EXACT image_path from the `📎 Image (embed once only):` label that precedes each image.\n"
     "- NEVER list image filenames as plain text — always use ![...](path) markdown.\n"
-    "- Place each included image in your response at the same relative position where it appears in the source. NEVER collect images into a separate section.\n"
+    "- Write a short introductory sentence before each image so the reader knows what it shows (e.g., 'The diagram below illustrates the rocker arm assembly:').\n"
+    "- Place each included image INSIDE your answer, right after the step or paragraph it illustrates. NEVER collect images into a separate section at the end.\n"
     "- **STRICT DEDUPLICATION — CRITICAL**: Each image path must appear EXACTLY ONCE in your entire response. Even if the same `📎 Image:` label appears multiple times in the context, you MUST reference each path only once. Writing the same ![...](path) markdown a second time is strictly forbidden.\n\n"
     "If the user's message is a greeting or small talk, ignore these documents and respond naturally."
 )
@@ -319,11 +320,38 @@ class MultimodalSearchContextProvider(ContextProvider):
                     docs.append(doc)
 
         except Exception as e:
-            logger.error(
-                "[MultimodalSearchContextProvider] Search failed in %.2fs: %s",
-                time.time() - search_start, e,
-            )
-            return Context()
+            # If the search failed and we had an OBO header, retry without it.
+            # This handles "permissionFilterOption: enabled" indexes where the
+            # OBO token exchange succeeded but the resulting token is invalid
+            # or lacks the required consent, causing the search to be rejected.
+            if "x_ms_query_source_authorization" in search_params:
+                logger.warning(
+                    "[MultimodalSearchContextProvider] Search failed with OBO header in %.2fs: %s — retrying without permission filter",
+                    time.time() - search_start, e,
+                )
+                search_params.pop("x_ms_query_source_authorization")
+                try:
+                    async with SearchClient(
+                        endpoint=self._endpoint,
+                        index_name=self._index_name,
+                        credential=self._credential,
+                    ) as client:
+                        results = await client.search(**search_params)
+                        docs = []
+                        async for doc in results:
+                            docs.append(doc)
+                except Exception as retry_e:
+                    logger.error(
+                        "[MultimodalSearchContextProvider] Search retry without OBO also failed in %.2fs: %s",
+                        time.time() - search_start, retry_e,
+                    )
+                    return Context()
+            else:
+                logger.error(
+                    "[MultimodalSearchContextProvider] Search failed in %.2fs: %s",
+                    time.time() - search_start, e,
+                )
+                return Context()
 
         logger.info(
             "[MultimodalSearchContextProvider] Search returned %d documents in %.2fs",
