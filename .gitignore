@@ -158,6 +158,7 @@ venv_temp/
 ENV/
 env.bak/
 venv.bak/
+.devcontainer-venv
 
 # Spyder project settings
 .spyderproject
