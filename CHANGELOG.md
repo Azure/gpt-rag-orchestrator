@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [v2.6.2] - 2026-04-18
+### Fixed
+- **OpenTelemetry version pinning:** Pinned `azure-monitor-opentelemetry==1.8.7`, `azure-monitor-opentelemetry-exporter==1.0.0b49`, `opentelemetry-instrumentation-httpx==0.61b0`, and `opentelemetry-instrumentation-fastapi==0.61b0` in `requirements.txt`. Unpinned versions caused non-deterministic Docker builds where an older exporter (referencing the removed `LogData` class) could be paired with `opentelemetry-sdk>=1.39.0`, crashing the container on startup with `ImportError: cannot import name 'LogData' from 'opentelemetry.sdk._logs'`. ([#445](https://github.com/Azure/GPT-RAG/issues/445))
+
 ## [v2.6.1] - 2026-04-01
 ### Fixed
 - **Multimodal image rendering:** Fixed images not appearing in multimodal responses caused by `reasoning_effort` parameter being rejected by gpt-5-nano in the image classifier, validator, and intent classification calls. Removed the unsupported parameter from all three LLM classification calls.
