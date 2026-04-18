@@ -347,7 +347,7 @@ class SearchClient:
 
         # Optional: user context token for permission trimming.
         if search_user_token:
-            headers["x-ms-query-source-authorization"] = f"Bearer {search_user_token}"
+            headers["x-ms-query-source-authorization"] = search_user_token
 
         session = await self._get_session()
         async with session.post(url, headers=headers, json=body) as resp:
