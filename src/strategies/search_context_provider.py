@@ -124,7 +124,7 @@ class SearchContextProvider(ContextProvider):
                     logger.warning("[SearchContextProvider] OBO token acquisition failed: %s", e)
 
             if obo_token:
-                search_params["x_ms_query_source_authorization"] = f"Bearer {obo_token}"
+                search_params["x_ms_query_source_authorization"] = obo_token
                 logger.info("[SearchContextProvider] Using x-ms-query-source-authorization (OBO)")
             else:
                 logger.info("[SearchContextProvider] Not sending x-ms-query-source-authorization")
