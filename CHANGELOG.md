@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **Missing `regex` dependency in `requirements.txt`:** Added `regex>=2022.1.18` as an explicit dependency. The `tiktoken==0.8.0` package requires `regex` at runtime, but it was not listed in `requirements.txt`. This caused pip dependency resolver warnings when installing additional packages (such as `agentops-toolkit`) on top of the project dependencies, since `tiktoken` would report an unsatisfied requirement. Users installing into a fresh virtual environment could also encounter import errors from `tiktoken`.
+
 ## [v2.6.2] - 2026-04-18
 ### Fixed
 - **OpenTelemetry version pinning:** Pinned `azure-monitor-opentelemetry==1.8.7`, `azure-monitor-opentelemetry-exporter==1.0.0b49`, `opentelemetry-instrumentation-httpx==0.61b0`, and `opentelemetry-instrumentation-fastapi==0.61b0` in `requirements.txt`. Unpinned versions caused non-deterministic Docker builds where an older exporter (referencing the removed `LogData` class) could be paired with `opentelemetry-sdk>=1.39.0`, crashing the container on startup with `ImportError: cannot import name 'LogData' from 'opentelemetry.sdk._logs'`. ([#445](https://github.com/Azure/GPT-RAG/issues/445))
