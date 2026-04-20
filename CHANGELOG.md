@@ -5,6 +5,8 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.6.3] - 2026-04-20
+
 ### Fixed
 - **Missing `regex` dependency in `requirements.txt`:** Added `regex>=2022.1.18` as an explicit dependency. The `tiktoken==0.8.0` package requires `regex` at runtime, but it was not listed in `requirements.txt`. This caused pip dependency resolver warnings when installing additional packages (such as `agentops-toolkit`) on top of the project dependencies, since `tiktoken` would report an unsatisfied requirement. Users installing into a fresh virtual environment could also encounter import errors from `tiktoken`.
 
