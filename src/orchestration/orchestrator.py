@@ -59,6 +59,10 @@ class Orchestrator:
         if not instance.agentic_strategy:
             raise EnvironmentError("AGENT_STRATEGY must be set")
 
+        # Best-effort: propagate incoming conversation_id (may be None here).
+        if instance.agentic_strategy and hasattr(instance.agentic_strategy, "set_context"):
+            instance.agentic_strategy.set_context(conversation_id)
+
         instance.agentic_strategy.user_context = user_context
 
         # Provide the incoming API token to strategies that can use it for OBO.
@@ -108,6 +112,12 @@ class Orchestrator:
                     asyncio.create_task(self.database_client.create_document(
                         self.database_container, self.conversation_id, conversation, partition_key=partition_key
                     ))
+                    
+            # Search/RAG scoping: conversation_id is finalized here when the client omitted it on create().
+            # Keep strategy in sync so retrieval filters by this id (not None).
+            if self.agentic_strategy and hasattr(self.agentic_strategy, "set_context"):
+                self.agentic_strategy.set_context(self.conversation_id)
+
 
             # Info-level lifecycle log (useful even when LOG_LEVEL=INFO)
             try:

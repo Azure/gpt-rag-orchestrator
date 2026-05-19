@@ -13,6 +13,7 @@ azure-search-documents==11.7.0b2
 
 # AI and NLP dependencies
 tiktoken==0.8.0
+regex>=2022.1.18
 openai==2.9.0
 
 # Semantic Kernel dependencies

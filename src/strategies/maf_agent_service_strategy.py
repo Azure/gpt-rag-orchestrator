@@ -76,6 +76,7 @@ Guidelines:
 
         cfg = get_config()
         self.strategy_type = AgentStrategies.MAF_AGENT_SERVICE
+        self.conversation_id: Optional[str] = None
 
         # Ensure credential is set (use config's async credential as fallback)
         if not hasattr(self, 'credential') or self.credential is None:
@@ -102,6 +103,10 @@ Guidelines:
         self._search_provider: Optional[SearchContextProvider] = None
 
         logging.debug("[MafAgentServiceStrategy] Initialized")
+    
+    def set_context(self, conversation_id: Optional[str]) -> None:
+        """Set conversation_id (may be None before orchestrator assigns a new id)."""
+        self.conversation_id = conversation_id
 
     def _prompt_namespace(self) -> str:
         """Share prompts directory with MafLiteStrategy."""
@@ -153,6 +158,7 @@ Guidelines:
             provider = SearchContextProvider(
                 endpoint=self.search_endpoint,
                 credential=self.credential,
+                conversation_id=self.conversation_id,
                 index_name=self.search_index_name,
                 top_k=self.search_top_k,
                 semantic_configuration_name=self.semantic_search_config,
