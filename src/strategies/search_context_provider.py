@@ -19,6 +19,7 @@ from azure.core.credentials_async import AsyncTokenCredential
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizedQuery, QueryType, QueryCaptionType
 
+from connectors.search import build_conversation_filter
 logger = logging.getLogger(__name__)
 
 _CONTEXT_PROMPT = (
@@ -46,6 +47,7 @@ class SearchContextProvider(ContextProvider):
         endpoint: str,
         index_name: str,
         credential: AsyncTokenCredential,
+        conversation_id: Optional[str] = None,
         top_k: int = 3,
         semantic_configuration_name: str | None = None,
         embed_fn: Callable[[str], Awaitable[list[float]]] | None = None,
@@ -56,6 +58,7 @@ class SearchContextProvider(ContextProvider):
         self._endpoint = endpoint
         self._index_name = index_name
         self._credential = credential
+        self._conversation_id = (conversation_id or "").strip() or None
         self._top_k = top_k
         self._semantic_config = semantic_configuration_name
         self._embed_fn = embed_fn
@@ -92,6 +95,9 @@ class SearchContextProvider(ContextProvider):
             "top": self._top_k,
             "select": ["id", "content", "title", "filepath", "url"],
         }
+
+        # Conversation scoping: only this conversation + shared/global chunks.
+        search_params["filter"] = build_conversation_filter(self._conversation_id, field_name="conversationId")
 
         # Hybrid search: add vector query when embedding function is available
         if self._embed_fn:

@@ -75,6 +75,7 @@ class MafLiteStrategy(BaseAgentStrategy):
 
         cfg = get_config()
         self.strategy_type = AgentStrategies.MAF_LITE
+        self.conversation_id: Optional[str] = None
 
         if not hasattr(self, "credential") or self.credential is None:
             self.credential = cfg.aiocredential
@@ -118,6 +119,10 @@ class MafLiteStrategy(BaseAgentStrategy):
         self._cached_instructions: Optional[str] = None
 
         logging.debug("[MafLiteStrategy] Initialized")
+    
+    def set_context(self, conversation_id: Optional[str]) -> None:
+        """Set conversation_id (may be None before orchestrator assigns a new id)."""
+        self.conversation_id = conversation_id
 
     # ------------------------------------------------------------------
     # Prompt namespace override — share prompts with MafAgentServiceStrategy
@@ -201,6 +206,7 @@ class MafLiteStrategy(BaseAgentStrategy):
             provider = SearchContextProvider(
                 endpoint=self.search_endpoint,
                 credential=self.credential,
+                conversation_id=self.conversation_id,        
                 index_name=self.search_index_name,
                 top_k=self.search_top_k,
                 semantic_configuration_name=self.semantic_search_config,

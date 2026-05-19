@@ -31,6 +31,7 @@ from azure.search.documents.models import VectorizedQuery, QueryType, QueryCapti
 from azure.storage.blob.aio import BlobClient as AzureBlobClient
 
 from connectors.multimodal_chat_client import MULTIMODAL_PREFIX
+from connectors.search import build_conversation_filter
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +205,7 @@ class MultimodalSearchContextProvider(ContextProvider):
         index_name: str,
         credential: AsyncTokenCredential,
         blob_credential: AsyncTokenCredential,
+        conversation_id: Optional[str] = None,
         top_k: int = 3,
         max_images: int = 10,
         max_images_per_doc: int = 3,
@@ -218,6 +220,7 @@ class MultimodalSearchContextProvider(ContextProvider):
         self._index_name = index_name
         self._credential = credential
         self._blob_credential = blob_credential
+        self._conversation_id = (conversation_id or "").strip() or None
         self._top_k = top_k
         self._max_images = max_images
         self._max_images_per_doc = max_images_per_doc
@@ -265,6 +268,9 @@ class MultimodalSearchContextProvider(ContextProvider):
                 "relatedImages", "imageCaptions",
             ],
         }
+
+        # Conversation scoping: only this conversation + shared/global chunks.
+        search_params["filter"] = build_conversation_filter(self._conversation_id, field_name="conversationId")
 
         # Dual vector queries: contentVector + captionVector
         if self._embed_fn:
