@@ -277,7 +277,7 @@ if ($buildMode -eq 'local') {
     Write-Green "✅ Docker build succeeded."
 } else {
     Write-Blue "🛠️  Building remotely with 'az acr build'."
-    $acrBuildArgs = @('acr','build','--registry',$values.CONTAINER_REGISTRY_NAME,'--image',"azure-gpt-rag/orchestrator:$tag",'--file','Dockerfile')
+    $acrBuildArgs = @('acr','build','--registry',$values.CONTAINER_REGISTRY_NAME,'--image',"azure-gpt-rag/orchestrator:$tag",'--file','Dockerfile','--no-logs')
     if ($env:ACR_TASK_AGENT_POOL) {
         Invoke-ExternalCommand -FilePath 'az' -Arguments @('acr','agentpool','show','--registry',$values.CONTAINER_REGISTRY_NAME,'--name',$env:ACR_TASK_AGENT_POOL,'--resource-group',$values.AZURE_RESOURCE_GROUP,'--only-show-errors') -What 'validate ACR task agent pool'
         $acrBuildArgs += @('--agent-pool',$env:ACR_TASK_AGENT_POOL)
