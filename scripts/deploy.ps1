@@ -63,39 +63,32 @@ if ($env:DEBUG -eq 'true') {
 
 Write-Host ""  # blank line
 
-#region Early Docker validation
+#region Build mode selection
 $pausedPattern   = 'Docker Desktop is manually paused'
 $daemonDownRegex = '((?i)error during connect|Cannot connect to the Docker daemon|Is the docker daemon running|The Docker daemon is not running|dockerDesktopLinuxEngine|dockerDesktopWindowsEngine|The system cannot find the file specified|open \\./pipe/|context deadline exceeded)'
 
-# Optional: try service check, but do NOT fail based on it
-try {
-    $dockerSvc = Get-Service -Name 'com.docker.service' -ErrorAction SilentlyContinue
-    if ($dockerSvc) {
-        Write-Blue "🔍 Docker Desktop service status: $($dockerSvc.Status)"
-    }
-} catch { }
-
-if (Get-Command docker -ErrorAction SilentlyContinue) {
-    Write-Blue "🔍 Checking Docker availability…"
+function Test-DockerReady {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { return $false }
     $probeOutput = & docker info 2>&1
     $probeExit   = $LASTEXITCODE
     $probeText   = ($probeOutput | Out-String)
+    return ($probeExit -eq 0 -and $probeText -notmatch $pausedPattern -and $probeText -notmatch $daemonDownRegex)
+}
 
-    if ($probeText -match $pausedPattern -or $probeText -match $daemonDownRegex -or $probeExit -ne 0) {
-        if ($probeText -match $pausedPattern) {
-            Write-ErrorColored '❌ Docker Desktop is manually paused. Unpause it via the Whale menu or Dashboard.'
-        } else {
-            Write-ErrorColored '❌ Docker Desktop is not running.'
-        }
-        Write-Yellow '⚠️  Please start/unpause Docker Desktop and re-run this script.'
-        exit 1
-    }
-} else {
-    Write-ErrorColored '❌ Docker CLI not found on this system.'
-    Write-Yellow '⚠️  Please install Docker Desktop and re-run this script.'
+$buildMode = if ($env:BUILD_MODE) { $env:BUILD_MODE.Trim().ToLowerInvariant() } else { '' }
+if (-not $buildMode) {
+    $networkIsolationEnabled = ($env:NETWORK_ISOLATION -and $env:NETWORK_ISOLATION.ToLowerInvariant() -eq 'true')
+    $buildMode = if ($networkIsolationEnabled -or $env:ACR_TASK_AGENT_POOL) { 'acr-task' } elseif (Test-DockerReady) { 'local' } else { 'acr-task' }
+}
+if ($buildMode -notin @('local', 'acr-task')) {
+    Write-ErrorColored "❌ Unsupported BUILD_MODE '$buildMode'. Use 'local' or 'acr-task'."
     exit 1
 }
-Write-Green "✅ Docker is available."
+if ($buildMode -eq 'local' -and -not (Test-DockerReady)) {
+    Write-ErrorColored '❌ BUILD_MODE=local requested, but Docker is not available.'
+    exit 1
+}
+Write-Green "✅ Build mode: $buildMode"
 Write-Host ""
 #endregion
 
@@ -217,8 +210,12 @@ Write-Host ""
 
 #region Login to ACR
 Write-Green ("🔐 Logging into ACR ({0} in {1})…" -f $values.CONTAINER_REGISTRY_NAME, $values.AZURE_RESOURCE_GROUP)
-Invoke-ExternalCommand -FilePath 'az' -Arguments @('acr','login','--name',$values.CONTAINER_REGISTRY_NAME,'--resource-group',$values.AZURE_RESOURCE_GROUP) -What 'ACR login'
-Write-Green "✅ Logged into ACR."
+if ($buildMode -eq 'local') {
+    Invoke-ExternalCommand -FilePath 'az' -Arguments @('acr','login','--name',$values.CONTAINER_REGISTRY_NAME,'--resource-group',$values.AZURE_RESOURCE_GROUP) -What 'ACR login'
+    Write-Green "✅ Logged into ACR."
+} else {
+    Write-Green "✅ Using remote ACR build; local Docker login is not required."
+}
 Write-Host ""
 #endregion
 
@@ -262,7 +259,7 @@ if ($env:tag) {
 #region Build or ACR build image
 $fullImageName = "$($values.CONTAINER_REGISTRY_LOGIN_SERVER)/azure-gpt-rag/orchestrator:$tag"
 Write-Green "🛠️  Building Docker image…"
-if (Get-Command docker -ErrorAction SilentlyContinue) {
+if ($buildMode -eq 'local') {
     $buildOut = & docker build --platform linux/amd64 -t $fullImageName . 2>&1
     $buildExit = $LASTEXITCODE
     if ($buildExit -ne 0) {
@@ -272,8 +269,14 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     }
     Write-Green "✅ Docker build succeeded."
 } else {
-    Write-Blue "⚠️  Docker CLI not found locally. Falling back to 'az acr build'."
-    Invoke-ExternalCommand -FilePath 'az' -Arguments @('acr','build','--registry',$values.CONTAINER_REGISTRY_NAME,'--image',"azure-gpt-rag/orchestrator:$tag",'--file','Dockerfile','.') -What 'ACR cloud build'
+    Write-Blue "🛠️  Building remotely with 'az acr build'."
+    $acrBuildArgs = @('acr','build','--registry',$values.CONTAINER_REGISTRY_NAME,'--image',"azure-gpt-rag/orchestrator:$tag",'--file','Dockerfile')
+    if ($env:ACR_TASK_AGENT_POOL) {
+        Invoke-ExternalCommand -FilePath 'az' -Arguments @('acr','agentpool','show','--registry',$values.CONTAINER_REGISTRY_NAME,'--name',$env:ACR_TASK_AGENT_POOL,'--resource-group',$values.AZURE_RESOURCE_GROUP,'--only-show-errors') -What 'validate ACR task agent pool'
+        $acrBuildArgs += @('--agent-pool',$env:ACR_TASK_AGENT_POOL)
+    }
+    $acrBuildArgs += '.'
+    Invoke-ExternalCommand -FilePath 'az' -Arguments $acrBuildArgs -What 'ACR cloud build'
     Write-Green "✅ ACR cloud build succeeded."
 }
 Write-Host ""
@@ -305,7 +308,7 @@ if ($ids.type.tostring().contains("UserAssigned")) {
 Write-Green "✅ Container app registry updated."
 
 #region Push Docker image (if local build used)
-if (Get-Command docker -ErrorAction SilentlyContinue) {
+if ($buildMode -eq 'local') {
     Write-Green "📤 Pushing image…"
     $pushOut = & docker push $fullImageName 2>&1
     $pushExit = $LASTEXITCODE

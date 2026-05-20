@@ -114,9 +114,38 @@ echo "   resourceGroupName = $resourceGroupName"
 echo "   orchestratorApp = $orchestratorApp"
 echo
 
-echo -e "${GREEN}🔐 Logging into ACR (${containerRegistryName} in ${resourceGroupName})…${NC}"
-az acr login --name "${containerRegistryName}" --resource-group "${resourceGroupName}"
-echo -e "${GREEN}✅ Logged into ACR.${NC}"
+docker_ready() {
+  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
+}
+
+buildMode="${BUILD_MODE:-}"
+if [[ -z "$buildMode" ]]; then
+  if [[ "${NETWORK_ISOLATION:-}" == "true" || -n "${ACR_TASK_AGENT_POOL:-}" ]]; then
+    buildMode="acr-task"
+  elif docker_ready; then
+    buildMode="local"
+  else
+    buildMode="acr-task"
+  fi
+fi
+
+if [[ "$buildMode" != "local" && "$buildMode" != "acr-task" ]]; then
+  echo -e "${YELLOW}⚠️  Unsupported BUILD_MODE '${buildMode}'. Use 'local' or 'acr-task'.${NC}"
+  exit 1
+fi
+if [[ "$buildMode" == "local" ]] && ! docker_ready; then
+  echo -e "${YELLOW}⚠️  BUILD_MODE=local requested, but Docker is not available.${NC}"
+  exit 1
+fi
+
+echo -e "${GREEN}✅ Build mode: ${buildMode}${NC}"
+if [[ "$buildMode" == "local" ]]; then
+  echo -e "${GREEN}🔐 Logging into ACR (${containerRegistryName} in ${resourceGroupName})…${NC}"
+  az acr login --name "${containerRegistryName}" --resource-group "${resourceGroupName}"
+  echo -e "${GREEN}✅ Logged into ACR.${NC}"
+else
+  echo -e "${GREEN}✅ Using remote ACR build; local Docker login is not required.${NC}"
+fi
 echo
 
 echo -e "${BLUE}🛢️ Defining tag…${NC}"
@@ -148,21 +177,35 @@ else
     fi
 fi
 
-echo -e "${GREEN}🛠️  Building Docker image…${NC}"
-docker build \
-  --platform linux/amd64 \
-  -t "${containerRegistryLoginServer}/azure-gpt-rag/orchestrator:${tag}" \
-  .
+imageRef="${containerRegistryLoginServer}/azure-gpt-rag/orchestrator:${tag}"
 
-echo
-echo -e "${GREEN}📤 Pushing image…${NC}"
-docker push "${containerRegistryLoginServer}/azure-gpt-rag/orchestrator:${tag}"
-echo -e "${GREEN}✅ Image pushed.${NC}"
+if [[ "$buildMode" == "local" ]]; then
+  echo -e "${GREEN}🛠️  Building Docker image…${NC}"
+  docker build \
+    --platform linux/amd64 \
+    -t "$imageRef" \
+    .
+
+  echo
+  echo -e "${GREEN}📤 Pushing image…${NC}"
+  docker push "$imageRef"
+  echo -e "${GREEN}✅ Image pushed.${NC}"
+else
+  echo -e "${GREEN}🛠️  Building image remotely via 'az acr build'…${NC}"
+  acr_build_args=(acr build --registry "${containerRegistryName}" --image "azure-gpt-rag/orchestrator:${tag}" --file Dockerfile)
+  if [[ -n "${ACR_TASK_AGENT_POOL:-}" ]]; then
+    az acr agentpool show --registry "${containerRegistryName}" --name "${ACR_TASK_AGENT_POOL}" --resource-group "${resourceGroupName}" --only-show-errors >/dev/null
+    acr_build_args+=(--agent-pool "${ACR_TASK_AGENT_POOL}")
+  fi
+  acr_build_args+=(.)
+  az "${acr_build_args[@]}"
+  echo -e "${GREEN}✅ Remote build completed.${NC}"
+fi
 
 echo
 echo -e "${GREEN}🔄 Updating container app…${NC}"
 az containerapp update \
   --name "${orchestratorApp}" \
   --resource-group "${resourceGroupName}" \
-  --image "${containerRegistryLoginServer}/azure-gpt-rag/orchestrator:${tag}"
+  --image "$imageRef"
 echo -e "${GREEN}✅ Container app updated.${NC}"
