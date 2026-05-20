@@ -11,6 +11,7 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 - **Per-conversation document retrieval filter:** Updated retrieval across all strategies to filter Azure AI Search chunks by `conversationId eq '<cid>' or conversationId eq 'NaN'`, so retrieval returns both chunks ingested for the current conversation (via the new `POST /ingest-documents` endpoint in `gpt-rag-ingestion`) and chunks shared across all users (`conversationId = 'NaN'`). Implements [Azure/GPT-RAG#401](https://github.com/Azure/GPT-RAG/issues/401). ([#188](https://github.com/Azure/gpt-rag-orchestrator/pull/188))
 
 ### Fixed
+- **ACR remote build log streaming on Windows:** `scripts/deploy.ps1` now forces UTF-8 console/Python output before invoking Azure CLI so `az acr build` log streaming does not fail on Unicode build output when running from the jumpbox.
 - **Missing `regex` dependency in `requirements.txt`:** Added `regex>=2022.1.18` as an explicit dependency. The `tiktoken==0.8.0` package requires `regex` at runtime, but it was not listed in `requirements.txt`. This caused pip dependency resolver warnings when installing additional packages (such as `agentops-toolkit`) on top of the project dependencies, since `tiktoken` would report an unsatisfied requirement. Users installing into a fresh virtual environment could also encounter import errors from `tiktoken`.
 
 ## [v2.6.2] - 2026-04-18
