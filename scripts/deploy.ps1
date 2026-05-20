@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     deploy.ps1 — validate APP_CONFIG_ENDPOINT, load App Config (label=gpt-rag), then build & push
 
