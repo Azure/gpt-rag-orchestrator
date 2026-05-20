@@ -1,5 +1,8 @@
-# Use the official slim Python 3.12 image
-FROM python:3.12-slim
+# Defaults point at Microsoft Container Registry so network-isolated ACR Tasks
+# builds use the AI Landing Zone firewall allow-list without Docker Hub egress.
+ARG REGISTRY=mcr.microsoft.com
+ARG PYTHON_IMAGE=devcontainers/python:3.12-bookworm
+FROM ${REGISTRY}/${PYTHON_IMAGE}
 
 # 1. Install OS prerequisites used to add external APT repositories and verify packages
 RUN apt-get update \
