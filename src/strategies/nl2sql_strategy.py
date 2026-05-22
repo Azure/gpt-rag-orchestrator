@@ -1,11 +1,27 @@
 import asyncio
 import logging
 import re
-from typing import AsyncIterator
+import time
+import uuid
+from typing import AsyncIterator, Tuple
 
+# Suppress Azure SDK HTTP logging BEFORE importing azure packages
+# (same pattern as single_agent_rag_strategy_v2.py — reduces noisy HTTP telemetry in agent flows)
+for _azure_logger in [
+    "azure.core.pipeline.policies.http_logging_policy",
+    "azure.identity",
+    "azure.core",
+    "azure",
+]:
+    _logger = logging.getLogger(_azure_logger)
+    _logger.setLevel(logging.CRITICAL)
+    _logger.propagate = False
+    _logger.disabled = True
+    _logger.handlers.clear()
+
+from azure.ai.projects.models import PromptAgentDefinition
 from semantic_kernel.agents import (
     AzureAIAgent,
-    AzureAIAgentSettings,
     AgentGroupChat
 )
 from semantic_kernel.agents.strategies import TerminationStrategy
@@ -51,15 +67,18 @@ class NL2SQLStrategy(BaseAgentStrategy):
             self._sqlquery_prompt    = await self._read_prompt("sqlquery_agent")
             self._syntetizer_prompt  = await self._read_prompt("syntetizer_agent")
 
+    async def _create_prompt_agent_version(self, client, *, agent_name: str, instructions: str):
+        return await client.agents.create_version(
+            agent_name=agent_name,
+            definition=PromptAgentDefinition(
+                model=self.model_name,
+                instructions=instructions,
+            ),
+        )
+
     async def initiate_agent_flow(self, user_message: str) -> AsyncIterator[str]:
         # ensure prompts are loaded
         await self._load_prompts()
-
-        # prepare model settings
-        ai_agent_settings = AzureAIAgentSettings(
-            model_deployment_name=self.model_name,
-            endpoint=self.project_endpoint
-        )
 
         # open a single client/session for creation + streaming
         async with self.credential as creds, \
@@ -69,23 +88,27 @@ class NL2SQLStrategy(BaseAgentStrategy):
                    ) as client:
 
             # 1) create all three agents in parallel
-            triage_def, sql_def, syntetizer_def= await asyncio.gather(
-                client.agents.create_agent(
-                    model=ai_agent_settings.model_deployment_name,
-                    name="TriageAgent",
-                    instructions=self._triage_prompt
+            suffix = uuid.uuid4().hex[:8]
+            t0 = time.time()
+            triage_def, sql_def, syntetizer_def = await asyncio.gather(
+                self._create_prompt_agent_version(
+                    client, agent_name=f"nl2sql-triage-{suffix}", instructions=self._triage_prompt
                 ),
-                client.agents.create_agent(
-                    model=ai_agent_settings.model_deployment_name,
-                    name="SQLQueryAgent",
-                    instructions=self._sqlquery_prompt
+                self._create_prompt_agent_version(
+                    client, agent_name=f"nl2sql-sqlquery-{suffix}", instructions=self._sqlquery_prompt
                 ),
-                client.agents.create_agent(
-                    model=ai_agent_settings.model_deployment_name,
-                    name="SyntetizerAgent",
-                    instructions=self._syntetizer_prompt
-                ),                
+                self._create_prompt_agent_version(
+                    client, agent_name=f"nl2sql-syntetizer-{suffix}", instructions=self._syntetizer_prompt
+                ),
             )
+            logging.info(
+                f"[NL2SQL][Telemetry] Agent versions parallel setup took: {time.time() - t0:.2f}s"
+            )
+            agent_versions: list[Tuple[str, str, str]] = [
+                (triage_def.name, triage_def.version, "triage_agent"),
+                (sql_def.name, sql_def.version, "sqlquery_agent"),
+                (syntetizer_def.name, syntetizer_def.version, "syntetizer_agent"),
+            ]
 
             # 2) wrap them in AzureAIAgent objects (using keyword args!)
             triage_agent = AzureAIAgent(
@@ -142,19 +165,17 @@ class NL2SQLStrategy(BaseAgentStrategy):
                     logging.warning(f"Chat reset failed: {e!r}")
 
                 # schedule background deletions
-                for agent, name in [
-                    (triage_agent, "triage_agent"),
-                    (sqlquery_agent, "sqlquery_agent"),
-                    (syntetizer_agent, "syntetizer_agent"),
-                ]:
-                    agent_id = getattr(agent, "id", None)
-                    if agent_id:
-                        logging.info(f"Scheduling deletion for {name} (id={agent_id})")
-                        self._schedule_agent_deletion(agent_id)
+                for agent_name, agent_version, label in agent_versions:
+                    if agent_name and agent_version:
+                        logging.info(
+                            f"Scheduling deletion for {label} "
+                            f"(name={agent_name}, version={agent_version})"
+                        )
+                        self._schedule_agent_deletion(agent_name, agent_version)
                     else:
-                        logging.warning(f"{name} has no id; skipping deletion.")
+                        logging.warning(f"{label} has no name/version; skipping deletion.")
 
-    def _schedule_agent_deletion(self, agent_id: str):
+    def _schedule_agent_deletion(self, agent_name: str, agent_version: str):
         """
         Fire-and-forget deletion that opens its own client/session,
         preventing “Session is closed” errors.
@@ -166,10 +187,17 @@ class NL2SQLStrategy(BaseAgentStrategy):
                                credential=creds,
                                endpoint=self.project_endpoint
                            ) as delete_client:
-                    await delete_client.agents.delete_agent(agent_id)
-                    logging.info(f"Background deleted agent {agent_id}")
+                    await delete_client.agents.delete_version(
+                        agent_name=agent_name,
+                        agent_version=agent_version,
+                    )
+                    logging.info(
+                        f"Background deleted agent {agent_name} version {agent_version}"
+                    )
             except Exception as e:
-                logging.error(f"Failed background deletion of {agent_id}: {e!r}")
+                logging.error(
+                    f"Failed background deletion of {agent_name}:{agent_version}: {e!r}"
+                )
 
         task = asyncio.create_task(_delete())
         task.add_done_callback(lambda t: t.exception())

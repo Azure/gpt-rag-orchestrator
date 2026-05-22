@@ -5,6 +5,9 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Fixed
+- **NL2SQL Agent Service v2 API:** Migrated `NL2SQLStrategy` from removed `agents.create_agent` / `delete_agent` calls to `create_version` / `delete_version` on `AIProjectClient` for compatibility with `azure-ai-projects` 2.x. ([#461](https://github.com/Azure/GPT-RAG/issues/461), [#456](https://github.com/Azure/GPT-RAG/issues/456))
+
 ## [v2.6.3] - 2026-04-20
 
 ### Fixed
