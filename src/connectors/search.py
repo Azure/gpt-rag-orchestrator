@@ -83,6 +83,25 @@ class SearchResult(BaseModel):
     content: str
 
 
+def _odata_escape_string(value: Optional[str]) -> str:
+    """Escape a string for embedding in single-quoted OData literals."""
+    return (value or "").replace("'", "''")
+
+
+def build_conversation_filter(conversation_id: Optional[str], *, field_name: str = "conversationId") -> str:
+    """Build OData filter for conversation-scoped retrieval.
+
+    Includes:
+    - conversation-specific chunks (conversationId == <cid>) when cid is set
+    - shared/global chunks (conversationId == 'NaN') always
+    """
+    safe_field = (field_name or "").strip() or "conversationId"
+    shared_clause = f"{safe_field} eq 'NaN'"
+    cid = (conversation_id or "").strip() or None
+    if cid:
+        return f"{safe_field} eq '{_odata_escape_string(cid)}' or {shared_clause}"
+    return shared_clause
+
 class SearchClient:
     """
     Azure Cognitive Search client with hybrid search support.
@@ -123,6 +142,9 @@ class SearchClient:
         # Last OBO error summary (for clear logs / strict-mode failures)
         self._last_obo_error: Optional[str] = None
 
+        # Conversation ID scope for filtering search results
+        self._conversation_id: Optional[str] = None
+
         # Shared aiohttp session — reuses TCP connections across all HTTP calls
         self._session: Optional[aiohttp.ClientSession] = None
 
@@ -155,7 +177,13 @@ class SearchClient:
             self._session = aiohttp.ClientSession()
         return self._session
 
-    def set_request_context(self, *, api_access_token: Optional[str], allow_anonymous: bool) -> None:
+    def set_request_context(
+        self,
+        *,
+        api_access_token: Optional[str],
+        allow_anonymous: bool,
+        conversation_id: Optional[str] = None,
+    ) -> None:
         """Sets per-request context used for permission trimming.
 
         api_access_token is the incoming user token sent to the orchestrator (audience: this API).
@@ -169,6 +197,8 @@ class SearchClient:
 
         self._request_api_access_token = api_access_token
         self._allow_anonymous = bool(allow_anonymous)
+        self._conversation_id = (conversation_id or "").strip() or None
+
 
     def _token_fingerprint(self, token: Optional[str]) -> str:
         if not token:
@@ -494,6 +524,10 @@ class SearchClient:
                 "select": "title,content,url,filepath,chunk_id",
                 "top": self.search_top_k
             }
+                        
+            # Filter by conversation scope: this chat + shared corpora (general/global).
+            # Never query without a filter: an unset id would return every chunk in the index.
+            search_body["filter"] = build_conversation_filter(self._conversation_id, field_name="conversationId")
             
             # Generate embeddings for vector/hybrid search
             if self.search_approach in ["vector", "hybrid"] and self.aoai_client:
