@@ -245,10 +245,10 @@ async def lifespan(app: FastAPI):
         # 4. Warm up CosmosDBClient singleton (persistent connection)
         get_cosmosdb_client()
 
-        # 5. Pre-warm AgentsClient (forces TCP/TLS + token so first request is fast)
+        # 5. Pre-warm Agent Service only for strategies that use it.
         try:
-            from strategies.single_agent_rag_strategy_v2 import prewarm_agents_client
-            await prewarm_agents_client()
+            from startup_warmup import prewarm_agents_for_strategy
+            await prewarm_agents_for_strategy(cfg)
         except Exception as ae:
             logging.warning(f"[Startup] ⚠️ AgentsClient pre-warm failed: {ae}")
 
@@ -784,4 +784,3 @@ FastAPIInstrumentor.instrument_app(app)
 # Run the app locally (avoid nested event loop when started by uvicorn CLI)
 if __name__ == "__main__" and not is_azure_environment():
     uvicorn.run(app, host="0.0.0.0", port=9000, log_level="info", timeout_keep_alive=60)
-

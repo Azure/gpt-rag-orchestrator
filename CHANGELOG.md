@@ -5,6 +5,11 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.6.4] - 2026-05-25
+
+### Fixed
+- **Strategy-aware Agent Service startup warmup:** The orchestrator now pre-warms Azure AI Foundry Agent Service only when the active `AGENT_STRATEGY` uses it. The default `maf_lite` strategy no longer creates or contacts Agent Service during startup, preventing unwanted startup-created agents. The `single_agent_rag` startup path now reuses an existing `gpt-rag-agent-v2` agent by name before creating a new reusable agent, reducing duplicate agent creation. Fixes [Azure/GPT-RAG#456](https://github.com/Azure/GPT-RAG/issues/456).
+
 ## [v2.6.3] - 2026-05-19
 
 ### Added
