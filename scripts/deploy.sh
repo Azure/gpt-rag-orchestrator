@@ -165,26 +165,25 @@ set_containerapp_registry() {
   fi
 }
 
-restart_latest_revision() {
+verify_containerapp_image() {
   local app_name="$1"
-  local revision="$2"
+  local expected_image="$2"
+  local actual_image
 
-  if [[ -z "${revision//[[:space:]]/}" || "$revision" == "null" ]]; then
-    revision="$(az containerapp show \
-      --name "$app_name" \
-      --resource-group "$resourceGroupName" \
-      --query properties.latestRevisionName -o tsv)"
-  fi
+  actual_image="$(az containerapp show \
+    --name "$app_name" \
+    --resource-group "$resourceGroupName" \
+    --query 'properties.template.containers[0].image' -o tsv)"
 
-  if [[ -z "${revision//[[:space:]]/}" || "$revision" == "null" ]]; then
-    error "Could not determine latest revision for '$app_name'."
+  if [[ -z "${actual_image//[[:space:]]/}" || "$actual_image" == "null" ]]; then
+    error "Could not determine configured image for '$app_name'."
     exit 1
   fi
 
-  az containerapp revision restart \
-    --name "$app_name" \
-    --resource-group "$resourceGroupName" \
-    --revision "$revision"
+  if [[ "$actual_image" != "$expected_image" ]]; then
+    error "Container app '$app_name' is configured with '$actual_image' instead of '$expected_image'."
+    exit 1
+  fi
 }
 
 echo
@@ -271,6 +270,10 @@ latestRevision="$(az containerapp update \
   --query properties.latestRevisionName -o tsv)"
 success "Container app updated."
 
-info "Restarting latest container app revision..."
-restart_latest_revision "$appName" "$latestRevision"
-success "Container app revision restarted."
+if [[ -n "${latestRevision//[[:space:]]/}" && "$latestRevision" != "null" ]]; then
+  success "Latest revision: ${latestRevision}"
+fi
+
+info "Verifying container app image..."
+verify_containerapp_image "$appName" "$imageRef"
+success "Container app image verified."
