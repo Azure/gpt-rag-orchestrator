@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [v2.6.8] - 2026-05-26
+
+### Changed
+- **NL2SQL now uses Microsoft Agent Framework without Agent Service agent creation:** Replaced the Semantic Kernel Agent Service group-chat implementation with a direct Microsoft Agent Framework `ChatAgent` workflow backed by local NL2SQL tools, eliminating per-request Foundry Agent Service agent creation and the `AgentsOperations.create_agent` failure path. Fixes [Azure/GPT-RAG#461](https://github.com/Azure/GPT-RAG/issues/461).
+
+### Fixed
+- **NL2SQL startup and response latency:** NL2SQL no longer pre-warms Agent Service on startup or creates three server-side agents per request; it now performs deterministic datasource/table/schema/query steps locally and uses MAF only for triage, SQL generation, and answer synthesis. Fixes [Azure/GPT-RAG#462](https://github.com/Azure/GPT-RAG/issues/462).
+- **Conversation rename API schema:** Added typed request/response models for the existing conversation rename endpoint while preserving its authorization and ownership checks. Supports [Azure/GPT-RAG#435](https://github.com/Azure/GPT-RAG/issues/435).
+
 ## [v2.6.7] - 2026-05-26
 
 ### Fixed

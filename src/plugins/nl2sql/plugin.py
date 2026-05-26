@@ -2,8 +2,6 @@ import logging
 import time
 from typing import Any, Dict, List, Optional, Annotated
 
-from semantic_kernel.functions import kernel_function
-
 from .nl2sql_types import (
     DataSourceItem,
     DataSourcesList,
@@ -54,14 +52,6 @@ class NL2SQLPlugin:
     async def _perform_search(self, body: Dict[str, Any], search_index: str) -> Dict[str, Any]:
         return await self.search.search(index_name=search_index, body=body)
 
-    @kernel_function(
-        name="GetAllDatasourcesInfo",
-        description=(
-            "Retrieve a list of all datasources. "
-            "Returns a DataSourcesList object with each datasource's name, "
-            "description, and type."
-        )
-    )
     async def get_all_datasources_info(self) -> DataSourcesList:
         documents = await self.cosmos.list_documents(self.container_name)
         datasources = [
@@ -74,13 +64,6 @@ class NL2SQLPlugin:
         ]
         return DataSourcesList(datasources=datasources)
 
-    @kernel_function(
-        name="GetAllTablesInfo",
-        description=(
-            "Retrieve a list of tables filtering by the given datasource. "
-            "Each entry will have table, description, and datasource."
-        )
-    )
     async def get_all_tables_info(
         self,
         datasource: Annotated[str, "Name of the target datasource"]
@@ -122,13 +105,6 @@ class NL2SQLPlugin:
 
         return TablesList(tables=tables_info, error=error)
 
-    @kernel_function(
-        name="GetSchemaInfo",
-        description=(
-            "Retrieve schema information (columns and description) "
-            "for a specific table in the given datasource."
-        )
-    )
     async def get_schema_info(
         self,
         datasource: Annotated[str, "Target datasource"],
@@ -179,13 +155,6 @@ class NL2SQLPlugin:
                 columns=None
             )
 
-    @kernel_function(
-        name="TablesRetrieval",
-        description=(
-            "Retrieve necessary tables based on an optimized query string. "
-            "Returns a list of TableRetrievalItem and optional error."
-        )
-    )
     async def tables_retrieval(
         self,
         input: Annotated[str, "Optimized retrieval query"],
@@ -236,13 +205,6 @@ class NL2SQLPlugin:
 
         return TablesRetrievalResult(tables=results, error=err)
 
-    @kernel_function(
-        name="MeasuresRetrieval",
-        description=(
-            "Retrieve measures for a given datasource, "
-            "including name, description, type, source_table, data_type, source_model."
-        )
-    )
     async def measures_retrieval(
         self,
         datasource: Annotated[str, "Name of the target datasource"]
@@ -282,13 +244,6 @@ class NL2SQLPlugin:
 
         return MeasuresList(measures=measures, error=err)
 
-    @kernel_function(
-        name="QueriesRetrieval",
-        description=(
-            "Retrieve saved SQL queries (question, query, reasoning) "
-            "based on the user ask and optional datasource filter."
-        )
-    )
     async def queries_retrieval(
         self,
         input: Annotated[str, "The user ask"],
@@ -340,10 +295,6 @@ class NL2SQLPlugin:
 
         return QueriesRetrievalResult(queries=results, error=err)
 
-    @kernel_function(
-        name="ValidateSQLQuery",
-        description="Validate the syntax of an SQL query. Returns a ValidateSQLQueryResult indicating validity."
-    )
     async def validate_sql_query(
         self,
         query: Annotated[str, "SQL Query"]
@@ -358,10 +309,6 @@ class NL2SQLPlugin:
         except Exception as e:
             return ValidateSQLQueryResult(is_valid=False, error=str(e))
 
-    @kernel_function(
-        name="ExecuteDAXQuery",
-        description="Execute a DAX query against a semantic model datasource and return the results."
-    )
     async def execute_dax_query(
         self,
         datasource: Annotated[str, "Target datasource"],
@@ -390,10 +337,6 @@ class NL2SQLPlugin:
         except Exception as e:
             return ExecuteQueryResult(error=str(e))
 
-    @kernel_function(
-        name="ExecuteSQLQuery",
-        description="Execute a SQL query against a SQL datasource and return the results. Only SELECT statements are allowed."
-    )
     async def execute_sql_query(
         self,
         datasource: Annotated[str, "Target datasource name"],

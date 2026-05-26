@@ -29,7 +29,7 @@ def test_resolve_agent_strategy_defaults_to_maf_lite():
     [
         ("single_agent_rag", True),
         ("maf_agent_service", True),
-        ("nl2sql", True),
+        ("nl2sql", False),
         ("maf_lite", False),
         ("mcp", False),
         ("multimodal", False),
