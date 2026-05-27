@@ -1,6 +1,6 @@
 # — FastAPI & TestClient (for calling your app in-memory)
 fastapi==0.115.12
-requests==2.32.4
+requests==2.33.0
 
 # — Data handling & reporting
 pandas

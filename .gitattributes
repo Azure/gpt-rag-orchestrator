@@ -1,0 +1,2 @@
+# Keep Bash entrypoints executable from WSL/Linux checkouts.
+*.sh text eol=lf

@@ -207,6 +207,27 @@ class TestMultimodalStrategy:
         assert s.classify_images is True
 
     @pytest.mark.asyncio
+    async def test_classify_no_retrieval_followup(self):
+        from strategies.multimodal_strategy import MultimodalStrategy
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "NO_RETRIEVAL_FOLLOWUP"
+
+        with patch("strategies.multimodal_strategy.MultimodalChatClient") as MockClient:
+            mock_client_instance = MagicMock()
+            mock_client_instance._client.chat.completions.create = AsyncMock(return_value=mock_response)
+            MockClient.return_value = mock_client_instance
+
+            s = MultimodalStrategy()
+            intent = await s._classify_intent(
+                "Translate that to Portuguese.",
+                history=[{"role": "assistant", "text": "The prior answer."}],
+            )
+
+            assert intent == "no_retrieval"
+
+    @pytest.mark.asyncio
     async def test_create_search_provider_passes_visual_classifier_callback_when_enabled(self):
         from strategies.multimodal_strategy import MultimodalStrategy
 

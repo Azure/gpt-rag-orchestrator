@@ -122,6 +122,21 @@ class ConversationDetail(BaseModel):
         populate_by_name = True
 
 
+class ConversationUpdateRequest(BaseModel):
+    """Request body for updating conversation metadata."""
+    name: str = Field(..., min_length=1, description="New conversation name")
+
+
+class ConversationUpdateResponse(BaseModel):
+    """Response for PATCH /conversations/{id}."""
+    id: str = Field(..., description="Unique identifier of the conversation")
+    name: str = Field(..., description="Updated conversation name")
+    last_updated: Optional[datetime] = Field(None, alias="lastUpdated", description="Updated timestamp")
+
+    class Config:
+        populate_by_name = True
+
+
 # Reusable OpenAPI responses for the orchestrator endpoint. Put here so
 # route decorators in `main.py` remain compact and the examples are centralized.
 ORCHESTRATOR_RESPONSES = {

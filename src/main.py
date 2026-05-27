@@ -35,6 +35,8 @@ from schemas import (
     ConversationListResponse,
     ConversationMetadata,
     ConversationDetail,
+    ConversationUpdateRequest,
+    ConversationUpdateResponse,
 )
 from constants import APPLICATION_INSIGHTS_CONNECTION_STRING, APP_NAME
 from util.tools import is_azure_environment
@@ -245,10 +247,10 @@ async def lifespan(app: FastAPI):
         # 4. Warm up CosmosDBClient singleton (persistent connection)
         get_cosmosdb_client()
 
-        # 5. Pre-warm AgentsClient (forces TCP/TLS + token so first request is fast)
+        # 5. Pre-warm Agent Service only for strategies that use it.
         try:
-            from strategies.single_agent_rag_strategy_v2 import prewarm_agents_client
-            await prewarm_agents_client()
+            from startup_warmup import prewarm_agents_for_strategy
+            await prewarm_agents_for_strategy(cfg)
         except Exception as ae:
             logging.warning(f"[Startup] ⚠️ AgentsClient pre-warm failed: {ae}")
 
@@ -699,7 +701,7 @@ async def get_conversation(
 )
 async def update_conversation(
     conversation_id: str,
-    body: dict,
+    body: ConversationUpdateRequest,
     x_api_key: Optional[str] = Header(None, alias="X-API-KEY"),
     dapr_api_token: Optional[str] = Header(None, alias="dapr-api-token"),
     authorization: Optional[str] = Header(None, alias="Authorization"),
@@ -715,7 +717,7 @@ async def update_conversation(
         if conversation_doc.get("principal_id") != principal_id:
             raise HTTPException(status_code=403, detail="You do not have permission to access this conversation")
 
-        new_name = body.get("name", "").strip()
+        new_name = body.name.strip()
         if not new_name:
             raise HTTPException(status_code=400, detail="Conversation name cannot be empty")
 
@@ -723,11 +725,11 @@ async def update_conversation(
         if updated_doc is None:
             raise HTTPException(status_code=500, detail="Failed to update conversation")
 
-        return {
-            "id": updated_doc.get("id"),
-            "name": updated_doc.get("name"),
-            "lastUpdated": updated_doc.get("lastUpdated"),
-        }
+        return ConversationUpdateResponse(
+            id=updated_doc.get("id"),
+            name=updated_doc.get("name"),
+            last_updated=updated_doc.get("lastUpdated"),
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -784,4 +786,3 @@ FastAPIInstrumentor.instrument_app(app)
 # Run the app locally (avoid nested event loop when started by uvicorn CLI)
 if __name__ == "__main__" and not is_azure_environment():
     uvicorn.run(app, host="0.0.0.0", port=9000, log_level="info", timeout_keep_alive=60)
-

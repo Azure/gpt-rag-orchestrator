@@ -35,6 +35,11 @@ from .agent_strategies import AgentStrategies
 from .composite_context_provider import CompositeContextProvider
 from .multimodal_search_context_provider import MultimodalSearchContextProvider
 from .maf_plugins import UserProfile, UserProfileMemory
+from .retrieval_intent import (
+    RETRIEVAL_INTENT_SYSTEM_PROMPT,
+    build_retrieval_intent_messages,
+    parse_retrieval_intent,
+)
 from connectors.multimodal_chat_client import MultimodalChatClient
 from connectors.search import acquire_obo_search_token
 from dependencies import get_config
@@ -73,12 +78,7 @@ class MultimodalStrategy(BaseAgentStrategy):
     models analysing images retrieved alongside text documents.
     """
 
-    _INTENT_SYSTEM_PROMPT = (
-        "You are an intent classifier. Given a user message, respond with exactly "
-        "one word: GREETING if the message is a greeting, salutation, small talk, "
-        "farewell, or thanks (in any language), or QUESTION if it is a real question "
-        "or request that needs a knowledge base search. Respond with ONLY ONE WORD."
-    )
+    _INTENT_SYSTEM_PROMPT = RETRIEVAL_INTENT_SYSTEM_PROMPT
 
     AGENT_INSTRUCTIONS = (
         "You are a helpful AI assistant with vision capabilities. "
@@ -146,6 +146,15 @@ class MultimodalStrategy(BaseAgentStrategy):
         # History window size (number of recent messages sent to the model)
         self.history_max_messages = int(cfg.get("CHAT_HISTORY_MAX_MESSAGES", 10))
 
+        # Small bounded context used only by the retrieval-needed classifier.
+        self.intent_history_max_messages = int(cfg.get("RETRIEVAL_INTENT_HISTORY_MESSAGES", 4))
+        self.intent_history_max_chars = int(cfg.get("RETRIEVAL_INTENT_HISTORY_MAX_CHARS", 4000))
+        self.no_retrieval_followup_detection_enabled = cfg.get(
+            "ENABLE_NO_RETRIEVAL_FOLLOWUP_DETECTION",
+            True,
+            type=bool,
+        )
+
         # Hard cap on output tokens for the main agent response
         self.max_completion_tokens = int(cfg.get("MAX_COMPLETION_TOKENS", 4096))
 
@@ -159,7 +168,7 @@ class MultimodalStrategy(BaseAgentStrategy):
         self._cached_instructions: Optional[str] = None
 
         logging.debug("[MultimodalStrategy] Initialized")
-    
+
     def set_context(self, conversation_id: Optional[str]) -> None:
         """Set conversation_id (may be None before orchestrator assigns a new id)."""
         self.conversation_id = conversation_id
@@ -446,16 +455,19 @@ class MultimodalStrategy(BaseAgentStrategy):
     # ------------------------------------------------------------------
     # Intent classification (LLM-based)
     # ------------------------------------------------------------------
-    async def _classify_intent(self, user_message: str) -> str:
-        """Classify user intent as 'greeting' or 'question' using a lightweight LLM call."""
+    async def _classify_intent(self, user_message: str, history: list[dict] | None = None) -> str:
+        """Classify whether the turn needs retrieval using a lightweight LLM call."""
         try:
             client = self._get_or_create_chat_client()
+            messages = build_retrieval_intent_messages(
+                user_message=user_message,
+                history=history,
+                max_history_messages=self.intent_history_max_messages,
+                max_history_chars=self.intent_history_max_chars,
+            )
             _kwargs = dict(
                 model=self.model_name,
-                messages=[
-                    {"role": "system", "content": self._INTENT_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_message},
-                ],
+                messages=messages,
                 max_completion_tokens=200,
             )
             try:
@@ -465,7 +477,10 @@ class MultimodalStrategy(BaseAgentStrategy):
                 _kwargs["max_tokens"] = 200
                 resp = await client._client.chat.completions.create(**_kwargs)
             result = (resp.choices[0].message.content or "").strip().upper()
-            intent = "greeting" if "GREETING" in result else "question"
+            intent = parse_retrieval_intent(
+                result,
+                enable_no_retrieval=self.no_retrieval_followup_detection_enabled,
+            )
             logging.info("[MultimodalStrategy] intent=%s (raw=%r)", intent, result)
             return intent
         except Exception as e:
@@ -506,9 +521,11 @@ class MultimodalStrategy(BaseAgentStrategy):
                     time.time() - t0, bool(self.embedding_deployment),
                 )
 
-            # Classify intent — skip search for greetings / small talk
+            history = conv.get("messages", [])
+
+            # Classify intent — skip search when retrieval is not needed.
             t0 = time.time()
-            intent = await self._classify_intent(user_message)
+            intent = await self._classify_intent(user_message, history=history)
             logging.info("[MultimodalStrategy] intent_classification: %.2fs", time.time() - t0)
 
             # Build context providers
@@ -517,6 +534,8 @@ class MultimodalStrategy(BaseAgentStrategy):
                 context_providers.append(self._search_provider)
             elif intent == "greeting":
                 logging.info("[MultimodalStrategy] Greeting detected — skipping search")
+            elif intent == "no_retrieval":
+                logging.info("[MultimodalStrategy] No-retrieval follow-up detected — skipping search")
             else:
                 logging.warning("[MultimodalStrategy] No search provider — agent will answer without grounding")
             logging.info("[MultimodalStrategy] context_providers: %d", len(context_providers))
@@ -545,7 +564,6 @@ class MultimodalStrategy(BaseAgentStrategy):
                     conv["session_initialized"] = True
 
                 # Build message list with conversation history
-                history = conv.get("messages", [])
                 input_messages: list[ChatMessage] = []
                 for msg in history[-self.history_max_messages:]:
                     role = msg.get("role", "user")

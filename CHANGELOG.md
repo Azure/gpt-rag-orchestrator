@@ -1,9 +1,47 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.  
+All notable changes to this project will be documented in this file.
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v2.6.10] - 2026-05-27
+
+### Changed
+- **Dependency refresh:** Updated `requests` to 2.33.0, `aiohttp` to 3.13.4 for the runtime and evaluation dependencies.
+
+## [v2.6.9] - 2026-05-27
+
+### Added
+- **Bounded conversation persistence:** Added byte- and message-based compaction for persisted conversation documents so long chats keep recent context without growing Cosmos DB items indefinitely. Implements [Azure/GPT-RAG#448](https://github.com/Azure/GPT-RAG/issues/448).
+- **Retrieval-needed triage:** Extended local MAF strategies to distinguish greetings, retrieval-needed questions, and no-retrieval follow-ups such as formatting, translation, summarization, or rephrasing of the previous answer.
+
+## [v2.6.8] - 2026-05-26
+
+### Changed
+- **NL2SQL now uses Microsoft Agent Framework without Agent Service agent creation:** Replaced the Semantic Kernel Agent Service group-chat implementation with a direct Microsoft Agent Framework `ChatAgent` workflow backed by local NL2SQL tools, eliminating per-request Foundry Agent Service agent creation and the `AgentsOperations.create_agent` failure path. Fixes [Azure/GPT-RAG#461](https://github.com/Azure/GPT-RAG/issues/461).
+
+### Fixed
+- **NL2SQL startup and response latency:** NL2SQL no longer pre-warms Agent Service on startup or creates three server-side agents per request; it now performs deterministic datasource/table/schema/query steps locally and uses MAF only for triage, SQL generation, and answer synthesis. Fixes [Azure/GPT-RAG#462](https://github.com/Azure/GPT-RAG/issues/462).
+- **Conversation rename API schema:** Added typed request/response models for the existing conversation rename endpoint while preserving its authorization and ownership checks. Supports [Azure/GPT-RAG#435](https://github.com/Azure/GPT-RAG/issues/435).
+
+## [v2.6.7] - 2026-05-26
+
+### Fixed
+- **Azure CLI warning-safe deploy verification:** Filter Azure CLI warning and progress lines from App Configuration, Container Apps update, and image verification output before consuming TSV values, so Windows deploys do not fail when the Azure CLI or Container Apps extension emits non-data output. Fixes [Azure/GPT-RAG#449](https://github.com/Azure/GPT-RAG/issues/449).
+
+## [v2.6.6] - 2026-05-26
+
+### Fixed
+- **Container Apps image update verification:** Replaced the mandatory latest-revision restart with explicit image verification after `az containerapp update --image`, avoiding transient `Not Found` failures immediately after revision creation while still confirming the new image is configured. Fixes [Azure/GPT-RAG#449](https://github.com/Azure/GPT-RAG/issues/449).
+
+## [v2.6.5] - 2026-05-25
+
+### Fixed
+- **Docker-free component deployment:** Updated Bash and PowerShell deploy scripts to choose the build mode before touching Docker, use `az acr build` when Docker is unavailable or remote build is requested, configure Container App registry identity, and restart the latest revision after image updates. Fixes [Azure/GPT-RAG#449](https://github.com/Azure/GPT-RAG/issues/449).
+
+## [v2.6.4] - 2026-05-25
+
+### Fixed
+- **Strategy-aware Agent Service startup warmup:** The orchestrator now pre-warms Azure AI Foundry Agent Service only when the active `AGENT_STRATEGY` uses it. The default `maf_lite` strategy no longer creates or contacts Agent Service during startup, preventing unwanted startup-created agents. The `single_agent_rag` startup path now reuses an existing `gpt-rag-agent-v2` agent by name before creating a new reusable agent, reducing duplicate agent creation. Fixes [Azure/GPT-RAG#456](https://github.com/Azure/GPT-RAG/issues/456).
 
 ## [v2.6.3] - 2026-05-19
 
@@ -136,7 +174,7 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [v2.1.0] – 2025-08-31
 ### Added
-- User Feedback Loop. [#358](https://github.com/Azure/GPT-RAG/issues/358) 
+- User Feedback Loop. [#358](https://github.com/Azure/GPT-RAG/issues/358)
 ### Changed
 - Standardized resource group variable as `AZURE_RESOURCE_GROUP`. [#365](https://github.com/Azure/GPT-RAG/issues/365)
 
@@ -156,5 +194,5 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 ### Changed
 - Major architecture refactor to support the vNext architecture.
 
-## [v1.0.0] 
+## [v1.0.0]
 - Original version.
