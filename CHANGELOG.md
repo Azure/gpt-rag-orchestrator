@@ -5,6 +5,9 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Changed
+- **Dependency refresh:** Updated `requests` to 2.33.0, `aiohttp` to 3.13.4 for the runtime and evaluation dependencies.
+
 ## [v2.6.9] - 2026-05-27
 
 ### Added
