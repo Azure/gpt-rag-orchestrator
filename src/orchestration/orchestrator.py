@@ -6,6 +6,10 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, Optional
 from connectors.cosmosdb import get_cosmosdb_client
+from orchestration.conversation_compaction import (
+    compact_conversation_for_persistence,
+    load_conversation_compaction_config,
+)
 from strategies.agent_strategy_factory import AgentStrategyFactory
 from strategies.base_agent_strategy import BaseAgentStrategy
 from dependencies import get_config
@@ -26,11 +30,12 @@ class Orchestrator:
 
         # app configuration
         cfg = get_config()
-        
+
         # database
         self.database_client = get_cosmosdb_client()
         self.database_container = cfg.get("CONVERSATIONS_DATABASE_CONTAINER", "conversations")
-        
+        self.conversation_compaction_config = load_conversation_compaction_config(cfg)
+
     @classmethod
     async def create(
         cls,
@@ -112,7 +117,7 @@ class Orchestrator:
                     asyncio.create_task(self.database_client.create_document(
                         self.database_container, self.conversation_id, conversation, partition_key=partition_key
                     ))
-                    
+
             # Search/RAG scoping: conversation_id is finalized here when the client omitted it on create().
             # Keep strategy in sync so retrieval filters by this id (not None).
             if self.agentic_strategy and hasattr(self.agentic_strategy, "set_context"):
@@ -159,7 +164,11 @@ class Orchestrator:
                 async def persist_conversation():
                     start_time = time.time()
                     try:
-                        await self.database_client.update_document(self.database_container, self.agentic_strategy.conversation)
+                        conversation_to_persist = self._prepare_conversation_for_persistence(
+                            self.agentic_strategy.conversation
+                        )
+                        self.agentic_strategy.conversation = conversation_to_persist
+                        await self.database_client.update_document(self.database_container, conversation_to_persist)
                         logging.info(f"[Orchestrator][Timing] conversation_persist_async_done: {time.time() - start_time:.2f}s")
                     except Exception as e:
                         logging.error(f"[Orchestrator] Error asynchronously persisting conversation: {e}")
@@ -223,5 +232,23 @@ class Orchestrator:
             conversation["feedback"] = []
         conversation["feedback"].append(feedback)
 
-        await self.database_client.update_document(self.database_container, conversation)
+        conversation_to_persist = self._prepare_conversation_for_persistence(conversation)
+        await self.database_client.update_document(self.database_container, conversation_to_persist)
         logging.info(f"Feedback saved for conversation {self.conversation_id}")
+
+    def _prepare_conversation_for_persistence(self, conversation: Dict) -> Dict:
+        compacted, stats = compact_conversation_for_persistence(
+            conversation,
+            self.conversation_compaction_config,
+        )
+        if stats.get("compacted"):
+            logging.info(
+                "[Orchestrator] conversation compacted before persistence "
+                "(conversation_id=%s pruned_messages=%s pruned_questions=%s bytes=%s->%s)",
+                compacted.get("id") or self.conversation_id,
+                stats.get("pruned_messages"),
+                stats.get("pruned_questions"),
+                stats.get("original_bytes"),
+                stats.get("final_bytes"),
+            )
+        return compacted

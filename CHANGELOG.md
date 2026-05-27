@@ -1,7 +1,13 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.  
+All notable changes to this project will be documented in this file.
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
+
+## [v2.6.9] - 2026-05-27
+
+### Added
+- **Bounded conversation persistence:** Added byte- and message-based compaction for persisted conversation documents so long chats keep recent context without growing Cosmos DB items indefinitely. Implements [Azure/GPT-RAG#448](https://github.com/Azure/GPT-RAG/issues/448).
+- **Retrieval-needed triage:** Extended local MAF strategies to distinguish greetings, retrieval-needed questions, and no-retrieval follow-ups such as formatting, translation, summarization, or rephrasing of the previous answer.
 
 ## [v2.6.8] - 2026-05-26
 
@@ -163,7 +169,7 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [v2.1.0] – 2025-08-31
 ### Added
-- User Feedback Loop. [#358](https://github.com/Azure/GPT-RAG/issues/358) 
+- User Feedback Loop. [#358](https://github.com/Azure/GPT-RAG/issues/358)
 ### Changed
 - Standardized resource group variable as `AZURE_RESOURCE_GROUP`. [#365](https://github.com/Azure/GPT-RAG/issues/365)
 
@@ -183,5 +189,5 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 ### Changed
 - Major architecture refactor to support the vNext architecture.
 
-## [v1.0.0] 
+## [v1.0.0]
 - Original version.
