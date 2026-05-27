@@ -41,14 +41,23 @@ from openai import BadRequestError
 # Module-level singleton for AgentsClient — eliminates per-request TCP/TLS + token overhead
 _agents_client: Optional[AgentsClient] = None
 _cached_agent: Optional[Any] = None  # Pre-created/fetched agent reused across all requests
+DEFAULT_REUSABLE_AGENT_NAME = "gpt-rag-agent-v2"
 
 
-async def prewarm_agents_client() -> None:
+async def _find_agent_by_name(agents_client: AgentsClient, name: str) -> Optional[Any]:
+    async for agent in agents_client.list_agents(limit=100):
+        if getattr(agent, "name", None) == name:
+            return agent
+    return None
+
+
+async def prewarm_agents_client(*, create_reusable_agent: bool = True) -> None:
     """Pre-warm the AgentsClient HTTP pipeline and create/fetch a reusable agent.
 
     1. Forces TCP/TLS handshake and token acquisition so the first real request
        doesn't pay the ~5-6s cold-start penalty.
-    2. Creates (or fetches) the agent at startup so _setup_agent() returns in ~0ms.
+    2. Optionally creates (or fetches) the single-agent reusable agent so
+       _setup_agent() returns in ~0ms.
     """
     global _agents_client, _cached_agent
     cfg = get_config()
@@ -70,6 +79,14 @@ async def prewarm_agents_client() -> None:
     except Exception as e:
         logging.warning("[Startup] ⚠️ AgentsClient pre-warm API call failed (client still created): %s", e)
 
+    if not create_reusable_agent:
+        logging.info("[Startup] Skipping reusable single-agent creation for active strategy")
+        return
+
+    if _cached_agent is not None:
+        logging.info("[Startup] Reusable agent already cached (id=%s)", getattr(_cached_agent, "id", "unknown"))
+        return
+
     # --- Pre-create or fetch the agent so every request gets it in ~0ms ---
     agent_id = cfg.get("AGENT_ID", "") or None
     if agent_id:
@@ -80,6 +97,23 @@ async def prewarm_agents_client() -> None:
         except Exception as e:
             logging.warning("[Startup] ⚠️ Could not pre-fetch agent %s: %s", agent_id, e)
     else:
+        try:
+            _cached_agent = await _find_agent_by_name(_agents_client, DEFAULT_REUSABLE_AGENT_NAME)
+            if _cached_agent is not None:
+                logging.info(
+                    "[Startup] ✅ Reusing existing startup agent (name=%s, id=%s)",
+                    DEFAULT_REUSABLE_AGENT_NAME,
+                    getattr(_cached_agent, "id", "unknown"),
+                )
+                return
+        except Exception as e:
+            logging.warning(
+                "[Startup] ⚠️ Could not verify existing startup agent by name; "
+                "continuing without startup agent creation to avoid duplicates: %s",
+                e,
+            )
+            return
+
         # No AGENT_ID: create a reusable agent at startup (eliminates create+delete per request)
         try:
             from connectors.search import get_search_client
@@ -126,7 +160,7 @@ async def prewarm_agents_client() -> None:
             model_name = cfg.get("CHAT_DEPLOYMENT_NAME")
             _cached_agent = await _agents_client.create_agent(
                 model=model_name,
-                name="gpt-rag-agent-v2",
+                name=DEFAULT_REUSABLE_AGENT_NAME,
                 instructions=instructions,
                 tools=tools_list,
                 tool_resources=tool_resources,
