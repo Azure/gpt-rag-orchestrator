@@ -5,6 +5,9 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Changed
+- **Dependency refresh:** Updated `python-dotenv` to 1.2.2 for runtime configuration loading.
+
 ## [v2.6.10] - 2026-05-27
 
 ### Changed
