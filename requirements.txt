@@ -41,7 +41,7 @@ chardet>=5.2,<6.0.0
 
 # For evaluation
 requests==2.33.0
-python-dotenv==1.1.0
+python-dotenv==1.2.2
 
 # fastapi
 fastapi==0.115.12
