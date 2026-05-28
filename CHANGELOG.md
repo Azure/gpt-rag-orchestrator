@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [v2.6.11] - 2026-05-27
+
+### Changed
+- **Dependency refresh:** Updated `python-dotenv` to 1.2.2 for runtime configuration loading.
+
 ## [v2.6.10] - 2026-05-27
 
 ### Changed
