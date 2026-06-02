@@ -27,13 +27,14 @@ for _azure_logger in [
     _logger.handlers.clear()
 
 from agent_framework import ChatAgent
-from agent_framework.azure import AzureAIAgentClient
 
 from .base_agent_strategy import BaseAgentStrategy
 from .agent_strategies import AgentStrategies
 from .composite_context_provider import CompositeContextProvider
 from .search_context_provider import SearchContextProvider
 from .maf_plugins import UserProfile, UserProfileMemory
+from . import agent_provider_v2
+from connectors.openai_chat_client import OpenAIChatClient
 from connectors.search import acquire_obo_search_token
 from dependencies import get_config
 
@@ -51,8 +52,11 @@ class MafAgentServiceStrategy(BaseAgentStrategy):
     2. Optional agentic search over documents (via Agent Service V2)
     3. Extensible context providers for custom functionality
 
-    Uses AzureAIAgentClient which communicates with Azure AI Foundry Agent Service V2
-    for thread management and model inference.
+    Uses the Azure AI Foundry **declarative** Agent API: a single versioned
+    *prompt agent* (``AIProjectClient.agents.create_version`` +
+    ``PromptAgentDefinition``) is created once and reused across every request,
+    with server-side thread management handled by the Microsoft Agent Framework
+    ``ChatAgent`` (Responses runtime).
     """
 
     AGENT_INSTRUCTIONS = """You are a helpful AI assistant. Your role is to assist users with their
@@ -83,6 +87,14 @@ Guidelines:
             self.credential = cfg.aiocredential
             logging.debug("[MafAgentServiceStrategy] Using credential from AppConfigClient")
 
+        # Direct-model client config used only for the (background) user-profile
+        # extraction performed by UserProfileMemory. The main agent runs through
+        # the shared Foundry prompt-agent provider, not this client.
+        self._sync_credential = cfg.credential
+        self.model_endpoint = cfg.get("AI_FOUNDRY_ACCOUNT_ENDPOINT")
+        self.openai_api_version = cfg.get("OPENAI_API_VERSION", "2025-04-01-preview")
+        self._memory_chat_client: Optional[OpenAIChatClient] = None
+
         # Azure AI Search configuration for retrieval
         self.search_endpoint = cfg.get_value("SEARCH_SERVICE_QUERY_ENDPOINT", allow_none=True)
         self.search_index_name = cfg.get_value("SEARCH_RAG_INDEX_NAME", allow_none=True)
@@ -111,6 +123,22 @@ Guidelines:
     def _prompt_namespace(self) -> str:
         """Share prompts directory with MafLiteStrategy."""
         return "maf"
+
+    def _get_or_create_memory_chat_client(self) -> OpenAIChatClient:
+        """Lazily build the direct-model client used by UserProfileMemory for
+        background profile extraction. Reused for the lifetime of the worker."""
+        if self._memory_chat_client is None:
+            logging.debug(
+                "[MafAgentServiceStrategy] Creating OpenAIChatClient for memory "
+                f"endpoint={self.model_endpoint} model={self.model_name}"
+            )
+            self._memory_chat_client = OpenAIChatClient(
+                azure_endpoint=self.model_endpoint,
+                model_deployment_name=self.model_name,
+                credential=self._sync_credential,
+                api_version=self.openai_api_version,
+            )
+        return self._memory_chat_client
 
     async def _load_user_profile(self, user_id: str) -> UserProfile:
         """Load user profile from CosmosDB or return empty profile."""
@@ -220,72 +248,89 @@ Guidelines:
             base_instructions = await self._read_prompt("main")
             instructions = base_instructions if base_instructions else self.AGENT_INSTRUCTIONS
 
-            user_memory: UserProfileMemory | None = None
+            # Resolve the shared, reusable Foundry prompt agent (created once via
+            # create_version, then reused on every request and across restarts).
+            provider = await agent_provider_v2.get_provider(self.project_endpoint, self.credential)
+            agent_name = agent_provider_v2.compute_agent_name(
+                "gptrag-maf-agent-service",
+                model=self.model_name,
+                instructions=instructions,
+                tool_names=[],
+            )
+            details = await agent_provider_v2.get_or_create_agent_details(
+                provider=provider,
+                name=agent_name,
+                model=self.model_name,
+                instructions=instructions,
+                tools=None,
+            )
 
-            # Use request-scoped AzureAIAgentClient to guarantee async cleanup.
-            async with AzureAIAgentClient(
-                project_endpoint=self.project_endpoint,
-                model_deployment_name=self.model_name,
-                credential=self.credential,
-            ) as client:
-                user_memory = UserProfileMemory(
-                    chat_client=client,
-                    user_profile=user_profile,
-                )
+            # Legacy Assistants thread ids are not valid Responses conversation
+            # ids; drop them before reusing the server thread.
+            agent_provider_v2.reset_legacy_thread(conv)
 
-                context_providers = [user_memory]
-                if self._search_provider:
-                    context_providers.append(self._search_provider)
+            user_memory = UserProfileMemory(
+                chat_client=self._get_or_create_memory_chat_client(),
+                user_profile=user_profile,
+            )
 
-                async with ChatAgent(
-                    chat_client=client,
-                    instructions=instructions,
-                    context_provider=CompositeContextProvider(context_providers),
-                ) as agent:
+            context_providers = [user_memory]
+            if self._search_provider:
+                context_providers.append(self._search_provider)
 
-                    # Get or create thread
-                    thread_id = conv.get("thread_id")
-                    if thread_id:
-                        # Resume existing thread
-                        thread = agent.get_new_thread(service_thread_id=thread_id)
-                    else:
-                        # Create new thread
-                        thread = agent.get_new_thread()
-                        # service_thread_id may be None until first run; we'll update after
-                        if thread.service_thread_id:
-                            conv["thread_id"] = thread.service_thread_id
+            # Wrap the cached agent version into a ChatAgent (no HTTP call). The
+            # underlying client reuses the shared project client and does NOT
+            # close it on exit, so the singleton survives across requests.
+            async with provider.as_agent(
+                details,
+                context_provider=CompositeContextProvider(context_providers),
+            ) as agent:
 
-                    # If new session with existing profile, provide summary
-                    if is_new_session and user_memory.has_minimum_context():
-                        conv["session_initialized"] = True
-                        session_summary = self._build_session_summary(user_memory)
-                        yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
-                    elif is_new_session:
-                        conv["session_initialized"] = True
-
-                    # Stream the agent response
-                    full_response = ""
-                    async for chunk in agent.run_stream(
-                        user_message,
-                        thread=thread,
-                        options={"max_completion_tokens": self.max_completion_tokens, "reasoning_effort": self.reasoning_effort},
-                    ):
-                        if chunk.text:
-                            full_response += chunk.text
-                            yield chunk.text
-
-                    # Capture thread_id if it was set during the run
-                    if not conv.get("thread_id") and thread.service_thread_id:
+                # Get or create thread
+                thread_id = conv.get("thread_id")
+                if thread_id:
+                    # Resume existing thread
+                    thread = agent.get_new_thread(service_thread_id=thread_id)
+                else:
+                    # Create new thread
+                    thread = agent.get_new_thread()
+                    # service_thread_id may be None until first run; we'll update after
+                    if thread.service_thread_id:
                         conv["thread_id"] = thread.service_thread_id
 
-                    # Store in conversation history
-                    if "messages" not in conv:
-                        conv["messages"] = []
-                    conv["messages"].append({"role": "user", "text": user_message})
-                    conv["messages"].append({"role": "assistant", "text": full_response})
+                # If new session with existing profile, provide summary
+                if is_new_session and user_memory.has_minimum_context():
+                    conv["session_initialized"] = True
+                    session_summary = self._build_session_summary(user_memory)
+                    yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
+                elif is_new_session:
+                    conv["session_initialized"] = True
 
-            if user_memory is not None:
-                await self._save_user_profile(user_id, user_memory.user_profile)
+                # Stream the agent response
+                full_response = ""
+                async for chunk in agent.run_stream(
+                    user_message,
+                    thread=thread,
+                    options={"max_tokens": self.max_completion_tokens, "reasoning": {"effort": self.reasoning_effort}},
+                ):
+                    if chunk.text:
+                        full_response += chunk.text
+                        yield chunk.text
+
+                # Capture thread_id if it was set during the run
+                if not conv.get("thread_id") and thread.service_thread_id:
+                    conv["thread_id"] = thread.service_thread_id
+
+                # Store in conversation history
+                if "messages" not in conv:
+                    conv["messages"] = []
+                conv["messages"].append({"role": "user", "text": user_message})
+                conv["messages"].append({"role": "assistant", "text": full_response})
+
+            # Flush any pending background profile extraction before persisting so
+            # the saved profile reflects this turn (parity with MafLiteStrategy).
+            await user_memory.flush()
+            await self._save_user_profile(user_id, user_memory.user_profile)
 
             logging.info(f"[MafAgentServiceStrategy] Flow completed in {round(time.time() - flow_start, 2)}s")
 
