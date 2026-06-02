@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [v2.8.0] - 2026-06-02
+
+### Changed
+
+- **Foundry Agent Service v2 agent creation for `single_agent_rag` and `maf_agent_service`.** Migrated reusable server-side agent creation from the legacy ephemeral `AgentsClient.create_agent()` / per-request delete pattern to the new declarative/versioned Foundry pattern using `AIProjectClient.agents.create_version()` with `PromptAgentDefinition`. Agents are now created once per deterministic definition fingerprint and reused by name/version across requests.
+
+### Fixed
+
+- **Run-time reasoning payload rejection with declarative agents.** `reasoning_effort` is now baked into the prompt agent definition and folded into the reusable agent fingerprint. The strategies no longer send `reasoning` as a per-run option, avoiding the Foundry `invalid_payload: Not allowed when agent is specified` failure. Per-run options are limited to `max_tokens`, with a one-shot fallback to no run-time options if the service rejects model-specific run settings.
+- **Create-once reuse semantics for Agent Service strategies.** `single_agent_rag` and `maf_agent_service` no longer create a new server-side agent for every request. Existing matching prompt agents are discovered and reused before any creation path is attempted. Implements [Azure/GPT-RAG#477](https://github.com/Azure/GPT-RAG/issues/477).
+
 ## [v2.6.11] - 2026-05-27
 
 ### Changed
