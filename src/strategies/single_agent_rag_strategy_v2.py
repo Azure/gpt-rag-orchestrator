@@ -78,11 +78,13 @@ def _render_agent_instructions(cfg, *, aisearch_enabled: bool) -> str:
 
 def _compute_agent_name(cfg, instructions: str, aisearch_enabled: bool) -> str:
     tool_names = ["search_knowledge_base"] if aisearch_enabled else []
+    reasoning_effort = cfg.get("REASONING_EFFORT", "medium")
     return agent_provider_v2.compute_agent_name(
         DEFAULT_REUSABLE_AGENT_NAME,
         model=cfg.get("CHAT_DEPLOYMENT_NAME"),
         instructions=instructions,
         tool_names=tool_names,
+        extra={"reasoning_effort": reasoning_effort} if reasoning_effort else None,
     )
 
 
@@ -122,6 +124,7 @@ async def prewarm_agents_client(*, create_reusable_agent: bool = True) -> None:
             model=cfg.get("CHAT_DEPLOYMENT_NAME"),
             instructions=instructions,
             tools=tools,
+            reasoning_effort=cfg.get("REASONING_EFFORT", "medium"),
         )
         logging.info("[Startup] ✅ Reusable prompt agent ready (name=%s)", name)
     except Exception as e:
@@ -353,6 +356,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
             model=self.model_name,
             instructions=instructions,
             tools=[search_knowledge_base] if aisearch_enabled else None,
+            reasoning_effort=self.reasoning_effort,
         )
         logging.info(f"[Agent Flow V2][Telemetry] Agent resolve took: {time.time() - t0:.2f}s")
 
@@ -403,13 +407,15 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
 
                 logging.info("[Agent Flow V2] Streaming from Foundry prompt agent (Responses)...")
                 first_token = False
-                async for chunk in agent.run_stream(
+                # ``reasoning`` is baked into the agent definition (it is a
+                # definition-level setting and is rejected as a per-run option);
+                # only ``max_tokens`` is passed per run, with a one-shot fallback
+                # to no options if the service ever rejects it too.
+                async for chunk in agent_provider_v2.stream_agent_run(
+                    agent,
                     user_message,
                     thread=thread,
-                    options={
-                        "max_tokens": self.max_completion_tokens,
-                        "reasoning": {"effort": self.reasoning_effort},
-                    },
+                    options={"max_tokens": self.max_completion_tokens},
                 ):
                     if chunk.text:
                         if not first_token:

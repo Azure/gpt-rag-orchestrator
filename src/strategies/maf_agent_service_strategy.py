@@ -256,6 +256,7 @@ Guidelines:
                 model=self.model_name,
                 instructions=instructions,
                 tool_names=[],
+                extra={"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else None,
             )
             details = await agent_provider_v2.get_or_create_agent_details(
                 provider=provider,
@@ -263,6 +264,7 @@ Guidelines:
                 model=self.model_name,
                 instructions=instructions,
                 tools=None,
+                reasoning_effort=self.reasoning_effort,
             )
 
             # Legacy Assistants thread ids are not valid Responses conversation
@@ -306,12 +308,16 @@ Guidelines:
                 elif is_new_session:
                     conv["session_initialized"] = True
 
-                # Stream the agent response
+                # Stream the agent response. ``reasoning`` is baked into the agent
+                # definition (definition-level setting, rejected as a per-run
+                # option); only ``max_tokens`` is passed per run, with a one-shot
+                # fallback to no options if the service ever rejects it too.
                 full_response = ""
-                async for chunk in agent.run_stream(
+                async for chunk in agent_provider_v2.stream_agent_run(
+                    agent,
                     user_message,
                     thread=thread,
-                    options={"max_tokens": self.max_completion_tokens, "reasoning": {"effort": self.reasoning_effort}},
+                    options={"max_tokens": self.max_completion_tokens},
                 ):
                     if chunk.text:
                         full_response += chunk.text

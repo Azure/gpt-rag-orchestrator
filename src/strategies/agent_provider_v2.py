@@ -19,11 +19,26 @@ resolved agent definitions) lives at module scope here.
 import asyncio
 import hashlib
 import logging
-from typing import Any, Optional, Sequence
+from typing import Any, AsyncIterator, Optional, Sequence
 
 from azure.core.exceptions import HttpResponseError, ResourceExistsError, ResourceNotFoundError
 from azure.ai.projects.aio import AIProjectClient
+from azure.ai.projects.models import PromptAgentDefinition, Reasoning
+from agent_framework import normalize_tools
 from agent_framework.azure import AzureAIProjectAgentProvider
+
+# ``to_azure_ai_tools`` converts Agent Framework function tools into the Azure AI
+# ``FunctionTool`` schema that must be embedded in the *agent definition* (the
+# service uses it to emit tool calls). It currently lives in a private module of
+# the pinned ``agent-framework-azure-ai`` beta; import defensively so a future
+# package reshuffle degrades loudly (fail-fast at create time) rather than
+# importing-time crashing the whole app.
+try:  # pragma: no cover - exercised implicitly by the create path
+    from agent_framework_azure_ai._shared import to_azure_ai_tools
+    _HAS_TOOL_CONVERTER = True
+except Exception:  # pragma: no cover - defensive against private API churn
+    to_azure_ai_tools = None  # type: ignore[assignment]
+    _HAS_TOOL_CONVERTER = False
 
 # Conversations whose server-side ``thread_id`` was created by the new
 # Responses-based prompt agents are tagged with this value. A conversation
@@ -95,13 +110,20 @@ async def get_or_create_agent_details(
     model: str,
     instructions: str,
     tools: Optional[Sequence[Any]] = None,
+    reasoning_effort: Optional[str] = None,
 ) -> Any:
     """Return cached ``AgentVersionDetails`` for ``name``, creating the versioned
     prompt agent exactly once when it does not yet exist.
 
     Existence is checked with ``AIProjectClient.agents.get(name)``; creation goes
-    through ``AzureAIProjectAgentProvider.create_agent`` which calls
-    ``agents.create_version`` with a ``PromptAgentDefinition`` under the hood.
+    through ``agents.create_version`` with a ``PromptAgentDefinition``.
+
+    ``reasoning_effort`` (``minimal|low|medium|high``) is baked into the agent
+    *definition* when provided. Reasoning is a definition-level setting on the
+    new declarative agents: it cannot be passed as a per-run option (the service
+    rejects ``reasoning`` with ``invalid_payload`` when an agent is specified), so
+    it must live on the version. Callers MUST also fold ``reasoning_effort`` into
+    the agent ``name`` fingerprint so a changed effort maps to a new agent.
 
     There is no ephemeral per-request creation and no ``delete_agent``: the
     resolved definition is cached in-process and reused.
@@ -135,11 +157,14 @@ async def get_or_create_agent_details(
                 name,
             )
             try:
-                await provider.create_agent(
+                await _create_versioned_agent(
+                    provider=provider,
+                    client=client,
                     name=name,
                     model=model,
                     instructions=instructions,
                     tools=tools,
+                    reasoning_effort=reasoning_effort,
                 )
             except (ResourceExistsError, HttpResponseError) as create_err:
                 # Another cold replica created the same definition-fingerprinted
@@ -162,6 +187,106 @@ async def get_or_create_agent_details(
 
         _agent_details_cache[name] = details
         return details
+
+
+async def _create_versioned_agent(
+    *,
+    provider: AzureAIProjectAgentProvider,
+    client: AIProjectClient,
+    name: str,
+    model: str,
+    instructions: str,
+    tools: Optional[Sequence[Any]],
+    reasoning_effort: Optional[str],
+) -> None:
+    """Materialise the versioned prompt agent via ``create_version``.
+
+    When ``reasoning_effort`` is set the definition is built directly so the
+    ``reasoning`` field can be embedded (the Agent Framework ``create_agent``
+    helper does not surface ``reasoning`` on the definition). Otherwise the
+    framework helper is used so its tool-normalisation/response-format handling
+    is preserved verbatim.
+    """
+    if not reasoning_effort:
+        await provider.create_agent(
+            name=name,
+            model=model,
+            instructions=instructions,
+            tools=tools,
+        )
+        return
+
+    if not _HAS_TOOL_CONVERTER and tools:
+        # Refuse to create a reasoning-fingerprinted agent whose tool schema would
+        # silently be dropped; failing fast avoids poisoning the create-once cache
+        # with a misleading agent. (No tools => converter is not needed.)
+        raise RuntimeError(
+            "Cannot build the prompt agent definition: the Agent Framework tool "
+            "converter (agent_framework_azure_ai._shared.to_azure_ai_tools) is "
+            "unavailable in this build but tools were requested."
+        )
+
+    azure_tools = to_azure_ai_tools(normalize_tools(tools)) if tools else None
+    definition = PromptAgentDefinition(
+        model=model,
+        instructions=instructions,
+        tools=azure_tools,
+        reasoning=Reasoning(effort=reasoning_effort),
+    )
+    await client.agents.create_version(agent_name=name, definition=definition)
+
+
+def is_invalid_payload_error(exc: BaseException) -> bool:
+    """True when ``exc`` is a Responses ``invalid_payload`` rejection of a
+    run-time option (e.g. ``reasoning`` or ``max_output_tokens`` not being
+    permitted alongside an agent reference).
+
+    The Agent Framework wraps the underlying ``HttpResponseError`` in its own
+    exception type, so match on the surfaced message rather than the type.
+    """
+    msg = str(getattr(exc, "message", "") or exc)
+    return (
+        "invalid_payload" in msg
+        or "Not allowed when agent is specified" in msg
+    )
+
+
+async def stream_agent_run(
+    agent: Any,
+    user_message: str,
+    *,
+    thread: Any,
+    options: Optional[dict] = None,
+) -> AsyncIterator[Any]:
+    """Stream ``agent.run_stream`` and, if the service rejects the run-time
+    ``options`` as an invalid payload *before any output is produced*, retry once
+    with no run-time options.
+
+    This guards against deployments/models where even ``max_tokens``
+    (``max_output_tokens``) is not permitted alongside an agent reference. The
+    common path (options accepted) never triggers the retry. The retry only fires
+    when nothing has been yielded yet, so it cannot duplicate streamed text; the
+    rejection is a request-validation 400 that the service raises before mutating
+    the thread.
+    """
+    produced = False
+    try:
+        async for chunk in agent.run_stream(user_message, thread=thread, options=options or {}):
+            # Treat any yielded chunk (text, tool-call, metadata) as "produced":
+            # once the stream has emitted anything the run is in flight and the
+            # one-shot fallback below must not re-issue it.
+            produced = True
+            yield chunk
+    except Exception as exc:  # noqa: BLE001 - re-raised unless it's a known retryable payload error
+        if produced or not options or not is_invalid_payload_error(exc):
+            raise
+        logging.warning(
+            "[AgentProviderV2] Run rejected run-time options %s as invalid payload; "
+            "retrying without run-time options: %s",
+            sorted(options.keys()), exc,
+        )
+        async for chunk in agent.run_stream(user_message, thread=thread, options={}):
+            yield chunk
 
 
 def reset_legacy_thread(conv: dict) -> None:
