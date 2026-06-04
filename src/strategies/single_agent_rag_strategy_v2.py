@@ -250,6 +250,37 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         if conversation_id:
             self.conversation_id = conversation_id
 
+    def _resolve_conversation_id(self) -> Optional[str]:
+        """Resolve the chat conversation id for retrieval scoping.
+
+        Prefer the conversation dict id assigned by the orchestrator; fall back
+        to the id captured via set_context(). Never use thread_id — that is the
+        agent thread id, not the chat conversation id used to tag documents.
+        """
+        return (getattr(self, "conversation", None) or {}).get("id") \
+            or getattr(self, "conversation_id", None)
+
+    def _apply_search_request_context(self) -> None:
+        """Push per-request retrieval context onto the (singleton) search client.
+
+        Scopes the AI Search filter to the current conversation so uploaded
+        documents (tagged with this conversation id by the ingestion service)
+        are included alongside the shared corpus (issue #478).
+        """
+        if not self.search_client:
+            return
+        allow_anonymous = self.cfg.get("ALLOW_ANONYMOUS", default=True, type=bool)
+        request_access_token = getattr(self, "request_access_token", None)
+        conversation_id = self._resolve_conversation_id()
+        try:
+            self.search_client.set_request_context(
+                api_access_token=request_access_token,
+                allow_anonymous=allow_anonymous,
+                conversation_id=conversation_id,
+            )
+        except Exception:
+            pass
+
     async def initiate_agent_flow(self, user_message: str):
         """
         V2 Latency-Optimized Agent Flow.
@@ -531,24 +562,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
 
         # Agent SDK Features: Auto-functions
         if self.search_client:
-            # OBO prep
-            allow_anonymous = self.cfg.get("ALLOW_ANONYMOUS", default=True, type=bool)
-            request_access_token = getattr(self, "request_access_token", None)
-            # Scope retrieval to the current conversation so uploaded documents
-            # (tagged with this conversation id by the ingestion service) are
-            # included in the search filter. Prefer the conversation dict id set
-            # by the orchestrator; fall back to the id captured via set_context().
-            # Never use thread_id here — it is the agent thread, not the chat id.
-            conversation_id = (getattr(self, "conversation", None) or {}).get("id") \
-                or getattr(self, "conversation_id", None)
-            try:
-                self.search_client.set_request_context(
-                    api_access_token=request_access_token,
-                    allow_anonymous=allow_anonymous,
-                    conversation_id=conversation_id,
-                )
-            except Exception:
-                pass
+            self._apply_search_request_context()
 
         # Determine if we need to create an agent this request
         # Priority: _cached_agent (pre-warmed) > existing_agent_id (config) > create new
