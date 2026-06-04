@@ -200,6 +200,12 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         self.tools_list = []
         self.tool_resources = {}
 
+        # Conversation scope for retrieval. Set by the orchestrator via set_context()
+        # and/or read from self.conversation["id"] at stream time. Without it, the
+        # AI Search filter falls back to shared ('NaN') chunks only and uploaded
+        # per-conversation documents are never retrieved (see issue #478).
+        self.conversation_id: Optional[str] = None
+
         aisearch_enabled = self.cfg.get("SEARCH_RETRIEVAL_ENABLED", True, type=bool)
         if not aisearch_enabled:
             logging.warning("[Init V2] SEARCH_RETRIEVAL_ENABLED set to false. SearchClient will not be available.")
@@ -232,6 +238,17 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
 
         # Initialize Direct LLM Client for Bypass scenario (singleton)
         self.llm_client = get_genai_client()
+
+    def set_context(self, conversation_id: Optional[str]) -> None:
+        """Receive the active conversation id from the orchestrator.
+
+        The orchestrator calls this (guarded by hasattr) before the agent flow
+        runs. Storing it lets _stream_agent scope the AI Search retrieval to the
+        current conversation so uploaded documents tagged with this id are
+        returned alongside the shared corpus (issue #478).
+        """
+        if conversation_id:
+            self.conversation_id = conversation_id
 
     async def initiate_agent_flow(self, user_message: str):
         """
@@ -517,8 +534,19 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
             # OBO prep
             allow_anonymous = self.cfg.get("ALLOW_ANONYMOUS", default=True, type=bool)
             request_access_token = getattr(self, "request_access_token", None)
+            # Scope retrieval to the current conversation so uploaded documents
+            # (tagged with this conversation id by the ingestion service) are
+            # included in the search filter. Prefer the conversation dict id set
+            # by the orchestrator; fall back to the id captured via set_context().
+            # Never use thread_id here — it is the agent thread, not the chat id.
+            conversation_id = (getattr(self, "conversation", None) or {}).get("id") \
+                or getattr(self, "conversation_id", None)
             try:
-                self.search_client.set_request_context(api_access_token=request_access_token, allow_anonymous=allow_anonymous)
+                self.search_client.set_request_context(
+                    api_access_token=request_access_token,
+                    allow_anonymous=allow_anonymous,
+                    conversation_id=conversation_id,
+                )
             except Exception:
                 pass
 
