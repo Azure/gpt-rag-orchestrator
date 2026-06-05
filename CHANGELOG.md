@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v2.8.1] - 2026-06-04
 
 ### Fixed
 - **Uploaded documents now retrieved in chat (issue #478):** `SingleAgentRAGStrategyV2` now scopes the Azure AI Search retrieval to the active conversation. It passes the chat `conversation_id` (from the orchestrator-provided conversation dict, falling back to `set_context()`) into `set_request_context`, so the search filter includes per-conversation uploaded chunks (`conversationId eq '<cid>' or conversationId eq 'NaN'`) instead of only the shared corpus. Previously the conversation id was never propagated, so uploaded documents were filtered out and the model answered without them.
