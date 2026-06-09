@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **Foundry Agent Service v2 create-once regression (issue #484):** Restored the `single_agent_rag` and `maf_agent_service` migration to declarative/versioned Foundry prompt agents (`AIProjectClient.agents.create_version()` with `PromptAgentDefinition`) after it was dropped from the later orchestrator line. The restoration preserves the uploaded-document conversation scope fix from issue #478, so Agent Service strategies reuse definition-fingerprinted agents without regressing per-conversation retrieval.
 - **Uploaded documents now retrieved in chat (issue #478):** `SingleAgentRAGStrategyV2` now scopes the Azure AI Search retrieval to the active conversation. It passes the chat `conversation_id` (from the orchestrator-provided conversation dict, falling back to `set_context()`) into `set_request_context`, so the search filter includes per-conversation uploaded chunks (`conversationId eq '<cid>' or conversationId eq 'NaN'`) instead of only the shared corpus. Previously the conversation id was never propagated, so uploaded documents were filtered out and the model answered without them.
 
 All notable changes to this project will be documented in this file.

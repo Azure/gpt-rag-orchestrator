@@ -2,8 +2,7 @@ import logging
 import json
 import time
 import traceback
-from typing import Optional, Any, Dict, List, cast, AsyncIterator
-from azure.ai.agents.models import AsyncAgentEventHandler, AsyncAgentRunStream
+from typing import Optional
 
 # Suppress Azure SDK HTTP logging BEFORE importing azure packages
 for _azure_logger in [
@@ -18,156 +17,118 @@ for _azure_logger in [
     logger.disabled = True
     logger.handlers.clear()
 
-from azure.ai.agents.models import (
-    BingGroundingTool,
-    FunctionTool,
-    ListSortOrder,
-    MessageDeltaChunk,
-    MessageDeltaTextUrlCitationAnnotation,
-    MessageTextContent,
-    ToolOutput,
-)
-from azure.ai.agents.aio.operations._operations import RunsOperations as RunsOperationsGenerated
-from azure.ai.agents.aio import AgentsClient
-
 from .base_agent_strategy import BaseAgentStrategy
 from .agent_strategies import AgentStrategies
+from . import agent_provider_v2
 
 from dependencies import get_config
 from connectors.search import get_search_client
 from connectors.aifoundry import get_genai_client
 from openai import BadRequestError
 
-# Module-level singleton for AgentsClient — eliminates per-request TCP/TLS + token overhead
-_agents_client: Optional[AgentsClient] = None
-_cached_agent: Optional[Any] = None  # Pre-created/fetched agent reused across all requests
-DEFAULT_REUSABLE_AGENT_NAME = "gpt-rag-agent-v2"
+# Base name for the single, reusable Foundry prompt agent. The actual agent name
+# embeds a definition fingerprint (see agent_provider_v2.compute_agent_name).
+DEFAULT_REUSABLE_AGENT_NAME = "gptrag-single-agent-rag"
 
 
-async def _find_agent_by_name(agents_client: AgentsClient, name: str) -> Optional[Any]:
-    async for agent in agents_client.list_agents(limit=100):
-        if getattr(agent, "name", None) == name:
-            return agent
-    return None
+async def search_knowledge_base(query: str) -> str:
+    """Search the knowledge base for documents relevant to the user's question.
+
+    Use this whenever answering requires information from the indexed documents.
+
+    Args:
+        query: A natural-language search query describing the information needed.
+
+    Returns:
+        Markdown-formatted excerpts of the most relevant documents, each with a
+        citable ``### [title](filepath)`` header.
+    """
+    # Schema-only reference. This callable defines the function-tool contract
+    # recorded on the prompt-agent definition at create time. Actual execution
+    # at request time is performed by a per-request bound callable (which carries
+    # the same tool name) supplied through ``provider.as_agent(tools=[...])``.
+    return ""
+
+
+def _render_agent_instructions(cfg, *, aisearch_enabled: bool) -> str:
+    """Render the single_agent_rag system prompt for the agent definition.
+
+    ``user_context`` is intentionally empty so the agent definition stays stable
+    and is reused across all users (per-user context is supplied at request time
+    by the framework, not baked into the persistent agent)."""
+    from pathlib import Path
+    from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+    src_folder = Path(__file__).resolve().parent.parent
+    prompt_dir = src_folder / "prompts" / "single_agent_rag"
+    env = Environment(
+        loader=FileSystemLoader(str(prompt_dir)),
+        undefined=StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("main.jinja2")
+    return template.render({
+        "strategy": "single_agent_rag",
+        "user_context": {},
+        "bing_grounding_enabled": False,
+        "aisearch_enabled": aisearch_enabled,
+    }).strip()
+
+
+def _compute_agent_name(cfg, instructions: str, aisearch_enabled: bool) -> str:
+    tool_names = ["search_knowledge_base"] if aisearch_enabled else []
+    reasoning_effort = cfg.get("REASONING_EFFORT", "medium")
+    return agent_provider_v2.compute_agent_name(
+        DEFAULT_REUSABLE_AGENT_NAME,
+        model=cfg.get("CHAT_DEPLOYMENT_NAME"),
+        instructions=instructions,
+        tool_names=tool_names,
+        extra={"reasoning_effort": reasoning_effort} if reasoning_effort else None,
+    )
 
 
 async def prewarm_agents_client(*, create_reusable_agent: bool = True) -> None:
-    """Pre-warm the AgentsClient HTTP pipeline and create/fetch a reusable agent.
+    """Pre-warm the Foundry provider and (optionally) pre-create the reusable
+    prompt agent.
 
-    1. Forces TCP/TLS handshake and token acquisition so the first real request
-       doesn't pay the ~5-6s cold-start penalty.
-    2. Optionally creates (or fetches) the single-agent reusable agent so
-       _setup_agent() returns in ~0ms.
+    1. Initialises the process-wide ``AIProjectClient`` + provider so the first
+       real request doesn't pay the cold-start penalty.
+    2. When ``create_reusable_agent`` is set, materialises the versioned prompt
+       agent exactly once via ``create_version`` so every request reuses it.
     """
-    global _agents_client, _cached_agent
     cfg = get_config()
     endpoint = cfg.get("AI_FOUNDRY_PROJECT_ENDPOINT")
     if not endpoint:
-        logging.warning("[Startup] AI_FOUNDRY_PROJECT_ENDPOINT not set; skipping AgentsClient pre-warm")
+        logging.warning("[Startup] AI_FOUNDRY_PROJECT_ENDPOINT not set; skipping provider pre-warm")
         return
 
     from connectors.identity_manager import get_identity_manager
     credential = get_identity_manager().get_aio_credential()
 
-    _agents_client = AgentsClient(endpoint=endpoint, credential=credential)
-    try:
-        # list_agents returns AsyncItemPaged (async iterable, not awaitable).
-        # Iterate the first item to force HTTP connection + token acquisition.
-        async for _ in _agents_client.list_agents(limit=1):
-            break
-        logging.info("[Startup] ✅ AgentsClient pre-warmed (HTTP pipeline ready)")
-    except Exception as e:
-        logging.warning("[Startup] ⚠️ AgentsClient pre-warm API call failed (client still created): %s", e)
+    provider = await agent_provider_v2.get_provider(endpoint, credential)
+    logging.info("[Startup] ✅ Foundry provider pre-warmed")
 
     if not create_reusable_agent:
-        logging.info("[Startup] Skipping reusable single-agent creation for active strategy")
+        logging.info("[Startup] Skipping reusable prompt-agent creation for active strategy")
         return
 
-    if _cached_agent is not None:
-        logging.info("[Startup] Reusable agent already cached (id=%s)", getattr(_cached_agent, "id", "unknown"))
-        return
-
-    # --- Pre-create or fetch the agent so every request gets it in ~0ms ---
-    agent_id = cfg.get("AGENT_ID", "") or None
-    if agent_id:
-        # AGENT_ID configured: fetch the pre-existing agent
-        try:
-            _cached_agent = await _agents_client.get_agent(agent_id)
-            logging.info("[Startup] ✅ Persistent agent pre-fetched (AGENT_ID=%s)", agent_id)
-        except Exception as e:
-            logging.warning("[Startup] ⚠️ Could not pre-fetch agent %s: %s", agent_id, e)
-    else:
-        try:
-            _cached_agent = await _find_agent_by_name(_agents_client, DEFAULT_REUSABLE_AGENT_NAME)
-            if _cached_agent is not None:
-                logging.info(
-                    "[Startup] ✅ Reusing existing startup agent (name=%s, id=%s)",
-                    DEFAULT_REUSABLE_AGENT_NAME,
-                    getattr(_cached_agent, "id", "unknown"),
-                )
-                return
-        except Exception as e:
-            logging.warning(
-                "[Startup] ⚠️ Could not verify existing startup agent by name; "
-                "continuing without startup agent creation to avoid duplicates: %s",
-                e,
-            )
-            return
-
-        # No AGENT_ID: create a reusable agent at startup (eliminates create+delete per request)
-        try:
-            from connectors.search import get_search_client
-            from pathlib import Path
-            from jinja2 import Environment, FileSystemLoader, StrictUndefined
-
-            tools_list = []
-            tool_resources = {}
-
-            # Add SearchClient function tool
-            aisearch_enabled = cfg.get("SEARCH_RETRIEVAL_ENABLED", True, type=bool)
-            if aisearch_enabled:
-                try:
-                    search_client = get_search_client()
-                    retrieval_tool = FunctionTool(functions={search_client.search_knowledge_base})
-                    tools_list.extend(retrieval_tool.definitions)
-                except Exception as e:
-                    logging.warning("[Startup] Could not add search tool: %s", e)
-
-            # Add BingGroundingTool
-            bing_enabled = cfg.get("BING_RETRIEVAL_ENABLED", False, type=bool)
-            bing_conn = cfg.get("BING_CONNECTION_ID", "") if bing_enabled else ""
-            if bing_conn:
-                bing = BingGroundingTool(connection_id=bing_conn, count=5)
-                tools_list.append(bing.definitions[0])
-
-            # Render instructions via Jinja2
-            src_folder = Path(__file__).resolve().parent.parent
-            prompt_dir = src_folder / "prompts" / "single_agent_rag"
-            env = Environment(
-                loader=FileSystemLoader(str(prompt_dir)),
-                undefined=StrictUndefined,
-                trim_blocks=True,
-                lstrip_blocks=True,
-            )
-            template = env.get_template("main.jinja2")
-            instructions = template.render({
-                "strategy": "single_agent_rag",
-                "user_context": {},
-                "bing_grounding_enabled": bool(bing_conn),
-                "aisearch_enabled": aisearch_enabled,
-            }).strip()
-
-            model_name = cfg.get("CHAT_DEPLOYMENT_NAME")
-            _cached_agent = await _agents_client.create_agent(
-                model=model_name,
-                name=DEFAULT_REUSABLE_AGENT_NAME,
-                instructions=instructions,
-                tools=tools_list,
-                tool_resources=tool_resources,
-            )
-            logging.info("[Startup] ✅ Reusable agent created and cached (id=%s)", _cached_agent.id)
-        except Exception as e:
-            logging.warning("[Startup] ⚠️ Could not pre-create agent (will create per-request): %s", e)
+    try:
+        aisearch_enabled = cfg.get("SEARCH_RETRIEVAL_ENABLED", True, type=bool)
+        instructions = _render_agent_instructions(cfg, aisearch_enabled=aisearch_enabled)
+        name = _compute_agent_name(cfg, instructions, aisearch_enabled)
+        tools = [search_knowledge_base] if aisearch_enabled else None
+        await agent_provider_v2.get_or_create_agent_details(
+            provider=provider,
+            name=name,
+            model=cfg.get("CHAT_DEPLOYMENT_NAME"),
+            instructions=instructions,
+            tools=tools,
+            reasoning_effort=cfg.get("REASONING_EFFORT", "medium"),
+        )
+        logging.info("[Startup] ✅ Reusable prompt agent ready (name=%s)", name)
+    except Exception as e:
+        logging.warning("[Startup] ⚠️ Could not pre-create prompt agent (will create on first request): %s", e)
 
 
 class SingleAgentRAGStrategyV2(BaseAgentStrategy):
@@ -195,10 +156,6 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         logging.debug("[Init] Initializing SingleAgentRAGStrategyV2...")
         self.cfg = get_config()
         self.strategy_type = AgentStrategies.SINGLE_AGENT_RAG
-        
-        self.existing_agent_id = self.cfg.get("AGENT_ID", "") or None
-        self.tools_list = []
-        self.tool_resources = {}
 
         # Conversation scope for retrieval. Set by the orchestrator via set_context()
         # and/or read from self.conversation["id"] at stream time. Without it, the
@@ -217,18 +174,6 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
             except Exception as e:
                 logging.error("[Init V2] ❌ Could not initialize SearchClient: %s", e)
                 raise
-
-        # --- Initialize BingGroundingTool ---
-        bing_enabled = self.cfg.get("BING_RETRIEVAL_ENABLED", False, type=bool)
-        if bing_enabled:
-            bing_conn = self.cfg.get("BING_CONNECTION_ID", "")
-            if bing_conn:
-                bing = BingGroundingTool(connection_id=bing_conn, count=5)
-                bing_def = bing.definitions[0]
-                self.tools_list.append(bing_def)
-                logging.debug(f"[Init V2] Added BingGroundingTool: {bing_def}")
-            else:
-                logging.error("[Init V2] BING_CONNECTION_ID not set")
 
         # Hard cap on output tokens for the main agent response
         self.max_completion_tokens = int(self.cfg.get("MAX_COMPLETION_TOKENS", 4096))
@@ -375,116 +320,6 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
             {"role": "assistant", "text": full_response}
         ])
 
-    async def _process_stream(self, agents_client, stream, thread_id):
-        tool_outputs_to_submit = None
-        run_id_to_submit = None
-        first_token = False
-        async for event_type, event_data, raw in stream:
-            
-            if event_type == "thread.message.delta":
-                if not first_token:
-                    start_t = getattr(self, '_stream_start_time', time.time())
-                    logging.info(f"[Agent Flow V2] 🤖 First Token: {time.time() - start_t:.2f}s")
-                    first_token = True
-                    
-                chunk = ""
-                delta = getattr(event_data, "delta", None)
-                if delta is not None:
-                    # delta could be a dict or a MessageDelta object
-                    content = delta.get("content") if isinstance(delta, dict) else getattr(delta, "content", None)
-                    if content and isinstance(content, list):
-                        for block in content:
-                            if isinstance(block, dict):
-                                text_obj = block.get("text", {})
-                                if isinstance(text_obj, dict) and text_obj.get("value"):
-                                    chunk += text_obj["value"]
-                            else:
-                                text_obj = getattr(block, "text", None)
-                                val = getattr(text_obj, "value", None) if text_obj else None
-                                if val:
-                                    chunk += val
-                else:
-                    chunk = getattr(event_data, "text", getattr(raw, "text", ""))
-                    
-                # Minimal inline Bing citation processor to avoid regex overhead if possible
-                if chunk and '【' in chunk:
-                    from util.citations import process_bing_citations
-                    chunk = process_bing_citations(event_data)
-                    
-                if chunk:
-                    yield chunk
-
-            elif event_type == "thread.run.requires_action":
-                logging.info(f"[Agent Flow V2] Run requires action. Executing tools natively...")
-                
-                tool_calls = event_data.required_action.submit_tool_outputs.tool_calls
-                tool_outputs = []
-                for tc in tool_calls:
-                    if tc.function.name == "search_knowledge_base" and self.search_client:
-                        try:
-                            args = json.loads(tc.function.arguments)
-                            t0 = time.time()
-                            result = await self.search_client.search_knowledge_base(**args)
-                            result_str = self._format_search_results(result)
-                            logging.info(f"[Agent Flow V2] Retrieval tool executed in {time.time()-t0:.2f}s")
-                            tool_outputs.append(ToolOutput(
-                                tool_call_id=tc.id,
-                                output=result_str
-                            ))
-                        except Exception as e:
-                            logging.error(f"Error executing tool {tc.function.name}: {e}")
-                            tool_outputs.append(ToolOutput(
-                                tool_call_id=tc.id,
-                                output=json.dumps({"error": str(e)})
-                            ))
-                
-                if tool_outputs:
-                    tool_outputs_to_submit = tool_outputs
-                    run_id_to_submit = event_data.id
-                    # Let the stream iterate to completion naturally (so the server confirms closure) and proceed.
-                    pass
-                            
-            elif event_type == "thread.run.failed":
-                err_msg = getattr(event_data, "last_error", None)
-                err_code = getattr(err_msg, "code", "unknown") if err_msg else "unknown"
-                err_txt = getattr(err_msg, "message", "Unknown Error") if err_msg else "Unknown Error"
-                logging.error(f"[Agent Flow V2] Run failed: code={err_code} message={err_txt}")
-                yield f"\n\n[ERROR]: The agent encountered an unexpected error: {err_txt}"
-                
-        if tool_outputs_to_submit and run_id_to_submit:
-            # Poll the run status to ensure it has transitioned to requires_action on the backend
-            # before submitting tool outputs to prevent the 'in_progress' conflict error.
-            import asyncio
-            for _ in range(15):
-                run_state = await agents_client.runs.get(thread_id=thread_id, run_id=run_id_to_submit)
-                logging.info(f"[Agent Flow V2] Run {run_id_to_submit} status is {run_state.status}")
-                if run_state.status in ["requires_action", "failed", "completed", "cancelled"]:
-                    break
-                await asyncio.sleep(2)
-                
-            if run_state.status != "requires_action":
-                logging.warning(f"[Agent Flow V2] Run transitioned to {run_state.status} natively. Bypassing manual tool submission.")
-                return
-
-                
-            # We bypass submit_tool_outputs_stream and the telemetry patched instance 
-            # method because the telemetry instrumentor crashes on `stream=True`.
-            kwargs_stream = {"stream_parameter": True, "stream": True}
-            response = await RunsOperationsGenerated.submit_tool_outputs(
-                agents_client.runs,
-                thread_id=thread_id,
-                run_id=run_id_to_submit,
-                tool_outputs=tool_outputs_to_submit,
-                **kwargs_stream
-            )
-            response_iterator = cast(AsyncIterator[bytes], response)
-            event_handler = AsyncAgentEventHandler()
-            stream2 = AsyncAgentRunStream(response_iterator, agents_client.runs._handle_submit_tool_outputs, event_handler)
-            
-            async with stream2 as s2:
-                async for chunk in self._process_stream(agents_client, s2, thread_id):
-                    yield chunk
-
     _CITATION_RULES = (
         "## Retrieved Documents\n\n"
         "The following documents were retrieved from the knowledge base. "
@@ -534,124 +369,119 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         )
 
     async def _stream_agent(self, user_message: str):
-        """
-        Azure AI Agents SDK streaming implementation.
-        Uses Event Handlers for real-time streaming,
-        avoiding polling loops entirely to guarantee sub-millisecond retrieval impact.
+        """Stream a response using the reusable Foundry prompt agent (Responses
+        runtime via the Microsoft Agent Framework ``ChatAgent``).
+
+        The versioned prompt agent is created once (``create_version``) and reused
+        on every request. Knowledge-base retrieval is exposed as a MAF function
+        tool that the framework invokes automatically; there is no per-request
+        agent creation or deletion.
         """
         stream_start = time.time()
         conv = self.conversation
-        thread_id = conv.get("thread_id")
-        
-        if self.search_client:
-            # Add retrieval via SearchClient
-            retrieval_functions = {self.search_client.search_knowledge_base}
-            retrieval_tool = FunctionTool(functions=retrieval_functions)
-            for tool_def in retrieval_tool.definitions:
-                if tool_def not in self.tools_list:
-                    self.tools_list.append(tool_def)
-        
-        # Reuse singleton AgentsClient — eliminates per-request TCP/TLS + token acquisition overhead
-        global _agents_client
-        if _agents_client is None:
-            _agents_client = AgentsClient(
-                endpoint=self.project_endpoint,
-                credential=self.credential
-            )
-        agents_client = _agents_client
 
-        # Agent SDK Features: Auto-functions
-        if self.search_client:
-            self._apply_search_request_context()
-
-        # Determine if we need to create an agent this request
-        # Priority: _cached_agent (pre-warmed) > existing_agent_id (config) > create new
-        create_agent = not self.existing_agent_id and _cached_agent is None
-        instructions = None
-        if create_agent:
-            # Fallback: pre-warm didn't cache an agent — render instructions for per-request creation
-            bing_enabled = bool(self.cfg.get("BING_CONNECTION_ID", ""))
-            aisearch_enabled = self.cfg.get("SEARCH_RETRIEVAL_ENABLED", True, type=bool)
-            prompt_context = {
-                "strategy": self.strategy_type.value,
-                "user_context": self.user_context or {},
-                "bing_grounding_enabled": bing_enabled,
-                "aisearch_enabled": aisearch_enabled,
-            }
-            instructions = await self._read_prompt("main", use_jinja2=True, jinja2_context=prompt_context)
-
-        # Parallel thread + agent setup — agent resolves from cache in ~0ms when pre-warmed
-        import asyncio
-        t0 = time.time()
-
-        async def _setup_thread():
-            if thread_id:
-                return await agents_client.threads.get(thread_id)
-            return await agents_client.threads.create()
-
-        async def _setup_agent():
-            # 1. Pre-warmed cache (created or fetched at startup) — ~0ms
-            if _cached_agent is not None:
-                return _cached_agent
-            # 2. AGENT_ID configured but not cached (pre-warm failed) — GET ~2s
-            if self.existing_agent_id:
-                return await agents_client.get_agent(self.existing_agent_id)
-            # 3. No cache, no AGENT_ID — create per-request (fallback) — POST ~3s
-            return await agents_client.create_agent(
-                model=self.model_name,
-                name="gpt-rag-agent-v2",
-                instructions=instructions,
-                tools=self.tools_list,
-                tool_resources=self.tool_resources,
-            )
-
-        thread, agent = await asyncio.gather(_setup_thread(), _setup_agent())
-
-        if not thread_id:
-            conv["thread_id"] = thread.id
-        if create_agent:
-            conv["agent_id"] = agent.id
-        logging.info(f"[Agent Flow V2][Telemetry] Thread + Agent parallel setup took: {time.time() - t0:.2f}s")
-
-        # Send message
-        t2 = time.time()
-        await agents_client.messages.create(
-            thread_id=thread.id,
-            role="user",
-            content=user_message
+        aisearch_enabled = (
+            self.cfg.get("SEARCH_RETRIEVAL_ENABLED", True, type=bool)
+            and self.search_client is not None
         )
-        logging.info(f"[Agent Flow V2][Telemetry] Message creation took: {time.time() - t2:.2f}s")
 
-        logging.info(f"[Agent Flow V2] Streaming from Azure AI Agents SDK...")
+        if self.cfg.get("BING_RETRIEVAL_ENABLED", False, type=bool):
+            logging.warning(
+                "[Agent Flow V2] BING_RETRIEVAL_ENABLED is set but Bing grounding is "
+                "not yet supported on the declarative agent path; continuing without it."
+            )
+
+        # Resolve the shared, reusable prompt agent (definition fingerprinted by
+        # instructions + tools so a changed release maps to a fresh agent name).
+        instructions = _render_agent_instructions(self.cfg, aisearch_enabled=aisearch_enabled)
+        provider = await agent_provider_v2.get_provider(self.project_endpoint, self.credential)
+        agent_name = _compute_agent_name(self.cfg, instructions, aisearch_enabled)
+
+        t0 = time.time()
+        details = await agent_provider_v2.get_or_create_agent_details(
+            provider=provider,
+            name=agent_name,
+            model=self.model_name,
+            instructions=instructions,
+            tools=[search_knowledge_base] if aisearch_enabled else None,
+            reasoning_effort=self.reasoning_effort,
+        )
+        logging.info(f"[Agent Flow V2][Telemetry] Agent resolve took: {time.time() - t0:.2f}s")
+
+        # Legacy Assistants thread ids are not valid Responses conversation ids.
+        agent_provider_v2.reset_legacy_thread(conv)
+
+        # Per-request bound retrieval tool. It carries the same tool name as the
+        # definition's function tool (set explicitly below) so MAF can match and
+        # invoke it, while closing over this request's OBO/search context.
+        request_tools = None
+        if aisearch_enabled:
+            allow_anonymous = self.cfg.get("ALLOW_ANONYMOUS", default=True, type=bool)
+            request_access_token = getattr(self, "request_access_token", None)
+            search_client = self.search_client
+            format_results = self._format_search_results
+            conversation_id = self._resolve_conversation_id()
+
+            async def _bound_search(query: str) -> str:
+                try:
+                    search_client.set_request_context(
+                        api_access_token=request_access_token,
+                        allow_anonymous=allow_anonymous,
+                        conversation_id=conversation_id,
+                    )
+                except Exception:
+                    pass
+                t_ret = time.time()
+                result = await search_client.search_knowledge_base(query=query)
+                logging.info(f"[Agent Flow V2] Retrieval tool executed in {time.time() - t_ret:.2f}s")
+                return format_results(result)
+
+            _bound_search.__name__ = "search_knowledge_base"
+            request_tools = [_bound_search]
+
+        agent = provider.as_agent(details, tools=request_tools)
+
         self._stream_start_time = stream_start
-        t_stream = time.time()
-
         full_response = ""
         try:
-            # Azure AI Agents SDK: Native Real-time event streaming
-            async with await agents_client.runs.stream(
-                thread_id=thread.id,
-                agent_id=agent.id,
-                max_completion_tokens=self.max_completion_tokens,
-            ) as stream:
-                async for chunk in self._process_stream(agents_client, stream, thread.id):
-                    full_response += chunk
-                    yield chunk
+            async with agent:
+                thread_id = conv.get("thread_id")
+                if thread_id:
+                    thread = agent.get_new_thread(service_thread_id=thread_id)
+                else:
+                    thread = agent.get_new_thread()
+                    if thread.service_thread_id:
+                        conv["thread_id"] = thread.service_thread_id
+
+                logging.info("[Agent Flow V2] Streaming from Foundry prompt agent (Responses)...")
+                first_token = False
+                # ``reasoning`` is baked into the agent definition (it is a
+                # definition-level setting and is rejected as a per-run option);
+                # only ``max_tokens`` is passed per run, with a one-shot fallback
+                # to no options if the service ever rejects it too.
+                async for chunk in agent_provider_v2.stream_agent_run(
+                    agent,
+                    user_message,
+                    thread=thread,
+                    options={"max_tokens": self.max_completion_tokens},
+                ):
+                    if chunk.text:
+                        if not first_token:
+                            logging.info(f"[Agent Flow V2] 🤖 First Token: {time.time() - stream_start:.2f}s")
+                            first_token = True
+                        full_response += chunk.text
+                        yield chunk.text
+
+                if not conv.get("thread_id") and thread.service_thread_id:
+                    conv["thread_id"] = thread.service_thread_id
 
         except Exception as e:
             err_msg = traceback.format_exc()
             logging.error(f"[Agent Flow V2] Streaming failed: {err_msg}")
-            yield f"[ERROR in Streaming]: {e}\n{err_msg}"
+            yield f"[ERROR in Streaming]: {e}"
 
         # Persist conversation history
         conv.setdefault("messages", []).extend([
             {"role": "user", "text": user_message},
             {"role": "assistant", "text": full_response}
         ])
-
-        # Cleanup Agent — only if created per-request (not cached/persistent)
-        if create_agent:
-            try:
-                await agents_client.delete_agent(agent.id)
-            except Exception:
-                pass
