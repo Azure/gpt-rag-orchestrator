@@ -89,3 +89,38 @@ class TestSingleAgentRagV2ConversationScope:
         s.search_client = None
         # Must not raise when retrieval is disabled.
         s._apply_search_request_context()
+
+    @pytest.mark.asyncio
+    async def test_bound_search_tool_delegates_to_apply_context(self):
+        """Production-path regression guard for issue #478.
+
+        Invokes the exact retrieval tool produced by `_build_search_tool()`
+        (the factory used by `_stream_agent`) and asserts it calls
+        `_apply_search_request_context()`. This guarantees the conversation
+        scope fix continues to run on the real code path, not just on a
+        helper method that could become dead code.
+        """
+        s = self._make_strategy()
+        s.conversation = {"id": "conv-xyz"}
+
+        async def _fake_search(query):
+            return {"documents": []}
+
+        s.search_client.search_knowledge_base = _fake_search
+        s._format_search_results = lambda r: "ok"
+
+        tool = s._build_search_tool()
+        assert tool is not None
+        assert tool.__name__ == "search_knowledge_base"
+
+        result = await tool("q")
+        assert result == "ok"
+
+        s.search_client.set_request_context.assert_called_once()
+        kwargs = s.search_client.set_request_context.call_args.kwargs
+        assert kwargs["conversation_id"] == "conv-xyz"
+
+    def test_build_search_tool_returns_none_without_search_client(self):
+        s = self._make_strategy()
+        s.search_client = None
+        assert s._build_search_tool() is None

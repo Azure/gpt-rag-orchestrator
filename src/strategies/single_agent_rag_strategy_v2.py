@@ -226,6 +226,29 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         except Exception:
             pass
 
+    def _build_search_tool(self):
+        """Build the per-request retrieval tool bound to this request's context.
+
+        Extracted so the conversation-scope fix for issue #478 has a single
+        code path used both by ``_stream_agent`` and by the regression tests.
+        Returns ``None`` when retrieval is disabled.
+        """
+        if not self.search_client:
+            return None
+
+        search_client = self.search_client
+        format_results = self._format_search_results
+
+        async def _bound_search(query: str) -> str:
+            self._apply_search_request_context()
+            t_ret = time.time()
+            result = await search_client.search_knowledge_base(query=query)
+            logging.info(f"[Agent Flow V2] Retrieval tool executed in {time.time() - t_ret:.2f}s")
+            return format_results(result)
+
+        _bound_search.__name__ = "search_knowledge_base"
+        return _bound_search
+
     async def initiate_agent_flow(self, user_message: str):
         """
         V2 Latency-Optimized Agent Flow.
@@ -416,28 +439,9 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         # invoke it, while closing over this request's OBO/search context.
         request_tools = None
         if aisearch_enabled:
-            allow_anonymous = self.cfg.get("ALLOW_ANONYMOUS", default=True, type=bool)
-            request_access_token = getattr(self, "request_access_token", None)
-            search_client = self.search_client
-            format_results = self._format_search_results
-            conversation_id = self._resolve_conversation_id()
-
-            async def _bound_search(query: str) -> str:
-                try:
-                    search_client.set_request_context(
-                        api_access_token=request_access_token,
-                        allow_anonymous=allow_anonymous,
-                        conversation_id=conversation_id,
-                    )
-                except Exception:
-                    pass
-                t_ret = time.time()
-                result = await search_client.search_knowledge_base(query=query)
-                logging.info(f"[Agent Flow V2] Retrieval tool executed in {time.time() - t_ret:.2f}s")
-                return format_results(result)
-
-            _bound_search.__name__ = "search_knowledge_base"
-            request_tools = [_bound_search]
+            tool = self._build_search_tool()
+            if tool is not None:
+                request_tools = [tool]
 
         agent = provider.as_agent(details, tools=request_tools)
 
