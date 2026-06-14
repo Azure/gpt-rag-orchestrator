@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [v2.8.3] - 2026-06-14
+
+### Changed
+- **Warn when `$env:APP_CONFIG_ENDPOINT` diverges from the azd environment during component deploy (issue [Azure/GPT-RAG#491](https://github.com/Azure/GPT-RAG/issues/491)):** `scripts/deploy.ps1` and `scripts/deploy.sh` now read both the shell `APP_CONFIG_ENDPOINT` and the azd env value and, when both are present and disagree (trimmed, case-insensitive), print a yellow warning that shows both values, states which one is being used (the shell value still wins, preserving existing precedence for jumpbox and CI flows), and tells the operator how to clear the shell override (`Remove-Item env:APP_CONFIG_ENDPOINT` in PowerShell, `unset APP_CONFIG_ENDPOINT` in bash). When only one source is set, the previous behavior is unchanged.
+
 ## [v2.8.2] - 2026-06-10
 
 ### Fixed
