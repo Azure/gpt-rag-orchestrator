@@ -45,7 +45,7 @@ python-dotenv==1.2.2
 
 # fastapi
 fastapi==0.115.12
-uvicorn==0.34.1
+uvicorn==0.49.0
 
 # NL2SQL dependencies
 sqlparse==0.5.5
