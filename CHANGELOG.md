@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [v2.8.5] - 2026-06-15
+
+### Reverted
+- **`semantic-kernel` bump to 1.43.0 ([#214](https://github.com/Azure/gpt-rag-orchestrator/pull/214))** reverted back to `1.34.0`. The bumped version requires `azure-ai-projects~=1.0.0b12`, which conflicts with the pinned `azure-ai-projects==2.0.0b3` and breaks `pip install -r requirements.txt` in the runtime image. The bump will be re-evaluated together with the `azure-ai-projects` upgrade path.
+
+## [v2.8.4] - 2026-06-15
+
+### Changed
+- **Dependency refresh:** Absorbed Dependabot bumps merged to `develop`:
+  - `uvicorn` 0.34.1 → 0.49.0 in `/evaluations` ([#205](https://github.com/Azure/gpt-rag-orchestrator/pull/205))
+  - `httpx` requirement updated in `/evaluations` ([#206](https://github.com/Azure/gpt-rag-orchestrator/pull/206))
+  - `openai` 2.9.0 → 2.41.1 in `/evaluations` ([#207](https://github.com/Azure/gpt-rag-orchestrator/pull/207))
+  - `azure-monitor-opentelemetry-exporter` ([#210](https://github.com/Azure/gpt-rag-orchestrator/pull/210))
+  - `sqlparse` 0.5.4 → 0.5.5 ([#212](https://github.com/Azure/gpt-rag-orchestrator/pull/212))
+  - `tiktoken` 0.8.0 → 0.13.0 ([#213](https://github.com/Azure/gpt-rag-orchestrator/pull/213))
+  - `semantic-kernel` 1.34.0 → 1.43.0 ([#214](https://github.com/Azure/gpt-rag-orchestrator/pull/214))
+
 ## [v2.8.3] - 2026-06-14
 
 ### Changed
