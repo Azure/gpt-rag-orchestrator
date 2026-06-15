@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [v2.8.5] - 2026-06-15
+
+### Reverted
+- **`semantic-kernel` bump to 1.43.0 ([#214](https://github.com/Azure/gpt-rag-orchestrator/pull/214))** reverted back to `1.34.0`. The bumped version requires `azure-ai-projects~=1.0.0b12`, which conflicts with the pinned `azure-ai-projects==2.0.0b3` and breaks `pip install -r requirements.txt` in the runtime image. The bump will be re-evaluated together with the `azure-ai-projects` upgrade path.
+
 ## [v2.8.4] - 2026-06-15
 
 ### Changed
