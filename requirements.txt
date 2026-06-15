@@ -52,6 +52,6 @@ sqlparse==0.5.4
 pyodbc==5.1.0
 #opentelemetry
 azure-monitor-opentelemetry==1.8.7
-azure-monitor-opentelemetry-exporter==1.0.0b49
+azure-monitor-opentelemetry-exporter==1.0.0b53
 opentelemetry-instrumentation-httpx==0.61b0
 opentelemetry-instrumentation-fastapi==0.61b0
