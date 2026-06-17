@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v2.8.6] - 2026-06-17
 
 ### Fixed
 - **`single_agent_rag` follow-up turns with tool calls now resume from a stable Foundry conversation object (issue [Azure/GPT-RAG#505](https://github.com/Azure/GPT-RAG/issues/505)):** The strategy now creates one server-side `conv_` conversation per chat and reuses it across turns, preventing follow-up tool outputs from being chained to the wrong prior `resp_` id and failing with `400 No tool call found for function call output`.
