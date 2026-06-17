@@ -449,13 +449,13 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         full_response = ""
         try:
             async with agent:
-                thread_id = conv.get("thread_id")
-                if thread_id:
-                    thread = agent.get_new_thread(service_thread_id=thread_id)
-                else:
-                    thread = agent.get_new_thread()
-                    if thread.service_thread_id:
-                        conv["thread_id"] = thread.service_thread_id
+                # Back the chat thread with a dedicated server-side conversation
+                # object (created once, resumed every turn). Resuming from the
+                # previous turn's response id instead breaks tool-call chaining on
+                # follow-up turns, which fail with "400 No tool call found for
+                # function call output" (Azure/GPT-RAG#505).
+                thread_id = await agent_provider_v2.ensure_conversation_id(conv)
+                thread = agent.get_new_thread(service_thread_id=thread_id)
 
                 logging.info("[Agent Flow V2] Streaming from Foundry prompt agent (Responses)...")
                 first_token = False
@@ -475,9 +475,6 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                             first_token = True
                         full_response += chunk.text
                         yield chunk.text
-
-                if not conv.get("thread_id") and thread.service_thread_id:
-                    conv["thread_id"] = thread.service_thread_id
 
         except Exception as e:
             err_msg = traceback.format_exc()
