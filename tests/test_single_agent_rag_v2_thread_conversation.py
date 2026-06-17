@@ -24,6 +24,28 @@ from strategies.agent_strategies import AgentStrategies  # noqa: F401
 from strategies import agent_provider_v2
 
 
+class TestReusableAgentName:
+    def test_uses_configured_agent_id_when_present(self):
+        from strategies.single_agent_rag_strategy_v2 import _resolve_agent_name
+
+        cfg = MagicMock()
+        cfg.get.return_value = " gptrag-single-agent-rag-b622680c09 "
+
+        assert _resolve_agent_name(cfg) == "gptrag-single-agent-rag-b622680c09"
+        cfg.get.assert_called_once_with("AGENT_ID", "")
+
+    def test_uses_stable_default_when_agent_id_is_empty(self):
+        from strategies.single_agent_rag_strategy_v2 import (
+            DEFAULT_REUSABLE_AGENT_NAME,
+            _resolve_agent_name,
+        )
+
+        cfg = MagicMock()
+        cfg.get.return_value = ""
+
+        assert _resolve_agent_name(cfg) == DEFAULT_REUSABLE_AGENT_NAME
+
+
 class TestEnsureConversationId:
     @pytest.fixture(autouse=True)
     def _reset_module_state(self):
