@@ -1,6 +1,16 @@
 # Changelog
 
-## [Unreleased]
+## [v2.8.6] - 2026-06-17
+
+### Fixed
+- **`single_agent_rag` follow-up turns with tool calls now resume from a stable Foundry conversation object (issue [Azure/GPT-RAG#505](https://github.com/Azure/GPT-RAG/issues/505)):** The strategy now creates one server-side `conv_` conversation per chat and reuses it across turns, preventing follow-up tool outputs from being chained to the wrong prior `resp_` id and failing with `400 No tool call found for function call output`.
+- **`single_agent_rag` now reuses the configured Foundry prompt agent:** `AGENT_ID` is honored as the persistent agent name to reuse, so configuration changes such as `REASONING_EFFORT` no longer create a second fingerprinted Foundry agent. When `AGENT_ID` is empty, the strategy falls back to the stable default `gptrag-single-agent-rag` name.
+- **Reasoning model response budget defaults:** `single_agent_rag` now defaults `MAX_COMPLETION_TOKENS` to `8000` and `REASONING_EFFORT` to `low`, leaving enough output budget for reasoning models such as `gpt-5-nano` and avoiding empty responses with `finish_reason=length` / `max_tokens`.
+- **Global knowledge chunks with null conversation ids are now retrievable:** The shared AI Search filter now matches both `conversationId eq 'NaN'` and `conversationId eq null`, so globally ingested documents remain visible regardless of which no-conversation sentinel was used.
+- **Direct LLM empty-index path now preserves valid chat history:** Persisted messages are normalized from `text` to `content`, empty/unsupported entries are skipped, and the no-context prompt stays strictly grounded when a configured knowledge base has no indexed content.
+
+### Changed
+- **Copilot repository instructions filename:** Renamed `.github/copilot_instructions.md` to `.github/copilot-instructions.md` so Copilot loads the repository instructions from the expected filename.
 
 ## [v2.8.5] - 2026-06-15
 

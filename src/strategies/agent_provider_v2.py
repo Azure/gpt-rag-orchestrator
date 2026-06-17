@@ -50,6 +50,9 @@ _provider: Optional[AzureAIProjectAgentProvider] = None
 _project_client: Optional[AIProjectClient] = None
 _provider_lock = asyncio.Lock()
 
+_openai_client: Any = None
+_openai_client_lock = asyncio.Lock()
+
 # name -> AgentVersionDetails, cached so per-request agent construction is a
 # pure in-process call (no HTTP) once the agent has been resolved once.
 _agent_details_cache: dict[str, Any] = {}
@@ -287,6 +290,59 @@ async def stream_agent_run(
         )
         async for chunk in agent.run_stream(user_message, thread=thread, options={}):
             yield chunk
+
+
+async def _get_openai_client() -> Any:
+    """Return a process-wide ``AsyncOpenAI`` client bound to the Foundry
+    Responses endpoint, created once from the shared project client.
+
+    Like the project client, it is intentionally never closed: it lives for the
+    lifetime of the worker process and is shared by all requests.
+    """
+    global _openai_client
+    if _openai_client is not None:
+        return _openai_client
+    async with _openai_client_lock:
+        if _openai_client is None:
+            if _project_client is None:
+                raise RuntimeError(
+                    "AgentProviderV2 is not initialized; call get_provider() before "
+                    "creating a conversation object."
+                )
+            _openai_client = _project_client.get_openai_client()
+            logging.info("[AgentProviderV2] Initialized OpenAI (Responses) client")
+    return _openai_client
+
+
+async def ensure_conversation_id(conv: dict) -> str:
+    """Return a stable server-side conversation id for the chat, creating a
+    dedicated Responses *conversation object* once and resuming it every turn.
+
+    The chat thread must be backed by a persistent conversation object rather
+    than the previous turn's per-turn response id (``resp_``). When a thread is
+    resumed from a ``resp_`` id, a follow-up turn that triggers a tool call
+    chains the tool output to the wrong response: the resumed turn id overrides
+    the in-loop response that actually holds the ``function_call``, so the
+    service rejects the tool result with ``400 No tool call found for function
+    call output`` (Azure/GPT-RAG#505). Backing the thread with a conversation
+    object keeps the ``function_call`` and its output in the same conversation,
+    so chaining resolves on every turn.
+
+    The id is cached on ``conv['thread_id']`` (tagged with the current backend by
+    ``reset_legacy_thread``) so it is created on the first turn and reused
+    thereafter.
+    """
+    thread_id = conv.get("thread_id")
+    if thread_id:
+        return thread_id
+    client = await _get_openai_client()
+    conversation = await client.conversations.create()
+    conv["thread_id"] = conversation.id
+    logging.info(
+        "[AgentProviderV2] Created conversation object %s to back the chat thread",
+        conversation.id,
+    )
+    return conversation.id
 
 
 def reset_legacy_thread(conv: dict) -> None:

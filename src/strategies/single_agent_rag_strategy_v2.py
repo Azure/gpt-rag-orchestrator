@@ -26,8 +26,7 @@ from connectors.search import get_search_client
 from connectors.aifoundry import get_genai_client
 from openai import BadRequestError
 
-# Base name for the single, reusable Foundry prompt agent. The actual agent name
-# embeds a definition fingerprint (see agent_provider_v2.compute_agent_name).
+# Stable name for the single, reusable Foundry prompt agent.
 DEFAULT_REUSABLE_AGENT_NAME = "gptrag-single-agent-rag"
 
 
@@ -76,16 +75,9 @@ def _render_agent_instructions(cfg, *, aisearch_enabled: bool) -> str:
     }).strip()
 
 
-def _compute_agent_name(cfg, instructions: str, aisearch_enabled: bool) -> str:
-    tool_names = ["search_knowledge_base"] if aisearch_enabled else []
-    reasoning_effort = cfg.get("REASONING_EFFORT", "medium")
-    return agent_provider_v2.compute_agent_name(
-        DEFAULT_REUSABLE_AGENT_NAME,
-        model=cfg.get("CHAT_DEPLOYMENT_NAME"),
-        instructions=instructions,
-        tool_names=tool_names,
-        extra={"reasoning_effort": reasoning_effort} if reasoning_effort else None,
-    )
+def _resolve_agent_name(cfg) -> str:
+    configured_agent = (cfg.get("AGENT_ID", "") or "").strip()
+    return configured_agent or DEFAULT_REUSABLE_AGENT_NAME
 
 
 async def prewarm_agents_client(*, create_reusable_agent: bool = True) -> None:
@@ -116,7 +108,7 @@ async def prewarm_agents_client(*, create_reusable_agent: bool = True) -> None:
     try:
         aisearch_enabled = cfg.get("SEARCH_RETRIEVAL_ENABLED", True, type=bool)
         instructions = _render_agent_instructions(cfg, aisearch_enabled=aisearch_enabled)
-        name = _compute_agent_name(cfg, instructions, aisearch_enabled)
+        name = _resolve_agent_name(cfg)
         tools = [search_knowledge_base] if aisearch_enabled else None
         await agent_provider_v2.get_or_create_agent_details(
             provider=provider,
@@ -124,7 +116,7 @@ async def prewarm_agents_client(*, create_reusable_agent: bool = True) -> None:
             model=cfg.get("CHAT_DEPLOYMENT_NAME"),
             instructions=instructions,
             tools=tools,
-            reasoning_effort=cfg.get("REASONING_EFFORT", "medium"),
+            reasoning_effort=cfg.get("REASONING_EFFORT", "low"),
         )
         logging.info("[Startup] ✅ Reusable prompt agent ready (name=%s)", name)
     except Exception as e:
@@ -134,10 +126,10 @@ async def prewarm_agents_client(*, create_reusable_agent: bool = True) -> None:
 class SingleAgentRAGStrategyV2(BaseAgentStrategy):
     """
     Implements a latency-optimized V2 Retrieve-Augmented Generation strategy.
-    
+
     This strategy prioritizes bypassing heavy cloud Agent services when possible (e.g. empty indexes),
     instead relying on local Execution via `GenAIModelClient`.
-    
+
     When an index has data or complex tools are needed, this uses Azure AI Agents SDK
     with explicit Event Handlers for streaming and local orchestration, avoiding polling loops.
     """
@@ -149,10 +141,10 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         """
         logging.debug("[Agent Flow V2] Creating SingleAgentRAGStrategyV2 instance...")
         return cls()
-        
+
     def __init__(self):
         super().__init__()
-        
+
         logging.debug("[Init] Initializing SingleAgentRAGStrategyV2...")
         self.cfg = get_config()
         self.strategy_type = AgentStrategies.SINGLE_AGENT_RAG
@@ -175,11 +167,15 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                 logging.error("[Init V2] ❌ Could not initialize SearchClient: %s", e)
                 raise
 
-        # Hard cap on output tokens for the main agent response
-        self.max_completion_tokens = int(self.cfg.get("MAX_COMPLETION_TOKENS", 4096))
+        # Hard cap on output tokens for the main agent response.
+        # Default 8000: reasoning models (e.g. gpt-5-nano) spend part of this
+        # budget on reasoning tokens, so a higher cap leaves room for the answer.
+        self.max_completion_tokens = int(self.cfg.get("MAX_COMPLETION_TOKENS", 8000))
 
-        # Reasoning effort for models that support it (e.g. gpt-5-mini)
-        self.reasoning_effort = self.cfg.get("REASONING_EFFORT", "medium")
+        # Reasoning effort for models that support it (e.g. gpt-5-mini/nano).
+        # Default "low": keeps reasoning token spend in check so the response
+        # is not truncated with finish_reason=length on heavy turns.
+        self.reasoning_effort = self.cfg.get("REASONING_EFFORT", "low")
 
         # Initialize Direct LLM Client for Bypass scenario (singleton)
         self.llm_client = get_genai_client()
@@ -257,13 +253,13 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         - If not empty: Azure AI Agents SDK streaming with event handlers
         """
         flow_start = time.time()
-        
+
         is_empty = False
         if self.search_client:
             is_empty = await self.search_client.is_index_empty()
-            
+
         logging.info(f"[Agent Flow V2] Index Empty Check Result: {is_empty} ({round(time.time() - flow_start, 2)}s)")
-        
+
         # 1. Bypass Routing: Empty Index goes directly to Chat Completion for ~Instant TTFB
         if is_empty and not self.cfg.get("BING_RETRIEVAL_ENABLED", False, type=bool):
             logging.info("[Agent Flow V2] ⚡ Routing locally directly to LLM (Search Index is empty, bypassing Agents)")
@@ -274,7 +270,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
             logging.info("[Agent Flow V2] 🤖 Routing to Azure AI Agents SDK (Search Index has data or Bing enabled)")
             async for chunk in self._stream_agent(user_message):
                 yield chunk
-                
+
         logging.info(f"[Agent Flow V2] Total flow time: {round(time.time() - flow_start, 2)}s")
 
     async def _stream_direct_llm(self, user_message: str):
@@ -286,27 +282,44 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
 
         aisearch_enabled = self.cfg.get("SEARCH_RETRIEVAL_ENABLED", True, type=bool)
         bing_enabled = self.cfg.get("BING_RETRIEVAL_ENABLED", False, type=bool)
-        
+
+        # This path is the empty-index bypass: no search tool is bound here. When a
+        # knowledge base is configured (aisearch enabled) but has no content to
+        # ground on, answer strictly: greet on small talk, otherwise tell the user
+        # there isn't enough information in the context instead of replying from the
+        # model's own knowledge. When no KB is configured at all, fall back to the
+        # plain direct-assistant behavior.
+        grounded_no_context = aisearch_enabled
+
         # Build prompt
         prompt_context = {
             "strategy": self.strategy_type.value,
             "user_context": self.user_context or {},
-            "aisearch_enabled": aisearch_enabled,
-            "bing_grounding_enabled": bing_enabled,
+            "aisearch_enabled": False,
+            "bing_grounding_enabled": False,
+            "grounded_no_context": grounded_no_context,
         }
         system_prompt = await self._read_prompt("main", use_jinja2=True, jinja2_context=prompt_context)
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message}
-        ]
-        
-        # Optional: Append history from CosmosDB conversation if we want context
+
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # Optional: Append history from CosmosDB conversation if we want context.
+        # Stored entries use the "text" key, while the chat completions API expects
+        # "content"; normalize and drop empties to avoid 400 "content is null" errors.
         history = self.conversation.get("messages", [])
-        if history:
-             for msg in history[-5:]: # Keep last 5 for speed
-                 messages.insert(1, msg)
-                 
+        for msg in history[-5:]:  # Keep last 5 for speed
+            role = msg.get("role")
+            if role not in ("user", "assistant", "system"):
+                continue
+            content = msg.get("content")
+            if content is None:
+                content = msg.get("text")
+            if not content:
+                continue
+            messages.append({"role": role, "content": content})
+
+        messages.append({"role": "user", "content": user_message})
+
         try:
              # Fast streaming completion
              _kwargs = dict(
@@ -321,22 +334,22 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
              except BadRequestError:
                  _kwargs.pop("reasoning_effort", None)
                  response_stream = await self.llm_client.openai_client.chat.completions.create(**_kwargs)
-             
+
              full_response = ""
              first_token = False
              async for update in response_stream:
                  if not first_token:
                      logging.info(f"[Agent Flow V2] ⚡ Direct LLM First Token: {time.time() - stream_start:.2f}s")
                      first_token = True
-                      
+
                  if update.choices and update.choices[0].delta.content:
                      full_response += update.choices[0].delta.content
                      yield update.choices[0].delta.content
-                     
+
         except Exception as e:
              logging.error(f"[Agent Flow V2] Direct LLM Streaming failed: {e}", exc_info=True)
              raise
-             
+
         # Add assistant response to history
         self.conversation.setdefault("messages", []).extend([
             {"role": "user", "text": user_message},
@@ -414,11 +427,11 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                 "not yet supported on the declarative agent path; continuing without it."
             )
 
-        # Resolve the shared, reusable prompt agent (definition fingerprinted by
-        # instructions + tools so a changed release maps to a fresh agent name).
+        # Resolve the shared, reusable prompt agent. AGENT_ID pins deployments to
+        # an existing Foundry prompt agent; otherwise we use a stable default name.
         instructions = _render_agent_instructions(self.cfg, aisearch_enabled=aisearch_enabled)
         provider = await agent_provider_v2.get_provider(self.project_endpoint, self.credential)
-        agent_name = _compute_agent_name(self.cfg, instructions, aisearch_enabled)
+        agent_name = _resolve_agent_name(self.cfg)
 
         t0 = time.time()
         details = await agent_provider_v2.get_or_create_agent_details(
@@ -449,13 +462,13 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         full_response = ""
         try:
             async with agent:
-                thread_id = conv.get("thread_id")
-                if thread_id:
-                    thread = agent.get_new_thread(service_thread_id=thread_id)
-                else:
-                    thread = agent.get_new_thread()
-                    if thread.service_thread_id:
-                        conv["thread_id"] = thread.service_thread_id
+                # Back the chat thread with a dedicated server-side conversation
+                # object (created once, resumed every turn). Resuming from the
+                # previous turn's response id instead breaks tool-call chaining on
+                # follow-up turns, which fail with "400 No tool call found for
+                # function call output" (Azure/GPT-RAG#505).
+                thread_id = await agent_provider_v2.ensure_conversation_id(conv)
+                thread = agent.get_new_thread(service_thread_id=thread_id)
 
                 logging.info("[Agent Flow V2] Streaming from Foundry prompt agent (Responses)...")
                 first_token = False
@@ -475,9 +488,6 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                             first_token = True
                         full_response += chunk.text
                         yield chunk.text
-
-                if not conv.get("thread_id") and thread.service_thread_id:
-                    conv["thread_id"] = thread.service_thread_id
 
         except Exception as e:
             err_msg = traceback.format_exc()
