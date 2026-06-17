@@ -93,10 +93,13 @@ def build_conversation_filter(conversation_id: Optional[str], *, field_name: str
 
     Includes:
     - conversation-specific chunks (conversationId == <cid>) when cid is set
-    - shared/global chunks (conversationId == 'NaN') always
+    - shared/global chunks always. A chunk is treated as shared when its
+      conversationId is the 'NaN' sentinel OR null/unset. Ingestion has used
+      both representations for global corpora, so both must match here,
+      otherwise globally-ingested documents become invisible to retrieval.
     """
     safe_field = (field_name or "").strip() or "conversationId"
-    shared_clause = f"{safe_field} eq 'NaN'"
+    shared_clause = f"({safe_field} eq 'NaN' or {safe_field} eq null)"
     cid = (conversation_id or "").strip() or None
     if cid:
         return f"{safe_field} eq '{_odata_escape_string(cid)}' or {shared_clause}"
@@ -391,12 +394,12 @@ class SearchClient:
         """
         Retrieves a single document by ID from the index.
         GET /indexes/{index_name}/docs/{document_id}
-        
+
         Args:
             index_name: Name of the search index
             document_id: Document key/ID
             select_fields: Optional list of fields to retrieve (e.g., ['filepath', 'title'])
-            
+
         Returns:
             Document dictionary with requested fields
         """
@@ -406,11 +409,11 @@ class SearchClient:
             f"/indexes/{index_name}/docs('{document_id}')"
             f"?api-version={self.api_version}"
         )
-        
+
         if select_fields:
             fields_str = ",".join(select_fields)
             url += f"&$select={fields_str}"
-        
+
         # Get bearer token
         try:
             token = (await self.credential.get_token("https://search.azure.com/.default")).token
@@ -475,15 +478,15 @@ class SearchClient:
                 "select": "id",
                 "top": 1
             }
-            
+
             search_user_token = await self._get_search_user_token_for_trimming()
-            
+
             results = await self.search(
                 index_name=self.index_name,
                 body=search_body,
                 search_user_token=search_user_token,
             )
-            
+
             # If no 'value' or empty list, it's empty
             has_results = len(results.get('value', [])) > 0
             is_empty_result = not has_results
@@ -491,14 +494,14 @@ class SearchClient:
                 "is_empty": is_empty_result,
                 "checked_at": time.time(),
             }
-            
+
             if is_empty_result:
                 logging.info(f"[Retrieval] Probe confirmed: Index '{self.index_name}' is EMPTY.")
             else:
                 logging.info(f"[Retrieval] Probe confirmed: Index '{self.index_name}' HAS DOCUMENTS.")
-                
+
             return is_empty_result
-            
+
         except Exception as e:
             logging.error(f"[Retrieval] Failed to check if index is empty: {e}", exc_info=True)
             # Default to not empty if we can't tell, to avoid false bypasses
@@ -507,35 +510,35 @@ class SearchClient:
     async def search_knowledge_base(self, query: str) -> str:
         """
         Searches the knowledge base for relevant documents using hybrid search.
-        
+
         :param query: The search query to find relevant documents.
         :return: Search results as a JSON string containing a list of documents with title, link and content.
         """
-        
+
         logging.info(f"[Retrieval] AI Search index: {self.index_name}")
         logging.info(f"[Retrieval] Search approach: {self.search_approach}")
         logging.info(f"[Retrieval] Executing search for query: {query}")
 
         try:
             logging.info("[Retrieval] Using Azure AI Search for document retrieval")
-            
+
             # Build search body according to search approach
             search_body: Dict[str, Any] = {
                 "select": "title,content,url,filepath,chunk_id",
                 "top": self.search_top_k
             }
-                        
+
             # Filter by conversation scope: this chat + shared corpora (general/global).
             # Never query without a filter: an unset id would return every chunk in the index.
             search_body["filter"] = build_conversation_filter(self._conversation_id, field_name="conversationId")
-            
+
             # Generate embeddings for vector/hybrid search
             if self.search_approach in ["vector", "hybrid"] and self.aoai_client:
                 start_time = time.time()
                 logging.info(f"[Retrieval] Generating embeddings for query")
                 embeddings_query = await self.aoai_client.get_embeddings(query)
                 logging.info(f"[Retrieval] Embeddings generated in {round(time.time() - start_time, 2)} seconds")
-                
+
                 if self.search_approach == "vector":
                     search_body["vectorQueries"] = [{
                         "kind": "vector",
@@ -554,7 +557,7 @@ class SearchClient:
             else:
                 # Term search only
                 search_body["search"] = query
-            
+
             # Execute search
             search_user_token = await self._get_search_user_token_for_trimming()
             if search_user_token:
@@ -567,19 +570,19 @@ class SearchClient:
                 body=search_body,
                 search_user_token=search_user_token,
             )
-            
+
             # Process search results
             results_list = []
             for result in search_results.get('value', []):
                 title = result.get('title', 'reference') or 'reference'
                 link = result.get('filepath') or result.get('url', '') or ''
                 content = result.get('content', '')
-                
+
                 # Debug log each document with formatted output (remove line breaks)
                 content_preview = content[:200] if len(content) > 200 else content
                 content_preview = ' '.join(content_preview.split())  # Replace all whitespace/newlines with single space
                 logging.debug(f"[Retrieval] Document: [{title}]({link}): {content_preview}")
-                
+
                 search_result = SearchResult(
                     title=title,
                     link=link,
@@ -594,10 +597,10 @@ class SearchClient:
                     "is_empty": False,
                     "checked_at": time.time(),
                 }
-            
+
             logging.info(f"[Retrieval] Found {len(results_list)} results from Azure AI Search")
             return json.dumps({"results": results_list, "query": query})
-            
+
         except Exception as e:
             logging.error(f"[Retrieval] Azure AI Search failed: {e}", exc_info=True)
 
@@ -613,22 +616,22 @@ class SearchClient:
     async def fetch_filepath_from_index(self, document_id: str) -> Optional[str]:
         """
         Fetch filepath directly from Azure AI Search index using document ID.
-        
+
         Args:
             document_id: Document ID from Azure Search
-            
+
         Returns:
             Filepath string from the index, or None if not found
         """
         try:
             logging.info("[Citations] 🔍 Fetching filepath from index for document_id: %s", document_id)
-            
+
             document = await self.get_document(
                 index_name=self.index_name,
                 document_id=document_id,
                 select_fields=['filepath', 'title']
             )
-            
+
             if document:
                 filepath = document.get('filepath')
                 if filepath:
@@ -638,7 +641,7 @@ class SearchClient:
                     logging.warning("[Citations] ⚠️ Document found but 'filepath' field is empty")
             else:
                 logging.warning("[Citations] ⚠️ Document not found with ID: %s", document_id)
-                
+
         except Exception as e:
             logging.error("[Citations] ❌ Error fetching document from index: %s", e, exc_info=True)
 
