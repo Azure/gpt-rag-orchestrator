@@ -8,6 +8,30 @@ from pydantic import BaseModel
 
 from dependencies import get_config
 
+# Standardized log markers for retrieval/auth failure paths. Operators can grep
+# these to spot swallowed errors that would otherwise return empty results
+# silently. See issue Azure/GPT-RAG#508.
+_RETRIEVAL_AUTH_FAILURE_MARKER = "[Retrieval][AUTH_FAILURE]"
+_RETRIEVAL_ERROR_MARKER = "[Retrieval][ERROR]"
+
+
+def _classify_retrieval_error(error: Any) -> tuple:
+    """Classify a retrieval/auth error for standardized logging.
+
+    Inspects ``str(error)`` for ``401`` or ``403`` substrings and returns
+    ``(level, marker)``. Auth-shaped failures are surfaced at ``ERROR`` so they
+    don't get lost; other failures are surfaced at ``WARNING`` because the
+    caller will fall back to empty results when ``ALLOW_ANONYMOUS=true``.
+
+    The error argument can be an exception, a status code, or any object that
+    str()'s to something useful. Tokens must never be passed in.
+    """
+    msg = str(error) if error is not None else ""
+    if "401" in msg or "403" in msg:
+        return logging.ERROR, _RETRIEVAL_AUTH_FAILURE_MARKER
+    return logging.WARNING, _RETRIEVAL_ERROR_MARKER
+
+
 _global_index_empty_cache: Dict[str, Dict[str, Any]] = {}
 
 # Module-level OBO token cache (shared across callers)
@@ -59,7 +83,18 @@ async def acquire_obo_search_token(api_access_token: Optional[str], allow_anonym
         async with session.post(token_url, data=form) as resp:
             raw = await resp.text()
             if resp.status >= 400:
-                logging.error("[OBO] Token exchange failed (status=%d body=%s)", resp.status, raw[:300])
+                level, marker = _classify_retrieval_error(resp.status)
+                logging.log(
+                    level,
+                    "%s OBO token exchange failed (status=%d body=%s)",
+                    marker,
+                    resp.status,
+                    raw[:300],
+                    extra={
+                        "retrieval_status": resp.status,
+                        "retrieval_credential_type": "obo",
+                    },
+                )
                 if allow_anonymous:
                     return None
                 raise RuntimeError(f"OBO token exchange failed: status={resp.status}")
@@ -263,6 +298,7 @@ class SearchClient:
                 raw = await resp.text()
                 if resp.status >= 400:
                     # Token endpoint errors often include trace_id/correlation_id.
+                    level, marker = _classify_retrieval_error(resp.status)
                     try:
                         err = json.loads(raw)
                         error = err.get("error")
@@ -273,18 +309,36 @@ class SearchClient:
                         self._last_obo_error = (
                             f"status={resp.status} error={error} codes={error_codes} trace_id={trace_id} correlation_id={correlation_id}"
                         )
-                        logging.error(
-                            "[Retrieval][OBO] OBO failed (status=%d error=%s codes=%s trace_id=%s correlation_id=%s desc=%s)",
+                        logging.log(
+                            level,
+                            "%s OBO failed (status=%d error=%s codes=%s trace_id=%s correlation_id=%s desc=%s)",
+                            marker,
                             resp.status,
                             error,
                             error_codes,
                             trace_id,
                             correlation_id,
                             (str(desc)[:240] + "…") if desc and len(str(desc)) > 240 else desc,
+                            extra={
+                                "retrieval_status": resp.status,
+                                "retrieval_index": self.index_name,
+                                "retrieval_credential_type": "obo",
+                            },
                         )
                     except Exception:
                         self._last_obo_error = f"status={resp.status} body={raw[:200]}"
-                        logging.error("[Retrieval][OBO] OBO failed (status=%d body=%s)", resp.status, raw[:400])
+                        logging.log(
+                            level,
+                            "%s OBO failed (status=%d body=%s)",
+                            marker,
+                            resp.status,
+                            raw[:400],
+                            extra={
+                                "retrieval_status": resp.status,
+                                "retrieval_index": self.index_name,
+                                "retrieval_credential_type": "obo",
+                            },
+                        )
                     return None
 
                 data = {}
@@ -341,9 +395,16 @@ class SearchClient:
             return token
 
         if self._allow_anonymous:
-            logging.warning(
-                "[Retrieval][Trimming] OBO failed; running without x-ms-query-source-authorization because ALLOW_ANONYMOUS=true (details=%s)",
+            level, marker = _classify_retrieval_error(self._last_obo_error)
+            logging.log(
+                level,
+                "%s OBO failed; running without x-ms-query-source-authorization because ALLOW_ANONYMOUS=true (details=%s)",
+                marker,
                 self._last_obo_error or "<no-details>",
+                extra={
+                    "retrieval_index": self.index_name,
+                    "retrieval_credential_type": "obo",
+                },
             )
             return None
 
@@ -602,7 +663,18 @@ class SearchClient:
             return json.dumps({"results": results_list, "query": query})
 
         except Exception as e:
-            logging.error(f"[Retrieval] Azure AI Search failed: {e}", exc_info=True)
+            level, marker = _classify_retrieval_error(e)
+            logging.log(
+                level,
+                "%s Azure AI Search failed: %s",
+                marker,
+                e,
+                exc_info=True,
+                extra={
+                    "retrieval_index": self.index_name,
+                    "retrieval_credential_type": "obo" if search_user_token else "managed_identity",
+                },
+            )
 
             # In strict mode (ALLOW_ANONYMOUS=false), do not silently degrade.
             # Raise so the request fails early and the logs make the root cause obvious.
