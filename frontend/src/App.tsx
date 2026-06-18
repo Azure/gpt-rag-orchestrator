@@ -3,10 +3,11 @@ import { ThemeProvider } from "next-themes";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { OverviewTab } from "./components/OverviewTab";
 import { ConversationsTab } from "./components/ConversationsTab";
+import { ConfigurationTab } from "./components/ConfigurationTab";
 import { fetchVersion } from "./lib/api";
-import { LayoutDashboard, MessageSquare } from "lucide-react";
+import { LayoutDashboard, MessageSquare, Settings } from "lucide-react";
 
-type Tab = "overview" | "conversations";
+type Tab = "overview" | "conversations" | "configuration";
 
 function Dashboard() {
   const [tab, setTab] = useState<Tab>("overview");
@@ -54,9 +55,22 @@ function Dashboard() {
           <MessageSquare className="h-4 w-4" />
           Conversations
         </button>
+        <button
+          onClick={() => setTab("configuration")}
+          className={`flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+            tab === "configuration"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Settings className="h-4 w-4" />
+          Configuration
+        </button>
       </nav>
 
-      {tab === "overview" ? <OverviewTab /> : <ConversationsTab />}
+      {tab === "overview" && <OverviewTab />}
+      {tab === "conversations" && <ConversationsTab />}
+      {tab === "configuration" && <ConfigurationTab />}
     </div>
   );
 }
