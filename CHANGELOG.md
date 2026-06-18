@@ -1,5 +1,39 @@
 # Changelog
 
+## [Unreleased]
+
+## [v2.8.9] - 2026-06-18
+
+### User and operator impact
+
+This release introduces a built-in **operator dashboard** for the orchestrator at `/dashboard`. The dashboard is opt-in (off by default) and gated by the `Admin` Entra app role when authentication is enabled, so existing deployments are unchanged unless you turn it on. Once enabled, operators get three tabs — Overview, Conversations, and Configuration — and can tune common runtime settings without leaving the app or restarting the container.
+
+### Added
+
+- **Operator dashboard at `/dashboard` ([Azure/GPT-RAG#511](https://github.com/Azure/GPT-RAG/issues/511)):** Turn it on by setting `ENABLE_DASHBOARD=true` in App Configuration. When off (the default), neither the page nor its API routes are registered.
+  - **Overview tab.** Today / 7-day / 30-day conversation counts, a conversations-over-time line chart, average user turns per conversation, and active user count. The overview query is cached in-process for 60 seconds so refreshes stay cheap.
+  - **Conversations tab.** Paginated, newest-first list of conversations with a detail dialog that renders the full message history. Data is read cross-partition from the existing conversation Cosmos container — no new storage.
+  - **Access control.** When authentication is enabled, every `/api/dashboard/*` route (except `/api/dashboard/version`) requires the caller's bearer token to include the `Admin` app role from Entra. The `/dashboard` HTML page itself is open so the SPA can load and render a clear access-denied state on 403.
+  - **Frontend.** Vite + React + TypeScript + Tailwind SPA, same conventions as `gpt-rag-ingestion`. Recharts is added for the time-series chart. The production bundle is built into `src/static` by a new `node:20-slim` stage in the Dockerfile.
+
+- **Configuration tab in the dashboard ([Azure/GPT-RAG#512](https://github.com/Azure/GPT-RAG/issues/512)):** A new third tab lets an admin view and edit a curated set of runtime settings without going to the Azure portal.
+  - **What you can edit.** Five sections matching the way operators actually think about the orchestrator: *Agent and generation* (`AGENT_STRATEGY`, `REASONING_EFFORT`, `CHAT_TEMPERATURE`, `CHAT_TOP_P`, `MAX_COMPLETION_TOKENS`), *Conversation history*, *Retrieval and search*, *Reliability*, and *Multimodal*. Each field has the right input type — dropdowns for enums, a range slider plus number input for `CHAT_TEMPERATURE` and `CHAT_TOP_P`, number boxes for counters, and toggles for booleans.
+  - **Accessible tooltips.** Every field has an info popover that is keyboard- and screen-reader-reachable (not hover-only). The text comes from a single backend metadata module (`src/api/config_settings.py`), so docs and UI never drift.
+  - **Two safety nets.** An explicit allow-list of editable keys, plus a defense-in-depth denylist that rejects any write to a key whose name matches sensitive suffixes (`_APIKEY`, `_SECRET`, `_PASSWORD`, `_CONNECTION_STRING`, `_TOKEN`, ...) or to specific keys like `KEY_VAULT_URI` and `MCP_APP_APIKEY` — even if a future refactor accidentally widens the allow-list.
+  - **Honest action buttons.** *Reload settings cache* refreshes the in-process App Configuration cache (`POST /api/dashboard/config/refresh`). *Apply changes* (`POST /api/dashboard/config/apply`) is a soft restart that refreshes the cache and returns a clear status string. We deliberately did not ship a button called "Restart" that does not actually restart the container — a hard revision restart would require `azure-mgmt-appcontainers` and extra RBAC and remains a follow-up.
+  - **Helpful errors.** Validation errors come back as `422` with a per-key error list and surface inline in the UI without breaking the page. Write errors come back as `500` with the same shape. Valid fields are not blocked by invalid ones.
+  - **Where values are written.** Accepted values are written to App Configuration under the `gpt-rag-orchestrator` label so it is easy to filter who wrote what in the Azure portal.
+
+### Fixed
+
+- **Restored `frontend/src/lib/api.ts` (fix for [#236](https://github.com/Azure/gpt-rag-orchestrator/pull/236)):** PR #236 merged the dashboard frontend without `lib/api.ts`, so a fresh `npm run build` in `frontend/` could not resolve the helpers imported by `App.tsx`, `OverviewTab.tsx`, `ConversationsTab.tsx`, and `ConversationDetailDialog.tsx`. Root cause was a `.gitignore` rule (`lib/`) silently swallowing the directory. The module is restored with the original typed wrapper around `fetch` (`ApiError`, `fetchVersion`, `fetchOverview`, `fetchConversations`, `fetchConversationDetail`, `formatUtc`) and extended with the helpers used by the new Configuration tab. `.gitignore` is updated with `!frontend/src/lib/**` so this cannot recur.
+
+### Validation
+
+- Full pytest suite: 220 passed.
+- Frontend: `npm run lint` clean, `npm run build` clean (no missing-import errors).
+- Endpoint surface manually exercised: `GET /api/dashboard/overview`, `GET /api/dashboard/conversations`, `GET /api/dashboard/config`, `PUT /api/dashboard/config` (allow-list accept, denylist reject, range reject, enum reject), `POST /api/dashboard/config/refresh`, `POST /api/dashboard/config/apply` — `require_admin` honored in each case when auth is on.
+
 ## [v2.8.8] - 2026-06-18
 
 ### Added

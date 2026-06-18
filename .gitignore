@@ -41,6 +41,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+!frontend/src/lib/
+!frontend/src/lib/**
 parts/
 sdist/
 var/
@@ -191,3 +193,5 @@ cython_debug/
 #.idea/
 
 .python_packages
+# Built dashboard SPA (produced by frontend/ build)
+src/static/
