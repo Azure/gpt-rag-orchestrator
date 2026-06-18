@@ -4,9 +4,10 @@ import json
 import time
 import hashlib
 from typing import Optional, Any, Dict, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from dependencies import get_config
+from util.metadata import format_custom_metadata, parse_allowed_keys
 
 # Standardized log markers for retrieval/auth failure paths. Operators can grep
 # these to spot swallowed errors that would otherwise return empty results
@@ -116,6 +117,13 @@ class SearchResult(BaseModel):
     title: str
     link: str
     content: str
+    # Raw custom_metadata carried for in-process consumers/tests only. It is
+    # excluded from serialization on purpose: the formatted metadata block is
+    # prepended into ``content`` (the text the LLM reads), so emitting the raw
+    # value as a separate JSON key would duplicate it and waste tokens. When the
+    # SEARCH_INCLUDE_METADATA_IN_CONTEXT flag is off this stays None and the
+    # serialized output is byte-for-byte unchanged.
+    custom_metadata: Optional[Any] = Field(default=None, exclude=True)
 
 
 def _odata_escape_string(value: Optional[str]) -> str:
@@ -168,6 +176,14 @@ class SearchClient:
         self.use_semantic = self.cfg.get('SEARCH_USE_SEMANTIC', 'false').lower() == 'true'
         self.index_name = self.cfg.get("SEARCH_RAG_INDEX_NAME", "ragindex")
         self.index_empty_cache_ttl_seconds = int(self.cfg.get("SEARCH_EMPTY_CACHE_TTL_SECONDS", 60, type=int))
+
+        # Custom metadata in LLM context (default OFF). When OFF the field is not
+        # selected, keeping the query byte-for-byte unchanged. This guard matters
+        # because pre-#487 indexes lack the custom_metadata field and selecting a
+        # missing field makes Azure AI Search reject the whole query with 400.
+        self.include_metadata_in_context = self.cfg.get("SEARCH_INCLUDE_METADATA_IN_CONTEXT", False, type=bool)
+        self.metadata_max_chars = int(self.cfg.get("SEARCH_METADATA_MAX_CHARS", 500, type=int))
+        self.metadata_allowed_keys = parse_allowed_keys(self.cfg.get("SEARCH_METADATA_ALLOWED_KEYS", "", type=str))
 
         # Per-request context (kept in memory only)
         self._request_api_access_token: Optional[str] = None
@@ -583,9 +599,14 @@ class SearchClient:
         try:
             logging.info("[Retrieval] Using Azure AI Search for document retrieval")
 
-            # Build search body according to search approach
+            # Build search body according to search approach. custom_metadata is
+            # only added to the select when the flag is on; otherwise the select
+            # string stays exactly as before so pre-#487 indexes keep working.
+            select_fields = "title,content,url,filepath,chunk_id"
+            if self.include_metadata_in_context:
+                select_fields += ",custom_metadata"
             search_body: Dict[str, Any] = {
-                "select": "title,content,url,filepath,chunk_id",
+                "select": select_fields,
                 "top": self.search_top_k
             }
 
@@ -639,6 +660,19 @@ class SearchClient:
                 link = result.get('filepath') or result.get('url', '') or ''
                 content = result.get('content', '')
 
+                # Prepend the formatted metadata block before content when enabled.
+                # Read defensively: the field may be absent or null on a result.
+                raw_metadata = None
+                if self.include_metadata_in_context:
+                    raw_metadata = result.get("custom_metadata") or []
+                    metadata_block = format_custom_metadata(
+                        raw_metadata,
+                        self.metadata_max_chars,
+                        self.metadata_allowed_keys,
+                    )
+                    if metadata_block:
+                        content = f"{metadata_block}\n\n{content}"
+
                 # Debug log each document with formatted output (remove line breaks)
                 content_preview = content[:200] if len(content) > 200 else content
                 content_preview = ' '.join(content_preview.split())  # Replace all whitespace/newlines with single space
@@ -647,7 +681,8 @@ class SearchClient:
                 search_result = SearchResult(
                     title=title,
                     link=link,
-                    content=content
+                    content=content,
+                    custom_metadata=raw_metadata,
                 )
                 results_list.append(search_result.model_dump())
 

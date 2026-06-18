@@ -32,6 +32,8 @@ from azure.storage.blob.aio import BlobClient as AzureBlobClient
 
 from connectors.multimodal_chat_client import MULTIMODAL_PREFIX
 from connectors.search import _classify_retrieval_error, build_conversation_filter
+from dependencies import get_config
+from util.metadata import format_custom_metadata, parse_allowed_keys
 
 logger = logging.getLogger(__name__)
 
@@ -260,13 +262,24 @@ class MultimodalSearchContextProvider(ContextProvider):
         )
 
         # ---- Build search parameters ----
+        # Custom metadata in context (default OFF). Only select the field when
+        # enabled so pre-#487 indexes (which lack it) are not 400'd by Search.
+        cfg = get_config()
+        include_metadata = cfg.get("SEARCH_INCLUDE_METADATA_IN_CONTEXT", False, type=bool)
+        metadata_max_chars = int(cfg.get("SEARCH_METADATA_MAX_CHARS", 500, type=int))
+        metadata_allowed_keys = parse_allowed_keys(cfg.get("SEARCH_METADATA_ALLOWED_KEYS", "", type=str))
+
+        select_fields = [
+            "id", "content", "title", "filepath", "url",
+            "relatedImages", "imageCaptions",
+        ]
+        if include_metadata:
+            select_fields = select_fields + ["custom_metadata"]
+
         search_params: dict[str, Any] = {
             "search_text": query,
             "top": self._top_k,
-            "select": [
-                "id", "content", "title", "filepath", "url",
-                "relatedImages", "imageCaptions",
-            ],
+            "select": select_fields,
         }
 
         # Conversation scoping: only this conversation + shared/global chunks.
@@ -501,6 +514,16 @@ class MultimodalSearchContextProvider(ContextProvider):
             # Build content: header + text interleaved with images at original positions
             header = f"### [{title}]({link})" if link else f"### {title}"
             content_parts.append({"type": "text", "text": f"\n\n---\n\n{header}"})
+
+            # Prepend the formatted metadata block before the document content.
+            if include_metadata:
+                metadata_block = format_custom_metadata(
+                    doc.get("custom_metadata") or [],
+                    metadata_max_chars,
+                    metadata_allowed_keys,
+                )
+                if metadata_block:
+                    content_parts.append({"type": "text", "text": f"\n{metadata_block}"})
 
             # Inline pass: figures whose <figure> tag falls within the display text
             inline_matches = list(_FIGURE_RE.finditer(display_text))
