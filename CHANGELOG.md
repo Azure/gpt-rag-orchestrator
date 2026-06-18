@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **Admin dashboard at `/dashboard` (refs [Azure/GPT-RAG#511](https://github.com/Azure/GPT-RAG/issues/511)):** A new opt-in, read-only dashboard mounted by FastAPI when `ENABLE_DASHBOARD=true` in App Configuration. The dashboard has two tabs — **Overview** (today / 7-day / 30-day conversation counts, a conversations-over-time line chart, average user turns per conversation, and active user count) and **Conversations** (paginated newest-first list with a detail view that renders the full message history). Data is read cross-partition from the existing conversation/history Cosmos container (`CONVERSATIONS_DATABASE_CONTAINER` in `DATABASE_NAME`), with a 60-second in-memory cache on the overview query to keep refreshes cheap. When authentication is on, every `/api/dashboard/*` route (except `/api/dashboard/version`) requires the caller's bearer token to include the `Admin` app role from Entra; the `/dashboard` HTML page itself is open so the SPA can load and render an access-denied state on 403. When `ENABLE_DASHBOARD=false` (the default) neither the page nor the API routes are registered. The frontend is a Vite + React + TypeScript + Tailwind SPA following the same component conventions used by `gpt-rag-ingestion`, with Recharts added for the time-series chart; the production bundle is built into `src/static` by a new `node:20-slim` stage in the `Dockerfile`.
+
 ## [v2.8.8] - 2026-06-18
 
 ### Added

@@ -42,6 +42,9 @@ from constants import APPLICATION_INSIGHTS_CONNECTION_STRING, APP_NAME
 from util.tools import is_azure_environment
 from util.jwt_utils import extract_bearer_token
 
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
 # ----------------------------------------
 # Initialization and logging
 # - Minimal early logging so config/auth warnings are visible during startup
@@ -782,6 +785,44 @@ async def delete_conversation(
 # Instrumentation
 HTTPXClientInstrumentor().instrument()
 FastAPIInstrumentor.instrument_app(app)
+
+# ----------------------------------------
+# Admin dashboard (opt-in)
+# ----------------------------------------
+# Mounted only when ``ENABLE_DASHBOARD`` is true so the dashboard surface
+# does not exist by default. The HTML page at ``/dashboard`` is open (the
+# SPA renders an access-denied state on 403 from the API). All API routes
+# under ``/api/dashboard`` are gated by the Admin app role when auth is on.
+_dashboard_enabled = bool(get_config().get("ENABLE_DASHBOARD", default=False, type=bool))
+if _dashboard_enabled:
+    logging.info("[startup] ENABLE_DASHBOARD=true — mounting admin dashboard at /dashboard")
+    from api.dashboard import router as dashboard_router
+
+    app.include_router(dashboard_router)
+
+    _static_dir = Path(__file__).resolve().parent / "static"
+    if _static_dir.is_dir():
+        _assets_dir = _static_dir / "assets"
+        if _assets_dir.is_dir():
+            app.mount(
+                "/assets",
+                StaticFiles(directory=str(_assets_dir)),
+                name="dashboard-assets",
+            )
+
+        @app.get("/logo.png", include_in_schema=False)
+        async def dashboard_logo():
+            return FileResponse(str(_static_dir / "logo.png"))
+
+        @app.get("/dashboard", include_in_schema=False)
+        async def dashboard_index():
+            return FileResponse(str(_static_dir / "index.html"))
+    else:
+        logging.warning(
+            "[startup] ENABLE_DASHBOARD=true but %s does not exist — frontend not built. "
+            "Run 'npm run build' inside frontend/ or rebuild the Docker image.",
+            _static_dir,
+        )
 
 # Run the app locally (avoid nested event loop when started by uvicorn CLI)
 if __name__ == "__main__" and not is_azure_environment():

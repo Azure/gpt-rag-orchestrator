@@ -1,3 +1,18 @@
+# ---------------------------------------------------------------------------
+# Stage 1: build the dashboard SPA. The output is copied into the Python
+# image below and served by FastAPI when ENABLE_DASHBOARD is true.
+# ---------------------------------------------------------------------------
+FROM node:20-slim AS frontend-build
+WORKDIR /build
+COPY frontend/package*.json ./frontend/
+RUN cd frontend && npm install --no-audit --no-fund
+COPY frontend/ ./frontend/
+# Vite outDir is configured to '../src/static' so the bundle lands here:
+RUN cd frontend && npm run build
+
+# ---------------------------------------------------------------------------
+# Stage 2: orchestrator runtime
+# ---------------------------------------------------------------------------
 # Use the official slim Python 3.12 image
 FROM python:3.12-slim
 
@@ -40,6 +55,9 @@ RUN pip install --upgrade pip \
 
 # 7. Copy app code, expose port, and launch
 COPY . .
+# Copy the pre-built dashboard bundle from the frontend stage. When
+# ENABLE_DASHBOARD is false this is unused; when true, FastAPI serves it.
+COPY --from=frontend-build /build/src/static ./src/static
 EXPOSE 8080
 ENV PYTHONPATH="/app/src"
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
