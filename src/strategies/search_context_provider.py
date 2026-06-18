@@ -19,7 +19,7 @@ from azure.core.credentials_async import AsyncTokenCredential
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizedQuery, QueryType, QueryCaptionType
 
-from connectors.search import build_conversation_filter
+from connectors.search import _classify_retrieval_error, build_conversation_filter
 logger = logging.getLogger(__name__)
 
 _CONTEXT_PROMPT = (
@@ -154,7 +154,19 @@ class SearchContextProvider(ContextProvider):
                     header = f"### [{title}]({link})" if link else f"### {title}"
                     parts.append(f"{header}\n{content}")
         except Exception as e:
-            logger.error("[SearchContextProvider] Search failed in %.2fs: %s", time.time() - search_start, e)
+            level, marker = _classify_retrieval_error(e)
+            logger.log(
+                level,
+                "%s Search failed in %.2fs: %s",
+                marker,
+                time.time() - search_start,
+                e,
+                exc_info=True,
+                extra={
+                    "retrieval_index": self._index_name,
+                    "retrieval_credential_type": "obo" if obo_token else "managed_identity",
+                },
+            )
             return Context()
 
         logger.info("[SearchContextProvider] Search returned %d documents in %.2fs", len(parts), time.time() - search_start)
