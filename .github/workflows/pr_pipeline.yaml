@@ -7,41 +7,24 @@ on:
 
 jobs:
   evaluations:
+    name: evaluations
     runs-on: ubuntu-latest
-    environment:
-      name: dev
-
-    env:
-      AZURE_CLIENT_SECRET:   ${{ secrets.AZURE_CREDENTIALS_CLIENT_SECRET }}
-      AZURE_TENANT_ID:       ${{ secrets.AZURE_CREDENTIALS_TENANT_ID }}
-      AZURE_CLIENT_ID:       ${{ secrets.AZURE_CREDENTIALS_CLIENT_ID }}
-      APP_CONFIG_ENDPOINT:   ${{ vars.APP_CONFIG_ENDPOINT }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Debug APP_CONFIG_ENDPOINT
-        run: |
-          echo "APP_CONFIG_ENDPOINT=[$APP_CONFIG_ENDPOINT]" 
-
-      - name: Login to Azure CLI
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
 
-      - name: Run evaluation
+      - name: Install test dependencies
         run: |
-          chmod +x evaluations/evaluate.sh
-          ./evaluations/evaluate.sh --skip-eval
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-mock
 
-      - name: Upload evaluation results
-        uses: actions/upload-artifact@v4
-        with:
-          name: evaluation-results
-          path: evaluations/evaluation-results.json
+      - name: Run unit tests
+        run: pytest -q
