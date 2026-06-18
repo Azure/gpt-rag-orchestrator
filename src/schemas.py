@@ -137,6 +137,69 @@ class ConversationUpdateResponse(BaseModel):
         populate_by_name = True
 
 
+# ---------------------------------------------------------------------------
+# Dashboard schemas
+# ---------------------------------------------------------------------------
+
+class DashboardDailyPoint(BaseModel):
+    """One bucket of the conversations-per-day series for the overview chart."""
+    date: str = Field(..., description="UTC date in YYYY-MM-DD format")
+    count: int = Field(..., ge=0, description="Number of conversations created on that date")
+
+
+class DashboardOverview(BaseModel):
+    """Aggregated metrics shown on the dashboard Overview tab."""
+    total: int = Field(..., ge=0, description="Total non-deleted conversations in the store")
+    today: int = Field(..., ge=0, description="Conversations created in the last 24 hours")
+    last_7_days: int = Field(..., ge=0, description="Conversations created in the last 7 days")
+    last_30_days: int = Field(..., ge=0, description="Conversations created in the last 30 days")
+    active_users: int = Field(..., ge=0, description="Distinct principal_ids that started a conversation in the window")
+    avg_turns: float = Field(..., ge=0, description="Average user turns per conversation in the window")
+    conversations_per_day: List[DashboardDailyPoint] = Field(
+        default_factory=list, description="Dense daily series across the requested window"
+    )
+    window_days: int = Field(..., ge=1, description="Size of the trailing window in days")
+
+
+class DashboardConversationSummary(BaseModel):
+    """Compact conversation row used in the dashboard Conversations table."""
+    id: str = Field(..., description="Conversation identifier")
+    name: Optional[str] = Field(None, description="User-provided name, if any")
+    principal_id: Optional[str] = Field(None, description="Owner principal id")
+    created_at: Optional[int] = Field(None, alias="_ts", description="Unix epoch seconds when the conversation was created")
+    last_updated: Optional[str] = Field(None, alias="lastUpdated", description="Last activity timestamp (ISO 8601)")
+    message_count: Optional[int] = Field(None, description="Number of messages stored in the conversation")
+
+    class Config:
+        populate_by_name = True
+
+
+class DashboardConversationListResponse(BaseModel):
+    """Paginated list response for the dashboard Conversations tab."""
+    conversations: List[DashboardConversationSummary] = Field(default_factory=list)
+    has_more: bool = Field(..., description="Whether more results exist beyond this page")
+    skip: int = Field(..., ge=0)
+    limit: int = Field(..., ge=1)
+
+
+class DashboardConversationDetail(BaseModel):
+    """Full conversation document returned by the dashboard detail view."""
+    id: str
+    name: Optional[str] = None
+    principal_id: Optional[str] = None
+    created_at: Optional[int] = Field(None, alias="_ts")
+    last_updated: Optional[str] = Field(None, alias="lastUpdated")
+    messages: List[Dict[str, Any]] = Field(default_factory=list)
+
+    class Config:
+        populate_by_name = True
+
+
+class DashboardVersionResponse(BaseModel):
+    """Tiny response used by the frontend to render the version chip in the header."""
+    version: str
+
+
 # Reusable OpenAPI responses for the orchestrator endpoint. Put here so
 # route decorators in `main.py` remain compact and the examples are centralized.
 ORCHESTRATOR_RESPONSES = {

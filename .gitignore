@@ -191,3 +191,5 @@ cython_debug/
 #.idea/
 
 .python_packages
+# Built dashboard SPA (produced by frontend/ build)
+src/static/

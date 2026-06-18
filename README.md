@@ -33,6 +33,31 @@ The **GPT-RAG Orchestrator** service is an agentic orchestration layer built on 
 
 For comprehensive information about GPT-RAG, including architecture details, configuration guides, best practices, troubleshooting resources, deployment guidance, customization options, and advanced usage scenarios, please refer to the [official project documentation](https://azure.github.io/GPT-RAG/).
 
+## Dashboard
+
+The orchestrator ships with an optional admin dashboard mounted at `/dashboard`. It exposes two tabs:
+
+- **Overview**: conversation counts for today, the last 7 days, and the last 30 days; a conversations-over-time chart; average user turns per conversation; and the number of active users.
+- **Conversations**: a paginated, newest-first list of conversations across all users, with a detail view that renders the full message history.
+
+The data comes from the existing conversation/history Cosmos DB container used by the orchestrator (`CONVERSATIONS_DATABASE_CONTAINER` in `DATABASE_NAME`). The dashboard is read-only.
+
+**Enabling the dashboard.** It is disabled by default. Set the App Configuration value `ENABLE_DASHBOARD=true` to mount it. When `ENABLE_DASHBOARD=false` (the default), the `/dashboard` HTML page and every `/api/dashboard/*` route are not registered at all.
+
+**Access control.** When authentication is on (`OAUTH_AZURE_AD_TENANT_ID` is configured), the entire `/api/dashboard/*` surface — except the small `/api/dashboard/version` endpoint used for the header chip — requires the caller's bearer token to include the `Admin` app role. The `/dashboard` HTML page itself is served openly so the SPA can load and render its own access-denied state on a 403 response. When authentication is off, the dashboard is open like the rest of the app in development.
+
+**Token scope.** The frontend must request an access token with the orchestrator's own API scope (`api://<client_id>/...`), not a Microsoft Graph scope. App roles are issued in the `roles` claim of an access token only when the token is requested for the application that defines those roles, so a Graph-scoped token will not surface the `Admin` role and every dashboard call will return 403.
+
+**Building the dashboard bundle.** Production builds happen automatically as part of the `Dockerfile` (a `node:20-slim` stage runs `npm run build` and copies the static assets into `src/static`). For local development you can run the Vite dev server with hot reload:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The dev server proxies `/api` to `http://localhost:9000`, which is where the orchestrator listens locally.
+
 ## Prerequisites
 
 Before deploying the application, you must provision the infrastructure as described in the [GPT-RAG](https://github.com/azure/gpt-rag) repo. This includes creating all necessary Azure resources required to support the application runtime.
