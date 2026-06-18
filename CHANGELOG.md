@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **Optional `custom_metadata` in the LLM context block (refs [Azure/GPT-RAG#506](https://github.com/Azure/GPT-RAG/issues/506)):** Retrieval can now surface the already-indexed `custom_metadata` field (from [Azure/GPT-RAG#487](https://github.com/Azure/GPT-RAG/issues/487)) into each document's context, behind a default-off flag. When `SEARCH_INCLUDE_METADATA_IN_CONTEXT` is `true`, the connector path (`search_knowledge_base`) and both context providers (`SearchContextProvider`, `MultimodalSearchContextProvider`) select the field and prepend a compact, deterministic `[Document metadata]` block (sorted `key: value` lines) before the document content. `SEARCH_METADATA_MAX_CHARS` (default `500`) caps the block size and `SEARCH_METADATA_ALLOWED_KEYS` (CSV, default empty = all keys) restricts which keys are shown. The change is additive and orchestrator-only — no ingestion, embedding, or vector changes. When the flag is off, `custom_metadata` is not added to the select and retrieval behavior is byte-for-byte unchanged; this is required because pre-#487 indexes lack the field and selecting a missing field makes Azure AI Search reject the whole query.
+
 ## [v2.8.7] - 2026-06-18
 
 ### Changed
