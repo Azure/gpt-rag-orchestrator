@@ -31,7 +31,7 @@ from azure.search.documents.models import VectorizedQuery, QueryType, QueryCapti
 from azure.storage.blob.aio import BlobClient as AzureBlobClient
 
 from connectors.multimodal_chat_client import MULTIMODAL_PREFIX
-from connectors.search import build_conversation_filter
+from connectors.search import _classify_retrieval_error, build_conversation_filter
 
 logger = logging.getLogger(__name__)
 
@@ -331,9 +331,18 @@ class MultimodalSearchContextProvider(ContextProvider):
             # OBO token exchange succeeded but the resulting token is invalid
             # or lacks the required consent, causing the search to be rejected.
             if "x_ms_query_source_authorization" in search_params:
-                logger.warning(
-                    "[MultimodalSearchContextProvider] Search failed with OBO header in %.2fs: %s — retrying without permission filter",
-                    time.time() - search_start, e,
+                level, marker = _classify_retrieval_error(e)
+                logger.log(
+                    level,
+                    "%s Search failed with OBO header in %.2fs: %s — retrying without permission filter",
+                    marker,
+                    time.time() - search_start,
+                    e,
+                    exc_info=True,
+                    extra={
+                        "retrieval_index": self._index_name,
+                        "retrieval_credential_type": "obo",
+                    },
                 )
                 search_params.pop("x_ms_query_source_authorization")
                 try:
@@ -347,15 +356,33 @@ class MultimodalSearchContextProvider(ContextProvider):
                         async for doc in results:
                             docs.append(doc)
                 except Exception as retry_e:
-                    logger.error(
-                        "[MultimodalSearchContextProvider] Search retry without OBO also failed in %.2fs: %s",
-                        time.time() - search_start, retry_e,
+                    level, marker = _classify_retrieval_error(retry_e)
+                    logger.log(
+                        level,
+                        "%s Search retry without OBO also failed in %.2fs: %s",
+                        marker,
+                        time.time() - search_start,
+                        retry_e,
+                        exc_info=True,
+                        extra={
+                            "retrieval_index": self._index_name,
+                            "retrieval_credential_type": "managed_identity",
+                        },
                     )
                     return Context()
             else:
-                logger.error(
-                    "[MultimodalSearchContextProvider] Search failed in %.2fs: %s",
-                    time.time() - search_start, e,
+                level, marker = _classify_retrieval_error(e)
+                logger.log(
+                    level,
+                    "%s Search failed in %.2fs: %s",
+                    marker,
+                    time.time() - search_start,
+                    e,
+                    exc_info=True,
+                    extra={
+                        "retrieval_index": self._index_name,
+                        "retrieval_credential_type": "managed_identity",
+                    },
                 )
                 return Context()
 
