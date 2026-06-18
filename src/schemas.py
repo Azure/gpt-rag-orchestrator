@@ -200,6 +200,87 @@ class DashboardVersionResponse(BaseModel):
     version: str
 
 
+# ---------------------------------------------------------------------------
+# Configuration tab (admin-only)
+# ---------------------------------------------------------------------------
+
+class DashboardSettingOption(BaseModel):
+    """One entry in an enum dropdown rendered on the Configuration tab."""
+    value: str
+    label: str
+    description: str
+
+
+class DashboardSettingField(BaseModel):
+    """A single editable setting along with its current value and metadata."""
+    key: str = Field(..., description="App Configuration key")
+    type: str = Field(..., description="One of 'enum', 'bool', 'int', 'float'")
+    value: Any = Field(..., description="Current value typed per `type`")
+    default: Any = Field(..., description="Default applied when the key is absent")
+    label: str = Field(..., description="Short human-readable name")
+    description: str = Field(..., description="Tooltip body explaining the setting")
+    options: Optional[List[DashboardSettingOption]] = Field(
+        None, description="Allowed values for enum fields"
+    )
+    min: Optional[float] = Field(None, description="Inclusive lower bound for numeric fields")
+    max: Optional[float] = Field(None, description="Inclusive upper bound for numeric fields")
+    step: Optional[float] = Field(None, description="Recommended UI step for numeric fields")
+    unit: Optional[str] = Field(None, description="Optional unit suffix, e.g. 'tokens'")
+
+
+class DashboardSettingSection(BaseModel):
+    """A group of related settings rendered as one card."""
+    id: str
+    label: str
+    description: str
+    settings: List[DashboardSettingField]
+
+
+class DashboardConfigResponse(BaseModel):
+    """Full payload for the Configuration tab."""
+    label: str = Field(..., description="App Configuration label written to on PUT")
+    sections: List[DashboardSettingSection]
+
+
+class DashboardConfigUpdateItem(BaseModel):
+    """One key/value pair sent by the Save action."""
+    key: str
+    value: Any
+
+
+class DashboardConfigUpdateRequest(BaseModel):
+    """Body for ``PUT /api/dashboard/config``."""
+    settings: List[DashboardConfigUpdateItem] = Field(default_factory=list)
+
+
+class DashboardConfigFieldError(BaseModel):
+    """Per-key validation or write error returned with 422 / 500."""
+    key: str
+    error: str
+
+
+class DashboardConfigErrorResponse(BaseModel):
+    """422 / 500 payload describing what went wrong, per-key."""
+    errors: List[DashboardConfigFieldError]
+
+
+class DashboardConfigRefreshResponse(BaseModel):
+    """Body returned by ``POST /api/dashboard/config/refresh``."""
+    status: str = "refreshed"
+    detail: Optional[str] = None
+
+
+class DashboardConfigApplyResponse(BaseModel):
+    """Body returned by ``POST /api/dashboard/config/apply``.
+
+    The endpoint name says what it does: refresh the in-process cache so
+    subsequent requests pick up new values. The orchestrator does not perform
+    a container restart here — see the endpoint docstring for the rationale.
+    """
+    status: str
+    detail: str
+
+
 # Reusable OpenAPI responses for the orchestrator endpoint. Put here so
 # route decorators in `main.py` remain compact and the examples are centralized.
 ORCHESTRATOR_RESPONSES = {

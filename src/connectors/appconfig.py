@@ -2,6 +2,10 @@ import os
 import logging
 from typing import Any
 from azure.core.exceptions import ClientAuthenticationError
+from azure.appconfiguration import (
+    AzureAppConfigurationClient,
+    ConfigurationSetting,
+)
 from azure.appconfiguration.provider import (
     AzureAppConfigurationKeyVaultOptions,
     load,
@@ -186,3 +190,45 @@ class AppConfigClient:
     def read_env_boolean(self, var_name, default=False):
         value = self.get_value(var_name, str(default)).strip().lower()
         return value in ['true', '1', 'yes']
+
+    # -----------------------------------------------------------------
+    # Write support (used by the admin dashboard Configuration tab)
+    # -----------------------------------------------------------------
+
+    def set_value(self, key: str, value: Any, label: str = "gpt-rag-orchestrator") -> None:
+        """Write a single key/value pair back to Azure App Configuration.
+
+        The read-side of this class uses the provider's bulk ``load`` helper,
+        which is read-only. For writes we instantiate the raw management
+        client per call — that's cheap and avoids holding extra long-lived
+        connections.
+
+        Values are persisted as strings (App Configuration is a string store).
+        Booleans are normalised to ``"true"`` / ``"false"`` so the same
+        precedence rules used by :meth:`get_value` apply on read back.
+
+        Raises:
+            RuntimeError: when App Configuration is disabled (no endpoint).
+            Exception: re-raises any underlying Azure SDK error so the caller
+                can surface it with a clear HTTP response.
+        """
+        if self.disabled:
+            raise RuntimeError(
+                "Azure App Configuration is disabled or not configured; "
+                "cannot persist setting."
+            )
+
+        endpoint = os.getenv("APP_CONFIG_ENDPOINT")
+        if not endpoint:
+            raise RuntimeError("APP_CONFIG_ENDPOINT is not set.")
+
+        if isinstance(value, bool):
+            str_value = "true" if value else "false"
+        else:
+            str_value = str(value)
+
+        write_client = AzureAppConfigurationClient(
+            base_url=endpoint, credential=self.credential
+        )
+        setting = ConfigurationSetting(key=key, label=label, value=str_value)
+        write_client.set_configuration_setting(setting)

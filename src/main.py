@@ -797,8 +797,10 @@ _dashboard_enabled = bool(get_config().get("ENABLE_DASHBOARD", default=False, ty
 if _dashboard_enabled:
     logging.info("[startup] ENABLE_DASHBOARD=true — mounting admin dashboard at /dashboard")
     from api.dashboard import router as dashboard_router
+    from api.dashboard_config import router as dashboard_config_router
 
     app.include_router(dashboard_router)
+    app.include_router(dashboard_config_router)
 
     _static_dir = Path(__file__).resolve().parent / "static"
     if _static_dir.is_dir():
