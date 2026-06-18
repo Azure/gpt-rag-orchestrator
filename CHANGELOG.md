@@ -1,6 +1,11 @@
 # Changelog
 
-## [Unreleased]
+## [v2.8.7] - 2026-06-18
+
+### Changed
+- **Standardized logging for swallowed retrieval and AI Search auth failures (refs [Azure/GPT-RAG#508](https://github.com/Azure/GPT-RAG/issues/508)):** The retrieval connector (`search_knowledge_base`, OBO token helpers, trimming fallback), the text retrieval provider (`SearchContextProvider`), and the multimodal retrieval provider (`MultimodalSearchContextProvider`) now emit structured log markers at every point where a retrieval or AI Search authentication failure used to be swallowed silently. AI Search 401/403 responses log `[Retrieval][AUTH_FAILURE]` at `ERROR`; other retrieval failures log `[Retrieval][ERROR]` at `WARNING`. Each record carries structured `extra` fields (`retrieval_status`, `retrieval_index`, `retrieval_credential_type`) so operators can pinpoint the failing call, index, and credential type (managed identity vs OBO). Behavior is unchanged: `search_knowledge_base` still returns `{"results": [], "error": "search_failed"}`, `SearchContextProvider.invoking` still returns an empty `Context()`, and OBO helpers still return `None` on failure. Two `caplog` tests lock the marker contract.
+
+## [v2.8.6] - 2026-06-17
 
 ### Fixed
 - **`single_agent_rag` follow-up turns with tool calls now resume from a stable Foundry conversation object (issue [Azure/GPT-RAG#505](https://github.com/Azure/GPT-RAG/issues/505)):** The strategy now creates one server-side `conv_` conversation per chat and reuses it across turns, preventing follow-up tool outputs from being chained to the wrong prior `resp_` id and failing with `400 No tool call found for function call output`.
