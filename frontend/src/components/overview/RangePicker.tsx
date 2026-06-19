@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { OverviewRange, RangePreset } from "./range";
+import { todayIso, type OverviewRange, type RangePreset } from "./range";
 
 interface RangePickerProps {
   value: OverviewRange;
@@ -13,10 +13,6 @@ const PRESETS: Array<{ id: RangePreset; label: string }> = [
   { id: "90d", label: "Last 90 days" },
   { id: "custom", label: "Custom range" },
 ];
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 function isoDaysAgo(days: number): string {
   const d = new Date();
@@ -52,6 +48,11 @@ export function RangePicker({ value, onChange }: RangePickerProps) {
       from: field === "from" ? next : value.from,
       to: field === "to" ? next : value.to,
     };
+    const today = todayIso();
+    if ((draft.from && draft.from > today) || (draft.to && draft.to > today)) {
+      setError("Dates can't be in the future.");
+      return;
+    }
     if (draft.from && draft.to) {
       if (draft.from > draft.to) {
         setError("Start date must be on or before end date.");
@@ -109,6 +110,7 @@ export function RangePicker({ value, onChange }: RangePickerProps) {
             <input
               type="date"
               value={value.from ?? ""}
+              max={todayIso()}
               onChange={(e) => updateCustom("from", e.target.value)}
               className="rounded-md border bg-background px-2 py-1 text-xs"
               aria-label="Custom range start date"
@@ -119,6 +121,7 @@ export function RangePicker({ value, onChange }: RangePickerProps) {
             <input
               type="date"
               value={value.to ?? ""}
+              max={todayIso()}
               onChange={(e) => updateCustom("to", e.target.value)}
               className="rounded-md border bg-background px-2 py-1 text-xs"
               aria-label="Custom range end date"

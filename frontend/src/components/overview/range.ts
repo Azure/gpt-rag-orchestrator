@@ -8,6 +8,23 @@ export interface OverviewRange {
   to?: string;
 }
 
+/** Today's date in YYYY-MM-DD form, UTC. */
+export function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Clamp a YYYY-MM-DD date string to today's UTC date when it is in the
+ * future. Used by RangePicker and by the persisted-range loader so a stale
+ * future value from localStorage (set on a previous session) cannot leak
+ * past the picker's max=today input cap (#247 Bug 1).
+ */
+export function clampToToday(value: string | undefined): string | undefined {
+  if (!value) return value;
+  const today = todayIso();
+  return value > today ? today : value;
+}
+
 /** Human label for the active range, used in the Active users card hint. */
 export function rangeLabel(range: OverviewRange): string {
   switch (range.preset) {

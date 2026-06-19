@@ -490,3 +490,138 @@ def test_overview_cache_key_is_range_specific(monkeypatch):
     # Same range called twice -> cache hit -> still two total backend calls.
     client.get("/api/dashboard/overview?from=2026-06-08&to=2026-06-14")
     assert fetch_mock.await_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Overview ``to`` is end-of-day UTC inclusive (#247 Bug 2)
+# ---------------------------------------------------------------------------
+
+
+def test_overview_to_is_end_of_day_inclusive(monkeypatch):
+    """``to=2026-06-19`` must include docs created during 2026-06-19.
+
+    The previous build parsed ``to`` as midnight UTC of that day, which
+    dropped everything during the last day of the range -- visible to
+    operators as "today's conversations missing from the Overview chart"
+    (#247 Bug 2). With the end-of-day fix, a doc with ``_ts`` at
+    2026-06-19T13:00:00Z must land inside the window.
+    """
+    from api import dashboard
+    from connectors import cosmosdb_admin
+
+    cosmosdb_admin.cache_clear()
+    fetch_mock = AsyncMock(return_value=_overview_payload())
+    monkeypatch.setattr(dashboard, "fetch_overview", fetch_mock)
+    app = _make_app(admin_dep_override=_allow_admin)
+    client = TestClient(app)
+    r = client.get("/api/dashboard/overview?from=2026-06-15&to=2026-06-19")
+    assert r.status_code == 200, r.text
+
+    kwargs = fetch_mock.await_args.kwargs
+    # to_ts must be end-of-day UTC (23:59:59) so the Cosmos ``_ts <= to_ts``
+    # filter in fetch_overview includes the whole last day.
+    from datetime import datetime, timezone
+
+    expected_to = int(
+        datetime(2026, 6, 19, 23, 59, 59, tzinfo=timezone.utc).timestamp()
+    )
+    expected_from = int(
+        datetime(2026, 6, 15, 0, 0, 0, tzinfo=timezone.utc).timestamp()
+    )
+    assert kwargs["from_ts"] == expected_from
+    assert kwargs["to_ts"] == expected_to
+
+    # And a sample doc at 13:00 on 2026-06-19 must be inside the window.
+    doc_ts = int(
+        datetime(2026, 6, 19, 13, 0, 0, tzinfo=timezone.utc).timestamp()
+    )
+    assert kwargs["from_ts"] <= doc_ts <= kwargs["to_ts"]
+
+
+def test_overview_rejects_future_dates(monkeypatch):
+    """Custom range bounds past today's UTC end-of-day must 400 (#247 Bug 1)."""
+    from api import dashboard
+    from connectors import cosmosdb_admin
+
+    cosmosdb_admin.cache_clear()
+    monkeypatch.setattr(
+        dashboard, "fetch_overview", AsyncMock(return_value=_overview_payload())
+    )
+    app = _make_app(admin_dep_override=_allow_admin)
+    client = TestClient(app)
+    # 2099-01-01 is comfortably past today's date in any plausible CI clock.
+    r = client.get("/api/dashboard/overview?from=2026-06-15&to=2099-01-01")
+    assert r.status_code == 400
+    assert "future" in r.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Conversation detail reconstruction from ``questions[]`` (#247 Bug 4)
+# ---------------------------------------------------------------------------
+
+
+def test_conversation_detail_reconstructs_from_questions(monkeypatch):
+    """Docs persist user prompts under ``questions[]`` not ``messages[]``.
+
+    The orchestrator stores assistant replies on the Azure AI Foundry agent
+    thread, so before this fix every dashboard conversation rendered as
+    ``user (empty)``/``assistant (empty)`` cards (#247 Bug 4). The detail
+    endpoint now projects ``questions[]`` into user-role message entries and
+    passes ``thread_id``/``feedback`` through so the UI can deep-link to
+    Foundry instead of showing nothing.
+    """
+    from api import dashboard
+
+    doc = {
+        "id": "c-7",
+        "name": "What is the fuel tank capacity of the Volkswagen d...",
+        "principal_id": "user-42",
+        "_ts": 1700000000,
+        "lastUpdated": "2026-06-19T13:05:00Z",
+        "questions": [
+            {"question_id": "q1", "text": "What is the fuel tank capacity?"},
+            {"question_id": "q2", "text": "And the trunk volume?"},
+        ],
+        "thread_id": "thread_abc123",
+        "feedback": [{"question_id": "q1", "rating": "thumbs_up"}],
+    }
+    monkeypatch.setattr(
+        dashboard, "read_conversation", AsyncMock(return_value=doc)
+    )
+    app = _make_app(admin_dep_override=_allow_admin)
+    client = TestClient(app)
+    r = client.get("/api/dashboard/conversations/c-7")
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["id"] == "c-7"
+    assert body["thread_id"] == "thread_abc123"
+    assert len(body["feedback"]) == 1
+    assert len(body["messages"]) == 2
+    assert body["messages"][0]["role"] == "user"
+    assert body["messages"][0]["content"] == "What is the fuel tank capacity?"
+    assert body["messages"][0]["question_id"] == "q1"
+    assert body["messages"][1]["role"] == "user"
+    assert body["messages"][1]["content"] == "And the trunk volume?"
+
+
+def test_conversation_detail_empty_questions_returns_empty_messages(monkeypatch):
+    """A doc with no ``questions`` and no ``messages`` still returns 200."""
+    from api import dashboard
+
+    doc = {
+        "id": "c-empty",
+        "principal_id": "user-1",
+        "_ts": 1700000000,
+    }
+    monkeypatch.setattr(
+        dashboard, "read_conversation", AsyncMock(return_value=doc)
+    )
+    app = _make_app(admin_dep_override=_allow_admin)
+    client = TestClient(app)
+    r = client.get("/api/dashboard/conversations/c-empty")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["messages"] == []
+    assert body["thread_id"] is None
+    assert body["feedback"] == []
