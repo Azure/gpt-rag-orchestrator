@@ -19,6 +19,15 @@ __pycache__/
 # Azure Developer CLI local state
 .azure/
 
+# Frontend build artifacts — the Docker frontend stage runs ``npm ci``
+# and ``npm run build`` from a clean copy, so shipping a local
+# ``node_modules`` (hundreds of MB) or a stale ``dist`` to the ACR build
+# context just slows the upload and risks platform/arch mismatches.
+# Discovered while shipping v2.8.10 (~700 MB context); also keeps the
+# v2.8.11 ACR build fast.
+frontend/node_modules/
+frontend/dist/
+
 # OS
 .DS_Store
 Thumbs.db

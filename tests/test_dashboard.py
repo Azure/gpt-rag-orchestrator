@@ -100,6 +100,46 @@ async def test_require_admin_accepts_admin_role():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
+async def test_fetch_overview_buckets_anonymous_principal_ids():
+    """Anonymous traffic uses ``anonymous-<conversation_id>`` as both partition
+    key and ``principal_id`` (to avoid hot-partitioning, see
+    ``orchestration/orchestrator.py``). Counting those naively makes every
+    anonymous conversation look like a distinct active user, which inflates
+    the Overview metric. Regression for the v2.8.10 sandbox bug where 57
+    anonymous conversations reported 57 active users.
+    """
+    from connectors import cosmosdb_admin
+
+    import time
+    now = int(time.time())
+    docs = [
+        # Three anonymous conversations - all the same logical user.
+        {"_ts": now - 3600, "principal_id": "anonymous-aaa", "message_count": 2},
+        {"_ts": now - 7200, "principal_id": "anonymous-bbb", "message_count": 2},
+        {"_ts": now - 10800, "principal_id": "anonymous", "message_count": 2},
+        # One authenticated user (Entra object id shape).
+        {
+            "_ts": now - 14400,
+            "principal_id": "11111111-2222-3333-4444-555555555555",
+            "message_count": 4,
+        },
+    ]
+
+    container = MagicMock()
+    container.query_items = MagicMock(return_value=_AsyncIter(docs))
+    cosmos = MagicMock()
+    cosmos.cfg.get = MagicMock(return_value="conversations")
+    cosmos._get_container = MagicMock(return_value=container)
+
+    with patch.object(cosmosdb_admin, "get_cosmosdb_client", return_value=cosmos):
+        cosmosdb_admin.cache_clear()
+        result = await cosmosdb_admin.fetch_overview(days=7)
+
+    # 1 anonymous bucket + 1 authenticated user, not 4.
+    assert result["active_users"] == 2
+
+
+@pytest.mark.asyncio
 async def test_fetch_overview_aggregates_buckets_and_users():
     from connectors import cosmosdb_admin
 

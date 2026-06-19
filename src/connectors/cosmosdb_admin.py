@@ -126,7 +126,17 @@ async def fetch_overview(
             in_window_count += 1
             pid = doc.get("principal_id")
             if pid:
-                active_users.add(str(pid))
+                pid_str = str(pid)
+                # Anonymous traffic uses ``anonymous-<conversation_id>`` as the
+                # Cosmos partition key (see ``orchestration/orchestrator.py``)
+                # to avoid hot-partitioning, and the same value is written
+                # into the ``principal_id`` field. Counting those naively
+                # produces one "active user" per anonymous conversation, which
+                # massively inflates the metric. Collapse them to a single
+                # ``anonymous`` bucket so the count reflects logical users.
+                if pid_str == "anonymous" or pid_str.startswith("anonymous-"):
+                    pid_str = "anonymous"
+                active_users.add(pid_str)
             # Count user turns. ``messages`` includes both user and assistant
             # entries; a turn is one round-trip, so divide by 2 and floor.
             msg_count = doc.get("message_count") or 0

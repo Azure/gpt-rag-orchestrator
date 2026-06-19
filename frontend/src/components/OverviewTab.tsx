@@ -152,7 +152,12 @@ export function OverviewTab() {
     return <ErrorState message="Failed to load overview" hint={error.message} />;
   }
 
-  if (loading || !data) {
+  // First load: nothing to show yet, render the spinner. After data has
+  // arrived once, keep the chart and KPIs mounted during refreshes (range
+  // changes, custom date edits) and surface the in-flight state with a small
+  // inline indicator instead of zeroing everything out (#241 follow-up:
+  // clicking "Custom range" used to unmount the chart on every keystroke).
+  if (!data) {
     return (
       <div className="flex items-center justify-center rounded-lg border bg-card p-12 text-sm text-muted-foreground">
         <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
@@ -165,13 +170,21 @@ export function OverviewTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold">Overview</h1>
-          <p className="text-xs text-muted-foreground">
-            Active window: {activeLabel} (UTC). The four KPI cards use their
-            own fixed windows.
-          </p>
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <div>
+            <h1 className="text-lg font-semibold">Overview</h1>
+            <p className="text-xs text-muted-foreground">
+              Active window: {activeLabel} (UTC). The four KPI cards use their
+              own fixed windows.
+            </p>
+          </div>
+          {loading && (
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <RefreshCw className="h-3 w-3 animate-spin" />
+              Refreshing...
+            </span>
+          )}
         </div>
         <RangePicker value={range} onChange={setRange} />
       </div>
