@@ -17,7 +17,7 @@ export const OVERVIEW_TOOLTIPS = {
   last30Days:
     "Conversations created in the last 30 days (rolling window, UTC). 'out of N total' counts every non-deleted conversation ever.",
   activeUsers:
-    "Distinct users (principal_id) who created at least one conversation in the selected window. Counts each user once regardless of how many conversations they had.",
+    "Distinct users who created at least one conversation in the selected window. Anonymous traffic is grouped under a single bucket regardless of how many sessions it produced. Authenticated users are counted by their Entra object id.",
   conversationsOverTime:
     "Daily count of new conversations across the selected window (UTC). Empty days are shown as zero.",
   engagement: "Engagement metrics scoped to the selected window.",
