@@ -20,7 +20,7 @@ import { InfoTooltip } from "./InfoTooltip";
 import {
   RangePicker,
 } from "./overview/RangePicker";
-import { rangeLabel, type OverviewRange } from "./overview/range";
+import { clampToToday, rangeLabel, type OverviewRange } from "./overview/range";
 import { OVERVIEW_TOOLTIPS } from "./overview/copy";
 
 const STORAGE_KEY = "gpt-rag-orchestrator.overview.range";
@@ -37,7 +37,14 @@ function readStoredRange(): OverviewRange {
       typeof parsed.preset === "string" &&
       ["today", "7d", "30d", "90d", "custom"].includes(parsed.preset)
     ) {
-      return parsed as OverviewRange;
+      // A previous session may have persisted a future date (Bug 1 — before
+      // the picker capped at today). Clamp on load so the picker and the
+      // overview query never start with a future bound.
+      return {
+        preset: parsed.preset as OverviewRange["preset"],
+        from: clampToToday(parsed.from),
+        to: clampToToday(parsed.to),
+      };
     }
   } catch {
     // Treat any parse error as missing preference.

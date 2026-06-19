@@ -104,8 +104,16 @@ async def get_version() -> DashboardVersionResponse:
 _MAX_RANGE_DAYS = 365
 
 
-def _parse_iso_date(value: str, field: str) -> int:
-    """Parse a YYYY-MM-DD (or full ISO) value into UTC start-of-day epoch seconds.
+def _parse_iso_date(value: str, field: str, *, end_of_day: bool = False) -> int:
+    """Parse a YYYY-MM-DD (or full ISO) value into UTC epoch seconds.
+
+    For a bare ``YYYY-MM-DD`` the result is start-of-day UTC, or end-of-day
+    UTC (``23:59:59``) when ``end_of_day`` is True. A full ISO datetime is
+    respected verbatim. This is used for the Overview ``to`` query parameter,
+    which operators expect to be inclusive (``from=2026-06-15&to=2026-06-19``
+    should include conversations created on 2026-06-19) -- the previous
+    implementation treated the date as midnight, silently dropping the whole
+    last day (#247 Bug 2).
 
     Raises 400 on a malformed value so the frontend can surface a helpful
     message instead of a server-side traceback.
@@ -118,6 +126,8 @@ def _parse_iso_date(value: str, field: str) -> int:
             dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
         else:
             dt = datetime.strptime(value, "%Y-%m-%d")
+            if end_of_day:
+                dt = dt.replace(hour=23, minute=59, second=59)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return int(dt.timestamp())
@@ -156,7 +166,20 @@ async def get_overview(
                 status_code=400, detail="Both 'from' and 'to' must be provided together"
             )
         from_ts = _parse_iso_date(from_, "from")
-        to_ts = _parse_iso_date(to, "to")
+        to_ts = _parse_iso_date(to, "to", end_of_day=True)
+        # Today's end-of-day UTC -- any bound past this is operator nonsense
+        # (and would surface as an empty chart). Frontend caps the picker at
+        # today, but we defend on the API too so a hand-crafted query still
+        # gets a 400 (#247 Bug 1).
+        today_end = int(
+            datetime.now(timezone.utc)
+            .replace(hour=23, minute=59, second=59, microsecond=0)
+            .timestamp()
+        )
+        if from_ts > today_end or to_ts > today_end:
+            raise HTTPException(
+                status_code=400, detail="'from' and 'to' cannot be in the future"
+            )
         if from_ts > to_ts:
             raise HTTPException(status_code=400, detail="'from' must be <= 'to'")
         window_days = ((to_ts - from_ts) // 86400) + 1
@@ -204,10 +227,45 @@ async def get_conversations(
     "/conversations/{conversation_id}",
     response_model=DashboardConversationDetail,
     dependencies=[Depends(require_admin)],
+    response_model_by_alias=True,
 )
 async def get_conversation_detail(conversation_id: str) -> DashboardConversationDetail:
-    """Return the full conversation document, including messages."""
+    """Return the conversation document with messages reconstructed from ``questions[]``.
+
+    The orchestrator persists user prompts under ``questions`` and stores
+    assistant replies on the Azure AI Foundry agent thread, not in Cosmos
+    (see ``src/orchestration/orchestrator.py`` lines 145-152). Previously
+    the dashboard returned ``messages: []`` for every conversation, which
+    rendered as ``user (empty)``/``assistant (empty)`` cards (#247 Bug 4).
+    We now project ``questions[]`` into user-role message entries and pass
+    ``thread_id`` and ``feedback`` through so the frontend can render a
+    friendly Foundry-deep-link note instead of empty cards.
+    """
     doc = await read_conversation(conversation_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return DashboardConversationDetail(**doc)
+
+    # Reconstruct user turns from ``questions[]`` so the dialog has something
+    # readable even though assistant replies live on the Foundry thread.
+    reconstructed: List[Dict[str, Any]] = []
+    for q in doc.get("questions") or []:
+        if not isinstance(q, dict):
+            continue
+        text = q.get("text") or q.get("question") or ""
+        reconstructed.append(
+            {
+                "role": "user",
+                "content": text,
+                "question_id": q.get("question_id"),
+            }
+        )
+
+    payload = dict(doc)
+    # Preserve any pre-existing ``messages`` (forward compatibility if a
+    # future change starts persisting them) but otherwise use the
+    # reconstructed list.
+    if not payload.get("messages"):
+        payload["messages"] = reconstructed
+    payload.setdefault("feedback", doc.get("feedback") or [])
+    payload.setdefault("thread_id", doc.get("thread_id"))
+    return DashboardConversationDetail(**payload)

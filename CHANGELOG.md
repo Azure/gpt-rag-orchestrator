@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+## [v2.8.12] - 2026-06-19
+
+### User and operator impact
+
+Patch release that fixes five operator-reported dashboard bugs against the
+v2.8.11 build ([Azure/gpt-rag-orchestrator#247](https://github.com/Azure/gpt-rag-orchestrator/issues/247)).
+The Overview Custom range picker no longer accepts future dates and the `to`
+day is now included in the chart, info tooltips render against a fully opaque
+background so the text is readable on top of cards, the Conversations dialog
+shows the prompts that were actually persisted instead of empty `(empty)`
+cards plus a friendly note explaining where the assistant transcript lives,
+and the Configuration tab's footer buttons are relabeled with sentence-case
+helper tooltips. No configuration changes are required.
+
+### Fixed
+
+- **Overview tab — Custom range accepted future dates ([#247](https://github.com/Azure/gpt-rag-orchestrator/issues/247)).** Both `From` and `To` `<input type="date">` controls now cap at today's UTC date via `max={todayIso()}`, the picker rejects any manually-typed future value with `Dates can't be in the future.`, the persisted-range loader clamps any future value left behind by an earlier session in `localStorage`, and the backend `/api/dashboard/overview` endpoint returns `400 'from' and 'to' cannot be in the future` so a hand-crafted query is rejected too.
+- **Overview tab — `to` excluded the last day of the range ([#247](https://github.com/Azure/gpt-rag-orchestrator/issues/247)).** `_parse_iso_date` parsed `to=2026-06-19` as midnight UTC, which silently dropped every conversation created during 2026-06-19 because the Cosmos predicate is `_ts <= to_ts`. The helper now takes an `end_of_day` flag and parses `to` as `23:59:59` UTC of that day, so the range is inclusive of both bounds. `window_days` math still produces the correct inclusive span. New regression test `test_overview_to_is_end_of_day_inclusive` pins the behavior.
+- **Overview tab — info tooltip rendered on a translucent background ([#247](https://github.com/Azure/gpt-rag-orchestrator/issues/247)).** The popover used `bg-popover`, which is a translucent surface token, so when the tooltip overlapped another KPI card the underlying card text bled through and made the tooltip prose unreadable. Switched the popover body to the fully opaque `bg-card` token with `border-border` and `shadow-md`, and kept the `normal-case tracking-normal` reset from v2.8.11.
+- **Conversations tab — dialog showed `user (empty)` and `assistant (empty)` for every conversation ([#247](https://github.com/Azure/gpt-rag-orchestrator/issues/247)).** The orchestrator stores user prompts under `questions[]` and persists assistant replies on the Azure AI Foundry agent thread referenced by `thread_id`, not in a `messages[]` array on the Cosmos document. The dashboard read `conversation_doc.get("messages", [])` and found nothing for every doc. The detail endpoint now projects `questions[]` into `{role: "user", content, question_id}` entries, passes `thread_id` and `feedback` through, and the dialog renders a friendly note explaining where the full transcript lives plus a placeholder card after each user turn ("Assistant response stored on Foundry thread."). Backend regression `test_conversation_detail_reconstructs_from_questions` covers the projection.
+- **Configuration tab — `Reload settings cache` button label was technical ([#247](https://github.com/Azure/gpt-rag-orchestrator/issues/247)).** Renamed the button to `Refresh from App Configuration` and added a sentence-case info tooltip explaining that it re-reads values from Azure App Configuration and does not save anything. The sibling `Apply changes` button also gets an info tooltip clarifying that it refreshes the running app's settings cache so saved changes take effect without restarting the container. Both tooltips use the now-opaque `InfoTooltip` from the same release.
+
 ## [v2.8.11] - 2026-06-19
 
 ### User and operator impact

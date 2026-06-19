@@ -119,6 +119,14 @@ export interface ConversationMessage {
   role?: string;
   content?: unknown;
   timestamp?: string;
+  question_id?: string;
+}
+
+export interface ConversationFeedback {
+  question_id?: string;
+  rating?: string;
+  comment?: string;
+  [key: string]: unknown;
 }
 
 export interface ConversationDetail {
@@ -128,6 +136,10 @@ export interface ConversationDetail {
   created_at?: number;
   last_updated?: string;
   messages: ConversationMessage[];
+  /** Azure AI Foundry agent thread id, if the orchestrator persisted one. */
+  thread_id?: string;
+  /** Feedback entries captured against the conversation. */
+  feedback?: ConversationFeedback[];
 }
 
 export interface ConversationListResponse {

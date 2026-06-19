@@ -67,7 +67,14 @@ export function InfoTooltip({ label, description, optionLines }: InfoTooltipProp
           // (#241 follow-up: the Overview StatCard label span uses
           // ``uppercase tracking-wide`` for the metric name, which previously
           // bled into the tooltip body and rendered the prose in ALL CAPS).
-          className="absolute left-6 top-0 z-50 w-72 rounded-md border bg-popover p-3 text-xs normal-case tracking-normal text-popover-foreground shadow-lg"
+          //
+          // ``bg-card`` is the same fully opaque token used for KPI/section
+          // backgrounds, so the popover is readable when it sits over another
+          // card in both light and dark mode (#247 Bug 3 — the previous
+          // ``bg-popover`` token is a translucent surface that picked up
+          // whatever was under it). ``border-border`` plus ``shadow-md``
+          // keeps the lift cue but no longer relies on alpha to feel layered.
+          className="absolute left-6 top-0 z-50 w-72 rounded-md border border-border bg-card p-3 text-xs normal-case tracking-normal text-card-foreground shadow-md"
         >
           <div className="font-medium normal-case tracking-normal text-foreground">{label}</div>
           <p className="mt-1 leading-relaxed normal-case tracking-normal text-muted-foreground">{description}</p>
