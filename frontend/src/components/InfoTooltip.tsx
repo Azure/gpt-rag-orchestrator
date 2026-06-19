@@ -62,10 +62,15 @@ export function InfoTooltip({ label, description, optionLines }: InfoTooltipProp
         <div
           id={bodyId}
           role="tooltip"
-          className="absolute left-6 top-0 z-50 w-72 rounded-md border bg-popover p-3 text-xs text-popover-foreground shadow-lg"
+          // ``normal-case`` and ``tracking-normal`` reset any
+          // ``uppercase``/``tracking-wide`` inherited from a parent label
+          // (#241 follow-up: the Overview StatCard label span uses
+          // ``uppercase tracking-wide`` for the metric name, which previously
+          // bled into the tooltip body and rendered the prose in ALL CAPS).
+          className="absolute left-6 top-0 z-50 w-72 rounded-md border bg-popover p-3 text-xs normal-case tracking-normal text-popover-foreground shadow-lg"
         >
-          <div className="font-medium text-foreground">{label}</div>
-          <p className="mt-1 leading-relaxed text-muted-foreground">{description}</p>
+          <div className="font-medium normal-case tracking-normal text-foreground">{label}</div>
+          <p className="mt-1 leading-relaxed normal-case tracking-normal text-muted-foreground">{description}</p>
           {optionLines && optionLines.length > 0 && (
             <ul className="mt-2 space-y-1.5 border-t pt-2">
               {optionLines.map((opt) => (

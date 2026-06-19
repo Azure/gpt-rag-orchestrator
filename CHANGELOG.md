@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [v2.8.11] - 2026-06-19
+
+### User and operator impact
+
+Patch release that fixes three operator-reported Overview tab bugs against the
+v2.8.10 dashboard ([Azure/gpt-rag-orchestrator#241](https://github.com/Azure/gpt-rag-orchestrator/issues/241)).
+Info tooltips on metric cards now render in sentence case, the Active users
+metric no longer treats every anonymous conversation as a distinct user, and
+the Custom range chip now reveals two clearly visible From/To date inputs
+without zeroing the chart. No configuration changes are required.
+
+### Fixed
+
+- **Overview tab — info tooltip bodies rendered in ALL CAPS ([#241](https://github.com/Azure/gpt-rag-orchestrator/issues/241)).** The `StatCard` label span uses `uppercase tracking-wide` for the metric name, and `text-transform: uppercase` is inherited by descendant elements, so the popover body inside `InfoTooltip` rendered the tooltip prose in capitals. The popover now resets to `normal-case tracking-normal` regardless of the surrounding label styling.
+- **Overview tab — Active users metric inflated for anonymous traffic ([#241](https://github.com/Azure/gpt-rag-orchestrator/issues/241)).** Anonymous conversations use `anonymous-<conversation_id>` as both their Cosmos partition key and `principal_id` to avoid hot-partitioning. The Overview aggregation counted distinct `principal_id` values verbatim, so 57 anonymous conversations reported 57 active users. `fetch_overview` now collapses any `principal_id` that starts with `anonymous-` (or equals `anonymous`) into a single bucket before counting; authenticated users continue to be counted by their Entra object id. The Active users tooltip wording is updated to match. Regression test `test_fetch_overview_buckets_anonymous_principal_ids` seeds three anonymous docs plus one authenticated GUID and asserts `active_users == 2`.
+- **Overview tab — Custom range chip hid the date inputs and zeroed the chart ([#241](https://github.com/Azure/gpt-rag-orchestrator/issues/241)).** Selecting `Custom range` already populated a default last-7-days range and triggered a refetch, but the From/To inputs sat in a second flex row inside a tight `justify-between` header layout and were easy to miss, and every range change unmounted the chart in favor of a full-page spinner so the chart visibly went to zero. The picker now renders the inputs on a dedicated full-width row directly under the chips, with visible `From` / `To` labels, a short hint about the 365-day cap, and an inline error for invalid ranges. Refreshes after the first successful load keep the existing chart and KPIs mounted and surface a small `Refreshing...` indicator instead.
+
+### Operational
+
+- **Smaller, faster ACR builds (`.dockerignore`).** Added `frontend/node_modules/` and `frontend/dist/` to `.dockerignore`. The Docker frontend stage runs `npm ci` and `npm run build` from a clean copy, so shipping a local `node_modules` or stale `dist` to the ACR build context just slowed the upload and risked platform/arch mismatches. Identified during the v2.8.10 sandbox deploy.
+
 ## [v2.8.10] - 2026-06-19
 
 ### User and operator impact

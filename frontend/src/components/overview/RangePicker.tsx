@@ -71,7 +71,7 @@ export function RangePicker({ value, onChange }: RangePickerProps) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex w-full flex-col gap-2">
       <div className="flex flex-wrap items-center gap-1.5">
         {PRESETS.map((p) => {
           const active = value.preset === p.id;
@@ -94,26 +94,42 @@ export function RangePicker({ value, onChange }: RangePickerProps) {
         })}
       </div>
       {value.preset === "custom" && (
-        <div className="flex flex-wrap items-center gap-2 text-xs">
+        // Always render the From/To inputs on their own row immediately under
+        // the chips when ``Custom range`` is active (#241 follow-up: the
+        // inputs were rendering but were easy to miss when the picker sat
+        // inside a tight ``justify-between`` flex row in the Overview
+        // header). ``w-full basis-full`` forces a hard line break in the
+        // parent flex layout so the inputs are never visually clipped.
+        <div
+          className="flex w-full basis-full flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2 text-xs"
+          data-testid="overview-range-custom"
+        >
           <label className="flex items-center gap-1.5">
-            <span className="text-muted-foreground">From</span>
+            <span className="font-medium text-foreground">From</span>
             <input
               type="date"
               value={value.from ?? ""}
               onChange={(e) => updateCustom("from", e.target.value)}
               className="rounded-md border bg-background px-2 py-1 text-xs"
+              aria-label="Custom range start date"
             />
           </label>
           <label className="flex items-center gap-1.5">
-            <span className="text-muted-foreground">To</span>
+            <span className="font-medium text-foreground">To</span>
             <input
               type="date"
               value={value.to ?? ""}
               onChange={(e) => updateCustom("to", e.target.value)}
               className="rounded-md border bg-background px-2 py-1 text-xs"
+              aria-label="Custom range end date"
             />
           </label>
-          {error && <span className="text-destructive">{error}</span>}
+          <span className="text-muted-foreground">Inclusive UTC dates, max 365 days.</span>
+          {error && (
+            <span role="alert" className="text-destructive">
+              {error}
+            </span>
+          )}
         </div>
       )}
     </div>
