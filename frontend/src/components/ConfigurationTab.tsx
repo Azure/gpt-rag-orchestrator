@@ -12,6 +12,7 @@ import {
 import { ConfigSection } from "./ConfigSection";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ErrorState } from "./ErrorState";
+import { InfoTooltip } from "./InfoTooltip";
 
 type Values = Record<string, string | number | boolean>;
 
@@ -228,21 +229,27 @@ export function ConfigurationTab() {
           onClick={handleRefresh}
           disabled={busy !== null}
           className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
-          title="Rebuild the orchestrator's in-process configuration cache"
         >
           <RefreshCw className={`h-4 w-4 ${busy === "refresh" ? "animate-spin" : ""}`} />
-          Reload settings cache
+          Refresh from App Configuration
         </button>
+        <InfoTooltip
+          label="Refresh from App Configuration"
+          description="Re-reads all values from Azure App Configuration. Use this if someone changed settings outside the dashboard and you want to see the latest values. Does not save anything."
+        />
         <button
           type="button"
           onClick={() => setApplyOpen(true)}
           disabled={busy !== null}
           className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
-          title="Apply configuration changes — refreshes the cache so the next request uses the new values"
         >
           <Zap className="h-4 w-4" />
           Apply changes
         </button>
+        <InfoTooltip
+          label="Apply changes"
+          description="Refreshes the running app's settings cache so your saved changes take effect without restarting the container."
+        />
         <button
           type="button"
           onClick={handleDiscard}

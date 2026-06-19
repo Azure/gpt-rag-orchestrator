@@ -197,13 +197,32 @@ class DashboardConversationListResponse(BaseModel):
 
 
 class DashboardConversationDetail(BaseModel):
-    """Full conversation document returned by the dashboard detail view."""
+    """Full conversation document returned by the dashboard detail view.
+
+    Message bodies are NOT stored in Cosmos -- the orchestrator only persists
+    user prompts under ``questions[]`` and delegates the full transcript
+    (assistant replies, tool calls) to the Azure AI Foundry agent thread.
+    The dashboard reconstructs the user turns from ``questions[]`` and
+    surfaces ``thread_id`` so the frontend can render a friendly note and a
+    deep-link to Foundry instead of showing empty cards (#247 Bug 4).
+    """
     id: str
     name: Optional[str] = None
     principal_id: Optional[str] = None
     created_at: Optional[int] = Field(None, validation_alias="_ts")
     last_updated: Optional[str] = Field(None, validation_alias="lastUpdated")
     messages: List[Dict[str, Any]] = Field(default_factory=list)
+    thread_id: Optional[str] = Field(
+        None,
+        description=(
+            "Azure AI Foundry agent thread id holding the full transcript, "
+            "when one was persisted at orchestration time."
+        ),
+    )
+    feedback: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Feedback entries captured on the conversation, if any.",
+    )
 
     class Config:
         populate_by_name = True

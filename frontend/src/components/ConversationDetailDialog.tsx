@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { ExternalLink, Info, X } from "lucide-react";
 import {
   ApiError,
   fetchConversationDetail,
@@ -53,6 +53,60 @@ function MessageBubble({ message }: { message: ConversationMessage }) {
   );
 }
 
+/**
+ * Friendly note rendered where an assistant reply would go.
+ *
+ * The orchestrator persists user prompts in Cosmos under ``questions[]`` and
+ * stores the full transcript (assistant replies, tool calls) on the Azure
+ * AI Foundry agent thread referenced by ``thread_id`` (#247 Bug 4).
+ */
+function FoundryAssistantPlaceholder() {
+  return (
+    <div className="rounded-md border border-dashed bg-muted/20 p-3">
+      <div className="mb-1 flex items-center gap-2">
+        <span
+          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${roleClass("assistant")}`}
+        >
+          assistant
+        </span>
+        <Info className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+      </div>
+      <p className="text-sm italic text-muted-foreground">
+        Assistant response stored on Foundry thread.
+      </p>
+    </div>
+  );
+}
+
+function FoundryThreadNote({ threadId }: { threadId?: string }) {
+  return (
+    <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-100">
+      <div className="flex items-start gap-2">
+        <Info className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden />
+        <div className="space-y-2">
+          <p>
+            Message bodies are stored on the Azure AI Foundry agent thread, not in this database. Open the conversation in Foundry to see the full transcript.
+          </p>
+          {threadId && (
+            <p className="font-mono text-xs">
+              thread_id: {threadId}
+            </p>
+          )}
+          <a
+            href="https://learn.microsoft.com/azure/ai-services/agents/"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-xs font-medium underline"
+          >
+            Foundry agents documentation
+            <ExternalLink className="h-3 w-3" aria-hidden />
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ConversationDetailDialog({ conversation, onClose }: Props) {
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -80,7 +134,13 @@ export function ConversationDetailDialog({ conversation, onClose }: Props) {
   }, [conversation.id]);
 
   const messages = detail?.messages ?? [];
+  const threadId = detail?.thread_id;
   const title = detail?.name || conversation.name || conversation.id;
+  // Cosmos only persists user turns (#247 Bug 4) -- if there are no
+  // assistant messages we mark every user turn so the placeholder slots in.
+  const hasAssistantTurn = messages.some(
+    (m) => (m.role ?? "").toLowerCase() === "assistant",
+  );
 
   return (
     <div
@@ -122,15 +182,22 @@ export function ConversationDetailDialog({ conversation, onClose }: Props) {
             <div className="py-12 text-center text-sm text-destructive">{error}</div>
           )}
           {!loading && !error && messages.length === 0 && (
-            <div className="py-12 text-center text-sm text-muted-foreground">
-              This conversation has no messages.
+            <div className="space-y-3">
+              <FoundryThreadNote threadId={threadId} />
             </div>
           )}
           {!loading && !error && messages.length > 0 && (
             <div className="space-y-3">
-              {messages.map((m, i) => (
-                <MessageBubble key={i} message={m} />
-              ))}
+              {!hasAssistantTurn && <FoundryThreadNote threadId={threadId} />}
+              {messages.map((m, i) => {
+                const isUser = (m.role ?? "").toLowerCase() === "user";
+                return (
+                  <div key={i} className="space-y-3">
+                    <MessageBubble message={m} />
+                    {isUser && !hasAssistantTurn && <FoundryAssistantPlaceholder />}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
