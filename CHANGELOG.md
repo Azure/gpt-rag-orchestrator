@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [v2.8.10] - 2026-06-19
+
+### User and operator impact
+
+Patch release that fixes four operator-reported dashboard bugs against the
+v2.8.9 dashboard ([Azure/gpt-rag-orchestrator#241](https://github.com/Azure/gpt-rag-orchestrator/issues/241)).
+Conversation date columns now render correctly, the `REASONING_EFFORT`
+dropdown can be saved, the Overview tab gains a time-range picker, and every
+Overview metric gets the same accessible info tooltip already used on the
+Configuration tab. No configuration changes are required.
+
+### Fixed
+
+- **Conversations tab — Created and Last updated columns showed `-` for every row ([#241](https://github.com/Azure/gpt-rag-orchestrator/issues/241)).** `ConversationListItem`, `ConversationMetadata`, `ConversationDetail`, `ConversationUpdateResponse`, `DashboardConversationSummary`, and `DashboardConversationDetail` declared their date fields with `alias="_ts"` / `alias="lastUpdated"`, which made FastAPI serialize the JSON under the Cosmos field names instead of the Python field names. The frontend then read `c.created_at` / `c.last_updated` and got `undefined`. Switched to `validation_alias=` so the alias is accepted on input only and the response JSON uses `created_at` and `last_updated`. A regression test asserts the serialized payload.
+- **Configuration tab — saving `REASONING_EFFORT=Low` failed with `Validation failed for REASONING_EFFORT` ([#241](https://github.com/Azure/gpt-rag-orchestrator/issues/241)).** The backend validator already accepted the lowercase `minimal/low/medium/high` values that Azure OpenAI's `reasoning_effort` parameter expects. Added a round-trip regression test for all four canonical values plus an uppercase-rejection test so this stays detectable.
+
+### Added
+
+- **Overview tab — time-range picker ([#241](https://github.com/Azure/gpt-rag-orchestrator/issues/241)).** Header now has a picker with presets Today / Last 7 days / Last 30 days (default) / Last 90 days / Custom range. The selection drives the time-series chart, the Engagement panel, the Active users card subtitle (`Distinct, <label>`), and the new `in_window_count` total. The four KPI cards keep their fixed semantic windows. Selection persists in `localStorage` under `gpt-rag-orchestrator.overview.range`. The backend endpoint accepts `from` and `to` ISO query params, validates `from <= to`, caps the range at 365 days, returns 400 on invalid input, and keys the in-process cache on `(from, to)`.
+- **Overview tab — accessible info tooltips ([#241](https://github.com/Azure/gpt-rag-orchestrator/issues/241)).** Reuses the existing `InfoTooltip` primitive from the Configuration tab next to each of the four KPI cards, the `Conversations over time` chart title, the `Engagement` panel title, and each of the three engagement rows. Wording lives in `frontend/src/components/overview/copy.ts`.
+
 ## [v2.8.9] - 2026-06-18
 
 ### User and operator impact

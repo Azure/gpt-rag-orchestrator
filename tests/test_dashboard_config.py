@@ -206,3 +206,48 @@ def test_apply_endpoint_refreshes_cache_and_reports_status():
     assert body["status"] == "applied"
     assert "cache" in body["detail"].lower()
     refresh_call.assert_called_once_with("refresh")
+
+
+# ---------------------------------------------------------------------------
+# REASONING_EFFORT round-trip (#241 Bug 2)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("value", ["minimal", "low", "medium", "high"])
+def test_reasoning_effort_round_trip_accepts_canonical_lowercase(value):
+    """The REASONING_EFFORT validator must accept every wire value the
+    Configuration dropdown emits. Bug 2 surfaced because operators saw
+    ``Validation failed for REASONING_EFFORT`` when picking ``Low`` — the
+    dropdown had been pushing uppercase labels as the wire value while the
+    backend (and the downstream Azure OpenAI Responses API ``reasoning.effort``
+    parameter) only accepts lowercase.
+    """
+    cfg = _build_cfg({"REASONING_EFFORT": "medium"})
+    refreshed = _build_cfg({"REASONING_EFFORT": value})
+    app = _make_app(cfg)
+    with patch("api.dashboard_config.get_config", return_value=refreshed):
+        client = TestClient(app)
+        r = client.put(
+            "/api/dashboard/config",
+            json={"settings": [{"key": "REASONING_EFFORT", "value": value}]},
+        )
+    assert r.status_code == 200, r.text
+    cfg.set_value.assert_called_once()
+    assert cfg.set_value.call_args.args[0] == "REASONING_EFFORT"
+    assert cfg.set_value.call_args.args[1] == value
+
+
+def test_reasoning_effort_rejects_uppercase_label():
+    """The historical regression: posting the display label rather than the
+    canonical lowercase wire value must produce the per-key 422 error that
+    the SPA renders as ``Validation failed for REASONING_EFFORT``."""
+    cfg = _build_cfg({"REASONING_EFFORT": "medium"})
+    app = _make_app(cfg)
+    client = TestClient(app)
+    r = client.put(
+        "/api/dashboard/config",
+        json={"settings": [{"key": "REASONING_EFFORT", "value": "Low"}]},
+    )
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert detail["errors"][0]["key"] == "REASONING_EFFORT"
+    cfg.set_value.assert_not_called()
