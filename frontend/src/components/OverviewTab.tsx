@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -11,24 +11,82 @@ import {
 import {
   ApiError,
   fetchOverview,
+  type OverviewQuery,
   type OverviewResponse,
 } from "../lib/api";
 import { ErrorState } from "./ErrorState";
 import { Activity, MessageSquare, RefreshCw, Users } from "lucide-react";
+import { InfoTooltip } from "./InfoTooltip";
+import {
+  RangePicker,
+} from "./overview/RangePicker";
+import { rangeLabel, type OverviewRange } from "./overview/range";
+import { OVERVIEW_TOOLTIPS } from "./overview/copy";
+
+const STORAGE_KEY = "gpt-rag-orchestrator.overview.range";
+const DEFAULT_RANGE: OverviewRange = { preset: "30d" };
+
+function readStoredRange(): OverviewRange {
+  if (typeof window === "undefined") return DEFAULT_RANGE;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_RANGE;
+    const parsed = JSON.parse(raw) as Partial<OverviewRange>;
+    if (
+      parsed &&
+      typeof parsed.preset === "string" &&
+      ["today", "7d", "30d", "90d", "custom"].includes(parsed.preset)
+    ) {
+      return parsed as OverviewRange;
+    }
+  } catch {
+    // Treat any parse error as missing preference.
+  }
+  return DEFAULT_RANGE;
+}
+
+function writeStoredRange(range: OverviewRange): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(range));
+  } catch {
+    // Ignore quota / disabled-storage errors; range is non-essential state.
+  }
+}
+
+function rangeToQuery(range: OverviewRange): OverviewQuery {
+  switch (range.preset) {
+    case "today":
+      return { days: 1 };
+    case "7d":
+      return { days: 7 };
+    case "30d":
+      return { days: 30 };
+    case "90d":
+      return { days: 90 };
+    case "custom":
+      if (range.from && range.to) return { from: range.from, to: range.to };
+      return { days: 30 };
+  }
+}
 
 interface StatCardProps {
   label: string;
   value: string | number;
   hint?: string;
   icon?: React.ReactNode;
+  tooltip?: { label: string; description: string };
 }
 
-function StatCard({ label, value, hint, icon }: StatCardProps) {
+function StatCard({ label, value, hint, icon, tooltip }: StatCardProps) {
   return (
     <div className="rounded-lg border bg-card p-4 shadow-sm">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {label}
+          {tooltip && (
+            <InfoTooltip label={tooltip.label} description={tooltip.description} />
+          )}
         </span>
         {icon && <span className="text-muted-foreground">{icon}</span>}
       </div>
@@ -39,35 +97,40 @@ function StatCard({ label, value, hint, icon }: StatCardProps) {
 }
 
 export function OverviewTab() {
+  const [range, setRange] = useState<OverviewRange>(() => readStoredRange());
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{ message: string; status?: number } | null>(null);
 
-  const load = () => {
-    const ctrl = new AbortController();
-    setLoading(true);
-    setError(null);
-    fetchOverview(30, ctrl.signal)
-      .then((res) => {
-        setData(res);
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (ctrl.signal.aborted) return;
-        if (err instanceof ApiError) {
-          setError({ status: err.status, message: err.message });
-        } else {
-          setError({ message: (err as Error).message });
-        }
-        setLoading(false);
-      });
-    return () => ctrl.abort();
-  };
+  const load = useCallback(
+    (current: OverviewRange) => {
+      const ctrl = new AbortController();
+      setLoading(true);
+      setError(null);
+      fetchOverview(rangeToQuery(current), ctrl.signal)
+        .then((res) => {
+          setData(res);
+          setLoading(false);
+        })
+        .catch((err) => {
+          if (ctrl.signal.aborted) return;
+          if (err instanceof ApiError) {
+            setError({ status: err.status, message: err.message });
+          } else {
+            setError({ message: (err as Error).message });
+          }
+          setLoading(false);
+        });
+      return () => ctrl.abort();
+    },
+    [],
+  );
 
   useEffect(() => {
-    const cancel = load();
+    writeStoredRange(range);
+    const cancel = load(range);
     return cancel;
-  }, []);
+  }, [range, load]);
 
   if (error) {
     if (error.status === 403) {
@@ -98,41 +161,64 @@ export function OverviewTab() {
     );
   }
 
+  const activeLabel = rangeLabel(range);
+
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold">Overview</h1>
+          <p className="text-xs text-muted-foreground">
+            Active window: {activeLabel} (UTC). The four KPI cards use their
+            own fixed windows.
+          </p>
+        </div>
+        <RangePicker value={range} onChange={setRange} />
+      </div>
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Today"
           value={data.today}
           hint="Conversations in the last 24h"
           icon={<MessageSquare className="h-4 w-4" />}
+          tooltip={{ label: "Today", description: OVERVIEW_TOOLTIPS.today }}
         />
         <StatCard
           label="Last 7 days"
           value={data.last_7_days}
           hint="Conversations created"
           icon={<MessageSquare className="h-4 w-4" />}
+          tooltip={{ label: "Last 7 days", description: OVERVIEW_TOOLTIPS.last7Days }}
         />
         <StatCard
           label="Last 30 days"
           value={data.last_30_days}
           hint={`out of ${data.total} total`}
           icon={<MessageSquare className="h-4 w-4" />}
+          tooltip={{ label: "Last 30 days", description: OVERVIEW_TOOLTIPS.last30Days }}
         />
         <StatCard
           label="Active users"
           value={data.active_users}
-          hint={`Distinct, last ${data.window_days} days`}
+          hint={`Distinct, ${activeLabel}`}
           icon={<Users className="h-4 w-4" />}
+          tooltip={{ label: "Active users", description: OVERVIEW_TOOLTIPS.activeUsers }}
         />
       </div>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         <div className="rounded-lg border bg-card p-4 shadow-sm lg:col-span-2">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Conversations over time</h2>
+            <h2 className="flex items-center gap-1 text-sm font-semibold">
+              Conversations over time
+              <InfoTooltip
+                label="Conversations over time"
+                description={OVERVIEW_TOOLTIPS.conversationsOverTime}
+              />
+            </h2>
             <span className="text-xs text-muted-foreground">
-              Last {data.window_days} days, UTC
+              {activeLabel}, UTC
             </span>
           </div>
           <div className="h-64 w-full">
@@ -170,19 +256,45 @@ export function OverviewTab() {
         </div>
 
         <div className="rounded-lg border bg-card p-4 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold">Engagement</h2>
+          <h2 className="mb-3 flex items-center gap-1 text-sm font-semibold">
+            Engagement
+            <InfoTooltip
+              label="Engagement"
+              description={OVERVIEW_TOOLTIPS.engagement}
+            />
+          </h2>
           <div className="space-y-4">
             <div className="flex items-baseline justify-between">
-              <span className="text-xs text-muted-foreground">Average turns per conversation</span>
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                Average turns per conversation
+                <InfoTooltip
+                  label="Average turns per conversation"
+                  description={OVERVIEW_TOOLTIPS.avgTurns}
+                />
+              </span>
               <span className="text-lg font-semibold tabular-nums">{data.avg_turns}</span>
             </div>
             <div className="flex items-baseline justify-between">
-              <span className="text-xs text-muted-foreground">Active users (window)</span>
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                Active users (window)
+                <InfoTooltip
+                  label="Active users (window)"
+                  description={OVERVIEW_TOOLTIPS.activeUsersWindow}
+                />
+              </span>
               <span className="text-lg font-semibold tabular-nums">{data.active_users}</span>
             </div>
             <div className="flex items-baseline justify-between">
-              <span className="text-xs text-muted-foreground">Total conversations</span>
-              <span className="text-lg font-semibold tabular-nums">{data.total}</span>
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                Total conversations
+                <InfoTooltip
+                  label="Total conversations"
+                  description={OVERVIEW_TOOLTIPS.totalConversations}
+                />
+              </span>
+              <span className="text-lg font-semibold tabular-nums">
+                {data.in_window_count ?? data.total}
+              </span>
             </div>
             <div className="flex items-center gap-1.5 border-t pt-3 text-xs text-muted-foreground">
               <Activity className="h-3 w-3" />
