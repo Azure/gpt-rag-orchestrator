@@ -1,6 +1,6 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 class OrchestratorRequest(BaseModel):
     # Core ask/question fields
@@ -94,8 +94,12 @@ class ConversationMetadata(BaseModel):
     """Metadata for a conversation in list view (no message content)."""
     id: str = Field(..., description="Unique identifier of the conversation")
     name: Optional[str] = Field(None, description="User-provided name for the conversation")
-    created_at: Optional[datetime] = Field(None, alias="_ts", description="Timestamp when the conversation was created")
-    last_updated: Optional[datetime] = Field(None, alias="lastUpdated", description="Timestamp when the last message was added")
+    # ``validation_alias`` accepts the Cosmos field on input (``_ts`` /
+    # ``lastUpdated``) while serialization always uses the field name, so
+    # the dashboard frontend sees ``created_at`` / ``last_updated`` in JSON.
+    # See #241 (Bug 1).
+    created_at: Optional[datetime] = Field(None, validation_alias="_ts", description="Timestamp when the conversation was created")
+    last_updated: Optional[datetime] = Field(None, validation_alias="lastUpdated", description="Timestamp when the last message was added")
 
     class Config:
         populate_by_name = True
@@ -114,8 +118,8 @@ class ConversationDetail(BaseModel):
     id: str = Field(..., description="Unique identifier of the conversation")
     name: Optional[str] = Field(None, description="User-provided name for the conversation")
     principal_id: Optional[str] = Field(None, description="User ID who owns this conversation")
-    created_at: Optional[datetime] = Field(None, alias="_ts", description="Timestamp when the conversation was created")
-    last_updated: Optional[datetime] = Field(None, alias="lastUpdated", description="Timestamp when the last message was added")
+    created_at: Optional[datetime] = Field(None, validation_alias="_ts", description="Timestamp when the conversation was created")
+    last_updated: Optional[datetime] = Field(None, validation_alias="lastUpdated", description="Timestamp when the last message was added")
     messages: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="List of messages in the conversation")
 
     class Config:
@@ -131,7 +135,7 @@ class ConversationUpdateResponse(BaseModel):
     """Response for PATCH /conversations/{id}."""
     id: str = Field(..., description="Unique identifier of the conversation")
     name: str = Field(..., description="Updated conversation name")
-    last_updated: Optional[datetime] = Field(None, alias="lastUpdated", description="Updated timestamp")
+    last_updated: Optional[datetime] = Field(None, validation_alias="lastUpdated", description="Updated timestamp")
 
     class Config:
         populate_by_name = True
@@ -158,7 +162,17 @@ class DashboardOverview(BaseModel):
     conversations_per_day: List[DashboardDailyPoint] = Field(
         default_factory=list, description="Dense daily series across the requested window"
     )
-    window_days: int = Field(..., ge=1, description="Size of the trailing window in days")
+    window_days: int = Field(..., ge=1, description="Size of the selected window in days")
+    # Range fields are present for both default and custom windows so the
+    # frontend can label the chart and Active users card consistently
+    # (#241 — operator-selectable time range).
+    from_: Optional[str] = Field(None, alias="from", description="Window start (UTC YYYY-MM-DD)")
+    to: Optional[str] = Field(None, description="Window end (UTC YYYY-MM-DD)")
+    in_window_count: Optional[int] = Field(
+        None, ge=0, description="Conversations created within the selected window"
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class DashboardConversationSummary(BaseModel):
@@ -166,8 +180,8 @@ class DashboardConversationSummary(BaseModel):
     id: str = Field(..., description="Conversation identifier")
     name: Optional[str] = Field(None, description="User-provided name, if any")
     principal_id: Optional[str] = Field(None, description="Owner principal id")
-    created_at: Optional[int] = Field(None, alias="_ts", description="Unix epoch seconds when the conversation was created")
-    last_updated: Optional[str] = Field(None, alias="lastUpdated", description="Last activity timestamp (ISO 8601)")
+    created_at: Optional[int] = Field(None, validation_alias="_ts", description="Unix epoch seconds when the conversation was created")
+    last_updated: Optional[str] = Field(None, validation_alias="lastUpdated", description="Last activity timestamp (ISO 8601)")
     message_count: Optional[int] = Field(None, description="Number of messages stored in the conversation")
 
     class Config:
@@ -187,8 +201,8 @@ class DashboardConversationDetail(BaseModel):
     id: str
     name: Optional[str] = None
     principal_id: Optional[str] = None
-    created_at: Optional[int] = Field(None, alias="_ts")
-    last_updated: Optional[str] = Field(None, alias="lastUpdated")
+    created_at: Optional[int] = Field(None, validation_alias="_ts")
+    last_updated: Optional[str] = Field(None, validation_alias="lastUpdated")
     messages: List[Dict[str, Any]] = Field(default_factory=list)
 
     class Config:

@@ -326,3 +326,127 @@ def test_overview_rejects_when_auth_on_without_admin(monkeypatch):
         headers={"Authorization": "Bearer abc"},
     )
     assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Overview time-range picker (#241)
+# ---------------------------------------------------------------------------
+
+def _overview_payload(**overrides):
+    base = {
+        "total": 1,
+        "today": 0,
+        "last_7_days": 1,
+        "last_30_days": 1,
+        "active_users": 1,
+        "avg_turns": 0.0,
+        "conversations_per_day": [{"date": "2026-06-12", "count": 1}],
+        "window_days": 8,
+        "from": "2026-06-12",
+        "to": "2026-06-19",
+        "in_window_count": 1,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_overview_accepts_custom_from_to_range(monkeypatch):
+    from api import dashboard
+    from connectors import cosmosdb_admin
+
+    cosmosdb_admin.cache_clear()
+    fetch_mock = AsyncMock(return_value=_overview_payload())
+    monkeypatch.setattr(dashboard, "fetch_overview", fetch_mock)
+
+    app = _make_app(admin_dep_override=_allow_admin)
+    client = TestClient(app)
+    r = client.get("/api/dashboard/overview?from=2026-06-12&to=2026-06-19")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Field name (not alias) is emitted for date columns; "from" stays as the
+    # alias because Python forbids ``from`` as a field name.
+    assert body["from"] == "2026-06-12"
+    assert body["to"] == "2026-06-19"
+    assert body["in_window_count"] == 1
+    # Backend was called with explicit epoch bounds.
+    fetch_mock.assert_awaited_once()
+    kwargs = fetch_mock.await_args.kwargs
+    assert kwargs["from_ts"] is not None
+    assert kwargs["to_ts"] is not None
+    assert kwargs["from_ts"] < kwargs["to_ts"]
+
+
+def test_overview_rejects_partial_range(monkeypatch):
+    from api import dashboard
+    from connectors import cosmosdb_admin
+
+    cosmosdb_admin.cache_clear()
+    monkeypatch.setattr(dashboard, "fetch_overview", AsyncMock(return_value=_overview_payload()))
+    app = _make_app(admin_dep_override=_allow_admin)
+    client = TestClient(app)
+
+    r1 = client.get("/api/dashboard/overview?from=2026-06-12")
+    r2 = client.get("/api/dashboard/overview?to=2026-06-19")
+    assert r1.status_code == 400
+    assert r2.status_code == 400
+    assert "together" in r1.json()["detail"]
+
+
+def test_overview_rejects_inverted_range(monkeypatch):
+    from api import dashboard
+    from connectors import cosmosdb_admin
+
+    cosmosdb_admin.cache_clear()
+    monkeypatch.setattr(dashboard, "fetch_overview", AsyncMock(return_value=_overview_payload()))
+    app = _make_app(admin_dep_override=_allow_admin)
+    client = TestClient(app)
+    r = client.get("/api/dashboard/overview?from=2026-06-19&to=2026-06-12")
+    assert r.status_code == 400
+    assert "<=" in r.json()["detail"]
+
+
+def test_overview_rejects_range_over_365_days(monkeypatch):
+    from api import dashboard
+    from connectors import cosmosdb_admin
+
+    cosmosdb_admin.cache_clear()
+    monkeypatch.setattr(dashboard, "fetch_overview", AsyncMock(return_value=_overview_payload()))
+    app = _make_app(admin_dep_override=_allow_admin)
+    client = TestClient(app)
+    r = client.get("/api/dashboard/overview?from=2024-01-01&to=2026-01-01")
+    assert r.status_code == 400
+    assert "365" in r.json()["detail"]
+
+
+def test_overview_rejects_malformed_date(monkeypatch):
+    from api import dashboard
+    from connectors import cosmosdb_admin
+
+    cosmosdb_admin.cache_clear()
+    monkeypatch.setattr(dashboard, "fetch_overview", AsyncMock(return_value=_overview_payload()))
+    app = _make_app(admin_dep_override=_allow_admin)
+    client = TestClient(app)
+    r = client.get("/api/dashboard/overview?from=not-a-date&to=2026-06-19")
+    assert r.status_code == 400
+    assert "from" in r.json()["detail"]
+
+
+def test_overview_cache_key_is_range_specific(monkeypatch):
+    """Two different custom ranges must not share a cache entry."""
+    from api import dashboard
+    from connectors import cosmosdb_admin
+
+    cosmosdb_admin.cache_clear()
+    fetch_mock = AsyncMock(return_value=_overview_payload())
+    monkeypatch.setattr(dashboard, "fetch_overview", fetch_mock)
+
+    app = _make_app(admin_dep_override=_allow_admin)
+    client = TestClient(app)
+    client.get("/api/dashboard/overview?from=2026-06-01&to=2026-06-07")
+    client.get("/api/dashboard/overview?from=2026-06-08&to=2026-06-14")
+    # Distinct ranges -> distinct cache keys -> two backend calls.
+    assert fetch_mock.await_count == 2
+
+    # Same range called twice -> cache hit -> still two total backend calls.
+    client.get("/api/dashboard/overview?from=2026-06-08&to=2026-06-14")
+    assert fetch_mock.await_count == 2

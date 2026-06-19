@@ -98,6 +98,12 @@ export interface OverviewResponse {
   avg_turns: number;
   conversations_per_day: DailyPoint[];
   window_days: number;
+  /** Inclusive ISO date the backend used as the window start. */
+  from?: string;
+  /** Inclusive ISO date the backend used as the window end. */
+  to?: string;
+  /** Conversations created inside the active window. */
+  in_window_count?: number;
 }
 
 export interface ConversationSummary {
@@ -137,12 +143,31 @@ export function fetchVersion(signal?: AbortSignal): Promise<string> {
   );
 }
 
+export interface OverviewQuery {
+  /** Trailing window in days; defaults to 30 if no custom range is set. */
+  days?: number;
+  /** Inclusive ISO date (YYYY-MM-DD) for custom range start. */
+  from?: string;
+  /** Inclusive ISO date (YYYY-MM-DD) for custom range end. */
+  to?: string;
+}
+
 export function fetchOverview(
-  windowDays = 30,
+  q: OverviewQuery | number = 30,
   signal?: AbortSignal,
 ): Promise<OverviewResponse> {
+  // Back-compat: a bare number still means trailing-window days.
+  const opts: OverviewQuery = typeof q === "number" ? { days: q } : q;
+  const params = new URLSearchParams();
+  if (opts.from && opts.to) {
+    params.set("from", opts.from);
+    params.set("to", opts.to);
+  } else if (opts.days != null) {
+    params.set("days", String(opts.days));
+  }
+  const qs = params.toString();
   return request<OverviewResponse>(
-    `/api/dashboard/overview?window_days=${windowDays}`,
+    `/api/dashboard/overview${qs ? `?${qs}` : ""}`,
     {},
     signal,
   );

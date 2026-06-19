@@ -61,6 +61,39 @@ class TestConversationSchemas:
         detail = ConversationDetail(id="conv-1")
         assert detail.messages == []
 
+    def test_date_fields_serialize_under_field_names_not_aliases(self):
+        """Regression for #241 / Bug 1.
+
+        Pydantic ``alias=`` defaults to serializing under the alias, which
+        emitted ``_ts``/``lastUpdated`` in the API response and the SPA's
+        ``c.created_at``/``c.last_updated`` lookups silently returned
+        undefined, rendering ``-`` in the date columns. We now use
+        ``validation_alias=`` so the alias is input-only and serialization
+        always uses the Python field name.
+        """
+        from schemas import (
+            ConversationDetail,
+            ConversationMetadata,
+            ConversationUpdateResponse,
+            DashboardConversationDetail,
+            DashboardConversationSummary,
+        )
+
+        for cls, kwargs in (
+            (ConversationMetadata, {"id": "c", "_ts": 1700000000, "lastUpdated": "2026-01-14T12:34:56Z"}),
+            (ConversationDetail, {"id": "c", "_ts": 1700000000, "lastUpdated": "2026-01-14T12:34:56Z"}),
+            (ConversationUpdateResponse, {"id": "c", "name": "Test", "lastUpdated": "2026-01-14T12:34:56Z"}),
+            (DashboardConversationSummary, {"id": "c", "_ts": 1700000000, "lastUpdated": "2026-01-14T12:34:56Z"}),
+            (DashboardConversationDetail, {"id": "c", "_ts": 1700000000, "lastUpdated": "2026-01-14T12:34:56Z"}),
+        ):
+            instance = cls(**kwargs)
+            payload = instance.model_dump_json(by_alias=True)
+            if "_ts" in kwargs:
+                assert '"created_at"' in payload, f"{cls.__name__} missing created_at: {payload}"
+                assert '"_ts"' not in payload, f"{cls.__name__} still emits _ts: {payload}"
+            assert '"last_updated"' in payload, f"{cls.__name__} missing last_updated: {payload}"
+            assert '"lastUpdated"' not in payload, f"{cls.__name__} still emits lastUpdated: {payload}"
+
 
 # ---------------------------------------------------------------------------
 # CosmosDB Client Tests (partition key support)
