@@ -4,10 +4,6 @@ local/
 .vscode/launch.json
 .claude/
 
-# Evaluations
-eval-input.jsonl 
-eval-results.json
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 __blobstorage__/

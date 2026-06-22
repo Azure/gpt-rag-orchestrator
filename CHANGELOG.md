@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Standalone `evaluations/` harness (scripts and pinned `requirements.txt`).
+  Evaluation now runs through the AgentOps Accelerator against the live
+  orchestrator endpoint; see the AgentOps HTTP agent tutorial
+  (https://azure.github.io/agentops/tutorial-http-agent/) for the full workflow
+  and the GPT-RAG retrieval optimization how-to
+  (https://azure.github.io/GPT-RAG/howto_retrieval_optimization/) for retrieval
+  tuning. `evaluations/README.md` now redirects to both. Also dropped the
+  `/evaluations` Dependabot pip entry that tracked the deleted requirements file.
+
 ## [v2.8.12] - 2026-06-19
 
 ### User and operator impact
