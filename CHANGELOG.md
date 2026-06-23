@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Dev CI/CD pipeline now soft-fails Azure environment connectivity failures.**
+  The `develop` deployment workflow now reports a GitHub Actions warning and
+  skips the `dev` deployment when Azure login, subscription/RBAC access, DNS, or
+  App Configuration connectivity is unavailable. Build/test failures and
+  non-Azure deployment failures still fail the job. This is a temporary
+  dev-only workaround until the `dev` environment credentials and
+  `APP_CONFIG_ENDPOINT` are repaired.
+
 ### Removed
 
 - Standalone `evaluations/` harness (scripts and pinned `requirements.txt`).
