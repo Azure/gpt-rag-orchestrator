@@ -30,15 +30,35 @@ jobs:
 
       - name: Login to Azure CLI
         id: azure_login
-        uses: azure/login@v2
-        continue-on-error: true
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+        shell: bash
+        run: |
+          set +e
+          login_output=$(az login \
+            --service-principal \
+            --username "$AZURE_CLIENT_ID" \
+            --password "$AZURE_CLIENT_SECRET" \
+            --tenant "$AZURE_TENANT_ID" \
+            --output none 2>&1)
+          login_status=$?
+          set -e
+
+          if [ "$login_status" -eq 0 ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "available=false"
+            echo "reason<<EOF"
+            echo "$login_output"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "::warning title=Dev deployment skipped::Azure login failed for the dev environment. Build/test signals are still valid, but deployment was skipped until AZURE_CREDENTIALS/RBAC/subscription access is fixed."
 
       - name: Warn when dev Azure login is unavailable
-        if: steps.azure_login.outcome != 'success'
+        if: steps.azure_login.outputs.available != 'true'
         run: |
-          echo "::warning title=Dev deployment skipped::Azure login failed for the dev environment. Build/test signals are still valid, but deployment was skipped until AZURE_CREDENTIALS/RBAC/subscription access is fixed."
           {
             echo "## Dev deployment skipped"
             echo
@@ -50,13 +70,13 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Python 3.12
-        if: steps.azure_login.outcome == 'success'
+        if: steps.azure_login.outputs.available == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Deploy to Azure
-        if: steps.azure_login.outcome == 'success'
+        if: steps.azure_login.outputs.available == 'true'
         run: |
           set +e
           ./scripts/deploy.sh 2>&1 | tee deploy.log
