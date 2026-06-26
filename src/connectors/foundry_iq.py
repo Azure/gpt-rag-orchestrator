@@ -41,6 +41,8 @@ KNOWLEDGE_BASE_NAME_KEY = "KNOWLEDGE_BASE_NAME"
 KNOWLEDGE_BASE_ENDPOINT_KEY = "KNOWLEDGE_BASE_ENDPOINT"
 FOUNDRY_IQ_API_VERSION_KEY = "FOUNDRY_IQ_API_VERSION"
 FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME_KEY = "FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME"
+FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND_KEY = "FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND"
+FOUNDRY_IQ_PATTERN_KEY = "FOUNDRY_IQ_PATTERN"
 FOUNDRY_IQ_FILTER_ADD_ON_ENABLED_KEY = "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED"
 FOUNDRY_IQ_SECURITY_FIELD_NAME_KEY = "FOUNDRY_IQ_SECURITY_FIELD_NAME"
 FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS_KEY = "FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS"
@@ -164,9 +166,18 @@ class FoundryIQClient:
         self.knowledge_source_name = (
             self.cfg.get(FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME_KEY, "") or ""
         ).strip()
+        self.knowledge_source_kind = (
+            self.cfg.get(FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND_KEY, "")
+            or self.cfg.get(FOUNDRY_IQ_PATTERN_KEY, "")
+            or ""
+        ).strip()
         self.filter_add_on_enabled = _as_bool(
             self.cfg.get(FOUNDRY_IQ_FILTER_ADD_ON_ENABLED_KEY, False, type=bool)
         )
+        if not self.knowledge_source_kind:
+            self.knowledge_source_kind = "searchIndex" if self.filter_add_on_enabled else "azureBlob"
+        if self.knowledge_source_kind == "managed":
+            self.knowledge_source_kind = "azureBlob"
         self.security_field_name = self.cfg.get(
             FOUNDRY_IQ_SECURITY_FIELD_NAME_KEY, "metadata_security_id", type=str
         )
@@ -293,11 +304,16 @@ class FoundryIQClient:
         if self.knowledge_source_name:
             source_params: Dict[str, Any] = {
                 "knowledgeSourceName": self.knowledge_source_name,
-                "kind": "searchIndex",
+                "kind": self.knowledge_source_kind,
                 "includeReferences": True,
                 "includeReferenceSourceData": True,
             }
             if self.filter_add_on_enabled:
+                if self.knowledge_source_kind != "searchIndex":
+                    raise ValueError(
+                        "Foundry IQ filterAddOn is only valid for searchIndex knowledge sources; "
+                        f"current kind={self.knowledge_source_kind}."
+                    )
                 if self.api_version != DEFAULT_FOUNDRY_IQ_API_VERSION:
                     raise ValueError(
                         "Foundry IQ Pattern B filterAddOn requires "

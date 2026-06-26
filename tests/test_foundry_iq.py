@@ -66,6 +66,8 @@ def _build_client(payload, status=200, config_overrides=None):
         "KNOWLEDGE_BASE_NAME": "kb-test",
         "FOUNDRY_IQ_API_VERSION": "2026-05-01-preview",
         "FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME": "",
+        "FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND": "",
+        "FOUNDRY_IQ_PATTERN": "",
         "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED": False,
         "FOUNDRY_IQ_SECURITY_FIELD_NAME": "metadata_security_id",
         "FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS": None,
@@ -156,11 +158,31 @@ def test_pattern_b_filter_add_on_uses_security_fields_and_conversation_scope():
 
 
 @pytest.mark.asyncio
+async def test_retrieve_uses_native_blob_knowledge_source_by_default():
+    client, session = _build_client(
+        _SAMPLE_PAYLOAD,
+        config_overrides={"FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME": "documents-blob-ks"},
+    )
+
+    await client.retrieve("hello")
+
+    assert session.captured["json"]["knowledgeSourceParams"] == [
+        {
+            "knowledgeSourceName": "documents-blob-ks",
+            "kind": "azureBlob",
+            "includeReferences": True,
+            "includeReferenceSourceData": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_retrieve_adds_pattern_b_filter_add_on_when_enabled():
     client, session = _build_client(
         _SAMPLE_PAYLOAD,
         config_overrides={
             "FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME": "ragindex-ks",
+            "FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND": "searchIndex",
             "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED": True,
             "FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS": 7,
         },
@@ -196,6 +218,7 @@ async def test_pattern_b_filter_add_on_requires_preview_api():
         config_overrides={
             "FOUNDRY_IQ_API_VERSION": "2026-04-01",
             "FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME": "ragindex-ks",
+            "FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND": "searchIndex",
             "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED": True,
         },
     )
