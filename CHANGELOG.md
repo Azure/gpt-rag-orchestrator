@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **Foundry IQ knowledge base retrieve: parse `azureBlob` reference shape
+  correctly.** `FoundryIQClient._normalize_references` previously read
+  `sourceData.content`, `sourceData.filepath`, and `sourceData.url`. The
+  Foundry IQ `azureBlob` knowledge source returns `sourceData.snippet` and
+  `sourceData.blob_url` instead (true for both `contentExtractionMode=minimal`
+  and `standard`/OCR), with no `title` field, so every reference was being
+  dropped as empty. The parser now accepts both shapes with explicit priority
+  (`snippet` → `content` → `text`; `blob_url` → `url` → `filepath` → `path` →
+  reference-level `blobUrl`) and derives a human-readable title from the
+  blob/file name when `sourceData.title` is absent. This restores grounding
+  for scanned PDFs ingested via the Content Understanding skill and keeps the
+  Pattern B `searchIndex` path working unchanged.
+
 ## [v3.0.1] - 2026-06-26
 
 ### Added

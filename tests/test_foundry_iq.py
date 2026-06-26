@@ -241,6 +241,54 @@ async def test_retrieve_raises_on_http_error():
         await client.retrieve("hello")
 
 
+@pytest.mark.asyncio
+async def test_retrieve_normalizes_azure_blob_snippet_shape():
+    """Real azureBlob payloads (both minimal and standard extraction modes)
+    return ``sourceData.snippet`` and ``sourceData.blob_url`` and do not
+    include ``title``; the parser must map those to the shared contract."""
+    payload = {
+        "references": [
+            {
+                "type": "azureBlob",
+                "id": "0",
+                "sourceData": {
+                    "uid": "abc_pages_0",
+                    "blob_url": "https://acct.blob.core.windows.net/documents/vw-fuel-system.pdf",
+                    "snippet": "# Fuel System\n\nThe fuel system, as covered...",
+                },
+                "blobUrl": "https://acct.blob.core.windows.net/documents/vw-fuel-system.pdf",
+            },
+            {
+                "type": "azureBlob",
+                "id": "1",
+                "sourceData": {
+                    "uid": "def_pages_0",
+                    "blob_url": "https://acct.blob.core.windows.net/documents/foundry-iq-validation.txt",
+                    "snippet": "Foundry IQ validation marker.",
+                },
+            },
+            {
+                # Empty snippet is dropped (matches the empty-content rule).
+                "sourceData": {"blob_url": "https://x/empty.txt", "snippet": ""},
+            },
+        ]
+    }
+    client, _ = _build_client(payload)
+    records = await client.retrieve("fuel system")
+    assert records == [
+        {
+            "title": "vw-fuel-system.pdf",
+            "link": "https://acct.blob.core.windows.net/documents/vw-fuel-system.pdf",
+            "content": "# Fuel System\n\nThe fuel system, as covered...",
+        },
+        {
+            "title": "foundry-iq-validation.txt",
+            "link": "https://acct.blob.core.windows.net/documents/foundry-iq-validation.txt",
+            "content": "Foundry IQ validation marker.",
+        },
+    ]
+
+
 # ---------------------------------------------------------------------------
 # FoundryIQContextProvider.invoking
 # ---------------------------------------------------------------------------

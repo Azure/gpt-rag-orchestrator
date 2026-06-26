@@ -223,20 +223,54 @@ class FoundryIQClient:
     def _normalize_references(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         """Map a retrieve response into ``[{title, link, content}]`` records.
 
-        The knowledge base retrieve response carries a ``references`` array; each
-        reference exposes a ``sourceData`` object with the configured source
-        fields. We map defensively into the same ``title``/``link``/``content``
-        contract the Azure AI Search path emits so downstream citation handling
-        is identical across backends.
+        The knowledge base retrieve response carries a ``references`` array;
+        each reference exposes a ``sourceData`` object with the configured
+        source fields. Field names vary by knowledge source kind and content
+        extraction mode:
+
+        - ``azureBlob`` native sources (both ``minimal`` and ``standard``
+          content extraction) return ``sourceData.snippet`` and
+          ``sourceData.blob_url`` and do not include ``title``.
+        - ``searchIndex`` Pattern B sources return whatever the index
+          projects (typically ``content``, ``filepath``/``url``, ``title``).
+
+        We accept the union with explicit priority so the downstream
+        ``{title, link, content}`` contract is identical across backends,
+        and so a future small rename does not silently drop references.
+        Title falls back to the link's filename when the source does not
+        carry one (true for ``azureBlob`` references).
         """
         records: List[Dict[str, str]] = []
         for ref in payload.get("references", []) or []:
             source = ref.get("sourceData") or {}
-            title = source.get("title") or ref.get("docKey") or source.get("id") or "reference"
-            link = source.get("filepath") or source.get("url") or ""
-            content = source.get("content") or ""
+
+            content = (
+                source.get("snippet")
+                or source.get("content")
+                or source.get("text")
+                or ""
+            )
             if not content:
                 continue
+
+            link = (
+                source.get("blob_url")
+                or source.get("url")
+                or source.get("filepath")
+                or source.get("path")
+                or ref.get("blobUrl")
+                or ""
+            )
+
+            title = source.get("title") or ref.get("docKey") or source.get("id")
+            if not title and link:
+                # Derive a human-friendly title from the blob/file name so the
+                # citation surface is not an opaque uid.
+                tail = link.rsplit("/", 1)[-1]
+                title = tail.split("?", 1)[0] or None
+            if not title:
+                title = "reference"
+
             records.append({"title": title, "link": link, "content": content})
         return records
 
