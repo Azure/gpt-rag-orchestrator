@@ -2,7 +2,41 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Foundry IQ as a selectable retrieval backend (`RETRIEVAL_BACKEND`).** A new
+  non-breaking seam lets operators choose where grounding documents come from:
+  `ai_search` (default, current Azure AI Search RAG index) or `foundry_iq`
+  (Foundry IQ knowledge base retrieve action). The selector is resolved once at
+  startup and read by `search_knowledge_base` and the MAF strategy
+  `_create_search_provider` seams. A new `FoundryIQClient` targets the knowledge
+  base retrieve endpoint with a pinned, configurable
+  `FOUNDRY_IQ_API_VERSION=2026-05-01-preview` and forwards the per-user OBO token
+  in `x-ms-query-source-authorization`. A new `FoundryIQContextProvider` emits
+  context that is byte-identical to the AI Search path via a shared
+  context-shaping helper, so citations are unchanged. New settings:
+  `RETRIEVAL_BACKEND`, `KNOWLEDGE_BASE_NAME`, `KNOWLEDGE_BASE_ENDPOINT`,
+  `KNOWLEDGE_BASE_CONNECTION_ID`, `FOUNDRY_IQ_API_VERSION`. The default stays
+  `ai_search`, so this changes no runtime behavior until an operator opts in.
+  Multimodal retrieval stays on `ai_search` for image grounding; the `foundry_iq`
+  selection routes it to text-only retrieval (Pattern A image parity deferred).
+  (Azure/GPT-RAG#526)
+
+- **Foundry IQ Pattern B query-time filtering.** When an existing GPT-RAG Azure
+  AI Search index is registered as a Foundry IQ `searchIndex` knowledge source,
+  the orchestrator can now send a `filterAddOn` OData filter using the GPT-RAG
+  security field (`metadata_security_id` by default) and conversation scope.
+  This keeps Pattern B security-field trimming separate from the native
+  `x-ms-query-source-authorization` OBO path used by Foundry IQ sources that
+  ingest permissions. New settings: `FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME`,
+  `FOUNDRY_IQ_FILTER_ADD_ON_ENABLED`, `FOUNDRY_IQ_SECURITY_FIELD_NAME`, and
+  `FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS`. (Azure/GPT-RAG#526)
+
 ### Changed
+
+- Reconciled the Azure AI Search query api-version setting to the single
+  canonical `SEARCH_API_VERSION` key (the orchestrator previously read an
+  undocumented `AZURE_SEARCH_API_VERSION` in one place).
 
 - **Dev CI/CD pipeline now soft-fails Azure environment connectivity failures.**
   The `develop` deployment workflow now reports a GitHub Actions warning and
@@ -15,6 +49,10 @@
   repaired.
 
 ### Removed
+
+- Removed the dead `ENABLE_AGENTIC_RETRIEVAL` flag from `.env.sample` and the
+  stale `enable_agentic_retrieval` Jinja example in the base strategy docstring.
+  The orchestrator never read this flag. (Azure/GPT-RAG#526)
 
 - Standalone `evaluations/` harness (scripts and pinned `requirements.txt`).
   Evaluation now runs through the AgentOps Accelerator against the live

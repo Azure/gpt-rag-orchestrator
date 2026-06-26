@@ -277,14 +277,14 @@ class BaseAgentStrategy(ABC):
         
         **Template Context**:
         - Pass a dictionary with variables that will be available in the template
-        - Common variables: enable_agentic_retrieval, user_context, config values, etc.
+        - Common variables: user_context, config values, etc.
         
         **Example Template Usage**:
         ```jinja2
-        {% if enable_agentic_retrieval %}
-        Use agentic retrieval instructions...
+        {% if user_context %}
+        Personalize the answer using the user context...
         {% else %}
-        Use traditional search instructions...
+        Answer using only the retrieved documents...
         {% endif %}
         ```
         
