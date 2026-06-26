@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 
 from dependencies import get_config
 from util.metadata import format_custom_metadata, parse_allowed_keys
+from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
+from connectors.foundry_iq import get_foundry_iq_client
 
 # Standardized log markers for retrieval/auth failure paths. Operators can grep
 # these to spot swallowed errors that would otherwise return empty results
@@ -165,7 +167,7 @@ class SearchClient:
         # ==== Load all config parameters in one place ====
         self.cfg = get_config()
         self.endpoint = self.cfg.get("SEARCH_SERVICE_QUERY_ENDPOINT")
-        self.api_version = self.cfg.get("AZURE_SEARCH_API_VERSION", "2024-07-01")
+        self.api_version = self.cfg.get("SEARCH_API_VERSION", "2024-07-01")
         self.credential = self.cfg.aiocredential
 
         # Hybrid search configuration
@@ -591,6 +593,11 @@ class SearchClient:
         :param query: The search query to find relevant documents.
         :return: Search results as a JSON string containing a list of documents with title, link and content.
         """
+        # Backend selector (Azure/GPT-RAG#526). The default 'ai_search' keeps the
+        # exact path below; 'foundry_iq' delegates to the knowledge base retrieve
+        # action and maps into the identical return contract.
+        if get_retrieval_backend() == RETRIEVAL_BACKEND_FOUNDRY_IQ:
+            return await self._search_knowledge_base_foundry_iq(query)
 
         logging.info(f"[Retrieval] AI Search index: {self.index_name}")
         logging.info(f"[Retrieval] Search approach: {self.search_approach}")
@@ -716,6 +723,58 @@ class SearchClient:
             if not self._allow_anonymous:
                 raise
 
+            logging.warning("[Retrieval] Falling back to empty results (ALLOW_ANONYMOUS=true)")
+            return json.dumps({"results": [], "query": query, "error": "search_failed"})
+
+
+    async def _search_knowledge_base_foundry_iq(self, query: str) -> str:
+        """Foundry IQ knowledge base retrieval, mapped to the AI Search contract.
+
+        Delegates to :class:`FoundryIQClient` and maps the normalized
+        ``{title, link, content}`` records into the exact same JSON contract
+        ``single_agent_rag`` consumes from the Azure AI Search path. The OBO
+        token (per-user document-level security) is acquired the same way as the
+        AI Search path and forwarded in ``x-ms-query-source-authorization`` by
+        the client. Conversation/security-field scoping via ``filterAddOn`` is a
+        server-side knowledge source concern deferred to a later PR.
+        """
+        logging.info("[Retrieval] Using Foundry IQ knowledge base for document retrieval")
+        search_user_token = None
+        try:
+            search_user_token = await self._get_search_user_token_for_trimming()
+            client = get_foundry_iq_client()
+            records = await client.retrieve(
+                query,
+                obo_token=search_user_token,
+                conversation_id=self._conversation_id,
+            )
+
+            results_list = []
+            for record in records[: self.search_top_k]:
+                search_result = SearchResult(
+                    title=record.get("title") or "reference",
+                    link=record.get("link") or "",
+                    content=record.get("content") or "",
+                )
+                results_list.append(search_result.model_dump())
+
+            logging.info(f"[Retrieval] Found {len(results_list)} results from Foundry IQ")
+            return json.dumps({"results": results_list, "query": query})
+
+        except Exception as e:
+            level, marker = _classify_retrieval_error(e)
+            logging.log(
+                level,
+                "%s Foundry IQ retrieval failed: %s",
+                marker,
+                e,
+                exc_info=True,
+                extra={
+                    "retrieval_credential_type": "obo" if search_user_token else "managed_identity",
+                },
+            )
+            if not self._allow_anonymous:
+                raise
             logging.warning("[Retrieval] Falling back to empty results (ALLOW_ANONYMOUS=true)")
             return json.dumps({"results": [], "query": query, "error": "search_failed"})
 

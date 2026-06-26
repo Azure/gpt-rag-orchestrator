@@ -34,6 +34,7 @@ from .base_agent_strategy import BaseAgentStrategy
 from .agent_strategies import AgentStrategies
 from .composite_context_provider import CompositeContextProvider
 from .multimodal_search_context_provider import MultimodalSearchContextProvider
+from .foundry_iq_context_provider import FoundryIQContextProvider
 from .maf_plugins import UserProfile, UserProfileMemory
 from .retrieval_intent import (
     RETRIEVAL_INTENT_SYSTEM_PROMPT,
@@ -42,6 +43,7 @@ from .retrieval_intent import (
 )
 from connectors.multimodal_chat_client import MultimodalChatClient
 from connectors.search import acquire_obo_search_token
+from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
 from dependencies import get_config
 from openai import BadRequestError
 
@@ -251,6 +253,25 @@ class MultimodalStrategy(BaseAgentStrategy):
             async def _get_obo_token() -> str | None:
                 token = getattr(self, "request_access_token", None)
                 return await acquire_obo_search_token(token) if token else None
+
+            # Decision #5 (Azure/GPT-RAG#526): multimodal stays on Azure AI Search
+            # for v3.0.0 — Pattern A captioning/image parity for Foundry IQ is
+            # deferred. The selector is still honored for consistency: when
+            # foundry_iq is configured, retrieval is text-only via
+            # FoundryIQContextProvider (no image grounding).
+            if get_retrieval_backend() == RETRIEVAL_BACKEND_FOUNDRY_IQ:
+                provider = FoundryIQContextProvider(
+                    conversation_id=self.conversation_id,
+                    top_k=self.search_top_k,
+                    max_content_chars=self.max_content_chars,
+                    get_obo_token=_get_obo_token,
+                )
+                logging.info(
+                    "[MultimodalStrategy] FoundryIQContextProvider created "
+                    "(top_k=%d, text-only; Pattern A image parity deferred)",
+                    self.search_top_k,
+                )
+                return provider
 
             provider = MultimodalSearchContextProvider(
                 endpoint=self.search_endpoint,

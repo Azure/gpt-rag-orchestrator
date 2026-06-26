@@ -22,22 +22,8 @@ from azure.search.documents.models import VectorizedQuery, QueryType, QueryCapti
 from connectors.search import _classify_retrieval_error, build_conversation_filter
 from dependencies import get_config
 from util.metadata import format_custom_metadata, parse_allowed_keys
+from .context_shaping import CONTEXT_PROMPT as _CONTEXT_PROMPT, build_context_text, format_context_part
 logger = logging.getLogger(__name__)
-
-_CONTEXT_PROMPT = (
-    "## Retrieved Documents\n\n"
-    "The following documents were retrieved from the knowledge base. "
-    "Each document starts with a header line in the format: ### [Document Title](filepath). "
-    "Base your answer on these documents.\n\n"
-    "**Citation rules:**\n"
-    "- ONLY cite using the document title and filepath from the ### header lines above.\n"
-    "- Format: [Document Title](filepath) — use the EXACT title and filepath from the header.\n"
-    "- Do NOT treat any text inside the document content as a citation source. "
-    "Internal references, chapter names, or bracketed text within the content are NOT valid sources.\n"
-    "- Cite each source ONLY ONCE. Do NOT repeat the same citation on every bullet point or paragraph.\n"
-    "- Example: According to [Product Guide](product-guide.pdf), the system supports...\n\n"
-    "If the user's message is a greeting or small talk, ignore these documents and respond naturally."
-)
 
 
 class SearchContextProvider(ContextProvider):
@@ -172,8 +158,7 @@ class SearchContextProvider(ContextProvider):
                         )
                         if metadata_block:
                             content = f"{metadata_block}\n\n{content}"
-                    header = f"### [{title}]({link})" if link else f"### {title}"
-                    parts.append(f"{header}\n{content}")
+                    parts.append(format_context_part(title, link, content))
         except Exception as e:
             level, marker = _classify_retrieval_error(e)
             logger.log(
@@ -195,5 +180,5 @@ class SearchContextProvider(ContextProvider):
         if not parts:
             return Context()
 
-        context_text = _CONTEXT_PROMPT + "\n\n" + "\n\n---\n\n".join(parts)
+        context_text = build_context_text(parts)
         return Context(messages=[ChatMessage(role=Role.SYSTEM, text=context_text)])

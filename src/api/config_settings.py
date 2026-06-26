@@ -135,6 +135,21 @@ _REASONING_EFFORT_OPTIONS: List[SettingOption] = [
 ]
 
 
+_RETRIEVAL_BACKEND_OPTIONS: List[SettingOption] = [
+    SettingOption(
+        "ai_search",
+        "Azure AI Search",
+        "Retrieve from the Azure AI Search RAG index (default, current behavior).",
+    ),
+    SettingOption(
+        "foundry_iq",
+        "Foundry IQ",
+        "Retrieve from a Foundry IQ knowledge base. Requires KNOWLEDGE_BASE_NAME "
+        "and KNOWLEDGE_BASE_ENDPOINT to be provisioned.",
+    ),
+]
+
+
 # ---------------------------------------------------------------------------
 # Sections (renders as one card per section in the UI, top to bottom)
 # ---------------------------------------------------------------------------
@@ -264,6 +279,20 @@ SECTIONS: List[SettingSection] = [
             "answering, and how many results each source returns."
         ),
         settings=[
+            SettingSpec(
+                key="RETRIEVAL_BACKEND",
+                type="enum",
+                default="ai_search",
+                label="Retrieval backend",
+                description=(
+                    "Selects which retrieval backend serves grounding "
+                    "documents. 'ai_search' uses the Azure AI Search RAG index "
+                    "(default). 'foundry_iq' targets a Foundry IQ knowledge "
+                    "base. The retrieved context shape and citations are "
+                    "identical across backends."
+                ),
+                options=_RETRIEVAL_BACKEND_OPTIONS,
+            ),
             SettingSpec(
                 key="SEARCH_RETRIEVAL_ENABLED",
                 type="bool",

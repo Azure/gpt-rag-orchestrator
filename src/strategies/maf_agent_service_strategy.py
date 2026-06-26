@@ -32,10 +32,12 @@ from .base_agent_strategy import BaseAgentStrategy
 from .agent_strategies import AgentStrategies
 from .composite_context_provider import CompositeContextProvider
 from .search_context_provider import SearchContextProvider
+from .foundry_iq_context_provider import FoundryIQContextProvider
 from .maf_plugins import UserProfile, UserProfileMemory
 from . import agent_provider_v2
 from connectors.openai_chat_client import OpenAIChatClient
 from connectors.search import acquire_obo_search_token
+from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
 from dependencies import get_config
 
 
@@ -182,6 +184,18 @@ Guidelines:
             async def _get_obo_token() -> str | None:
                 token = getattr(self, "request_access_token", None)
                 return await acquire_obo_search_token(token) if token else None
+
+            if get_retrieval_backend() == RETRIEVAL_BACKEND_FOUNDRY_IQ:
+                provider = FoundryIQContextProvider(
+                    conversation_id=self.conversation_id,
+                    top_k=self.search_top_k,
+                    get_obo_token=_get_obo_token,
+                )
+                logging.info(
+                    "[MafAgentServiceStrategy] FoundryIQContextProvider created (top_k=%d)",
+                    self.search_top_k,
+                )
+                return provider
 
             provider = SearchContextProvider(
                 endpoint=self.search_endpoint,
