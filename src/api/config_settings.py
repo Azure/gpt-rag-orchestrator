@@ -162,7 +162,6 @@ _FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND_OPTIONS: List[SettingOption] = [
     ),
 ]
 
-
 # ---------------------------------------------------------------------------
 # Sections (renders as one card per section in the UI, top to bottom)
 # ---------------------------------------------------------------------------
