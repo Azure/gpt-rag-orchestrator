@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v3.0.2] - 2026-06-26
+
 ### Fixed
 
 - **Foundry IQ knowledge base retrieve: forward Search-audience token as
