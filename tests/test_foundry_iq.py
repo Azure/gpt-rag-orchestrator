@@ -56,17 +56,23 @@ class _FakeSession:
         return _FakeResponse(self._payload, self._status)
 
 
-def _build_client(payload, status=200):
+def _build_client(payload, status=200, config_overrides=None):
     """Build a FoundryIQClient with a stubbed config and fake session."""
     from connectors import foundry_iq
 
-    cfg = MagicMock()
-    cfg.get.side_effect = lambda key, default=None, type=str: {  # noqa: A002
+    values = {
         "KNOWLEDGE_BASE_ENDPOINT": "https://fake-search.search.windows.net",
         "SEARCH_SERVICE_QUERY_ENDPOINT": "https://fake-search.search.windows.net",
         "KNOWLEDGE_BASE_NAME": "kb-test",
         "FOUNDRY_IQ_API_VERSION": "2026-05-01-preview",
-    }.get(key, default)
+        "FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME": "",
+        "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED": False,
+        "FOUNDRY_IQ_SECURITY_FIELD_NAME": "metadata_security_id",
+        "FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS": None,
+    }
+    values.update(config_overrides or {})
+    cfg = MagicMock()
+    cfg.get.side_effect = lambda key, default=None, type=str: values.get(key, default)  # noqa: A002
     cfg.aiocredential = MagicMock()
     cfg.aiocredential.get_token = AsyncMock(return_value=SimpleNamespace(token="svc-token"))
 
@@ -131,6 +137,73 @@ async def test_retrieve_forwards_obo_header_and_normalizes():
     ]
 
 
+def test_pattern_b_filter_add_on_uses_security_fields_and_conversation_scope():
+    from connectors.foundry_iq import build_pattern_b_filter_add_on
+
+    filter_add_on = build_pattern_b_filter_add_on(
+        conversation_id="conv-1",
+        user_context={
+            "principal_id": "user-1",
+            "principal_name": "ada@example.com",
+            "groups": ["group-a", "group-b"],
+        },
+    )
+
+    assert "metadata_security_id/any(g:search.in(g, 'user-1,ada@example.com,group-a,group-b'))" in filter_add_on
+    assert "or not metadata_security_id/any()" in filter_add_on
+    assert "conversationId eq 'conv-1'" in filter_add_on
+    assert "conversationId eq 'NaN'" in filter_add_on
+
+
+@pytest.mark.asyncio
+async def test_retrieve_adds_pattern_b_filter_add_on_when_enabled():
+    client, session = _build_client(
+        _SAMPLE_PAYLOAD,
+        config_overrides={
+            "FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME": "ragindex-ks",
+            "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED": True,
+            "FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS": 7,
+        },
+    )
+
+    await client.retrieve(
+        "hello",
+        conversation_id="conv-1",
+        user_context={"principal_id": "user-1"},
+    )
+
+    captured_body = session.captured["json"]
+    assert captured_body["maxOutputDocuments"] == 7
+    assert captured_body["knowledgeSourceParams"] == [
+        {
+            "knowledgeSourceName": "ragindex-ks",
+            "kind": "searchIndex",
+            "includeReferences": True,
+            "includeReferenceSourceData": True,
+            "filterAddOn": (
+                "((metadata_security_id/any(g:search.in(g, 'user-1')) "
+                "or not metadata_security_id/any())) and "
+                "(conversationId eq 'conv-1' or (conversationId eq 'NaN' or conversationId eq null))"
+            ),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pattern_b_filter_add_on_requires_preview_api():
+    client, _ = _build_client(
+        _SAMPLE_PAYLOAD,
+        config_overrides={
+            "FOUNDRY_IQ_API_VERSION": "2026-04-01",
+            "FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME": "ragindex-ks",
+            "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED": True,
+        },
+    )
+
+    with pytest.raises(ValueError, match="filterAddOn requires 2026-05-01-preview"):
+        await client.retrieve("hello")
+
+
 @pytest.mark.asyncio
 async def test_retrieve_omits_obo_header_when_no_token():
     client, session = _build_client(_SAMPLE_PAYLOAD)
@@ -178,6 +251,7 @@ async def test_provider_invoking_shape_and_forwards_obo():
     _, kwargs = fake_client.retrieve.call_args
     assert kwargs["obo_token"] == "user-obo-token"
     assert kwargs["conversation_id"] == "conv-1"
+    assert kwargs["user_context"] == {}
 
     # Context shape is byte-identical to the shared shaping helpers.
     expected_parts = [format_context_part(r["title"], r["link"], r["content"]) for r in records]

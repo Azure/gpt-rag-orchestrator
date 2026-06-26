@@ -22,6 +22,16 @@
   selection routes it to text-only retrieval (Pattern A image parity deferred).
   (Azure/GPT-RAG#526)
 
+- **Foundry IQ Pattern B query-time filtering.** When an existing GPT-RAG Azure
+  AI Search index is registered as a Foundry IQ `searchIndex` knowledge source,
+  the orchestrator can now send a `filterAddOn` OData filter using the GPT-RAG
+  security field (`metadata_security_id` by default) and conversation scope.
+  This keeps Pattern B security-field trimming separate from the native
+  `x-ms-query-source-authorization` OBO path used by Foundry IQ sources that
+  ingest permissions. New settings: `FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME`,
+  `FOUNDRY_IQ_FILTER_ADD_ON_ENABLED`, `FOUNDRY_IQ_SECURITY_FIELD_NAME`, and
+  `FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS`. (Azure/GPT-RAG#526)
+
 ### Changed
 
 - Reconciled the Azure AI Search query api-version setting to the single

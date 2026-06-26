@@ -294,6 +294,54 @@ SECTIONS: List[SettingSection] = [
                 options=_RETRIEVAL_BACKEND_OPTIONS,
             ),
             SettingSpec(
+                key="FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME",
+                type="string",
+                default="",
+                label="Foundry IQ knowledge source name",
+                description=(
+                    "Optional searchIndex knowledge source to target when "
+                    "RETRIEVAL_BACKEND=foundry_iq. Set this for Pattern B so "
+                    "runtime filters can be applied to the registered GPT-RAG "
+                    "Azure AI Search index."
+                ),
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_FILTER_ADD_ON_ENABLED",
+                type="bool",
+                default=False,
+                label="Enable Pattern B filterAddOn",
+                description=(
+                    "When enabled, Foundry IQ retrieve requests add a "
+                    "filterAddOn OData expression for GPT-RAG custom security "
+                    "fields. This is distinct from x-ms-query-source-authorization, "
+                    "which is used for native Foundry IQ permission-aware sources."
+                ),
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_SECURITY_FIELD_NAME",
+                type="string",
+                default="metadata_security_id",
+                label="Pattern B security field",
+                description=(
+                    "Collection field used by the registered Azure AI Search "
+                    "index for GPT-RAG security trimming. Keep the default for "
+                    "standard GPT-RAG indexes."
+                ),
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS",
+                type="int",
+                default=5,
+                label="Foundry IQ max output documents",
+                description=(
+                    "Caps grounding documents returned by the Foundry IQ "
+                    "retrieve action before the orchestrator builds prompt context."
+                ),
+                min=1,
+                max=50,
+                step=1,
+            ),
+            SettingSpec(
                 key="SEARCH_RETRIEVAL_ENABLED",
                 type="bool",
                 default=True,

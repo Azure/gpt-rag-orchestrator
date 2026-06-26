@@ -190,6 +190,7 @@ Guidelines:
                     conversation_id=self.conversation_id,
                     top_k=self.search_top_k,
                     get_obo_token=_get_obo_token,
+                    user_context=self.user_context,
                 )
                 logging.info(
                     "[MafAgentServiceStrategy] FoundryIQContextProvider created (top_k=%d)",

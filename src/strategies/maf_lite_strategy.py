@@ -220,6 +220,7 @@ class MafLiteStrategy(BaseAgentStrategy):
                     top_k=self.search_top_k,
                     max_content_chars=self.max_content_chars,
                     get_obo_token=_get_obo_token,
+                    user_context=self.user_context,
                 )
                 logging.info(
                     "[MafLiteStrategy] FoundryIQContextProvider created (top_k=%d)",

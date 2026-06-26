@@ -8,12 +8,14 @@ service bearer token for ``https://search.azure.com/.default`` and, when an OBO
 user token is supplied, forwards it in the ``x-ms-query-source-authorization``
 header for per-user document-level security (query-time ACL/RBAC enforcement).
 
-Pattern A vs Pattern B is a *server-side* knowledge base configuration concern,
-not a client concern: the client always targets the configured knowledge base
-name and the retrieve call shape is identical either way. The Pattern B security
-field trimming (a ``filterAddOn`` OData filter under ``knowledgeSourceParams``)
-is a separate mechanism from the OBO header and is intentionally NOT wired here —
-it is deferred to a later PR.
+Pattern A vs Pattern B is mostly a *server-side* knowledge base configuration
+concern: the client always targets the configured knowledge base name. The one
+query-time difference is Pattern B security-field trimming. When enabled,
+GPT-RAG injects a ``filterAddOn`` OData filter under ``knowledgeSourceParams``.
+That filter is deliberately separate from the native OBO header. The OBO header
+drives Foundry IQ permission-aware sources such as ADLS Gen2 ACLs, SharePoint,
+Purview, OneLake, and Fabric. The Pattern B filter narrows the registered GPT-RAG
+Azure AI Search index that carries custom security fields.
 
 Introduced for Azure/GPT-RAG#526. Per-user security on the retrieve action is a
 preview capability, so the API version is pinned to a single configurable
@@ -22,7 +24,7 @@ constant (see :data:`DEFAULT_FOUNDRY_IQ_API_VERSION`).
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 import aiohttp
 
@@ -38,9 +40,109 @@ DEFAULT_FOUNDRY_IQ_API_VERSION = "2026-05-01-preview"
 KNOWLEDGE_BASE_NAME_KEY = "KNOWLEDGE_BASE_NAME"
 KNOWLEDGE_BASE_ENDPOINT_KEY = "KNOWLEDGE_BASE_ENDPOINT"
 FOUNDRY_IQ_API_VERSION_KEY = "FOUNDRY_IQ_API_VERSION"
+FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME_KEY = "FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME"
+FOUNDRY_IQ_FILTER_ADD_ON_ENABLED_KEY = "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED"
+FOUNDRY_IQ_SECURITY_FIELD_NAME_KEY = "FOUNDRY_IQ_SECURITY_FIELD_NAME"
+FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS_KEY = "FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS"
 
 # Search-audience scope used for the service token.
 _SEARCH_SCOPE = "https://search.azure.com/.default"
+
+
+def _odata_escape_string(value: Optional[str]) -> str:
+    """Escape a string for embedding in a single-quoted OData literal."""
+    return (value or "").replace("'", "''")
+
+
+def _normalize_security_ids(values: Iterable[Any]) -> List[str]:
+    """Return stable, non-empty security IDs without broadening the filter."""
+    normalized: List[str] = []
+    seen = set()
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text or text == "anonymous":
+            continue
+        if text not in seen:
+            seen.add(text)
+            normalized.append(text)
+    return normalized
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _as_optional_int(value: Any) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def build_pattern_b_filter_add_on(
+    *,
+    conversation_id: Optional[str],
+    user_context: Optional[Mapping[str, Any]],
+    security_field_name: str = "metadata_security_id",
+) -> str:
+    """Build the Pattern B ``filterAddOn`` for GPT-RAG security fields.
+
+    Pattern B registers GPT-RAG's existing Azure AI Search index as a Foundry IQ
+    ``searchIndex`` knowledge source. The custom security fields on that index
+    are not enforced by ``x-ms-query-source-authorization``. They must be
+    expressed as an OData ``filterAddOn`` on the retrieve request. The filter
+    preserves the direct AI Search behavior: include documents that match one of
+    the caller security IDs, plus public documents where the security collection
+    is empty.
+    """
+    safe_field = (security_field_name or "").strip() or "metadata_security_id"
+    context = dict(user_context or {})
+
+    candidate_ids: List[Any] = [
+        context.get("principal_id"),
+        context.get("oid"),
+        context.get("user_id"),
+    ]
+    principal_name = context.get("principal_name") or context.get("user_name")
+    if principal_name:
+        candidate_ids.append(principal_name)
+
+    for key in ("security_ids", "groups", "group_ids", "client_group_names"):
+        value = context.get(key)
+        if isinstance(value, (list, tuple, set)):
+            candidate_ids.extend(value)
+        elif value:
+            candidate_ids.append(value)
+
+    security_ids = _normalize_security_ids(candidate_ids)
+    public_clause = f"not {safe_field}/any()"
+    if not security_ids:
+        security_clause = public_clause
+    else:
+        escaped_ids = ",".join(_odata_escape_string(value) for value in security_ids)
+        security_clause = f"({safe_field}/any(g:search.in(g, '{escaped_ids}')) or {public_clause})"
+
+    # Keep runtime uploads conversation-scoped while allowing the shared corpus.
+    conversation_clause = None
+    cid = (conversation_id or "").strip() or None
+    if cid:
+        conversation_clause = (
+            f"(conversationId eq '{_odata_escape_string(cid)}' "
+            "or (conversationId eq 'NaN' or conversationId eq null))"
+        )
+
+    if conversation_clause:
+        return f"({security_clause}) and {conversation_clause}"
+    return security_clause
 
 
 class FoundryIQClient:
@@ -58,6 +160,18 @@ class FoundryIQClient:
         self.knowledge_base_name = self.cfg.get(KNOWLEDGE_BASE_NAME_KEY)
         self.api_version = self.cfg.get(
             FOUNDRY_IQ_API_VERSION_KEY, DEFAULT_FOUNDRY_IQ_API_VERSION
+        )
+        self.knowledge_source_name = (
+            self.cfg.get(FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME_KEY, "") or ""
+        ).strip()
+        self.filter_add_on_enabled = _as_bool(
+            self.cfg.get(FOUNDRY_IQ_FILTER_ADD_ON_ENABLED_KEY, False, type=bool)
+        )
+        self.security_field_name = self.cfg.get(
+            FOUNDRY_IQ_SECURITY_FIELD_NAME_KEY, "metadata_security_id", type=str
+        )
+        self.max_output_documents = _as_optional_int(
+            self.cfg.get(FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS_KEY, None)
         )
         self.credential = self.cfg.aiocredential
 
@@ -121,6 +235,7 @@ class FoundryIQClient:
         *,
         obo_token: Optional[str] = None,
         conversation_id: Optional[str] = None,
+        user_context: Optional[Mapping[str, Any]] = None,
     ) -> List[Dict[str, str]]:
         """Run the knowledge base retrieve action and return normalized records.
 
@@ -129,9 +244,12 @@ class FoundryIQClient:
             present it is forwarded in ``x-ms-query-source-authorization`` for
             per-user document-level security. This is the OBO mechanism, kept
             distinct from the Pattern B ``filterAddOn`` security filter.
-        :param conversation_id: Conversation scope, plumbed for parity and
-            logging. Conversation/security-field scoping via ``filterAddOn`` is
-            a server-side knowledge source concern deferred to a later PR.
+        :param conversation_id: Optional conversation scope. When Pattern B
+            ``filterAddOn`` is enabled, this narrows runtime-upload documents to
+            the current conversation plus shared/global chunks.
+        :param user_context: Optional user/security context used only for Pattern
+            B security-field filters. Native permission enforcement continues to
+            use ``obo_token`` and the ``x-ms-query-source-authorization`` header.
         :return: A list of ``{title, link, content}`` records.
         """
         url = self._retrieve_url()
@@ -169,6 +287,37 @@ class FoundryIQClient:
                 }
             ]
         }
+        if self.max_output_documents:
+            body["maxOutputDocuments"] = self.max_output_documents
+
+        knowledge_source_params: List[Dict[str, Any]] = []
+        if self.knowledge_source_name:
+            source_params: Dict[str, Any] = {
+                "knowledgeSourceName": self.knowledge_source_name,
+                "kind": "searchIndex",
+                "includeReferences": True,
+                "includeReferenceSourceData": True,
+            }
+            if self.filter_add_on_enabled:
+                if self.api_version != DEFAULT_FOUNDRY_IQ_API_VERSION:
+                    raise ValueError(
+                        "Foundry IQ Pattern B filterAddOn requires "
+                        f"{DEFAULT_FOUNDRY_IQ_API_VERSION}; current "
+                        f"FOUNDRY_IQ_API_VERSION={self.api_version}."
+                    )
+                source_params["filterAddOn"] = build_pattern_b_filter_add_on(
+                    conversation_id=conversation_id,
+                    user_context=user_context,
+                    security_field_name=self.security_field_name,
+                )
+                logging.info(
+                    "[FoundryIQClient][PatternB] Applying filterAddOn to knowledge source %s",
+                    self.knowledge_source_name,
+                )
+            knowledge_source_params.append(source_params)
+
+        if knowledge_source_params:
+            body["knowledgeSourceParams"] = knowledge_source_params
 
         session = await self._get_session()
         async with session.post(url, headers=headers, json=body) as resp:

@@ -239,6 +239,7 @@ class SearchClient:
         api_access_token: Optional[str],
         allow_anonymous: bool,
         conversation_id: Optional[str] = None,
+        user_context: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Sets per-request context used for permission trimming.
 
@@ -254,6 +255,7 @@ class SearchClient:
         self._request_api_access_token = api_access_token
         self._allow_anonymous = bool(allow_anonymous)
         self._conversation_id = (conversation_id or "").strip() or None
+        self._user_context = dict(user_context or {})
 
 
     def _token_fingerprint(self, token: Optional[str]) -> str:
@@ -747,6 +749,7 @@ class SearchClient:
                 query,
                 obo_token=search_user_token,
                 conversation_id=self._conversation_id,
+                user_context=getattr(self, "_user_context", {}),
             )
 
             results_list = []

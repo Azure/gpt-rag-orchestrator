@@ -8,8 +8,8 @@ behavior therefore does not change with the selected ``RETRIEVAL_BACKEND``.
 
 Per-request OBO permission trimming is forwarded by :class:`FoundryIQClient` in
 the ``x-ms-query-source-authorization`` header. That OBO header is a distinct
-mechanism from the Pattern B ``filterAddOn`` security filter, which is a
-server-side knowledge source concern deferred to a later PR.
+mechanism from the Pattern B ``filterAddOn`` security filter, which narrows a
+registered GPT-RAG Azure AI Search index using its custom security fields.
 
 Introduced for Azure/GPT-RAG#526.
 """
@@ -17,7 +17,7 @@ Introduced for Azure/GPT-RAG#526.
 import logging
 import time
 from collections.abc import Awaitable, Callable, MutableSequence
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from agent_framework import ChatMessage, Context, ContextProvider, Role
 
@@ -38,11 +38,13 @@ class FoundryIQContextProvider(ContextProvider):
         top_k: int = 3,
         max_content_chars: int = 1500,
         get_obo_token: Callable[[], Awaitable[Optional[str]]] | None = None,
+        user_context: Optional[Mapping[str, Any]] = None,
     ) -> None:
         self._conversation_id = (conversation_id or "").strip() or None
         self._top_k = top_k
         self._max_content_chars = max_content_chars
         self._get_obo_token = get_obo_token
+        self._user_context = dict(user_context or {})
 
     async def __aenter__(self):
         return self
@@ -82,6 +84,7 @@ class FoundryIQContextProvider(ContextProvider):
                 query,
                 obo_token=obo_token,
                 conversation_id=self._conversation_id,
+                user_context=self._user_context,
             )
 
             parts: list[str] = []
