@@ -276,14 +276,13 @@ class FoundryIQClient:
         if conversation_id:
             logging.debug("[FoundryIQClient] conversation_id=%s", conversation_id)
 
-        # Minimal retrieve request: a single user message. Answer synthesis is
-        # left to the orchestrator's own model, so the default output mode (which
-        # returns references) is used.
+        # GPT-RAG configures the knowledge base with minimal reasoning, which
+        # requires explicit intents rather than chat messages.
         body: Dict[str, Any] = {
-            "messages": [
+            "intents": [
                 {
-                    "role": "user",
-                    "content": [{"type": "text", "text": query}],
+                    "search": query,
+                    "type": "semantic",
                 }
             ]
         }

@@ -127,8 +127,8 @@ async def test_retrieve_forwards_obo_header_and_normalizes():
     # Endpoint shape and pinned preview api-version.
     assert "/knowledgebases/kb-test/retrieve" in session.captured["url"]
     assert "api-version=2026-05-01-preview" in session.captured["url"]
-    # Minimal retrieve body.
-    assert session.captured["json"]["messages"][0]["content"][0]["text"] == "hello"
+    # Minimal-reasoning knowledge bases require explicit intents.
+    assert session.captured["json"]["intents"] == [{"search": "hello", "type": "semantic"}]
 
     # Normalized to {title, link, content}; empty-content reference dropped.
     assert records == [
