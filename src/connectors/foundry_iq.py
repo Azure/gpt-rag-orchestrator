@@ -46,6 +46,7 @@ FOUNDRY_IQ_PATTERN_KEY = "FOUNDRY_IQ_PATTERN"
 FOUNDRY_IQ_FILTER_ADD_ON_ENABLED_KEY = "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED"
 FOUNDRY_IQ_SECURITY_FIELD_NAME_KEY = "FOUNDRY_IQ_SECURITY_FIELD_NAME"
 FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS_KEY = "FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS"
+FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY = "FOUNDRY_IQ_FORWARD_SOURCE_AUTH"
 
 # Search-audience scope used for the service token.
 _SEARCH_SCOPE = "https://search.azure.com/.default"
@@ -184,6 +185,17 @@ class FoundryIQClient:
         self.max_output_documents = _as_optional_int(
             self.cfg.get(FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS_KEY, None)
         )
+        # When true (default), and no per-user OBO token is available, the
+        # service managed-identity Search-audience token is forwarded as
+        # ``x-ms-query-source-authorization`` so Foundry IQ can evaluate
+        # RBAC-scoped permission filters on the bound knowledge source. This
+        # is required by knowledge bases whose index has
+        # ``permissionFilterOption=enabled`` and whose knowledge source uses
+        # ``ingestionPermissionOptions=["rbacScope"]`` — without it the
+        # retrieve action returns 502 ("Failed to query search index").
+        self.forward_source_auth = _as_bool(
+            self.cfg.get(FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY, True, type=bool)
+        )
         self.credential = self.cfg.aiocredential
 
         # Shared aiohttp session — reuses TCP connections across calls.
@@ -223,20 +235,54 @@ class FoundryIQClient:
     def _normalize_references(payload: Dict[str, Any]) -> List[Dict[str, str]]:
         """Map a retrieve response into ``[{title, link, content}]`` records.
 
-        The knowledge base retrieve response carries a ``references`` array; each
-        reference exposes a ``sourceData`` object with the configured source
-        fields. We map defensively into the same ``title``/``link``/``content``
-        contract the Azure AI Search path emits so downstream citation handling
-        is identical across backends.
+        The knowledge base retrieve response carries a ``references`` array;
+        each reference exposes a ``sourceData`` object with the configured
+        source fields. Field names vary by knowledge source kind and content
+        extraction mode:
+
+        - ``azureBlob`` native sources (both ``minimal`` and ``standard``
+          content extraction) return ``sourceData.snippet`` and
+          ``sourceData.blob_url`` and do not include ``title``.
+        - ``searchIndex`` Pattern B sources return whatever the index
+          projects (typically ``content``, ``filepath``/``url``, ``title``).
+
+        We accept the union with explicit priority so the downstream
+        ``{title, link, content}`` contract is identical across backends,
+        and so a future small rename does not silently drop references.
+        Title falls back to the link's filename when the source does not
+        carry one (true for ``azureBlob`` references).
         """
         records: List[Dict[str, str]] = []
         for ref in payload.get("references", []) or []:
             source = ref.get("sourceData") or {}
-            title = source.get("title") or ref.get("docKey") or source.get("id") or "reference"
-            link = source.get("filepath") or source.get("url") or ""
-            content = source.get("content") or ""
+
+            content = (
+                source.get("snippet")
+                or source.get("content")
+                or source.get("text")
+                or ""
+            )
             if not content:
                 continue
+
+            link = (
+                source.get("blob_url")
+                or source.get("url")
+                or source.get("filepath")
+                or source.get("path")
+                or ref.get("blobUrl")
+                or ""
+            )
+
+            title = source.get("title") or ref.get("docKey") or source.get("id")
+            if not title and link:
+                # Derive a human-friendly title from the blob/file name so the
+                # citation surface is not an opaque uid.
+                tail = link.rsplit("/", 1)[-1]
+                title = tail.split("?", 1)[0] or None
+            if not title:
+                title = "reference"
+
             records.append({"title": title, "link": link, "content": content})
         return records
 
@@ -280,9 +326,28 @@ class FoundryIQClient:
         if obo_token:
             # Per-user document-level security (query-time ACL/RBAC enforcement).
             headers["x-ms-query-source-authorization"] = obo_token
-            logging.info("[FoundryIQClient][Trimming] Using x-ms-query-source-authorization (OBO)")
+            logging.info(
+                "[FoundryIQClient][Trimming] x-ms-query-source-authorization=present "
+                "token_audience=%s source=obo",
+                _SEARCH_SCOPE,
+            )
+        elif self.forward_source_auth:
+            # Anonymous/unauth chat path: forward the service MI Search-audience
+            # token so Foundry IQ can evaluate RBAC-scope permission filters on
+            # the bound knowledge source. The MI itself must hold the relevant
+            # data-plane role on the storage container (or other source) for
+            # the filter to admit documents.
+            headers["x-ms-query-source-authorization"] = token
+            logging.info(
+                "[FoundryIQClient][Trimming] x-ms-query-source-authorization=present "
+                "token_audience=%s source=managed_identity",
+                _SEARCH_SCOPE,
+            )
         else:
-            logging.info("[FoundryIQClient][Trimming] Not sending x-ms-query-source-authorization")
+            logging.info(
+                "[FoundryIQClient][Trimming] x-ms-query-source-authorization=absent "
+                "reason=FOUNDRY_IQ_FORWARD_SOURCE_AUTH=false and no OBO token"
+            )
 
         if conversation_id:
             logging.debug("[FoundryIQClient] conversation_id=%s", conversation_id)

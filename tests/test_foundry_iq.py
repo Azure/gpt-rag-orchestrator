@@ -71,6 +71,7 @@ def _build_client(payload, status=200, config_overrides=None):
         "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED": False,
         "FOUNDRY_IQ_SECURITY_FIELD_NAME": "metadata_security_id",
         "FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS": None,
+        "FOUNDRY_IQ_FORWARD_SOURCE_AUTH": True,
     }
     values.update(config_overrides or {})
     cfg = MagicMock()
@@ -229,9 +230,27 @@ async def test_pattern_b_filter_add_on_requires_preview_api():
 
 @pytest.mark.asyncio
 async def test_retrieve_omits_obo_header_when_no_token():
-    client, session = _build_client(_SAMPLE_PAYLOAD)
+    """When forwarding is disabled and no OBO token is supplied, the
+    ``x-ms-query-source-authorization`` header must be omitted entirely."""
+    client, session = _build_client(
+        _SAMPLE_PAYLOAD,
+        config_overrides={"FOUNDRY_IQ_FORWARD_SOURCE_AUTH": False},
+    )
     await client.retrieve("hello")
     assert "x-ms-query-source-authorization" not in session.captured["headers"]
+
+
+@pytest.mark.asyncio
+async def test_retrieve_forwards_managed_identity_token_when_no_obo():
+    """Anonymous chat path: the service MI Search-audience token must be
+    forwarded as ``x-ms-query-source-authorization`` so RBAC-scoped permission
+    filters on the bound knowledge source can be evaluated."""
+    client, session = _build_client(_SAMPLE_PAYLOAD)
+    await client.retrieve("hello")
+    headers = session.captured["headers"]
+    assert headers["Authorization"] == "Bearer svc-token"
+    # MI token reused as the source-auth token when no OBO token is present.
+    assert headers["x-ms-query-source-authorization"] == "svc-token"
 
 
 @pytest.mark.asyncio
@@ -239,6 +258,54 @@ async def test_retrieve_raises_on_http_error():
     client, _ = _build_client({"error": "boom"}, status=403)
     with pytest.raises(RuntimeError):
         await client.retrieve("hello")
+
+
+@pytest.mark.asyncio
+async def test_retrieve_normalizes_azure_blob_snippet_shape():
+    """Real azureBlob payloads (both minimal and standard extraction modes)
+    return ``sourceData.snippet`` and ``sourceData.blob_url`` and do not
+    include ``title``; the parser must map those to the shared contract."""
+    payload = {
+        "references": [
+            {
+                "type": "azureBlob",
+                "id": "0",
+                "sourceData": {
+                    "uid": "abc_pages_0",
+                    "blob_url": "https://acct.blob.core.windows.net/documents/vw-fuel-system.pdf",
+                    "snippet": "# Fuel System\n\nThe fuel system, as covered...",
+                },
+                "blobUrl": "https://acct.blob.core.windows.net/documents/vw-fuel-system.pdf",
+            },
+            {
+                "type": "azureBlob",
+                "id": "1",
+                "sourceData": {
+                    "uid": "def_pages_0",
+                    "blob_url": "https://acct.blob.core.windows.net/documents/foundry-iq-validation.txt",
+                    "snippet": "Foundry IQ validation marker.",
+                },
+            },
+            {
+                # Empty snippet is dropped (matches the empty-content rule).
+                "sourceData": {"blob_url": "https://x/empty.txt", "snippet": ""},
+            },
+        ]
+    }
+    client, _ = _build_client(payload)
+    records = await client.retrieve("fuel system")
+    assert records == [
+        {
+            "title": "vw-fuel-system.pdf",
+            "link": "https://acct.blob.core.windows.net/documents/vw-fuel-system.pdf",
+            "content": "# Fuel System\n\nThe fuel system, as covered...",
+        },
+        {
+            "title": "foundry-iq-validation.txt",
+            "link": "https://acct.blob.core.windows.net/documents/foundry-iq-validation.txt",
+            "content": "Foundry IQ validation marker.",
+        },
+    ]
 
 
 # ---------------------------------------------------------------------------
