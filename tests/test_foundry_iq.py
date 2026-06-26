@@ -71,6 +71,7 @@ def _build_client(payload, status=200, config_overrides=None):
         "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED": False,
         "FOUNDRY_IQ_SECURITY_FIELD_NAME": "metadata_security_id",
         "FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS": None,
+        "FOUNDRY_IQ_FORWARD_SOURCE_AUTH": True,
     }
     values.update(config_overrides or {})
     cfg = MagicMock()
@@ -229,9 +230,27 @@ async def test_pattern_b_filter_add_on_requires_preview_api():
 
 @pytest.mark.asyncio
 async def test_retrieve_omits_obo_header_when_no_token():
-    client, session = _build_client(_SAMPLE_PAYLOAD)
+    """When forwarding is disabled and no OBO token is supplied, the
+    ``x-ms-query-source-authorization`` header must be omitted entirely."""
+    client, session = _build_client(
+        _SAMPLE_PAYLOAD,
+        config_overrides={"FOUNDRY_IQ_FORWARD_SOURCE_AUTH": False},
+    )
     await client.retrieve("hello")
     assert "x-ms-query-source-authorization" not in session.captured["headers"]
+
+
+@pytest.mark.asyncio
+async def test_retrieve_forwards_managed_identity_token_when_no_obo():
+    """Anonymous chat path: the service MI Search-audience token must be
+    forwarded as ``x-ms-query-source-authorization`` so RBAC-scoped permission
+    filters on the bound knowledge source can be evaluated."""
+    client, session = _build_client(_SAMPLE_PAYLOAD)
+    await client.retrieve("hello")
+    headers = session.captured["headers"]
+    assert headers["Authorization"] == "Bearer svc-token"
+    # MI token reused as the source-auth token when no OBO token is present.
+    assert headers["x-ms-query-source-authorization"] == "svc-token"
 
 
 @pytest.mark.asyncio

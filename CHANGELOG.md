@@ -4,6 +4,21 @@
 
 ### Fixed
 
+- **Foundry IQ knowledge base retrieve: forward Search-audience token as
+  `x-ms-query-source-authorization` when no OBO token is available.** When a
+  knowledge base has `permissionFilterOption=enabled` and its knowledge source
+  uses `ingestionPermissionOptions=["rbacScope"]`, the retrieve action requires
+  a Search-audience token in `x-ms-query-source-authorization` to evaluate the
+  per-document RBAC filter — without it the service responds 502 ("Failed to
+  query search index"). `FoundryIQClient.retrieve` now falls back to the
+  service managed-identity token (acquired for `https://search.azure.com/.default`)
+  when no per-user OBO token is present, so anonymous chat against an
+  RBAC-filtered knowledge base no longer fails. The behavior is gated by the
+  new `FOUNDRY_IQ_FORWARD_SOURCE_AUTH` flag (default `true`) so operators can
+  disable it. This closes the orchestrator-side gap behind Azure/GPT-RAG#508
+  ("Orchestrator API does not work when RBAC is enabled") for the Foundry IQ
+  retrieval backend.
+
 - **Foundry IQ knowledge base retrieve: parse `azureBlob` reference shape
   correctly.** `FoundryIQClient._normalize_references` previously read
   `sourceData.content`, `sourceData.filepath`, and `sourceData.url`. The

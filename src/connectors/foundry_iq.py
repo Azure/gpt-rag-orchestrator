@@ -46,6 +46,7 @@ FOUNDRY_IQ_PATTERN_KEY = "FOUNDRY_IQ_PATTERN"
 FOUNDRY_IQ_FILTER_ADD_ON_ENABLED_KEY = "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED"
 FOUNDRY_IQ_SECURITY_FIELD_NAME_KEY = "FOUNDRY_IQ_SECURITY_FIELD_NAME"
 FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS_KEY = "FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS"
+FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY = "FOUNDRY_IQ_FORWARD_SOURCE_AUTH"
 
 # Search-audience scope used for the service token.
 _SEARCH_SCOPE = "https://search.azure.com/.default"
@@ -184,6 +185,17 @@ class FoundryIQClient:
         self.max_output_documents = _as_optional_int(
             self.cfg.get(FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS_KEY, None)
         )
+        # When true (default), and no per-user OBO token is available, the
+        # service managed-identity Search-audience token is forwarded as
+        # ``x-ms-query-source-authorization`` so Foundry IQ can evaluate
+        # RBAC-scoped permission filters on the bound knowledge source. This
+        # is required by knowledge bases whose index has
+        # ``permissionFilterOption=enabled`` and whose knowledge source uses
+        # ``ingestionPermissionOptions=["rbacScope"]`` — without it the
+        # retrieve action returns 502 ("Failed to query search index").
+        self.forward_source_auth = _as_bool(
+            self.cfg.get(FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY, True, type=bool)
+        )
         self.credential = self.cfg.aiocredential
 
         # Shared aiohttp session — reuses TCP connections across calls.
@@ -314,9 +326,28 @@ class FoundryIQClient:
         if obo_token:
             # Per-user document-level security (query-time ACL/RBAC enforcement).
             headers["x-ms-query-source-authorization"] = obo_token
-            logging.info("[FoundryIQClient][Trimming] Using x-ms-query-source-authorization (OBO)")
+            logging.info(
+                "[FoundryIQClient][Trimming] x-ms-query-source-authorization=present "
+                "token_audience=%s source=obo",
+                _SEARCH_SCOPE,
+            )
+        elif self.forward_source_auth:
+            # Anonymous/unauth chat path: forward the service MI Search-audience
+            # token so Foundry IQ can evaluate RBAC-scope permission filters on
+            # the bound knowledge source. The MI itself must hold the relevant
+            # data-plane role on the storage container (or other source) for
+            # the filter to admit documents.
+            headers["x-ms-query-source-authorization"] = token
+            logging.info(
+                "[FoundryIQClient][Trimming] x-ms-query-source-authorization=present "
+                "token_audience=%s source=managed_identity",
+                _SEARCH_SCOPE,
+            )
         else:
-            logging.info("[FoundryIQClient][Trimming] Not sending x-ms-query-source-authorization")
+            logging.info(
+                "[FoundryIQClient][Trimming] x-ms-query-source-authorization=absent "
+                "reason=FOUNDRY_IQ_FORWARD_SOURCE_AUTH=false and no OBO token"
+            )
 
         if conversation_id:
             logging.debug("[FoundryIQClient] conversation_id=%s", conversation_id)
