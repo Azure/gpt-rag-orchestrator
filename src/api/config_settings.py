@@ -149,6 +149,18 @@ _RETRIEVAL_BACKEND_OPTIONS: List[SettingOption] = [
     ),
 ]
 
+_FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND_OPTIONS: List[SettingOption] = [
+    SettingOption(
+        "azureBlob",
+        "Azure Blob or ADLS Gen2",
+        "Native Foundry IQ file ingestion from Blob Storage or ADLS Gen2. This is the default for Foundry IQ.",
+    ),
+    SettingOption(
+        "searchIndex",
+        "Existing Azure AI Search index",
+        "Legacy Pattern B: register the GPT-RAG generated search index and optionally apply filterAddOn.",
+    ),
+]
 
 # ---------------------------------------------------------------------------
 # Sections (renders as one card per section in the UI, top to bottom)
@@ -299,11 +311,23 @@ SECTIONS: List[SettingSection] = [
                 default="",
                 label="Foundry IQ knowledge source name",
                 description=(
-                    "Optional searchIndex knowledge source to target when "
-                    "RETRIEVAL_BACKEND=foundry_iq. Set this for Pattern B so "
-                    "runtime filters can be applied to the registered GPT-RAG "
-                    "Azure AI Search index."
+                    "Knowledge source to target when RETRIEVAL_BACKEND=foundry_iq. "
+                    "By default this is the native Blob/ADLS source created by the "
+                    "deployment. For Pattern B, set it to the registered GPT-RAG "
+                    "Azure AI Search index knowledge source."
                 ),
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND",
+                type="enum",
+                default="azureBlob",
+                label="Foundry IQ knowledge source kind",
+                description=(
+                    "Controls the kind sent in knowledgeSourceParams. Use azureBlob "
+                    "for the native Foundry IQ file-ingestion default; use searchIndex "
+                    "only for the legacy Pattern B index-registration path."
+                ),
+                options=_FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND_OPTIONS,
             ),
             SettingSpec(
                 key="FOUNDRY_IQ_FILTER_ADD_ON_ENABLED",

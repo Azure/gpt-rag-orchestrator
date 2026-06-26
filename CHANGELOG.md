@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v3.0.1] - 2026-06-26
 
 ### Added
 
@@ -47,6 +47,12 @@
   extra red `azure/login` annotations. This is a temporary dev-only workaround
   until the `dev` environment credentials and `APP_CONFIG_ENDPOINT` are
   repaired.
+
+- **Foundry IQ defaults to native Blob or ADLS Knowledge Sources.** The
+  orchestrator now reads `FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND` or
+  `FOUNDRY_IQ_PATTERN`, defaults to `azureBlob`, and sends `searchIndex` only
+  when Pattern B is explicitly configured. `filterAddOn` is rejected for native
+  sources because it only applies to `searchIndex` Knowledge Sources.
 
 ### Removed
 
