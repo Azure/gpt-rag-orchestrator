@@ -2,7 +2,7 @@
 # Stage 1: build the dashboard SPA. The output is copied into the Python
 # image below and served by FastAPI when ENABLE_DASHBOARD is true.
 # ---------------------------------------------------------------------------
-FROM node:20-slim AS frontend-build
+FROM mcr.microsoft.com/devcontainers/javascript-node:20-bookworm AS frontend-build
 WORKDIR /build
 COPY frontend/package*.json ./frontend/
 RUN cd frontend && npm install --no-audit --no-fund
@@ -13,8 +13,8 @@ RUN cd frontend && npm run build
 # ---------------------------------------------------------------------------
 # Stage 2: orchestrator runtime
 # ---------------------------------------------------------------------------
-# Use the official slim Python 3.12 image
-FROM python:3.12-slim
+# Use an MCR-hosted Python 3.12 image to avoid Docker Hub pulls in local and ACR builds.
+FROM mcr.microsoft.com/devcontainers/python:3.12-bookworm
 
 # 1. Install OS prerequisites used to add external APT repositories and verify packages
 RUN apt-get update \

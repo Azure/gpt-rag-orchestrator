@@ -22,6 +22,35 @@ success() { echo -e "${GREEN}$*${NC}" >&2; }
 warn() { echo -e "${YELLOW}$*${NC}" >&2; }
 error() { echo -e "${RED}$*${NC}" >&2; }
 
+run_with_retry() {
+  local description="$1"
+  local max_attempts="$2"
+  local delay_seconds="$3"
+  shift 3
+
+  local attempt status=1
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    info "${description} attempt ${attempt}/${max_attempts}..."
+    set +e
+    "$@"
+    status=$?
+    set -e
+
+    if [[ $status -eq 0 ]]; then
+      return 0
+    fi
+
+    warn "${description} attempt ${attempt}/${max_attempts} failed (exit ${status})."
+    if (( attempt < max_attempts )); then
+      warn "Retrying ${description} in ${delay_seconds} seconds..."
+      sleep "$delay_seconds"
+    fi
+  done
+
+  error "Failed: ${description} after ${max_attempts} attempts. Verify ACR network access, MCR base image availability, registry permissions, and ACR task agent pool settings if configured."
+  exit "$status"
+}
+
 select_cli_value() {
   local expected="${1:-}"
   local line trimmed fallback=""
@@ -303,7 +332,7 @@ else
     acr_build_args+=(--agent-pool "$ACR_TASK_AGENT_POOL")
   fi
   acr_build_args+=(.)
-  az "${acr_build_args[@]}"
+  run_with_retry "ACR remote build" 3 15 az "${acr_build_args[@]}"
   success "Remote build completed."
 fi
 
