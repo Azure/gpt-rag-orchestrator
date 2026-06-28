@@ -1,16 +1,18 @@
 # Changelog
 
-## [Unreleased]
+## [v3.0.3] - 2026-06-28
 
 ### Changed
 
-- **MCR-hosted base images replace Docker Hub.** The Dockerfile now uses
-  MCR-hosted Node.js and Python dev container images for the frontend build and
-  orchestrator runtime stages, avoiding Docker Hub base-image pulls during local
-  Docker builds and remote ACR builds. Remote `az acr build` deployment now has
-  bounded, visible retries so transient registry or base-image availability
-  failures show attempt counts before ending with actionable troubleshooting
-  guidance.
+- **MCR-hosted base images replace Docker Hub for Zero Trust ACR builds.** The
+  Dockerfile now uses MCR-hosted Node.js and Python dev container images for the
+  frontend build and orchestrator runtime stages, so local Docker builds and
+  remote ACR builds no longer pull base images from Docker Hub.
+
+- **Remote ACR build retry is bounded and visible.** Remote `az acr build`
+  deployment now has bounded retries so transient registry or base-image
+  availability failures show attempt counts before ending with actionable
+  troubleshooting guidance.
 
 ## [v3.0.2] - 2026-06-26
 
