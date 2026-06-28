@@ -37,6 +37,36 @@ function Invoke-ExternalCommand {
     return $output
 }
 
+function Invoke-ExternalCommandWithRetry {
+    param(
+        [Parameter(Mandatory=$true)][string]$FilePath,
+        [Parameter()][string[]]$Arguments = @(),
+        [Parameter(Mandatory=$true)][string]$What,
+        [Parameter()][int]$MaxAttempts = 3,
+        [Parameter()][int]$DelaySeconds = 15
+    )
+
+    $finalExitCode = 1
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        Write-Blue ("{0} attempt {1}/{2}..." -f $What, $attempt, $MaxAttempts)
+        $output = & $FilePath @Arguments 2>&1
+        $finalExitCode = $LASTEXITCODE
+        if ($finalExitCode -eq 0) {
+            return $output
+        }
+
+        Write-Yellow ("{0} attempt {1}/{2} failed (exit {3})." -f $What, $attempt, $MaxAttempts, $finalExitCode)
+        if ($output) { Write-Host ($output | Out-String) }
+        if ($attempt -lt $MaxAttempts) {
+            Write-Yellow ("Retrying {0} in {1} seconds..." -f $What, $DelaySeconds)
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+
+    Write-ErrorColored ("Failed: {0} after {1} attempts. Verify ACR network access, MCR base image availability, registry permissions, and ACR task agent pool settings if configured." -f $What, $MaxAttempts)
+    exit $finalExitCode
+}
+
 function Get-CliOutputValue {
     param(
         [Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$Output,
@@ -344,7 +374,7 @@ if ($buildMode -eq 'local') {
         $acrBuildArgs += @('--agent-pool',$env:ACR_TASK_AGENT_POOL)
     }
     $acrBuildArgs += '.'
-    Invoke-ExternalCommand -FilePath 'az' -Arguments $acrBuildArgs -What 'ACR remote build' | Out-Null
+    Invoke-ExternalCommandWithRetry -FilePath 'az' -Arguments $acrBuildArgs -What 'ACR remote build' | Out-Null
     Write-Green 'Remote build completed.'
 }
 

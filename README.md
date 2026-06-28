@@ -48,7 +48,7 @@ The data comes from the existing conversation/history Cosmos DB container used b
 
 **Token scope.** The frontend must request an access token with the orchestrator's own API scope (`api://<client_id>/...`), not a Microsoft Graph scope. App roles are issued in the `roles` claim of an access token only when the token is requested for the application that defines those roles, so a Graph-scoped token will not surface the `Admin` role and every dashboard call will return 403.
 
-**Building the dashboard bundle.** Production builds happen automatically as part of the `Dockerfile` (a `node:20-slim` stage runs `npm run build` and copies the static assets into `src/static`). For local development you can run the Vite dev server with hot reload:
+**Building the dashboard bundle.** Production builds happen automatically as part of the `Dockerfile` (an MCR base image stage using Node.js 20 runs `npm run build` and copies the static assets into `src/static`). For local development you can run the Vite dev server with hot reload:
 
 ```bash
 cd frontend
