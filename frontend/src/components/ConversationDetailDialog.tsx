@@ -30,10 +30,13 @@ function roleClass(role?: string): string {
 }
 
 function MessageBubble({ message }: { message: ConversationMessage }) {
+  const raw = message.content ?? message.text;
   const content =
-    typeof message.content === "string"
-      ? message.content
-      : JSON.stringify(message.content, null, 2);
+    raw == null
+      ? ""
+      : typeof raw === "string"
+        ? raw
+        : JSON.stringify(raw, null, 2);
   return (
     <div className="rounded-md border bg-muted/30 p-3">
       <div className="mb-1 flex items-center justify-between">

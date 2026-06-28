@@ -118,6 +118,8 @@ export interface ConversationSummary {
 export interface ConversationMessage {
   role?: string;
   content?: unknown;
+  /** Backend reconstruction emits the message body under "text" (compat with `questions[]`). */
+  text?: unknown;
   timestamp?: string;
   question_id?: string;
 }

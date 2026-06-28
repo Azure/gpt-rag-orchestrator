@@ -115,6 +115,23 @@
   tuning. `evaluations/README.md` now redirects to both. Also dropped the
   `/evaluations` Dependabot pip entry that tracked the deleted requirements file.
 
+## [v2.8.13] - 2026-06-19
+
+### User and operator impact
+
+Hotfix on top of v2.8.12. The Conversations detail dialog was still showing
+`(empty)` cards for every user and assistant turn because the backend
+reconstruction in v2.8.12 emits each message body under the `text` field but
+the dialog component only read `content`. The dialog now reads `content` and
+falls back to `text` so persisted prompts and answers render correctly.
+
+### Fixed
+
+- Conversations detail: dialog renders message bodies returned under either
+  `content` or `text`, removing the `(empty)` cards seen after upgrading to
+  v2.8.12 (`frontend/src/components/ConversationDetailDialog.tsx`,
+  `frontend/src/lib/api.ts`).
+
 ## [v2.8.12] - 2026-06-19
 
 ### User and operator impact
