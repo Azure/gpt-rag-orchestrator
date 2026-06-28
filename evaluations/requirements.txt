@@ -1,8 +1,0 @@
-# Runtime dependencies for importing and exercising src.main in-memory.
--r ../requirements.txt
-
-# Data handling & reporting
-pandas
-
-# Azure AI Evaluation SDK
-azure-ai-evaluation

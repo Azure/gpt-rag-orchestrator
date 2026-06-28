@@ -1,6 +1,119 @@
 # Changelog
 
-## [Unreleased]
+## [v3.0.3] - 2026-06-28
+
+### Changed
+
+- **MCR-hosted base images replace Docker Hub for Zero Trust ACR builds.** The
+  Dockerfile now uses MCR-hosted Node.js and Python dev container images for the
+  frontend build and orchestrator runtime stages, so local Docker builds and
+  remote ACR builds no longer pull base images from Docker Hub.
+
+- **Remote ACR build retry is bounded and visible.** Remote `az acr build`
+  deployment now has bounded retries so transient registry or base-image
+  availability failures show attempt counts before ending with actionable
+  troubleshooting guidance.
+
+## [v3.0.2] - 2026-06-26
+
+### Fixed
+
+- **Foundry IQ knowledge base retrieve: forward Search-audience token as
+  `x-ms-query-source-authorization` when no OBO token is available.** When a
+  knowledge base has `permissionFilterOption=enabled` and its knowledge source
+  uses `ingestionPermissionOptions=["rbacScope"]`, the retrieve action requires
+  a Search-audience token in `x-ms-query-source-authorization` to evaluate the
+  per-document RBAC filter — without it the service responds 502 ("Failed to
+  query search index"). `FoundryIQClient.retrieve` now falls back to the
+  service managed-identity token (acquired for `https://search.azure.com/.default`)
+  when no per-user OBO token is present, so anonymous chat against an
+  RBAC-filtered knowledge base no longer fails. The behavior is gated by the
+  new `FOUNDRY_IQ_FORWARD_SOURCE_AUTH` flag (default `true`) so operators can
+  disable it. This closes the orchestrator-side gap behind Azure/GPT-RAG#508
+  ("Orchestrator API does not work when RBAC is enabled") for the Foundry IQ
+  retrieval backend.
+
+- **Foundry IQ knowledge base retrieve: parse `azureBlob` reference shape
+  correctly.** `FoundryIQClient._normalize_references` previously read
+  `sourceData.content`, `sourceData.filepath`, and `sourceData.url`. The
+  Foundry IQ `azureBlob` knowledge source returns `sourceData.snippet` and
+  `sourceData.blob_url` instead (true for both `contentExtractionMode=minimal`
+  and `standard`/OCR), with no `title` field, so every reference was being
+  dropped as empty. The parser now accepts both shapes with explicit priority
+  (`snippet` → `content` → `text`; `blob_url` → `url` → `filepath` → `path` →
+  reference-level `blobUrl`) and derives a human-readable title from the
+  blob/file name when `sourceData.title` is absent. This restores grounding
+  for scanned PDFs ingested via the Content Understanding skill and keeps the
+  Pattern B `searchIndex` path working unchanged.
+
+## [v3.0.1] - 2026-06-26
+
+### Added
+
+- **Foundry IQ as a selectable retrieval backend (`RETRIEVAL_BACKEND`).** A new
+  non-breaking seam lets operators choose where grounding documents come from:
+  `ai_search` (default, current Azure AI Search RAG index) or `foundry_iq`
+  (Foundry IQ knowledge base retrieve action). The selector is resolved once at
+  startup and read by `search_knowledge_base` and the MAF strategy
+  `_create_search_provider` seams. A new `FoundryIQClient` targets the knowledge
+  base retrieve endpoint with a pinned, configurable
+  `FOUNDRY_IQ_API_VERSION=2026-05-01-preview` and forwards the per-user OBO token
+  in `x-ms-query-source-authorization`. A new `FoundryIQContextProvider` emits
+  context that is byte-identical to the AI Search path via a shared
+  context-shaping helper, so citations are unchanged. New settings:
+  `RETRIEVAL_BACKEND`, `KNOWLEDGE_BASE_NAME`, `KNOWLEDGE_BASE_ENDPOINT`,
+  `KNOWLEDGE_BASE_CONNECTION_ID`, `FOUNDRY_IQ_API_VERSION`. The default stays
+  `ai_search`, so this changes no runtime behavior until an operator opts in.
+  Multimodal retrieval stays on `ai_search` for image grounding; the `foundry_iq`
+  selection routes it to text-only retrieval (Pattern A image parity deferred).
+  (Azure/GPT-RAG#526)
+
+- **Foundry IQ Pattern B query-time filtering.** When an existing GPT-RAG Azure
+  AI Search index is registered as a Foundry IQ `searchIndex` knowledge source,
+  the orchestrator can now send a `filterAddOn` OData filter using the GPT-RAG
+  security field (`metadata_security_id` by default) and conversation scope.
+  This keeps Pattern B security-field trimming separate from the native
+  `x-ms-query-source-authorization` OBO path used by Foundry IQ sources that
+  ingest permissions. New settings: `FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME`,
+  `FOUNDRY_IQ_FILTER_ADD_ON_ENABLED`, `FOUNDRY_IQ_SECURITY_FIELD_NAME`, and
+  `FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS`. (Azure/GPT-RAG#526)
+
+### Changed
+
+- Reconciled the Azure AI Search query api-version setting to the single
+  canonical `SEARCH_API_VERSION` key (the orchestrator previously read an
+  undocumented `AZURE_SEARCH_API_VERSION` in one place).
+
+- **Dev CI/CD pipeline now soft-fails Azure environment connectivity failures.**
+  The `develop` deployment workflow now reports a GitHub Actions warning and
+  skips the `dev` deployment when Azure login, subscription/RBAC access, DNS, or
+  App Configuration connectivity is unavailable. Build/test failures and
+  non-Azure deployment failures still fail the job. The Azure login step is
+  handled by the workflow shell so expected dev credential failures do not emit
+  extra red `azure/login` annotations. This is a temporary dev-only workaround
+  until the `dev` environment credentials and `APP_CONFIG_ENDPOINT` are
+  repaired.
+
+- **Foundry IQ defaults to native Blob or ADLS Knowledge Sources.** The
+  orchestrator now reads `FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND` or
+  `FOUNDRY_IQ_PATTERN`, defaults to `azureBlob`, and sends `searchIndex` only
+  when Pattern B is explicitly configured. `filterAddOn` is rejected for native
+  sources because it only applies to `searchIndex` Knowledge Sources.
+
+### Removed
+
+- Removed the dead `ENABLE_AGENTIC_RETRIEVAL` flag from `.env.sample` and the
+  stale `enable_agentic_retrieval` Jinja example in the base strategy docstring.
+  The orchestrator never read this flag. (Azure/GPT-RAG#526)
+
+- Standalone `evaluations/` harness (scripts and pinned `requirements.txt`).
+  Evaluation now runs through the AgentOps Accelerator against the live
+  orchestrator endpoint; see the AgentOps HTTP agent tutorial
+  (https://azure.github.io/agentops/tutorial-http-agent/) for the full workflow
+  and the GPT-RAG retrieval optimization how-to
+  (https://azure.github.io/GPT-RAG/howto_retrieval_optimization/) for retrieval
+  tuning. `evaluations/README.md` now redirects to both. Also dropped the
+  `/evaluations` Dependabot pip entry that tracked the deleted requirements file.
 
 ## [v2.8.13] - 2026-06-19
 

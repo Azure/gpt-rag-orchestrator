@@ -6,8 +6,8 @@ on:
       - develop
 
 jobs:
-  evaluations:
-    name: evaluations
+  tests:
+    name: tests
     runs-on: ubuntu-latest
 
     steps:

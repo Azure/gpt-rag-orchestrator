@@ -135,6 +135,33 @@ _REASONING_EFFORT_OPTIONS: List[SettingOption] = [
 ]
 
 
+_RETRIEVAL_BACKEND_OPTIONS: List[SettingOption] = [
+    SettingOption(
+        "ai_search",
+        "Azure AI Search",
+        "Retrieve from the Azure AI Search RAG index (default, current behavior).",
+    ),
+    SettingOption(
+        "foundry_iq",
+        "Foundry IQ",
+        "Retrieve from a Foundry IQ knowledge base. Requires KNOWLEDGE_BASE_NAME "
+        "and KNOWLEDGE_BASE_ENDPOINT to be provisioned.",
+    ),
+]
+
+_FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND_OPTIONS: List[SettingOption] = [
+    SettingOption(
+        "azureBlob",
+        "Azure Blob or ADLS Gen2",
+        "Native Foundry IQ file ingestion from Blob Storage or ADLS Gen2. This is the default for Foundry IQ.",
+    ),
+    SettingOption(
+        "searchIndex",
+        "Existing Azure AI Search index",
+        "Legacy Pattern B: register the GPT-RAG generated search index and optionally apply filterAddOn.",
+    ),
+]
+
 # ---------------------------------------------------------------------------
 # Sections (renders as one card per section in the UI, top to bottom)
 # ---------------------------------------------------------------------------
@@ -264,6 +291,80 @@ SECTIONS: List[SettingSection] = [
             "answering, and how many results each source returns."
         ),
         settings=[
+            SettingSpec(
+                key="RETRIEVAL_BACKEND",
+                type="enum",
+                default="ai_search",
+                label="Retrieval backend",
+                description=(
+                    "Selects which retrieval backend serves grounding "
+                    "documents. 'ai_search' uses the Azure AI Search RAG index "
+                    "(default). 'foundry_iq' targets a Foundry IQ knowledge "
+                    "base. The retrieved context shape and citations are "
+                    "identical across backends."
+                ),
+                options=_RETRIEVAL_BACKEND_OPTIONS,
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME",
+                type="string",
+                default="",
+                label="Foundry IQ knowledge source name",
+                description=(
+                    "Knowledge source to target when RETRIEVAL_BACKEND=foundry_iq. "
+                    "By default this is the native Blob/ADLS source created by the "
+                    "deployment. For Pattern B, set it to the registered GPT-RAG "
+                    "Azure AI Search index knowledge source."
+                ),
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND",
+                type="enum",
+                default="azureBlob",
+                label="Foundry IQ knowledge source kind",
+                description=(
+                    "Controls the kind sent in knowledgeSourceParams. Use azureBlob "
+                    "for the native Foundry IQ file-ingestion default; use searchIndex "
+                    "only for the legacy Pattern B index-registration path."
+                ),
+                options=_FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND_OPTIONS,
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_FILTER_ADD_ON_ENABLED",
+                type="bool",
+                default=False,
+                label="Enable Pattern B filterAddOn",
+                description=(
+                    "When enabled, Foundry IQ retrieve requests add a "
+                    "filterAddOn OData expression for GPT-RAG custom security "
+                    "fields. This is distinct from x-ms-query-source-authorization, "
+                    "which is used for native Foundry IQ permission-aware sources."
+                ),
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_SECURITY_FIELD_NAME",
+                type="string",
+                default="metadata_security_id",
+                label="Pattern B security field",
+                description=(
+                    "Collection field used by the registered Azure AI Search "
+                    "index for GPT-RAG security trimming. Keep the default for "
+                    "standard GPT-RAG indexes."
+                ),
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS",
+                type="int",
+                default=5,
+                label="Foundry IQ max output documents",
+                description=(
+                    "Caps grounding documents returned by the Foundry IQ "
+                    "retrieve action before the orchestrator builds prompt context."
+                ),
+                min=1,
+                max=50,
+                step=1,
+            ),
             SettingSpec(
                 key="SEARCH_RETRIEVAL_ENABLED",
                 type="bool",

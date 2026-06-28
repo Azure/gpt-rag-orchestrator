@@ -8,11 +8,3 @@ updates:
     labels:
       - "dependencies"
       - "python"
-  - package-ecosystem: "pip"
-    directory: "/evaluations"
-    schedule:
-      interval: "weekly"
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-      - "python"

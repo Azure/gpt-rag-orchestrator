@@ -218,6 +218,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                 api_access_token=request_access_token,
                 allow_anonymous=allow_anonymous,
                 conversation_id=conversation_id,
+                user_context=self.user_context,
             )
         except Exception:
             pass
