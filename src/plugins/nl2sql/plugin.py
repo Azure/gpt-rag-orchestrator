@@ -17,6 +17,7 @@ from .nl2sql_types import (
     TablesRetrievalResult,
     ValidateSQLQueryResult,
 )
+from .sql_validation import validate_single_read_only_select
 
 from connectors import (
     get_cosmosdb_client,
@@ -299,15 +300,8 @@ class NL2SQLPlugin:
         self,
         query: Annotated[str, "SQL Query"]
     ) -> ValidateSQLQueryResult:
-        try:
-            import sqlparse
-            parsed = sqlparse.parse(query)
-            if parsed and len(parsed) > 0:
-                return ValidateSQLQueryResult(is_valid=True)
-            else:
-                return ValidateSQLQueryResult(is_valid=False, error="Query could not be parsed.")
-        except Exception as e:
-            return ValidateSQLQueryResult(is_valid=False, error=str(e))
+        validation = validate_single_read_only_select(query)
+        return ValidateSQLQueryResult(is_valid=validation.is_valid, error=validation.error)
 
     async def execute_dax_query(
         self,
@@ -345,6 +339,11 @@ class NL2SQLPlugin:
         # log entry and parameters
         logging.info(f"execute_sql_query called with datasource={datasource}, query={query}")
         try:
+            validation = validate_single_read_only_select(query)
+            if not validation.is_valid:
+                logging.error(f"Rejected SQL query: {validation.error}")
+                return ExecuteQueryResult(error=validation.error)
+
             cosmosdb = self.cosmos
             datasource_config = await cosmosdb.get_document(self.container_name, datasource)
             logging.debug(f"Datasource config fetched: {datasource_config}")
@@ -386,11 +385,6 @@ class NL2SQLPlugin:
             logging.info("Creating SQL connection")
             connection = await sql_client.create_connection()
             cursor = connection.cursor()
-
-            # only SELECT allowed
-            if not query.strip().lower().startswith('select'):
-                logging.error("Rejected non-SELECT statement")
-                return ExecuteQueryResult(error="Only SELECT statements are allowed.")
 
             logging.info("Executing SQL query")
             cursor.execute(query)

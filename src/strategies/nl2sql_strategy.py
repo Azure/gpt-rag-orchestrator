@@ -161,7 +161,7 @@ class NL2SQLStrategy(BaseAgentStrategy):
             if fenced:
                 query = fenced.group(1)
         if not query:
-            select_match = re.search(r"\bselect\b.*?(?:;|$)", response, flags=re.IGNORECASE | re.DOTALL)
+            select_match = re.search(r"\bselect\b.*", response, flags=re.IGNORECASE | re.DOTALL)
             if select_match:
                 query = select_match.group(0)
         if not query:

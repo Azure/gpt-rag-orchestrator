@@ -29,6 +29,11 @@ The **GPT-RAG Orchestrator** service is an agentic orchestration layer built on 
 | `mcp` | MCP | Model Context Protocol strategy using Semantic Kernel. |
 | `nl2sql` | NL2SQL | Natural language to SQL translation strategy for structured data queries. |
 
+### NL2SQL datasource security
+
+> [!IMPORTANT]
+> When using the `nl2sql` strategy, configure every SQL Server, Azure SQL, or Fabric SQL datasource with a least-privilege read-only principal. Grant only the `SELECT` permissions needed for approved schemas, tables, or views, and do not use admin, owner, contributor, ingestion, or write-capable identities for NL2SQL query execution. The orchestrator validates generated SQL before execution, but database permissions remain the primary security boundary.
+
 ## Documentation
 
 For comprehensive information about GPT-RAG, including architecture details, configuration guides, best practices, troubleshooting resources, deployment guidance, customization options, and advanced usage scenarios, please refer to the [official project documentation](https://azure.github.io/GPT-RAG/).
