@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v3.0.4] - 2026-06-29
+
 ### Fixed
 
 - **NL2SQL read-only enforcement:** Hardened NL2SQL SQL execution so only a
