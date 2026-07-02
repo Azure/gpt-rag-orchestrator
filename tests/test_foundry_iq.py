@@ -72,6 +72,8 @@ def _build_client(payload, status=200, config_overrides=None):
         "FOUNDRY_IQ_SECURITY_FIELD_NAME": "metadata_security_id",
         "FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS": None,
         "FOUNDRY_IQ_FORWARD_SOURCE_AUTH": True,
+        "FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED": False,
+        "FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME": "",
     }
     values.update(config_overrides or {})
     cfg = MagicMock()
@@ -258,6 +260,140 @@ async def test_retrieve_raises_on_http_error():
     client, _ = _build_client({"error": "boom"}, status=403)
     with pytest.raises(RuntimeError):
         await client.retrieve("hello")
+
+
+# ---------------------------------------------------------------------------
+# Hybrid file-upload sidecar (Pattern A + UI upload)
+# ---------------------------------------------------------------------------
+
+def _conv_upload_overrides(**extra):
+    base = {
+        "FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME": "documents-blob-ks",
+        "FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND": "azureBlob",
+        "FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED": True,
+        "FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME": "ragindex-conv-ks",
+    }
+    base.update(extra)
+    return base
+
+
+@pytest.mark.asyncio
+async def test_conversation_upload_adds_second_source_in_pattern_a():
+    """Pattern A (azureBlob primary) + upload enabled: the retrieve body carries
+    two knowledge sources. The native blob source is untouched (no filterAddOn);
+    the sidecar searchIndex source is conversation-scoped and tolerant of an
+    empty/missing upload index (failOnError=False)."""
+    client, session = _build_client(
+        _SAMPLE_PAYLOAD,
+        config_overrides=_conv_upload_overrides(),
+    )
+
+    await client.retrieve(
+        "hello",
+        conversation_id="conv-1",
+        user_context={"principal_id": "user-1"},
+    )
+
+    sources = session.captured["json"]["knowledgeSourceParams"]
+    assert len(sources) == 2
+
+    primary, sidecar = sources[0], sources[1]
+    # Native blob corpus is never trimmed by the Pattern B filter.
+    assert primary == {
+        "knowledgeSourceName": "documents-blob-ks",
+        "kind": "azureBlob",
+        "includeReferences": True,
+        "includeReferenceSourceData": True,
+    }
+    # Sidecar is a searchIndex source, degrades gracefully, and is scoped.
+    assert sidecar["knowledgeSourceName"] == "ragindex-conv-ks"
+    assert sidecar["kind"] == "searchIndex"
+    assert sidecar["failOnError"] is False
+    assert "conversationId eq 'conv-1'" in sidecar["filterAddOn"]
+    assert "metadata_security_id/any(g:search.in(g, 'user-1'))" in sidecar["filterAddOn"]
+
+
+@pytest.mark.asyncio
+async def test_conversation_upload_sidecar_always_carries_filter_add_on():
+    """CONTRACT: the runtime-upload sidecar source must never be queried without
+    a filterAddOn, even when there is no conversation and no user context. A bare
+    security-only filter (public-or-owned) is still applied, so uploads can never
+    leak across users or conversations."""
+    client, session = _build_client(
+        _SAMPLE_PAYLOAD,
+        config_overrides=_conv_upload_overrides(),
+    )
+
+    await client.retrieve("hello")
+
+    sidecar = session.captured["json"]["knowledgeSourceParams"][1]
+    assert sidecar["knowledgeSourceName"] == "ragindex-conv-ks"
+    assert sidecar["filterAddOn"], "sidecar upload source must always be filtered"
+
+
+@pytest.mark.asyncio
+async def test_conversation_upload_skipped_for_pattern_b_primary():
+    """Pattern B already scopes its single searchIndex source by conversationId;
+    enabling the upload flag must not add a duplicate second source."""
+    client, session = _build_client(
+        _SAMPLE_PAYLOAD,
+        config_overrides=_conv_upload_overrides(
+            FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND="searchIndex",
+            FOUNDRY_IQ_FILTER_ADD_ON_ENABLED=True,
+        ),
+    )
+
+    await client.retrieve("hello", conversation_id="conv-1")
+
+    sources = session.captured["json"]["knowledgeSourceParams"]
+    assert len(sources) == 1
+    assert sources[0]["kind"] == "searchIndex"
+
+
+@pytest.mark.asyncio
+async def test_conversation_upload_skipped_when_name_missing():
+    """Upload enabled but no sidecar source name provisioned: skip gracefully
+    (shared corpus only), never emit a nameless source."""
+    client, session = _build_client(
+        _SAMPLE_PAYLOAD,
+        config_overrides=_conv_upload_overrides(
+            FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME="",
+        ),
+    )
+
+    await client.retrieve("hello", conversation_id="conv-1")
+
+    sources = session.captured["json"]["knowledgeSourceParams"]
+    assert len(sources) == 1
+    assert sources[0]["knowledgeSourceName"] == "documents-blob-ks"
+
+
+@pytest.mark.asyncio
+async def test_conversation_upload_disabled_by_default():
+    """Default config (flag off) keeps the single-source Pattern A behavior."""
+    client, session = _build_client(
+        _SAMPLE_PAYLOAD,
+        config_overrides={"FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME": "documents-blob-ks"},
+    )
+
+    await client.retrieve("hello", conversation_id="conv-1")
+
+    assert len(session.captured["json"]["knowledgeSourceParams"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_conversation_upload_requires_preview_api():
+    """The sidecar filterAddOn is a preview capability; a non-preview api-version
+    must fail loudly rather than silently drop conversation scoping."""
+    client, _ = _build_client(
+        _SAMPLE_PAYLOAD,
+        config_overrides=_conv_upload_overrides(
+            FOUNDRY_IQ_API_VERSION="2026-04-01",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="conversation-upload filterAddOn requires"):
+        await client.retrieve("hello", conversation_id="conv-1")
 
 
 @pytest.mark.asyncio

@@ -366,7 +366,34 @@ SECTIONS: List[SettingSection] = [
                 step=1,
             ),
             SettingSpec(
-                key="SEARCH_RETRIEVAL_ENABLED",
+                key="FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED",
+                type="bool",
+                default=False,
+                label="Enable conversation file upload (Pattern A)",
+                description=(
+                    "When RETRIEVAL_BACKEND=foundry_iq and the primary knowledge "
+                    "source is the native azureBlob corpus, also query a second "
+                    "searchIndex source built over the existing GPT-RAG index so "
+                    "files uploaded in the chat UI are grounded alongside the "
+                    "shared corpus. The upload source is always trimmed by a "
+                    "security + conversationId filterAddOn, so uploads stay "
+                    "scoped to the conversation that created them. No effect for "
+                    "Pattern B, which already scopes by conversationId."
+                ),
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME",
+                type="string",
+                default="",
+                label="Conversation upload knowledge source name",
+                description=(
+                    "Name of the searchIndex knowledge source that carries "
+                    "chat-UI uploads when FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED "
+                    "is on. Provisioned by the deployment; defaults to "
+                    "'<SEARCH_RAG_INDEX_NAME>-conv-ks'. Leave blank to let the "
+                    "deployment set it."
+                ),
+            ),
                 type="bool",
                 default=True,
                 label="Enable Azure AI Search retrieval",

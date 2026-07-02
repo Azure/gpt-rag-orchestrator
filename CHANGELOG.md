@@ -1,6 +1,35 @@
 # Changelog
 
-## [v3.0.4] - 2026-06-29
+## [v3.1.0] - 2026-07-02
+
+### Added
+
+- **Foundry IQ conversational file upload retrieval (Pattern A).** When Foundry
+  IQ runs with the native `azureBlob` knowledge source (Pattern A), the
+  orchestrator can now also retrieve documents a user uploaded through the UI
+  during the same conversation. This lets users upload a file mid-conversation
+  and immediately ask questions about it without leaving Foundry IQ retrieval.
+  The behavior is opt-in and off by default, gated by the new
+  `FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED` flag and the
+  `FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME` setting. When both are set, the
+  orchestrator adds a second, sidecar knowledge source (over the existing
+  conversation search index) alongside the native Blob source, so a single
+  Foundry IQ retrieval call spans both the curated corpus and the user's uploaded
+  files.
+
+### Security
+
+- **Uploaded documents stay scoped to the conversation and respect access
+  control.** The conversational sidecar knowledge source always carries a
+  server-computed `filterAddOn` that combines the request's security filter
+  (RBAC/ACL trimming, applied through the on-behalf-of identity) with the current
+  `conversationId`. Uploaded files are therefore only retrievable inside the
+  conversation that produced them and only for users allowed to see them. This
+  filter is mandatory: the orchestrator refuses to attach the sidecar source
+  without it, and the native Blob source keeps its existing behavior of never
+  receiving a conversation filter. The sidecar is only ever added in Pattern A;
+  Pattern B (search-index primary) is left unchanged to avoid double-counting the
+  same index.
 
 ### Fixed
 
@@ -9,6 +38,8 @@
   also ensure every configured SQL Server, Azure SQL, or Fabric SQL datasource
   uses a least-privilege read-only principal with access only to approved
   schemas, tables, or views.
+
+## [v3.0.4] - 2026-06-29
 
 ## [v3.0.3] - 2026-06-28
 
