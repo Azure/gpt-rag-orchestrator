@@ -47,6 +47,16 @@ FOUNDRY_IQ_FILTER_ADD_ON_ENABLED_KEY = "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED"
 FOUNDRY_IQ_SECURITY_FIELD_NAME_KEY = "FOUNDRY_IQ_SECURITY_FIELD_NAME"
 FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS_KEY = "FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS"
 FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY = "FOUNDRY_IQ_FORWARD_SOURCE_AUTH"
+# Hybrid file-upload sidecar (Pattern A + UI upload). When enabled, and the
+# primary knowledge source is the native azureBlob corpus, the retrieve action
+# also queries a second searchIndex knowledge source built over the existing
+# GPT-RAG index (SEARCH_RAG_INDEX_NAME). That second source carries the runtime
+# uploads and is trimmed by a security + conversationId filterAddOn so a user's
+# uploaded files are only visible inside their own conversation. Off by default.
+FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED_KEY = "FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED"
+FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME_KEY = (
+    "FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME"
+)
 
 # Search-audience scope used for the service token.
 _SEARCH_SCOPE = "https://search.azure.com/.default"
@@ -196,6 +206,15 @@ class FoundryIQClient:
         self.forward_source_auth = _as_bool(
             self.cfg.get(FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY, True, type=bool)
         )
+        # Hybrid file-upload sidecar. Only meaningful for Pattern A (azureBlob
+        # primary); Pattern B already carries a conversationId filterAddOn on its
+        # single searchIndex source, so it needs no second source.
+        self.conversation_upload_enabled = _as_bool(
+            self.cfg.get(FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED_KEY, False, type=bool)
+        )
+        self.conversation_knowledge_source_name = (
+            self.cfg.get(FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME_KEY, "") or ""
+        ).strip()
         self.credential = self.cfg.aiocredential
 
         # Shared aiohttp session — reuses TCP connections across calls.
@@ -285,6 +304,66 @@ class FoundryIQClient:
 
             records.append({"title": title, "link": link, "content": content})
         return records
+
+    def _build_conversation_source_params(
+        self,
+        *,
+        conversation_id: Optional[str],
+        user_context: Optional[Mapping[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Build the sidecar searchIndex source that carries runtime uploads.
+
+        Returns ``None`` when the hybrid file-upload sidecar does not apply:
+
+        - the feature is disabled, or
+        - the primary source is not the native ``azureBlob`` corpus (Pattern B
+          already trims its single searchIndex source by conversationId), or
+        - no conversation knowledge source name was provisioned.
+
+        When it does apply, the source is a ``searchIndex`` knowledge source over
+        the existing GPT-RAG index, always trimmed by a security +
+        conversationId ``filterAddOn`` so a user's uploads stay scoped to their
+        own conversation. ``failOnError`` is ``false`` so an empty or missing
+        upload index degrades gracefully to the shared corpus instead of failing
+        the whole retrieve.
+        """
+        if not self.conversation_upload_enabled:
+            return None
+        if self.knowledge_source_kind != "azureBlob":
+            # Pattern B (searchIndex primary) already applies a conversationId
+            # filterAddOn on its own source; a second source would double-count.
+            return None
+        if not self.conversation_knowledge_source_name:
+            logging.warning(
+                "[FoundryIQClient] FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED=true but "
+                "FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME is empty; skipping the "
+                "file-upload sidecar source."
+            )
+            return None
+        if self.api_version != DEFAULT_FOUNDRY_IQ_API_VERSION:
+            raise ValueError(
+                "Foundry IQ conversation-upload filterAddOn requires "
+                f"{DEFAULT_FOUNDRY_IQ_API_VERSION}; current "
+                f"FOUNDRY_IQ_API_VERSION={self.api_version}."
+            )
+        params: Dict[str, Any] = {
+            "knowledgeSourceName": self.conversation_knowledge_source_name,
+            "kind": "searchIndex",
+            "includeReferences": True,
+            "includeReferenceSourceData": True,
+            "failOnError": False,
+            "filterAddOn": build_pattern_b_filter_add_on(
+                conversation_id=conversation_id,
+                user_context=user_context,
+                security_field_name=self.security_field_name,
+            ),
+        }
+        logging.info(
+            "[FoundryIQClient][Upload] Adding conversation-upload source %s "
+            "(conversation_scoped filterAddOn)",
+            self.conversation_knowledge_source_name,
+        )
+        return params
 
     async def retrieve(
         self,
@@ -395,6 +474,13 @@ class FoundryIQClient:
                     self.knowledge_source_name,
                 )
             knowledge_source_params.append(source_params)
+
+        conversation_source_params = self._build_conversation_source_params(
+            conversation_id=conversation_id,
+            user_context=user_context,
+        )
+        if conversation_source_params:
+            knowledge_source_params.append(conversation_source_params)
 
         if knowledge_source_params:
             body["knowledgeSourceParams"] = knowledge_source_params
