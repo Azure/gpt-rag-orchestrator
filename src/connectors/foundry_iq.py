@@ -51,8 +51,8 @@ FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY = "FOUNDRY_IQ_FORWARD_SOURCE_AUTH"
 # primary knowledge source is the native azureBlob corpus, the retrieve action
 # also queries a second searchIndex knowledge source built over the existing
 # GPT-RAG index (SEARCH_RAG_INDEX_NAME). That second source carries the runtime
-# uploads and is trimmed by a security + conversationId filterAddOn so a user's
-# uploaded files are only visible inside their own conversation. Off by default.
+# uploads and is trimmed by a conversationId filterAddOn so uploaded files are
+# only visible inside the conversation that created them. Off by default.
 FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED_KEY = "FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED"
 FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME_KEY = (
     "FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME"
@@ -156,6 +156,11 @@ def build_pattern_b_filter_add_on(
     if conversation_clause:
         return f"({security_clause}) and {conversation_clause}"
     return security_clause
+
+
+def build_conversation_upload_filter_add_on(conversation_id: str) -> str:
+    """Build the Foundry IQ sidecar filter for runtime conversation uploads."""
+    return f"conversationId eq '{_odata_escape_string(conversation_id)}'"
 
 
 class FoundryIQClient:
@@ -321,11 +326,10 @@ class FoundryIQClient:
         - no conversation knowledge source name was provisioned.
 
         When it does apply, the source is a ``searchIndex`` knowledge source over
-        the existing GPT-RAG index, always trimmed by a security +
-        conversationId ``filterAddOn`` so a user's uploads stay scoped to their
-        own conversation. ``failOnError`` is ``false`` so an empty or missing
-        upload index degrades gracefully to the shared corpus instead of failing
-        the whole retrieve.
+        the existing GPT-RAG index, always trimmed by a simple conversationId
+        ``filterAddOn`` accepted by Foundry IQ. ``failOnError`` is ``false`` so
+        an empty or missing upload index degrades gracefully to the shared corpus
+        instead of failing the whole retrieve.
         """
         if not self.conversation_upload_enabled:
             return None
@@ -340,6 +344,13 @@ class FoundryIQClient:
                 "file-upload sidecar source."
             )
             return None
+        cid = (conversation_id or "").strip()
+        if not cid:
+            logging.warning(
+                "[FoundryIQClient] FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED=true but "
+                "conversation_id is empty; skipping the file-upload sidecar source."
+            )
+            return None
         if self.api_version != DEFAULT_FOUNDRY_IQ_API_VERSION:
             raise ValueError(
                 "Foundry IQ conversation-upload filterAddOn requires "
@@ -352,11 +363,7 @@ class FoundryIQClient:
             "includeReferences": True,
             "includeReferenceSourceData": True,
             "failOnError": False,
-            "filterAddOn": build_pattern_b_filter_add_on(
-                conversation_id=conversation_id,
-                user_context=user_context,
-                security_field_name=self.security_field_name,
-            ),
+            "filterAddOn": build_conversation_upload_filter_add_on(cid),
         }
         logging.info(
             "[FoundryIQClient][Upload] Adding conversation-upload source %s "
