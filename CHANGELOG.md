@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Foundry IQ conversation upload filter compatibility:** Changed the
+  conversational upload sidecar to send the Foundry IQ accepted
+  `filterAddOn` format `conversationId eq '<conversation-id>'` instead of the
+  compound Pattern B security and shared-corpus filter. This restores chat
+  retrieval for documents uploaded into a conversation while keeping the native
+  Blob source unchanged and continuing to forward source authorization for
+  Foundry IQ permission enforcement.
+
+- **Configuration allowlist import:** Restored the missing
+  `SEARCH_RETRIEVAL_ENABLED` setting wrapper in the dashboard configuration
+  allowlist so the settings module imports cleanly and the full test suite can
+  run against the patch.
+
 ## [v3.1.0] - 2026-07-02
 
 ### Added

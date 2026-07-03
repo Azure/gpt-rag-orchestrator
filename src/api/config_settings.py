@@ -375,10 +375,11 @@ SECTIONS: List[SettingSection] = [
                     "source is the native azureBlob corpus, also query a second "
                     "searchIndex source built over the existing GPT-RAG index so "
                     "files uploaded in the chat UI are grounded alongside the "
-                    "shared corpus. The upload source is always trimmed by a "
-                    "security + conversationId filterAddOn, so uploads stay "
-                    "scoped to the conversation that created them. No effect for "
-                    "Pattern B, which already scopes by conversationId."
+                    "shared corpus. The upload source is trimmed by a simple "
+                    "conversationId filterAddOn accepted by Foundry IQ, so "
+                    "uploads stay scoped to the conversation that created them. "
+                    "No effect for Pattern B, which already scopes by "
+                    "conversationId."
                 ),
             ),
             SettingSpec(
@@ -394,6 +395,8 @@ SECTIONS: List[SettingSection] = [
                     "deployment set it."
                 ),
             ),
+            SettingSpec(
+                key="SEARCH_RETRIEVAL_ENABLED",
                 type="bool",
                 default=True,
                 label="Enable Azure AI Search retrieval",
