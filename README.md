@@ -62,9 +62,19 @@ The data comes from the existing conversation/history Cosmos DB container used b
 
 **Enabling the dashboard.** It is disabled by default. Set the App Configuration value `ENABLE_DASHBOARD=true` to mount it. When `ENABLE_DASHBOARD=false` (the default), the `/dashboard` HTML page and every `/api/dashboard/*` route are not registered at all.
 
-**Access control.** When authentication is on (`OAUTH_AZURE_AD_TENANT_ID` is configured), the entire `/api/dashboard/*` surface — except the small `/api/dashboard/version` endpoint used for the header chip — requires the caller's bearer token to include the `Admin` app role. The `/dashboard` HTML page itself is served openly so the SPA can load and render its own access-denied state on a 403 response. When authentication is off, the dashboard is open like the rest of the app in development.
+**Access control.** When authentication is on (`OAUTH_AZURE_AD_TENANT_ID` is configured), the entire `/api/dashboard/*` surface — except the small `/api/dashboard/version` and `/api/dashboard/auth-config` endpoints used by the SPA at bootstrap — requires the caller's bearer token to include the `Admin` app role. The `/dashboard` HTML page itself is served openly so the SPA can load, call `/api/dashboard/auth-config`, and either sign the user in via MSAL (Authorization Code + PKCE) or render an access-denied state on a 403 response. When authentication is off, the dashboard is open like the rest of the app in development.
 
-**Token scope.** The frontend must request an access token with the orchestrator's own API scope (`api://<client_id>/...`), not a Microsoft Graph scope. App roles are issued in the `roles` claim of an access token only when the token is requested for the application that defines those roles, so a Graph-scoped token will not surface the `Admin` role and every dashboard call will return 403.
+**Sign-in configuration.** The SPA reads its runtime auth configuration from `GET /api/dashboard/auth-config`, which is derived from these App Configuration keys under the `gpt-rag-orchestrator` label:
+
+| Key | Required | Purpose |
+| --- | --- | --- |
+| `OAUTH_AZURE_AD_TENANT_ID` | Yes, to enable the gate | Entra tenant id. When unset, the SPA renders without MSAL and `require_admin` is a no-op. |
+| `OAUTH_AZURE_AD_CLIENT_ID` | Yes when tenant is set | Application (client) id of the orchestrator API app registration. |
+| `OAUTH_AZURE_AD_API_SCOPE` | Optional | Override for the scope the SPA requests. Defaults to `api://<OAUTH_AZURE_AD_CLIENT_ID>/access_as_user`. |
+
+The App Registration also needs a **Single-page application** redirect URI pointing at `https://<host>/dashboard/` (trailing slash), an exposed `access_as_user` scope, and an `Admin` app role assigned to every user who should see the dashboard. Full step-by-step in the GPT-RAG docs: [Admin Dashboard Sign-in](https://azure.github.io/GPT-RAG/howto_dashboard_signin/).
+
+**Token scope.** The frontend must request an access token with the orchestrator's own API scope (`api://<client_id>/access_as_user` by default), not a Microsoft Graph scope. App roles are issued in the `roles` claim of an access token only when the token is requested for the application that defines those roles, so a Graph-scoped token will not surface the `Admin` role and every dashboard call will return 403.
 
 **Building the dashboard bundle.** Production builds happen automatically as part of the `Dockerfile` (an MCR base image stage using Node.js 20 runs `npm run build` and copies the static assets into `src/static`). For local development you can run the Vite dev server with hot reload:
 
