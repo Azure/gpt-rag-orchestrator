@@ -4,6 +4,48 @@
 
 ### Added
 
+- **MSAL sign-in for the admin dashboard SPA.** The dashboard SPA served
+  under `/dashboard/` now authenticates admins with Microsoft Entra ID
+  using the Authorization Code + PKCE flow (`loginRedirect`). A new
+  unauthenticated `GET /api/dashboard/auth-config` endpoint tells the SPA
+  whether auth is enabled and, when it is, returns the `clientId`,
+  `tenantId`, `authority`, and `apiScope` it needs to bootstrap MSAL. The
+  SPA acquires an access token via `acquireTokenSilent` and falls back to
+  `acquireTokenRedirect` on `InteractionRequiredAuthError`. MSAL tokens
+  are kept in `sessionStorage` (not `localStorage`).
+
+### Changed
+
+- **Dashboard bearer token source.** The dashboard SPA no longer reads
+  `localStorage["dashboard.bearer"]` by default. Requests get their
+  bearer from the MSAL token provider registered at bootstrap. An
+  explicitly-passed `Authorization` header on a request still wins,
+  which preserves the scripted-test workflow (`api.request(url, {
+  headers: { Authorization: "Bearer <token>" } })`).
+
+### Operator prerequisites
+
+To enable auth on the dashboard SPA, an operator needs to:
+
+1. Create (or reuse) a single Microsoft Entra ID app registration for the
+   orchestrator API.
+2. Add a **SPA** platform redirect URI pointing at the deployed dashboard,
+   for example `https://<host>/dashboard/`.
+3. Expose an `access_as_user` scope on the API.
+4. Define an `Admin` app role and assign it to every user who should see
+   the dashboard.
+5. Set the following App Configuration keys (read by the orchestrator's
+   existing App Config connector):
+   - `OAUTH_AZURE_AD_TENANT_ID`
+   - `OAUTH_AZURE_AD_CLIENT_ID`
+   - `OAUTH_AZURE_AD_API_SCOPE` (optional; defaults to
+     `api://<clientId>/access_as_user`)
+
+If any of `OAUTH_AZURE_AD_TENANT_ID` / `OAUTH_AZURE_AD_CLIENT_ID` are
+unset, `auth-config` reports `authEnabled: false` and the SPA renders
+as before, matching the existing developer / air-gapped deployment
+story.
+
 ### Fixed
 
 ### Changed

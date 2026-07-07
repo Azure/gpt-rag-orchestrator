@@ -4,16 +4,21 @@
  * The dashboard is mounted under the orchestrator's own origin, so every
  * request is same-origin and uses relative `/api/dashboard/*` URLs. This
  * file is the single place that knows the URL shape, the response types,
- * and the `Authorization` header convention — components only import named
+ * and the `Authorization` header convention -- components only import named
  * helpers.
  *
- * Auth: when the orchestrator runs with auth enabled (Entra ID), `require_admin`
- * expects a bearer token. The dashboard is currently designed for the same
- * tenant and lets the browser session forward whatever cookie/header the
- * gateway injects, so this module does not manage tokens directly. If a token
- * is ever stashed under `localStorage["dashboard.bearer"]` we forward it; this
- * preserves the existing manual-testing flow without committing to a long-term
- * auth model in the dashboard.
+ * Auth: when the orchestrator runs with auth enabled (Entra ID),
+ * `require_admin` expects a bearer token whose `roles` claim contains
+ * `Admin`. The SPA obtains that token via MSAL and registers a token
+ * provider through `setAuthTokenProvider`; `request()` awaits the provider
+ * on every call and attaches the Authorization header when one is returned.
+ * A caller that passes its own `Authorization` header in `init.headers`
+ * (for scripted tests) wins and the provider is skipped.
+ *
+ * The response side of the wrapper distinguishes 401 (needs sign-in /
+ * silent-refresh failure) from 403 (signed in but the Admin app role is
+ * not assigned) so the UI can render a real reauth flow vs an
+ * access-denied panel instead of blurring both into one error.
  */
 
 export class ApiError extends Error {
@@ -27,15 +32,70 @@ export class ApiError extends Error {
   }
 }
 
-function authHeaders(): HeadersInit {
-  try {
-    const token = typeof window !== "undefined"
-      ? window.localStorage?.getItem("dashboard.bearer")
-      : null;
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  } catch {
-    return {};
+/** 401 from the API: caller must (re)authenticate. */
+export class UnauthorizedError extends ApiError {
+  constructor(message: string, body?: unknown) {
+    super(message, 401, body);
+    this.name = "UnauthorizedError";
   }
+}
+
+/**
+ * 403 from the API: caller is signed in but not entitled. Do NOT trigger a
+ * sign-in redirect -- the fix is an operator granting the Admin app role,
+ * not another token.
+ */
+export class ForbiddenError extends ApiError {
+  constructor(message: string, body?: unknown) {
+    super(message, 403, body);
+    this.name = "ForbiddenError";
+  }
+}
+
+type AuthTokenProvider = () => Promise<string | null>;
+
+let tokenProvider: AuthTokenProvider | null = null;
+
+/**
+ * Register a function that returns a fresh access token for the API scope.
+ *
+ * `main.tsx` wires this to MSAL after `handleRedirectPromise`. The provider
+ * is called on every request so token refresh / interaction fallback stays
+ * inside MSAL and out of the request path. Passing `null` unregisters it,
+ * which is useful in tests.
+ */
+export function setAuthTokenProvider(fn: AuthTokenProvider | null): void {
+  tokenProvider = fn;
+}
+
+/** Kind of auth error the app should react to. */
+export type AuthErrorKind = "unauthorized" | "forbidden";
+
+type AuthErrorHandler = (kind: AuthErrorKind, err: ApiError) => void;
+
+let authErrorHandler: AuthErrorHandler | null = null;
+
+/**
+ * Register a handler that fires whenever any API call returns 401 or 403.
+ *
+ * Used by `SignInGate` to lift access-denied and sign-in-required states out
+ * of individual tabs so the entire dashboard shell can react consistently.
+ * Passing `null` clears the handler.
+ */
+export function setAuthErrorHandler(fn: AuthErrorHandler | null): void {
+  authErrorHandler = fn;
+}
+
+function hasHeader(headers: HeadersInit | undefined, name: string): boolean {
+  if (!headers) return false;
+  const target = name.toLowerCase();
+  if (headers instanceof Headers) {
+    return headers.has(name);
+  }
+  if (Array.isArray(headers)) {
+    return headers.some(([k]) => k.toLowerCase() === target);
+  }
+  return Object.keys(headers).some((k) => k.toLowerCase() === target);
 }
 
 async function request<T>(
@@ -43,12 +103,28 @@ async function request<T>(
   init: RequestInit = {},
   signal?: AbortSignal,
 ): Promise<T> {
+  // Explicit Authorization in init.headers always wins (scripted tests,
+  // curl-style debugging). Only fall back to the MSAL provider when the
+  // caller did not set one itself.
+  const callerSetAuth = hasHeader(init.headers, "authorization");
+  const authHeader: Record<string, string> = {};
+  if (!callerSetAuth && tokenProvider) {
+    try {
+      const token = await tokenProvider();
+      if (token) authHeader.Authorization = `Bearer ${token}`;
+    } catch {
+      // Token acquisition failure -> proceed unauthenticated; the API will
+      // 401 and the UI will route to the sign-in gate. Swallowing keeps
+      // request() free of MSAL types.
+    }
+  }
+
   const res = await fetch(path, {
     ...init,
     signal,
     headers: {
       Accept: "application/json",
-      ...authHeaders(),
+      ...authHeader,
       ...(init.body ? { "Content-Type": "application/json" } : {}),
       ...(init.headers ?? {}),
     },
@@ -73,6 +149,16 @@ async function request<T>(
     } catch {
       // body was not JSON
     }
+    if (res.status === 401) {
+      const err = new UnauthorizedError(message, body);
+      authErrorHandler?.("unauthorized", err);
+      throw err;
+    }
+    if (res.status === 403) {
+      const err = new ForbiddenError(message, body);
+      authErrorHandler?.("forbidden", err);
+      throw err;
+    }
     throw new ApiError(message, res.status, body);
   }
   if (res.status === 204) return undefined as T;
@@ -80,7 +166,56 @@ async function request<T>(
 }
 
 // ---------------------------------------------------------------------------
-// Existing endpoints (pre-PR #236 surface — restored here because lib/api.ts
+// Auth config (unauthenticated bootstrap)
+// ---------------------------------------------------------------------------
+
+/**
+ * Runtime auth configuration returned by `GET /api/dashboard/auth-config`.
+ *
+ * Fields are surfaced in camelCase for idiomatic TS while the backend keeps
+ * snake_case in the wire format; `fetchAuthConfig` handles the mapping.
+ * When `authEnabled` is false the rest of the fields are undefined and the
+ * SPA must not bootstrap MSAL.
+ */
+export interface AuthConfig {
+  authEnabled: boolean;
+  clientId?: string;
+  tenantId?: string;
+  authority?: string;
+  apiScope?: string;
+}
+
+interface AuthConfigWire {
+  auth_enabled: boolean;
+  client_id?: string | null;
+  tenant_id?: string | null;
+  authority?: string | null;
+  api_scope?: string | null;
+}
+
+/**
+ * Fetch the SPA's MSAL bootstrap configuration.
+ *
+ * Called once at startup before any protected endpoint, so it does NOT go
+ * through the token provider (the endpoint is unauth by design).
+ */
+export async function fetchAuthConfig(signal?: AbortSignal): Promise<AuthConfig> {
+  const wire = await request<AuthConfigWire>(
+    "/api/dashboard/auth-config",
+    {},
+    signal,
+  );
+  return {
+    authEnabled: wire.auth_enabled,
+    clientId: wire.client_id ?? undefined,
+    tenantId: wire.tenant_id ?? undefined,
+    authority: wire.authority ?? undefined,
+    apiScope: wire.api_scope ?? undefined,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Existing endpoints (pre-PR #236 surface -- restored here because lib/api.ts
 // was missing from that PR and the rest of the SPA imports from it).
 // ---------------------------------------------------------------------------
 

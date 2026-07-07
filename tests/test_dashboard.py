@@ -243,6 +243,110 @@ def test_version_endpoint_is_public(tmp_path, monkeypatch):
     assert isinstance(data["version"], str) and data["version"]
 
 
+# ---------------------------------------------------------------------------
+# /auth-config endpoint (#546 -- MSAL bootstrap)
+# ---------------------------------------------------------------------------
+
+def _auth_cfg(values: Dict[str, Any]) -> MagicMock:
+    """Build a mock AppConfigClient that returns ``values`` for get_value()."""
+    cfg = MagicMock()
+    cfg.get_value = MagicMock(side_effect=lambda key, **_: values.get(key))
+    return cfg
+
+
+def _install_cfg(app, cfg):
+    """Override the get_config dependency the auth-config endpoint depends on."""
+    from dependencies import get_config
+
+    app.dependency_overrides[get_config] = lambda: cfg
+
+
+def test_auth_config_returns_minimal_when_auth_off():
+    """When tenant id is not configured only ``auth_enabled=false`` is returned.
+
+    The SPA uses this to know it can skip MSAL entirely in dev/unauth mode
+    without leaking any client/tenant identifiers.
+    """
+    app = _make_app()  # /auth-config is unauthenticated by design
+    _install_cfg(app, _auth_cfg({}))
+    client = TestClient(app)
+    r = client.get("/api/dashboard/auth-config")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["auth_enabled"] is False
+    # No tenant/client/scope leak when auth is off.
+    for absent in ("client_id", "tenant_id", "authority", "api_scope"):
+        assert body.get(absent) is None
+
+
+def test_auth_config_returns_msal_config_when_auth_on():
+    """With both tenant + client id set, return the full MSAL bootstrap payload.
+
+    ``authority`` and ``api_scope`` are derived server-side so the browser
+    never concatenates values that must match the app registration.
+    """
+    app = _make_app()
+    _install_cfg(
+        app,
+        _auth_cfg(
+            {
+                "OAUTH_AZURE_AD_TENANT_ID": "tenant-guid",
+                "OAUTH_AZURE_AD_CLIENT_ID": "client-guid",
+            }
+        ),
+    )
+    client = TestClient(app)
+    r = client.get("/api/dashboard/auth-config")
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {
+        "auth_enabled": True,
+        "client_id": "client-guid",
+        "tenant_id": "tenant-guid",
+        "authority": "https://login.microsoftonline.com/tenant-guid",
+        "api_scope": "api://client-guid/access_as_user",
+    }
+
+
+def test_auth_config_honors_explicit_api_scope_override():
+    """Operators can override the default scope with OAUTH_AZURE_AD_API_SCOPE.
+
+    Useful for tenants where the exposed scope name differs from
+    ``access_as_user`` (for example, when the API app registration was
+    provisioned with a different scope value).
+    """
+    app = _make_app()
+    _install_cfg(
+        app,
+        _auth_cfg(
+            {
+                "OAUTH_AZURE_AD_TENANT_ID": "tenant-guid",
+                "OAUTH_AZURE_AD_CLIENT_ID": "client-guid",
+                "OAUTH_AZURE_AD_API_SCOPE": "api://client-guid/Dashboard.Access",
+            }
+        ),
+    )
+    client = TestClient(app)
+    r = client.get("/api/dashboard/auth-config")
+    assert r.status_code == 200
+    assert r.json()["api_scope"] == "api://client-guid/Dashboard.Access"
+
+
+def test_auth_config_500s_when_tenant_set_but_client_missing():
+    """Half-configured auth is surfaced as a 500, not silently as auth=off.
+
+    Otherwise an operator who set the tenant id but forgot the client id
+    would see the dashboard load without a sign-in gate, which would be a
+    silent auth downgrade.
+    """
+    app = _make_app()
+    _install_cfg(app, _auth_cfg({"OAUTH_AZURE_AD_TENANT_ID": "tenant-guid"}))
+    client = TestClient(app)
+    r = client.get("/api/dashboard/auth-config")
+    assert r.status_code == 500
+    assert "OAUTH_AZURE_AD_CLIENT_ID" in r.json()["detail"]
+
+
 def test_overview_endpoint_uses_cache(monkeypatch):
     from api import dashboard
     from connectors import cosmosdb_admin

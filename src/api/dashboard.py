@@ -32,6 +32,7 @@ from connectors.cosmosdb_admin import (
 )
 from dependencies import get_config, validate_access_token
 from schemas import (
+    DashboardAuthConfigResponse,
     DashboardConversationDetail,
     DashboardConversationListResponse,
     DashboardConversationSummary,
@@ -99,6 +100,54 @@ async def get_version() -> DashboardVersionResponse:
     except OSError:
         version = "unknown"
     return DashboardVersionResponse(version=version)
+
+
+@router.get("/auth-config", response_model=DashboardAuthConfigResponse)
+async def get_auth_config(
+    cfg: AppConfigClient = Depends(get_config),
+) -> DashboardAuthConfigResponse:
+    """Return the MSAL configuration the SPA needs to sign the user in.
+
+    Unauthenticated by design (mirrors ``/version``): the SPA calls this
+    before any protected endpoint so it can decide whether to bootstrap MSAL
+    and which tenant/client/scope to use. When
+    ``OAUTH_AZURE_AD_TENANT_ID`` is not set the response only carries
+    ``auth_enabled=false`` so no tenant/client information leaks in dev mode.
+
+    The full authority URL and the API scope are derived server-side so the
+    browser never has to concatenate values that must match the app
+    registration. ``OAUTH_AZURE_AD_API_SCOPE`` is honored when explicitly set
+    for tenants where the scope needs to differ from the default
+    ``api://<client-id>/access_as_user``.
+    """
+    tenant_id = cfg.get_value("OAUTH_AZURE_AD_TENANT_ID", default=None, allow_none=True)
+    if not tenant_id:
+        return DashboardAuthConfigResponse(auth_enabled=False)
+
+    client_id = cfg.get_value("OAUTH_AZURE_AD_CLIENT_ID", default=None, allow_none=True)
+    if not client_id:
+        # Auth is half-configured (tenant set, client id missing). Surface the
+        # misconfiguration to the SPA rather than pretending auth is off,
+        # which would silently let the dashboard load without a sign-in gate.
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "OAUTH_AZURE_AD_TENANT_ID is set but OAUTH_AZURE_AD_CLIENT_ID is "
+                "missing; the dashboard cannot bootstrap MSAL until both are configured."
+            ),
+        )
+
+    api_scope = cfg.get_value(
+        "OAUTH_AZURE_AD_API_SCOPE", default=None, allow_none=True
+    ) or f"api://{client_id}/access_as_user"
+
+    return DashboardAuthConfigResponse(
+        auth_enabled=True,
+        client_id=client_id,
+        tenant_id=tenant_id,
+        authority=f"https://login.microsoftonline.com/{tenant_id}",
+        api_scope=api_scope,
+    )
 
 
 _MAX_RANGE_DAYS = 365
