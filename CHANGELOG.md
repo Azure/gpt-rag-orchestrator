@@ -4,6 +4,14 @@
 
 ### Added
 
+### Fixed
+
+### Changed
+
+## [v3.2.0] - 2026-07-10
+
+### Added
+
 - **Work IQ (Microsoft 365) knowledge source support (opt-in, default off).**
   The Foundry IQ retrieve client can now include a Work IQ knowledge source
   alongside existing `azureBlob` / `searchIndex` sources, giving grounded
@@ -13,7 +21,7 @@
   an on-behalf-of user token is available, a `kind="workIQ"` entry is
   appended to `knowledgeSourceParams`. ACL is enforced natively by M365 via
   the forwarded user token, so no `filterAddOn` is emitted. Managed-identity
-  fallback is never used for remote knowledge source kinds — when the OBO
+  fallback is never used for remote knowledge source kinds: when the OBO
   token is missing the Work IQ source is skipped (with a warning) and local
   sources still serve the request. See
   [Azure/GPT-RAG#543](https://github.com/Azure/GPT-RAG/issues/543) for the
@@ -21,10 +29,10 @@
   principal, and Work IQ knowledge source provisioning).
 
 - **Foundry IQ `maxRuntimeInSeconds` plumbing.** Remote knowledge source kinds
-  fan out to Microsoft 365 (and, later, Fabric) and can take 40–60 seconds
+  fan out to Microsoft 365 (and, later, Fabric) and can take 40 to 60 seconds
   end-to-end. The retrieve body now carries `maxRuntimeInSeconds` (default
   `120`, override via `FOUNDRY_IQ_MAX_RUNTIME_SECONDS`) whenever a remote
-  kind is enabled. The header is not emitted for Pattern A / Pattern B — the
+  kind is enabled. The header is not emitted for Pattern A / Pattern B, so the
   default retrieve body is byte-identical to prior releases.
 
 - **Reference-normalization seam for remote knowledge sources.** The
@@ -34,9 +42,11 @@
   expects. The seam is generic so future Fabric IQ shapes can be added
   without touching call sites.
 
+## [v3.1.1] - 2026-07-03
+
 ### Fixed
 
-- **Foundry IQ conversation upload filter compatibility:** Changed the
+- **Foundry IQ conversation upload filter compatibility.** Changed the
   conversational upload sidecar to send the Foundry IQ accepted
   `filterAddOn` format `conversationId eq '<conversation-id>'` instead of the
   compound Pattern B security and shared-corpus filter. This restores chat
@@ -44,7 +54,7 @@
   Blob source unchanged and continuing to forward source authorization for
   Foundry IQ permission enforcement.
 
-- **Configuration allowlist import:** Restored the missing
+- **Configuration allowlist import.** Restored the missing
   `SEARCH_RETRIEVAL_ENABLED` setting wrapper in the dashboard configuration
   allowlist so the settings module imports cleanly and the full test suite can
   run against the patch.
@@ -87,6 +97,8 @@
   also ensure every configured SQL Server, Azure SQL, or Fabric SQL datasource
   uses a least-privilege read-only principal with access only to approved
   schemas, tables, or views.
+
+## [v3.0.4] - 2026-06-29
 
 ## [v3.0.3] - 2026-06-28
 
