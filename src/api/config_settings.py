@@ -167,6 +167,13 @@ _FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND_OPTIONS: List[SettingOption] = [
         "gated Work IQ preview and OBO (x-ms-query-source-authorization). ACL is "
         "enforced natively by M365 — no filterAddOn is applied.",
     ),
+    SettingOption(
+        "fabricOntology",
+        "Fabric IQ (Microsoft Fabric ontology)",
+        "Remote Microsoft Fabric knowledge source backed by a Fabric ontology. "
+        "Requires OBO (x-ms-query-source-authorization); ACL is enforced "
+        "natively by Fabric so no filterAddOn is applied.",
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -412,7 +419,7 @@ SECTIONS: List[SettingSection] = [
                     "as maxRuntimeInSeconds on the request body. Remote knowledge "
                     "sources such as Work IQ can take 40–60 seconds; the default "
                     "leaves headroom. Only emitted when a remote knowledge source "
-                    "kind (workIQ, fabric*) is enabled, so default Pattern A / "
+                    "kind (workIQ, fabricOntology) is enabled, so default Pattern A / "
                     "Pattern B request bodies remain unchanged."
                 ),
                 min=30,
@@ -443,6 +450,34 @@ SECTIONS: List[SettingSection] = [
                     "Name of the Work IQ knowledge source registered on the "
                     "knowledge base. Required when WORK_IQ_ENABLED is true. "
                     "No effect when Work IQ is disabled."
+                ),
+            ),
+            SettingSpec(
+                key="FABRIC_IQ_ENABLED",
+                type="bool",
+                default=False,
+                label="Enable Fabric IQ knowledge source",
+                description=(
+                    "When enabled and FABRIC_IQ_KNOWLEDGE_SOURCE_NAME is set, "
+                    "the Foundry IQ retrieve request appends a fabricOntology "
+                    "knowledge source for grounding over a Microsoft Fabric "
+                    "ontology (semantic model, lakehouse, warehouse, or KQL "
+                    "database exposed through the ontology). ACL is enforced "
+                    "natively by Fabric via the forwarded per-user OBO token; "
+                    "managed-identity fallback is never used for Fabric IQ."
+                ),
+            ),
+            SettingSpec(
+                key="FABRIC_IQ_KNOWLEDGE_SOURCE_NAME",
+                type="string",
+                default="",
+                label="Fabric IQ knowledge source name",
+                description=(
+                    "Name of the fabricOntology knowledge source registered "
+                    "on the knowledge base. Required when FABRIC_IQ_ENABLED "
+                    "is true. The knowledge source itself binds a Fabric "
+                    "workspace and ontology at registration time; no effect "
+                    "when Fabric IQ is disabled."
                 ),
             ),
             SettingSpec(

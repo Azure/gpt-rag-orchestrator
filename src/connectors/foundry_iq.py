@@ -68,15 +68,24 @@ DEFAULT_FOUNDRY_IQ_MAX_RUNTIME_SECONDS = 120
 # Work IQ (Microsoft 365 remote knowledge source). Opt-in; default off. When
 # enabled, the retrieve request appends a workIQ knowledge source in
 # knowledgeSourceParams. ACL is enforced natively by M365, so no filterAddOn
-# is applied. OBO is required — MI fallback is never used for remote kinds.
+# is applied. OBO is required; MI fallback is never used for remote kinds.
 WORK_IQ_ENABLED_KEY = "WORK_IQ_ENABLED"
 WORK_IQ_KNOWLEDGE_SOURCE_NAME_KEY = "WORK_IQ_KNOWLEDGE_SOURCE_NAME"
+
+# Fabric IQ (Microsoft Fabric ontology remote knowledge source). Opt-in;
+# default off. When enabled, the retrieve request appends a fabricOntology
+# knowledge source in knowledgeSourceParams. ACL is enforced natively by
+# Fabric via the forwarded per-user OBO token (same
+# x-ms-query-source-authorization header used by Work IQ), so no filterAddOn
+# is applied. OBO is required; MI fallback is never used for remote kinds.
+FABRIC_IQ_ENABLED_KEY = "FABRIC_IQ_ENABLED"
+FABRIC_IQ_KNOWLEDGE_SOURCE_NAME_KEY = "FABRIC_IQ_KNOWLEDGE_SOURCE_NAME"
 
 # Knowledge source kinds that must never fall back to the service managed
 # identity for x-ms-query-source-authorization. These sources run against
 # external systems (M365, Fabric) where impersonation, not app identity, is
 # the security boundary.
-_REMOTE_KNOWLEDGE_SOURCE_KINDS = frozenset({"workIQ"})
+_REMOTE_KNOWLEDGE_SOURCE_KINDS = frozenset({"workIQ", "fabricOntology"})
 
 # Search-audience scope used for the service token.
 _SEARCH_SCOPE = "https://search.azure.com/.default"
@@ -255,6 +264,16 @@ class FoundryIQClient:
         self.work_iq_knowledge_source_name = (
             self.cfg.get(WORK_IQ_KNOWLEDGE_SOURCE_NAME_KEY, "") or ""
         ).strip()
+        # Fabric IQ (Microsoft Fabric ontology) remote knowledge source.
+        # Opt-in; requires a per-user OBO token (same
+        # x-ms-query-source-authorization header used by Work IQ), so
+        # anonymous / MI fallback is never used.
+        self.fabric_iq_enabled = _as_bool(
+            self.cfg.get(FABRIC_IQ_ENABLED_KEY, False, type=bool)
+        )
+        self.fabric_iq_knowledge_source_name = (
+            self.cfg.get(FABRIC_IQ_KNOWLEDGE_SOURCE_NAME_KEY, "") or ""
+        ).strip()
         self.credential = self.cfg.aiocredential
 
         # Shared aiohttp session — reuses TCP connections across calls.
@@ -349,6 +368,51 @@ class FoundryIQClient:
 
         return {"title": title, "link": link, "content": content}
 
+    @staticmethod
+    def _normalize_fabric_iq_reference(source: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Map a Fabric IQ ``sourceData`` payload into ``{title, link, content}``.
+
+        Fabric IQ references carry a different shape from Work IQ:
+
+        - ``fabricAnswer`` (optional) is a natural-language summary produced by
+          the Fabric ontology retriever.
+        - ``fabricRawData`` (optional) is the raw grounding evidence, typically
+          CSV rows the LLM should be able to quote from verbatim.
+        - ``workspaceId`` / ``ontologyId`` identify the Fabric artifact used.
+
+        Both ``fabricAnswer`` and ``fabricRawData`` may be present; when both
+        exist we concatenate them so the LLM sees the summary plus the raw
+        rows. Returns ``None`` when neither field is present so the caller can
+        skip empty hits rather than emit a bare ``reference`` title.
+
+        Fabric IQ does not currently return a per-reference deep link, so
+        ``link`` is left empty and the citation title falls back to the
+        workspace / ontology identifiers.
+        """
+        answer = source.get("fabricAnswer")
+        raw = source.get("fabricRawData")
+        parts: List[str] = []
+        if isinstance(answer, str) and answer.strip():
+            parts.append(answer.strip())
+        if isinstance(raw, str) and raw.strip():
+            parts.append(raw.strip())
+        if not parts:
+            return None
+        content = "\n\n".join(parts)
+
+        workspace_id = str(source.get("workspaceId") or "").strip()
+        ontology_id = str(source.get("ontologyId") or "").strip()
+        if workspace_id and ontology_id:
+            title = f"Fabric ontology {ontology_id} (workspace {workspace_id})"
+        elif ontology_id:
+            title = f"Fabric ontology {ontology_id}"
+        elif workspace_id:
+            title = f"Fabric workspace {workspace_id}"
+        else:
+            title = "Fabric ontology"
+
+        return {"title": title, "link": "", "content": content}
+
     @classmethod
     def _normalize_references(cls, payload: Dict[str, Any]) -> List[Dict[str, str]]:
         """Map a retrieve response into ``[{title, link, content}]`` records.
@@ -366,6 +430,10 @@ class FoundryIQClient:
         - ``workIQ`` (Microsoft 365) sources return ``sourceData.attributions``
           and ``sourceData.extracts`` instead of a flat snippet field. See
           :meth:`_normalize_work_iq_reference`.
+        - ``fabricOntology`` (Microsoft Fabric) sources return
+          ``sourceData.fabricAnswer`` and/or ``sourceData.fabricRawData``
+          alongside ``workspaceId`` / ``ontologyId``. See
+          :meth:`_normalize_fabric_iq_reference`.
 
         We accept the union with explicit priority so the downstream
         ``{title, link, content}`` contract is identical across backends,
@@ -377,8 +445,15 @@ class FoundryIQClient:
         for ref in payload.get("references", []) or []:
             source = ref.get("sourceData") or {}
 
-            # Work IQ / future Fabric shapes: prefer the specialised mapper
-            # when the payload carries the remote-kind fields.
+            # Fabric IQ shape (fabricOntology): distinct fields, no
+            # attributions/extracts overlap with Work IQ.
+            if source.get("fabricAnswer") or source.get("fabricRawData"):
+                fabric_record = cls._normalize_fabric_iq_reference(source)
+                if fabric_record is not None:
+                    records.append(fabric_record)
+                continue
+
+            # Work IQ shape (workIQ): attributions + extracts.
             if source.get("attributions") or source.get("extracts"):
                 record = cls._normalize_work_iq_reference(source)
                 if record is not None:
@@ -520,9 +595,55 @@ class FoundryIQClient:
             "includeReferenceSourceData": True,
         }
 
+    def _build_fabric_iq_source_params(
+        self, *, obo_token: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Build the Fabric IQ (Microsoft Fabric ontology) knowledge source entry.
+
+        Returns ``None`` when Fabric IQ does not apply:
+
+        - the feature is disabled, or
+        - no knowledge source name was provisioned, or
+        - no per-user OBO token is available (remote kinds strictly require
+          impersonation; MI fallback is never used).
+
+        Fabric IQ enforces ACL natively via the forwarded per-user token
+        (workspace / ontology / underlying-item permissions), so no
+        ``filterAddOn`` is emitted. The fabricOntology KS itself carries the
+        workspaceId and ontologyId at registration time; the retrieve-time
+        entry only needs the knowledge source name and reference flags.
+        """
+        if not self.fabric_iq_enabled:
+            return None
+        if not self.fabric_iq_knowledge_source_name:
+            logging.warning(
+                "[FoundryIQClient] FABRIC_IQ_ENABLED=true but "
+                "FABRIC_IQ_KNOWLEDGE_SOURCE_NAME is empty; skipping Fabric IQ source."
+            )
+            return None
+        if not obo_token:
+            logging.warning(
+                "[FoundryIQClient] FABRIC_IQ_ENABLED=true but no OBO token "
+                "(x-ms-query-source-authorization) available; skipping Fabric IQ "
+                "source. Managed-identity fallback is never used for remote "
+                "knowledge source kinds."
+            )
+            return None
+
+        logging.info(
+            "[FoundryIQClient][FabricIQ] Adding fabricOntology source %s (ACL native, no filterAddOn)",
+            self.fabric_iq_knowledge_source_name,
+        )
+        return {
+            "knowledgeSourceName": self.fabric_iq_knowledge_source_name,
+            "kind": "fabricOntology",
+            "includeReferences": True,
+            "includeReferenceSourceData": True,
+        }
+
     def _remote_kinds_enabled(self) -> bool:
         """Return True when any remote (M365 / Fabric) knowledge source is on."""
-        return self.work_iq_enabled
+        return self.work_iq_enabled or self.fabric_iq_enabled
 
     async def retrieve(
         self,
@@ -644,6 +765,10 @@ class FoundryIQClient:
         work_iq_source_params = self._build_work_iq_source_params(obo_token=obo_token)
         if work_iq_source_params:
             knowledge_source_params.append(work_iq_source_params)
+
+        fabric_iq_source_params = self._build_fabric_iq_source_params(obo_token=obo_token)
+        if fabric_iq_source_params:
+            knowledge_source_params.append(fabric_iq_source_params)
 
         if knowledge_source_params:
             body["knowledgeSourceParams"] = knowledge_source_params

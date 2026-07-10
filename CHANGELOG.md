@@ -4,6 +4,22 @@
 
 ### Added
 
+- **Fabric IQ (Microsoft Fabric ontology) knowledge source support (opt-in, default off).**
+  The Foundry IQ retrieve client can now include a `fabricOntology` knowledge
+  source alongside existing `azureBlob` / `searchIndex` / `workIQ` sources,
+  giving grounded answers over a Microsoft Fabric ontology (semantic model,
+  lakehouse, warehouse, or KQL database exposed through the ontology).
+  Behavior is gated by `FABRIC_IQ_ENABLED` and
+  `FABRIC_IQ_KNOWLEDGE_SOURCE_NAME`; when both are set and an on-behalf-of
+  user token is available, a `kind="fabricOntology"` entry is appended to
+  `knowledgeSourceParams`. ACL is enforced natively by Fabric via the
+  forwarded per-user token (same `x-ms-query-source-authorization` header
+  used by Work IQ), so no `filterAddOn` is emitted. Managed-identity
+  fallback is never used for remote knowledge source kinds: when the OBO
+  token is missing the Fabric IQ source is skipped (with a warning) and
+  local sources still serve the request. See
+  [Azure/GPT-RAG#543](https://github.com/Azure/GPT-RAG/issues/543).
+
 ### Fixed
 
 ### Changed
