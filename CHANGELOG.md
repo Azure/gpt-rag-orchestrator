@@ -90,6 +90,8 @@
   uses a least-privilege read-only principal with access only to approved
   schemas, tables, or views.
 
+## [v3.0.4] - 2026-06-29
+
 ## [v3.0.3] - 2026-06-28
 
 ### Changed
