@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Work IQ (Microsoft 365) knowledge source support (opt-in, default off).**
+  The Foundry IQ retrieve client can now include a Work IQ knowledge source
+  alongside existing `azureBlob` / `searchIndex` sources, giving grounded
+  answers over the caller's Outlook mail, Teams chats, SharePoint / OneDrive
+  files, and other M365 signals. Behavior is gated by
+  `WORK_IQ_ENABLED` and `WORK_IQ_KNOWLEDGE_SOURCE_NAME`; when both are set and
+  an on-behalf-of user token is available, a `kind="workIQ"` entry is
+  appended to `knowledgeSourceParams`. ACL is enforced natively by M365 via
+  the forwarded user token, so no `filterAddOn` is emitted. Managed-identity
+  fallback is never used for remote knowledge source kinds — when the OBO
+  token is missing the Work IQ source is skipped (with a warning) and local
+  sources still serve the request. See
+  [Azure/GPT-RAG#543](https://github.com/Azure/GPT-RAG/issues/543) for the
+  end-to-end enablement guide (gated preview, admin consent, service
+  principal, and Work IQ knowledge source provisioning).
+
+- **Foundry IQ `maxRuntimeInSeconds` plumbing.** Remote knowledge source kinds
+  fan out to Microsoft 365 (and, later, Fabric) and can take 40–60 seconds
+  end-to-end. The retrieve body now carries `maxRuntimeInSeconds` (default
+  `120`, override via `FOUNDRY_IQ_MAX_RUNTIME_SECONDS`) whenever a remote
+  kind is enabled. The header is not emitted for Pattern A / Pattern B — the
+  default retrieve body is byte-identical to prior releases.
+
+- **Reference-normalization seam for remote knowledge sources.** The
+  `_normalize_references` mapper now recognizes the Work IQ `sourceData`
+  shape (`attributions[].seeMoreWebUrl` + `extracts[].text`) and returns the
+  same `{title, link, content}` contract the rest of the orchestrator
+  expects. The seam is generic so future Fabric IQ shapes can be added
+  without touching call sites.
+
 ### Fixed
 
 - **Foundry IQ conversation upload filter compatibility:** Changed the
