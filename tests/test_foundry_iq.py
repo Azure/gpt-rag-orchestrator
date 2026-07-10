@@ -160,6 +160,19 @@ def test_pattern_b_filter_add_on_uses_security_fields_and_conversation_scope():
     assert "conversationId eq 'NaN'" in filter_add_on
 
 
+def test_conversation_upload_filter_add_on_uses_simple_conversation_filter():
+    from connectors.foundry_iq import build_conversation_upload_filter_add_on
+
+    assert (
+        build_conversation_upload_filter_add_on("conv-1")
+        == "conversationId eq 'conv-1'"
+    )
+    assert (
+        build_conversation_upload_filter_add_on("o'brien")
+        == "conversationId eq 'o''brien'"
+    )
+
+
 @pytest.mark.asyncio
 async def test_retrieve_uses_native_blob_knowledge_source_by_default():
     client, session = _build_client(
@@ -305,20 +318,19 @@ async def test_conversation_upload_adds_second_source_in_pattern_a():
         "includeReferences": True,
         "includeReferenceSourceData": True,
     }
-    # Sidecar is a searchIndex source, degrades gracefully, and is scoped.
+    # Sidecar is a searchIndex source, degrades gracefully, and is scoped with
+    # the simple filter format Foundry IQ accepts for the conversation upload KS.
     assert sidecar["knowledgeSourceName"] == "ragindex-conv-ks"
     assert sidecar["kind"] == "searchIndex"
     assert sidecar["failOnError"] is False
-    assert "conversationId eq 'conv-1'" in sidecar["filterAddOn"]
-    assert "metadata_security_id/any(g:search.in(g, 'user-1'))" in sidecar["filterAddOn"]
+    assert sidecar["filterAddOn"] == "conversationId eq 'conv-1'"
+    assert "metadata_security_id" not in sidecar["filterAddOn"]
 
 
 @pytest.mark.asyncio
-async def test_conversation_upload_sidecar_always_carries_filter_add_on():
+async def test_conversation_upload_sidecar_skipped_without_conversation_id():
     """CONTRACT: the runtime-upload sidecar source must never be queried without
-    a filterAddOn, even when there is no conversation and no user context. A bare
-    security-only filter (public-or-owned) is still applied, so uploads can never
-    leak across users or conversations."""
+    the conversationId filter that scopes uploaded chunks to their chat."""
     client, session = _build_client(
         _SAMPLE_PAYLOAD,
         config_overrides=_conv_upload_overrides(),
@@ -326,9 +338,9 @@ async def test_conversation_upload_sidecar_always_carries_filter_add_on():
 
     await client.retrieve("hello")
 
-    sidecar = session.captured["json"]["knowledgeSourceParams"][1]
-    assert sidecar["knowledgeSourceName"] == "ragindex-conv-ks"
-    assert sidecar["filterAddOn"], "sidecar upload source must always be filtered"
+    sources = session.captured["json"]["knowledgeSourceParams"]
+    assert len(sources) == 1
+    assert sources[0]["knowledgeSourceName"] == "documents-blob-ks"
 
 
 @pytest.mark.asyncio

@@ -34,6 +34,19 @@ The **GPT-RAG Orchestrator** service is an agentic orchestration layer built on 
 > [!IMPORTANT]
 > When using the `nl2sql` strategy, configure every SQL Server, Azure SQL, or Fabric SQL datasource with a least-privilege read-only principal. Grant only the `SELECT` permissions needed for approved schemas, tables, or views, and do not use admin, owner, contributor, ingestion, or write-capable identities for NL2SQL query execution. The orchestrator validates generated SQL before execution, but database permissions remain the primary security boundary.
 
+### Retrieval backends
+
+The `rag` and `multimodal_rag` strategies use Foundry IQ's Knowledge Base retrieve API. Alongside the existing native `azureBlob` and `searchIndex` (Pattern B) knowledge sources, the orchestrator can optionally query a Microsoft 365 **Work IQ** knowledge source for grounded answers over the caller's Outlook mail, Teams chats, and SharePoint / OneDrive files.
+
+Work IQ is opt-in and off by default:
+
+- Set `WORK_IQ_ENABLED=true` and `WORK_IQ_KNOWLEDGE_SOURCE_NAME=<your Work IQ knowledge source>` to enable it.
+- Work IQ requires a per-user on-behalf-of token. When the OBO token is missing the Work IQ source is skipped with a warning; managed-identity fallback is never used for remote knowledge source kinds.
+- ACL is enforced natively by Microsoft 365 via the forwarded user token — no `filterAddOn` is emitted for Work IQ.
+- Remote kinds can take 40–60 seconds end-to-end; set `FOUNDRY_IQ_MAX_RUNTIME_SECONDS` (default `120`) to control the retrieve runtime ceiling. The value is only emitted when a remote kind is enabled, so Pattern A / Pattern B requests stay byte-identical.
+
+Work IQ is currently a gated preview and requires admin consent plus a Work IQ knowledge source provisioned on the same Azure AI Search service. See the enablement guide in the [Azure/GPT-RAG](https://github.com/Azure/GPT-RAG) repo for the end-to-end setup ([issue #543](https://github.com/Azure/GPT-RAG/issues/543)).
+
 ## Documentation
 
 For comprehensive information about GPT-RAG, including architecture details, configuration guides, best practices, troubleshooting resources, deployment guidance, customization options, and advanced usage scenarios, please refer to the [official project documentation](https://azure.github.io/GPT-RAG/).

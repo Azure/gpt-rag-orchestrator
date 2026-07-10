@@ -160,6 +160,13 @@ _FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND_OPTIONS: List[SettingOption] = [
         "Existing Azure AI Search index",
         "Legacy Pattern B: register the GPT-RAG generated search index and optionally apply filterAddOn.",
     ),
+    SettingOption(
+        "workIQ",
+        "Work IQ (Microsoft 365)",
+        "Remote Microsoft 365 knowledge source (mail, files, chats). Requires the "
+        "gated Work IQ preview and OBO (x-ms-query-source-authorization). ACL is "
+        "enforced natively by M365 — no filterAddOn is applied.",
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -375,10 +382,11 @@ SECTIONS: List[SettingSection] = [
                     "source is the native azureBlob corpus, also query a second "
                     "searchIndex source built over the existing GPT-RAG index so "
                     "files uploaded in the chat UI are grounded alongside the "
-                    "shared corpus. The upload source is always trimmed by a "
-                    "security + conversationId filterAddOn, so uploads stay "
-                    "scoped to the conversation that created them. No effect for "
-                    "Pattern B, which already scopes by conversationId."
+                    "shared corpus. The upload source is trimmed by a simple "
+                    "conversationId filterAddOn accepted by Foundry IQ, so "
+                    "uploads stay scoped to the conversation that created them. "
+                    "No effect for Pattern B, which already scopes by "
+                    "conversationId."
                 ),
             ),
             SettingSpec(
@@ -394,6 +402,51 @@ SECTIONS: List[SettingSection] = [
                     "deployment set it."
                 ),
             ),
+            SettingSpec(
+                key="FOUNDRY_IQ_MAX_RUNTIME_SECONDS",
+                type="int",
+                default=120,
+                label="Foundry IQ retrieve max runtime",
+                description=(
+                    "Upper bound on the Foundry IQ retrieve action runtime, sent "
+                    "as maxRuntimeInSeconds on the request body. Remote knowledge "
+                    "sources such as Work IQ can take 40–60 seconds; the default "
+                    "leaves headroom. Only emitted when a remote knowledge source "
+                    "kind (workIQ, fabric*) is enabled, so default Pattern A / "
+                    "Pattern B request bodies remain unchanged."
+                ),
+                min=30,
+                max=600,
+                step=1,
+                unit="seconds",
+            ),
+            SettingSpec(
+                key="WORK_IQ_ENABLED",
+                type="bool",
+                default=False,
+                label="Enable Work IQ knowledge source",
+                description=(
+                    "When enabled and WORK_IQ_KNOWLEDGE_SOURCE_NAME is set, the "
+                    "Foundry IQ retrieve request appends a workIQ knowledge source "
+                    "for Microsoft 365 grounding (mail, files, chats). Requires "
+                    "the gated Work IQ preview and admin consent on the Foundry "
+                    "connector. OBO is mandatory — anonymous / managed-identity "
+                    "fallback is never used for Work IQ."
+                ),
+            ),
+            SettingSpec(
+                key="WORK_IQ_KNOWLEDGE_SOURCE_NAME",
+                type="string",
+                default="",
+                label="Work IQ knowledge source name",
+                description=(
+                    "Name of the Work IQ knowledge source registered on the "
+                    "knowledge base. Required when WORK_IQ_ENABLED is true. "
+                    "No effect when Work IQ is disabled."
+                ),
+            ),
+            SettingSpec(
+                key="SEARCH_RETRIEVAL_ENABLED",
                 type="bool",
                 default=True,
                 label="Enable Azure AI Search retrieval",

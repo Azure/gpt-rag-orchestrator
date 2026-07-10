@@ -51,12 +51,32 @@ FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY = "FOUNDRY_IQ_FORWARD_SOURCE_AUTH"
 # primary knowledge source is the native azureBlob corpus, the retrieve action
 # also queries a second searchIndex knowledge source built over the existing
 # GPT-RAG index (SEARCH_RAG_INDEX_NAME). That second source carries the runtime
-# uploads and is trimmed by a security + conversationId filterAddOn so a user's
-# uploaded files are only visible inside their own conversation. Off by default.
+# uploads and is trimmed by a conversationId filterAddOn so uploaded files are
+# only visible inside the conversation that created them. Off by default.
 FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED_KEY = "FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED"
 FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME_KEY = (
     "FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME"
 )
+# Upper bound on the retrieve action runtime (maxRuntimeInSeconds on the
+# request body). Remote knowledge source kinds such as workIQ / fabricOntology
+# can take 40-60s to fan out; the default leaves headroom without penalising
+# the fast local kinds. Only emitted when a remote kind is enabled so today's
+# Pattern A / Pattern B request bodies remain byte-identical.
+FOUNDRY_IQ_MAX_RUNTIME_SECONDS_KEY = "FOUNDRY_IQ_MAX_RUNTIME_SECONDS"
+DEFAULT_FOUNDRY_IQ_MAX_RUNTIME_SECONDS = 120
+
+# Work IQ (Microsoft 365 remote knowledge source). Opt-in; default off. When
+# enabled, the retrieve request appends a workIQ knowledge source in
+# knowledgeSourceParams. ACL is enforced natively by M365, so no filterAddOn
+# is applied. OBO is required — MI fallback is never used for remote kinds.
+WORK_IQ_ENABLED_KEY = "WORK_IQ_ENABLED"
+WORK_IQ_KNOWLEDGE_SOURCE_NAME_KEY = "WORK_IQ_KNOWLEDGE_SOURCE_NAME"
+
+# Knowledge source kinds that must never fall back to the service managed
+# identity for x-ms-query-source-authorization. These sources run against
+# external systems (M365, Fabric) where impersonation, not app identity, is
+# the security boundary.
+_REMOTE_KNOWLEDGE_SOURCE_KINDS = frozenset({"workIQ"})
 
 # Search-audience scope used for the service token.
 _SEARCH_SCOPE = "https://search.azure.com/.default"
@@ -158,6 +178,11 @@ def build_pattern_b_filter_add_on(
     return security_clause
 
 
+def build_conversation_upload_filter_add_on(conversation_id: str) -> str:
+    """Build the Foundry IQ sidecar filter for runtime conversation uploads."""
+    return f"conversationId eq '{_odata_escape_string(conversation_id)}'"
+
+
 class FoundryIQClient:
     """Client for the Foundry IQ knowledge base retrieve action."""
 
@@ -215,6 +240,21 @@ class FoundryIQClient:
         self.conversation_knowledge_source_name = (
             self.cfg.get(FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME_KEY, "") or ""
         ).strip()
+        # Retrieve-runtime ceiling for remote knowledge source kinds.
+        self.max_runtime_seconds = _as_optional_int(
+            self.cfg.get(
+                FOUNDRY_IQ_MAX_RUNTIME_SECONDS_KEY,
+                DEFAULT_FOUNDRY_IQ_MAX_RUNTIME_SECONDS,
+            )
+        ) or DEFAULT_FOUNDRY_IQ_MAX_RUNTIME_SECONDS
+        # Work IQ (Microsoft 365) remote knowledge source. Opt-in; requires
+        # a per-user OBO token — anonymous / MI fallback is never used.
+        self.work_iq_enabled = _as_bool(
+            self.cfg.get(WORK_IQ_ENABLED_KEY, False, type=bool)
+        )
+        self.work_iq_knowledge_source_name = (
+            self.cfg.get(WORK_IQ_KNOWLEDGE_SOURCE_NAME_KEY, "") or ""
+        ).strip()
         self.credential = self.cfg.aiocredential
 
         # Shared aiohttp session — reuses TCP connections across calls.
@@ -251,7 +291,66 @@ class FoundryIQClient:
         )
 
     @staticmethod
-    def _normalize_references(payload: Dict[str, Any]) -> List[Dict[str, str]]:
+    def _normalize_work_iq_reference(source: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Map a Work IQ ``sourceData`` payload into ``{title, link, content}``.
+
+        Work IQ references do not use the flat ``snippet`` / ``blob_url`` shape.
+        Instead they carry:
+
+        - ``attributions[]`` — one or more entries per reference. Each carries
+          a ``seeMoreWebUrl`` (Outlook / SharePoint / Teams deep link) and,
+          when available, a subject / filename we can use as the citation
+          title.
+        - ``extracts[]`` — extracted chunks with a ``text`` field. Concatenating
+          the extracts gives the grounding content the LLM sees.
+
+        Returns ``None`` when the payload has neither extracts nor attributions
+        we can use, so the caller can skip empty Work IQ hits without falling
+        through to the generic azureBlob / searchIndex path (which would
+        otherwise emit a ``reference`` title and no link).
+        """
+        attributions = source.get("attributions") or []
+        extracts = source.get("extracts") or []
+        if not attributions and not extracts:
+            return None
+
+        extract_texts: List[str] = []
+        for extract in extracts:
+            if isinstance(extract, Mapping):
+                text = extract.get("text")
+                if text:
+                    extract_texts.append(str(text))
+        content = "\n\n".join(extract_texts).strip()
+        if not content:
+            return None
+
+        link = ""
+        title: Optional[str] = None
+        for attribution in attributions:
+            if not isinstance(attribution, Mapping):
+                continue
+            if not link:
+                link = str(attribution.get("seeMoreWebUrl") or "")
+            if not title:
+                # Prefer human-friendly labels, fall back to filename.
+                for key in ("subject", "name", "title", "filename", "fileName"):
+                    value = attribution.get(key)
+                    if value:
+                        title = str(value)
+                        break
+            if link and title:
+                break
+
+        if not title and link:
+            tail = link.rsplit("/", 1)[-1]
+            title = tail.split("?", 1)[0] or None
+        if not title:
+            title = "reference"
+
+        return {"title": title, "link": link, "content": content}
+
+    @classmethod
+    def _normalize_references(cls, payload: Dict[str, Any]) -> List[Dict[str, str]]:
         """Map a retrieve response into ``[{title, link, content}]`` records.
 
         The knowledge base retrieve response carries a ``references`` array;
@@ -264,6 +363,9 @@ class FoundryIQClient:
           ``sourceData.blob_url`` and do not include ``title``.
         - ``searchIndex`` Pattern B sources return whatever the index
           projects (typically ``content``, ``filepath``/``url``, ``title``).
+        - ``workIQ`` (Microsoft 365) sources return ``sourceData.attributions``
+          and ``sourceData.extracts`` instead of a flat snippet field. See
+          :meth:`_normalize_work_iq_reference`.
 
         We accept the union with explicit priority so the downstream
         ``{title, link, content}`` contract is identical across backends,
@@ -274,6 +376,14 @@ class FoundryIQClient:
         records: List[Dict[str, str]] = []
         for ref in payload.get("references", []) or []:
             source = ref.get("sourceData") or {}
+
+            # Work IQ / future Fabric shapes: prefer the specialised mapper
+            # when the payload carries the remote-kind fields.
+            if source.get("attributions") or source.get("extracts"):
+                record = cls._normalize_work_iq_reference(source)
+                if record is not None:
+                    records.append(record)
+                continue
 
             content = (
                 source.get("snippet")
@@ -321,11 +431,10 @@ class FoundryIQClient:
         - no conversation knowledge source name was provisioned.
 
         When it does apply, the source is a ``searchIndex`` knowledge source over
-        the existing GPT-RAG index, always trimmed by a security +
-        conversationId ``filterAddOn`` so a user's uploads stay scoped to their
-        own conversation. ``failOnError`` is ``false`` so an empty or missing
-        upload index degrades gracefully to the shared corpus instead of failing
-        the whole retrieve.
+        the existing GPT-RAG index, always trimmed by a simple conversationId
+        ``filterAddOn`` accepted by Foundry IQ. ``failOnError`` is ``false`` so
+        an empty or missing upload index degrades gracefully to the shared corpus
+        instead of failing the whole retrieve.
         """
         if not self.conversation_upload_enabled:
             return None
@@ -340,6 +449,13 @@ class FoundryIQClient:
                 "file-upload sidecar source."
             )
             return None
+        cid = (conversation_id or "").strip()
+        if not cid:
+            logging.warning(
+                "[FoundryIQClient] FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED=true but "
+                "conversation_id is empty; skipping the file-upload sidecar source."
+            )
+            return None
         if self.api_version != DEFAULT_FOUNDRY_IQ_API_VERSION:
             raise ValueError(
                 "Foundry IQ conversation-upload filterAddOn requires "
@@ -352,11 +468,7 @@ class FoundryIQClient:
             "includeReferences": True,
             "includeReferenceSourceData": True,
             "failOnError": False,
-            "filterAddOn": build_pattern_b_filter_add_on(
-                conversation_id=conversation_id,
-                user_context=user_context,
-                security_field_name=self.security_field_name,
-            ),
+            "filterAddOn": build_conversation_upload_filter_add_on(cid),
         }
         logging.info(
             "[FoundryIQClient][Upload] Adding conversation-upload source %s "
@@ -364,6 +476,53 @@ class FoundryIQClient:
             self.conversation_knowledge_source_name,
         )
         return params
+
+    def _build_work_iq_source_params(
+        self, *, obo_token: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Build the Work IQ (Microsoft 365) knowledge source entry.
+
+        Returns ``None`` when Work IQ does not apply:
+
+        - the feature is disabled, or
+        - no knowledge source name was provisioned, or
+        - no per-user OBO token is available (remote kinds strictly require
+          impersonation — MI fallback is never used).
+
+        Work IQ enforces ACL natively via the M365 user token, so no
+        ``filterAddOn`` is emitted.
+        """
+        if not self.work_iq_enabled:
+            return None
+        if not self.work_iq_knowledge_source_name:
+            logging.warning(
+                "[FoundryIQClient] WORK_IQ_ENABLED=true but "
+                "WORK_IQ_KNOWLEDGE_SOURCE_NAME is empty; skipping Work IQ source."
+            )
+            return None
+        if not obo_token:
+            logging.warning(
+                "[FoundryIQClient] WORK_IQ_ENABLED=true but no OBO token "
+                "(x-ms-query-source-authorization) available; skipping Work IQ "
+                "source. Managed-identity fallback is never used for remote "
+                "knowledge source kinds."
+            )
+            return None
+
+        logging.info(
+            "[FoundryIQClient][WorkIQ] Adding workIQ source %s (ACL native, no filterAddOn)",
+            self.work_iq_knowledge_source_name,
+        )
+        return {
+            "knowledgeSourceName": self.work_iq_knowledge_source_name,
+            "kind": "workIQ",
+            "includeReferences": True,
+            "includeReferenceSourceData": True,
+        }
+
+    def _remote_kinds_enabled(self) -> bool:
+        """Return True when any remote (M365 / Fabric) knowledge source is on."""
+        return self.work_iq_enabled
 
     async def retrieve(
         self,
@@ -482,8 +641,18 @@ class FoundryIQClient:
         if conversation_source_params:
             knowledge_source_params.append(conversation_source_params)
 
+        work_iq_source_params = self._build_work_iq_source_params(obo_token=obo_token)
+        if work_iq_source_params:
+            knowledge_source_params.append(work_iq_source_params)
+
         if knowledge_source_params:
             body["knowledgeSourceParams"] = knowledge_source_params
+
+        # Remote kinds (workIQ, future fabric*) can take 40-60s to fan out.
+        # Emit the runtime ceiling only when a remote kind is enabled so the
+        # default Pattern A / Pattern B request body stays byte-identical.
+        if self._remote_kinds_enabled():
+            body["maxRuntimeInSeconds"] = self.max_runtime_seconds
 
         session = await self._get_session()
         async with session.post(url, headers=headers, json=body) as resp:
