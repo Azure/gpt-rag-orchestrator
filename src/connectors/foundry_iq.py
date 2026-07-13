@@ -152,10 +152,25 @@ SHAREPOINT_INDEXED_INDEX_NAME_KEY = "SHAREPOINT_INDEXED_INDEX_NAME"
 SHAREPOINT_INDEXED_SITE_URL_KEY = "SHAREPOINT_INDEXED_SITE_URL"
 SHAREPOINT_INDEXED_TENANT_ID_KEY = "SHAREPOINT_INDEXED_TENANT_ID"
 
+# Web grounding (Grounding with Bing) knowledge source. Opt-in; default off.
+# When enabled, the retrieve request appends a ``web`` knowledge source in
+# knowledgeSourceParams. Web grounding calls Bing Search over the public
+# internet: there is no per-user ACL to enforce, no OBO impersonation, and
+# no filterAddOn. Optional allow / block domain lists narrow the crawl at
+# request time. The knowledge source itself is registered on the knowledge
+# base (kind ``web``, webParameters.domains) via the platform's post-provision
+# script; the retrieve entry only names it.
+WEB_GROUNDING_ENABLED_KEY = "WEB_GROUNDING_ENABLED"
+WEB_GROUNDING_KNOWLEDGE_SOURCE_NAME_KEY = "WEB_GROUNDING_KNOWLEDGE_SOURCE_NAME"
+WEB_GROUNDING_ALLOWED_DOMAINS_KEY = "WEB_GROUNDING_ALLOWED_DOMAINS"
+WEB_GROUNDING_BLOCKED_DOMAINS_KEY = "WEB_GROUNDING_BLOCKED_DOMAINS"
+
 # Knowledge source kinds that must never fall back to the service managed
 # identity for x-ms-query-source-authorization. These sources run against
 # external systems (M365, Fabric) where impersonation, not app identity, is
-# the security boundary.
+# the security boundary. ``web`` is deliberately excluded: Grounding with
+# Bing hits the public internet and has no per-user ACL to enforce, so no
+# authorization header is added for that source.
 _REMOTE_KNOWLEDGE_SOURCE_KINDS = frozenset(
     {"workIQ", "fabricOntology", "fabricDataAgent", "remoteSharePoint"}
 )
@@ -201,6 +216,35 @@ def _as_optional_int(value: Any) -> Optional[int]:
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
+
+
+def _parse_domain_list(value: Any) -> List[str]:
+    """Parse a comma- or newline-separated domain list from config.
+
+    Accepts a list/tuple already, or a delimited string. Whitespace is
+    trimmed, empties dropped, order preserved, duplicates removed.
+    """
+    if value in (None, ""):
+        return []
+    if isinstance(value, (list, tuple)):
+        items = [str(item) for item in value]
+    else:
+        text = str(value)
+        # Accept both commas and newlines so the same value shape works
+        # in App Config, .env files, and pipeline overrides.
+        for sep in ("\n", ";"):
+            text = text.replace(sep, ",")
+        items = text.split(",")
+
+    seen = set()
+    normalized: List[str] = []
+    for item in items:
+        cleaned = item.strip().lower()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        normalized.append(cleaned)
+    return normalized
 
 
 def build_pattern_b_filter_add_on(
@@ -407,6 +451,20 @@ class FoundryIQClient:
         self.sharepoint_indexed_tenant_id = (
             self.cfg.get(SHAREPOINT_INDEXED_TENANT_ID_KEY, "") or ""
         ).strip()
+        # Web grounding (Grounding with Bing) knowledge source. Opt-in.
+        # Public data, no ACL, no OBO - domains lists are the only trimming.
+        self.web_grounding_enabled = _as_bool(
+            self.cfg.get(WEB_GROUNDING_ENABLED_KEY, False, type=bool)
+        )
+        self.web_grounding_knowledge_source_name = (
+            self.cfg.get(WEB_GROUNDING_KNOWLEDGE_SOURCE_NAME_KEY, "") or ""
+        ).strip()
+        self.web_grounding_allowed_domains = _parse_domain_list(
+            self.cfg.get(WEB_GROUNDING_ALLOWED_DOMAINS_KEY, "")
+        )
+        self.web_grounding_blocked_domains = _parse_domain_list(
+            self.cfg.get(WEB_GROUNDING_BLOCKED_DOMAINS_KEY, "")
+        )
         self.credential = self.cfg.aiocredential
 
         # Shared aiohttp session - reuses TCP connections across calls.
@@ -780,6 +838,60 @@ class FoundryIQClient:
 
         return {"title": str(title), "link": str(link), "content": str(content)}
 
+    @staticmethod
+    def _normalize_web_reference(source: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Map a web (Grounding with Bing) ``sourceData`` payload into
+        ``{title, link, content}``.
+
+        The public API preview for kind ``web`` does not document a fixed
+        reference shape end-to-end, so this normalizer follows the generic
+        Bing-style contract used across Microsoft grounding surfaces:
+
+        - ``title`` (page title) - preferred.
+        - ``url`` (canonical page URL) - preferred link.
+        - ``snippet`` (extract shown to the user) - preferred content.
+
+        Common alternates such as ``name`` (Bing web results) and
+        ``description`` are accepted as graceful fallbacks so a small server
+        rename does not silently drop citations. Returns ``None`` when
+        neither a snippet nor a URL is available, so the caller can skip
+        empty hits rather than emit a bare ``reference`` title.
+        """
+        snippet = (
+            source.get("snippet")
+            or source.get("description")
+            or source.get("content")
+            or ""
+        )
+        url = (
+            source.get("url")
+            or source.get("link")
+            or source.get("displayUrl")
+            or ""
+        )
+        title = (
+            source.get("title")
+            or source.get("name")
+            or ""
+        )
+
+        snippet_text = snippet.strip() if isinstance(snippet, str) else ""
+        url_text = url.strip() if isinstance(url, str) else ""
+        title_text = title.strip() if isinstance(title, str) else ""
+
+        if not snippet_text and not url_text:
+            return None
+
+        if not title_text and url_text:
+            # Derive a readable title from the URL host + path tail so the
+            # citation surface is not blank when the server omits ``title``.
+            tail = url_text.rsplit("/", 1)[-1].split("?", 1)[0]
+            title_text = tail or url_text
+        if not title_text:
+            title_text = "web result"
+
+        return {"title": title_text, "link": url_text, "content": snippet_text}
+
     @classmethod
     def _normalize_references(cls, payload: Dict[str, Any]) -> List[Dict[str, str]]:
         """Map a retrieve response into ``[{title, link, content}]`` records.
@@ -814,6 +926,10 @@ class FoundryIQClient:
           OneLake file pointer, optionally annotated with
           ``workspaceId`` / ``lakehouseId``. See
           :meth:`_normalize_onelake_reference`.
+        - ``web`` (Grounding with Bing) sources return generic
+          ``sourceData.title`` / ``sourceData.url`` / ``sourceData.snippet``
+          fields matching the public Bing-style contract. See
+          :meth:`_normalize_web_reference`.
 
         We accept the union with explicit priority so the downstream
         ``{title, link, content}`` contract is identical across backends,
@@ -825,6 +941,16 @@ class FoundryIQClient:
         for ref in payload.get("references", []) or []:
             source = ref.get("sourceData") or {}
 
+            # Web grounding shape (kind ``web``): dispatched by the top-level
+            # reference ``type`` marker since sourceData.url / snippet overlap
+            # with the generic azureBlob / searchIndex path below.
+            ref_type = str(ref.get("type") or "").strip().lower()
+            if ref_type == "web":
+                web_record = cls._normalize_web_reference(source)
+                if web_record is not None:
+                    records.append(web_record)
+                continue
+
             # Fabric Data Agent shape (fabricDataAgent): distinct fields,
             # no overlap with fabricOntology / workIQ.
             if source.get("dataAgentAnswer") or source.get("dataAgentRawData"):
@@ -834,10 +960,11 @@ class FoundryIQClient:
                 continue
 
             # SharePoint remote shape (remoteSharePoint / Copilot Retrieval
-            # API): keyed on webUrl + resourceMetadata. Check before Work IQ
-            # because both may carry extracts, but only SharePoint remote
-            # carries a webUrl deep link.
-            if source.get("webUrl") or source.get("resourceMetadata"):
+            # API): keyed on ``resourceMetadata``, the marker unique to the
+            # Copilot Retrieval API response envelope (Work IQ shares
+            # ``extracts`` but never carries ``resourceMetadata``, and a
+            # bare ``webUrl`` alone is ambiguous with SharePoint Indexed).
+            if source.get("resourceMetadata"):
                 sp_record = cls._normalize_sharepoint_remote_reference(source)
                 if sp_record is not None:
                     records.append(sp_record)
@@ -876,12 +1003,14 @@ class FoundryIQClient:
             # link fields on top of an otherwise flat sourceData. Only route
             # here when a SharePoint-index-specific field is present so
             # genuinely generic searchIndex hits still fall through to the
-            # flat path below. webUrl alone is already handled by the
-            # SharePoint remote branch above; SharePoint Indexed is
-            # identified by webPath / siteUrl / driveItemId (or a search
-            # projection carrying webUrl paired with driveItemId).
+            # flat path below. webUrl arrives here (rather than being eaten
+            # by the SharePoint remote branch above) because SharePoint
+            # remote now requires Copilot-Retrieval-API-specific markers
+            # (resourceMetadata / extracts). SharePoint Indexed is
+            # identified by webUrl / webPath / siteUrl / driveItemId.
             if (
-                source.get("webPath")
+                source.get("webUrl")
+                or source.get("webPath")
                 or source.get("siteUrl")
                 or source.get("driveItemId")
             ):
@@ -1254,13 +1383,69 @@ class FoundryIQClient:
             "includeReferenceSourceData": True,
         }
 
+    def _build_web_source_params(self) -> Optional[Dict[str, Any]]:
+        """Build the web (Grounding with Bing) knowledge source entry.
+
+        Returns ``None`` when web grounding does not apply:
+
+        - the feature is disabled, or
+        - no knowledge source name was provisioned.
+
+        Web grounding hits the public internet: there is no per-user ACL to
+        enforce, no OBO impersonation, and no ``filterAddOn``. The only
+        request-time trimming is the optional ``webParameters.domains``
+        allow / block lists. When both lists are empty the ``webParameters``
+        block is omitted so the request body stays minimal.
+        """
+        if not self.web_grounding_enabled:
+            return None
+        if not self.web_grounding_knowledge_source_name:
+            logging.warning(
+                "[FoundryIQClient] WEB_GROUNDING_ENABLED=true but "
+                "WEB_GROUNDING_KNOWLEDGE_SOURCE_NAME is empty; skipping web "
+                "grounding source."
+            )
+            return None
+
+        params: Dict[str, Any] = {
+            "knowledgeSourceName": self.web_grounding_knowledge_source_name,
+            "kind": "web",
+            "includeReferences": True,
+            "includeReferenceSourceData": True,
+        }
+
+        allowed = list(self.web_grounding_allowed_domains)
+        blocked = list(self.web_grounding_blocked_domains)
+        if allowed or blocked:
+            domains: Dict[str, List[str]] = {}
+            if allowed:
+                domains["allowedDomains"] = allowed
+            if blocked:
+                domains["blockedDomains"] = blocked
+            params["webParameters"] = {"domains": domains}
+
+        logging.info(
+            "[FoundryIQClient][Web] Adding web source %s (allowed=%d, blocked=%d)",
+            self.web_grounding_knowledge_source_name,
+            len(allowed),
+            len(blocked),
+        )
+        return params
+
     def _remote_kinds_enabled(self) -> bool:
-        """Return True when any remote (M365 / Fabric) knowledge source is on."""
+        """Return True when any remote knowledge source is on.
+
+        Controls emission of the ``maxRuntimeInSeconds`` runtime ceiling. Web
+        grounding calls the public Bing endpoint and can add several seconds
+        of latency, so it counts toward the ceiling even though it is not in
+        the OBO-required ``_REMOTE_KNOWLEDGE_SOURCE_KINDS`` frozenset.
+        """
         return (
             self.work_iq_enabled
             or self.fabric_iq_enabled
             or self.fabric_data_agent_enabled
             or self.sharepoint_remote_enabled
+            or self.web_grounding_enabled
         )
 
     async def retrieve(
@@ -1408,6 +1593,10 @@ class FoundryIQClient:
         sharepoint_indexed_source_params = self._build_sharepoint_indexed_source_params()
         if sharepoint_indexed_source_params:
             knowledge_source_params.append(sharepoint_indexed_source_params)
+
+        web_source_params = self._build_web_source_params()
+        if web_source_params:
+            knowledge_source_params.append(web_source_params)
 
         if knowledge_source_params:
             body["knowledgeSourceParams"] = knowledge_source_params

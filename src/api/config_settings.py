@@ -685,6 +685,58 @@ SECTIONS: List[SettingSection] = [
                 ),
             ),
             SettingSpec(
+                key="WEB_GROUNDING_ENABLED",
+                type="bool",
+                default=False,
+                label="Enable web grounding (Grounding with Bing)",
+                description=(
+                    "When enabled and WEB_GROUNDING_KNOWLEDGE_SOURCE_NAME is "
+                    "set, the Foundry IQ retrieve request appends a web "
+                    "knowledge source that grounds answers with Bing Search "
+                    "results over the public internet. Public data, no ACL, "
+                    "no OBO impersonation; the only request-time trimming is "
+                    "the optional allow / block domain lists. Web calls are "
+                    "billed per request by Bing and leave the Azure "
+                    "compliance boundary."
+                ),
+            ),
+            SettingSpec(
+                key="WEB_GROUNDING_KNOWLEDGE_SOURCE_NAME",
+                type="string",
+                default="",
+                label="Web grounding knowledge source name",
+                description=(
+                    "Name of the web knowledge source registered on the "
+                    "knowledge base. Required when WEB_GROUNDING_ENABLED is "
+                    "true. Registration itself is handled by the platform's "
+                    "post-provision script."
+                ),
+            ),
+            SettingSpec(
+                key="WEB_GROUNDING_ALLOWED_DOMAINS",
+                type="string",
+                default="",
+                label="Web grounding allowed domains",
+                description=(
+                    "Optional comma-separated list of hostnames the web "
+                    "knowledge source is allowed to return (for example "
+                    "``learn.microsoft.com,azure.microsoft.com``). Applied "
+                    "at retrieve time under webParameters.domains. Leave "
+                    "empty to search the open web."
+                ),
+            ),
+            SettingSpec(
+                key="WEB_GROUNDING_BLOCKED_DOMAINS",
+                type="string",
+                default="",
+                label="Web grounding blocked domains",
+                description=(
+                    "Optional comma-separated list of hostnames the web "
+                    "knowledge source must never return. Applied at "
+                    "retrieve time under webParameters.domains."
+                ),
+            ),
+            SettingSpec(
                 key="SEARCH_RETRIEVAL_ENABLED",
                 type="bool",
                 default=True,
