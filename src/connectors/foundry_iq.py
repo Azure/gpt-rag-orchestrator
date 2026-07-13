@@ -81,11 +81,24 @@ WORK_IQ_KNOWLEDGE_SOURCE_NAME_KEY = "WORK_IQ_KNOWLEDGE_SOURCE_NAME"
 FABRIC_IQ_ENABLED_KEY = "FABRIC_IQ_ENABLED"
 FABRIC_IQ_KNOWLEDGE_SOURCE_NAME_KEY = "FABRIC_IQ_KNOWLEDGE_SOURCE_NAME"
 
+# Fabric Data Agent (Microsoft Fabric Data Agent remote knowledge source).
+# Opt-in; default off. When enabled, the retrieve request appends a
+# fabricDataAgent knowledge source in knowledgeSourceParams. A Fabric Data
+# Agent acts as a virtual analyst that runs queries over Fabric data and
+# returns answers, tables, and charts. ACL is enforced natively by Fabric
+# via the forwarded per-user OBO token (same x-ms-query-source-authorization
+# header used by Work IQ / Fabric ontology), so no filterAddOn is applied.
+# OBO is required; MI fallback is never used for remote kinds.
+FABRIC_DATA_AGENT_ENABLED_KEY = "FABRIC_DATA_AGENT_ENABLED"
+FABRIC_DATA_AGENT_KNOWLEDGE_SOURCE_NAME_KEY = "FABRIC_DATA_AGENT_KNOWLEDGE_SOURCE_NAME"
+
 # Knowledge source kinds that must never fall back to the service managed
 # identity for x-ms-query-source-authorization. These sources run against
 # external systems (M365, Fabric) where impersonation, not app identity, is
 # the security boundary.
-_REMOTE_KNOWLEDGE_SOURCE_KINDS = frozenset({"workIQ", "fabricOntology"})
+_REMOTE_KNOWLEDGE_SOURCE_KINDS = frozenset(
+    {"workIQ", "fabricOntology", "fabricDataAgent"}
+)
 
 # Search-audience scope used for the service token.
 _SEARCH_SCOPE = "https://search.azure.com/.default"
@@ -235,7 +248,7 @@ class FoundryIQClient:
         # RBAC-scoped permission filters on the bound knowledge source. This
         # is required by knowledge bases whose index has
         # ``permissionFilterOption=enabled`` and whose knowledge source uses
-        # ``ingestionPermissionOptions=["rbacScope"]`` — without it the
+        # ``ingestionPermissionOptions=["rbacScope"]`` - without it the
         # retrieve action returns 502 ("Failed to query search index").
         self.forward_source_auth = _as_bool(
             self.cfg.get(FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY, True, type=bool)
@@ -257,7 +270,7 @@ class FoundryIQClient:
             )
         ) or DEFAULT_FOUNDRY_IQ_MAX_RUNTIME_SECONDS
         # Work IQ (Microsoft 365) remote knowledge source. Opt-in; requires
-        # a per-user OBO token — anonymous / MI fallback is never used.
+        # a per-user OBO token - anonymous / MI fallback is never used.
         self.work_iq_enabled = _as_bool(
             self.cfg.get(WORK_IQ_ENABLED_KEY, False, type=bool)
         )
@@ -274,9 +287,19 @@ class FoundryIQClient:
         self.fabric_iq_knowledge_source_name = (
             self.cfg.get(FABRIC_IQ_KNOWLEDGE_SOURCE_NAME_KEY, "") or ""
         ).strip()
+        # Fabric Data Agent remote knowledge source. Opt-in; requires a
+        # per-user OBO token (same x-ms-query-source-authorization header
+        # used by Work IQ / Fabric ontology), so anonymous / MI fallback is
+        # never used.
+        self.fabric_data_agent_enabled = _as_bool(
+            self.cfg.get(FABRIC_DATA_AGENT_ENABLED_KEY, False, type=bool)
+        )
+        self.fabric_data_agent_knowledge_source_name = (
+            self.cfg.get(FABRIC_DATA_AGENT_KNOWLEDGE_SOURCE_NAME_KEY, "") or ""
+        ).strip()
         self.credential = self.cfg.aiocredential
 
-        # Shared aiohttp session — reuses TCP connections across calls.
+        # Shared aiohttp session - reuses TCP connections across calls.
         self._session: Optional[aiohttp.ClientSession] = None
 
         if not self.endpoint:
@@ -316,11 +339,11 @@ class FoundryIQClient:
         Work IQ references do not use the flat ``snippet`` / ``blob_url`` shape.
         Instead they carry:
 
-        - ``attributions[]`` — one or more entries per reference. Each carries
+        - ``attributions[]`` - one or more entries per reference. Each carries
           a ``seeMoreWebUrl`` (Outlook / SharePoint / Teams deep link) and,
           when available, a subject / filename we can use as the citation
           title.
-        - ``extracts[]`` — extracted chunks with a ``text`` field. Concatenating
+        - ``extracts[]`` - extracted chunks with a ``text`` field. Concatenating
           the extracts gives the grounding content the LLM sees.
 
         Returns ``None`` when the payload has neither extracts nor attributions
@@ -413,6 +436,54 @@ class FoundryIQClient:
 
         return {"title": title, "link": "", "content": content}
 
+    @staticmethod
+    def _normalize_fabric_data_agent_reference(
+        source: Dict[str, Any],
+    ) -> Optional[Dict[str, str]]:
+        """Map a Fabric Data Agent ``sourceData`` payload into ``{title, link, content}``.
+
+        A Fabric Data Agent acts as a virtual analyst: it runs queries over
+        Fabric data and returns answers, and (optionally) tabular / chart
+        artifacts. The retrieve response typically exposes:
+
+        - ``dataAgentAnswer`` (optional) - natural-language answer.
+        - ``dataAgentRawData`` (optional) - raw grounding evidence, usually
+          CSV / JSON rows the LLM should be able to quote from verbatim.
+        - ``workspaceId`` / ``dataAgentId`` - identify the Fabric artifacts
+          the agent ran against.
+
+        Both ``dataAgentAnswer`` and ``dataAgentRawData`` may be present;
+        when both exist we concatenate them so the LLM sees the summary plus
+        the raw rows. Returns ``None`` when neither field is present so the
+        caller can skip empty hits rather than emit a bare ``reference``
+        title. Fabric Data Agent does not currently return a per-reference
+        deep link, so ``link`` is left empty and the citation title falls
+        back to the workspace / data agent identifiers.
+        """
+        answer = source.get("dataAgentAnswer")
+        raw = source.get("dataAgentRawData")
+        parts: List[str] = []
+        if isinstance(answer, str) and answer.strip():
+            parts.append(answer.strip())
+        if isinstance(raw, str) and raw.strip():
+            parts.append(raw.strip())
+        if not parts:
+            return None
+        content = "\n\n".join(parts)
+
+        workspace_id = str(source.get("workspaceId") or "").strip()
+        data_agent_id = str(source.get("dataAgentId") or "").strip()
+        if workspace_id and data_agent_id:
+            title = f"Fabric data agent {data_agent_id} (workspace {workspace_id})"
+        elif data_agent_id:
+            title = f"Fabric data agent {data_agent_id}"
+        elif workspace_id:
+            title = f"Fabric workspace {workspace_id}"
+        else:
+            title = "Fabric data agent"
+
+        return {"title": title, "link": "", "content": content}
+
     @classmethod
     def _normalize_references(cls, payload: Dict[str, Any]) -> List[Dict[str, str]]:
         """Map a retrieve response into ``[{title, link, content}]`` records.
@@ -434,6 +505,10 @@ class FoundryIQClient:
           ``sourceData.fabricAnswer`` and/or ``sourceData.fabricRawData``
           alongside ``workspaceId`` / ``ontologyId``. See
           :meth:`_normalize_fabric_iq_reference`.
+        - ``fabricDataAgent`` (Microsoft Fabric Data Agent) sources return
+          ``sourceData.dataAgentAnswer`` and/or ``sourceData.dataAgentRawData``
+          alongside ``workspaceId`` / ``dataAgentId``. See
+          :meth:`_normalize_fabric_data_agent_reference`.
 
         We accept the union with explicit priority so the downstream
         ``{title, link, content}`` contract is identical across backends,
@@ -444,6 +519,14 @@ class FoundryIQClient:
         records: List[Dict[str, str]] = []
         for ref in payload.get("references", []) or []:
             source = ref.get("sourceData") or {}
+
+            # Fabric Data Agent shape (fabricDataAgent): distinct fields,
+            # no overlap with fabricOntology / workIQ.
+            if source.get("dataAgentAnswer") or source.get("dataAgentRawData"):
+                data_agent_record = cls._normalize_fabric_data_agent_reference(source)
+                if data_agent_record is not None:
+                    records.append(data_agent_record)
+                continue
 
             # Fabric IQ shape (fabricOntology): distinct fields, no
             # attributions/extracts overlap with Work IQ.
@@ -562,7 +645,7 @@ class FoundryIQClient:
         - the feature is disabled, or
         - no knowledge source name was provisioned, or
         - no per-user OBO token is available (remote kinds strictly require
-          impersonation — MI fallback is never used).
+          impersonation - MI fallback is never used).
 
         Work IQ enforces ACL natively via the M365 user token, so no
         ``filterAddOn`` is emitted.
@@ -641,9 +724,62 @@ class FoundryIQClient:
             "includeReferenceSourceData": True,
         }
 
+    def _build_fabric_data_agent_source_params(
+        self, *, obo_token: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Build the Fabric Data Agent knowledge source entry.
+
+        Returns ``None`` when Fabric Data Agent does not apply:
+
+        - the feature is disabled, or
+        - no knowledge source name was provisioned, or
+        - no per-user OBO token is available (remote kinds strictly require
+          impersonation; MI fallback is never used).
+
+        Fabric Data Agent enforces ACL natively via the forwarded per-user
+        token (workspace / data agent / underlying-item permissions), so no
+        ``filterAddOn`` is emitted. The fabricDataAgent KS itself carries
+        the workspaceId and dataAgentId at registration time; the
+        retrieve-time entry only needs the knowledge source name and
+        reference flags.
+        """
+        if not self.fabric_data_agent_enabled:
+            return None
+        if not self.fabric_data_agent_knowledge_source_name:
+            logging.warning(
+                "[FoundryIQClient] FABRIC_DATA_AGENT_ENABLED=true but "
+                "FABRIC_DATA_AGENT_KNOWLEDGE_SOURCE_NAME is empty; skipping "
+                "Fabric Data Agent source."
+            )
+            return None
+        if not obo_token:
+            logging.warning(
+                "[FoundryIQClient] FABRIC_DATA_AGENT_ENABLED=true but no OBO "
+                "token (x-ms-query-source-authorization) available; skipping "
+                "Fabric Data Agent source. Managed-identity fallback is never "
+                "used for remote knowledge source kinds."
+            )
+            return None
+
+        logging.info(
+            "[FoundryIQClient][FabricDataAgent] Adding fabricDataAgent source "
+            "%s (ACL native, no filterAddOn)",
+            self.fabric_data_agent_knowledge_source_name,
+        )
+        return {
+            "knowledgeSourceName": self.fabric_data_agent_knowledge_source_name,
+            "kind": "fabricDataAgent",
+            "includeReferences": True,
+            "includeReferenceSourceData": True,
+        }
+
     def _remote_kinds_enabled(self) -> bool:
         """Return True when any remote (M365 / Fabric) knowledge source is on."""
-        return self.work_iq_enabled or self.fabric_iq_enabled
+        return (
+            self.work_iq_enabled
+            or self.fabric_iq_enabled
+            or self.fabric_data_agent_enabled
+        )
 
     async def retrieve(
         self,
@@ -769,6 +905,12 @@ class FoundryIQClient:
         fabric_iq_source_params = self._build_fabric_iq_source_params(obo_token=obo_token)
         if fabric_iq_source_params:
             knowledge_source_params.append(fabric_iq_source_params)
+
+        fabric_data_agent_source_params = self._build_fabric_data_agent_source_params(
+            obo_token=obo_token
+        )
+        if fabric_data_agent_source_params:
+            knowledge_source_params.append(fabric_data_agent_source_params)
 
         if knowledge_source_params:
             body["knowledgeSourceParams"] = knowledge_source_params
