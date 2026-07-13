@@ -8,7 +8,65 @@
 
 ### Changed
 
+## [v3.5.0] - 2026-07-13
+
+### Added
+
+- **SharePoint remote (Copilot Retrieval API) knowledge source (preview, default off).**
+  The Foundry IQ retrieve client can now include a `remoteSharePoint` knowledge
+  source that live-queries SharePoint through the Microsoft Graph Copilot
+  Retrieval API. Behavior is gated by `SHAREPOINT_REMOTE_ENABLED` and
+  `SHAREPOINT_REMOTE_KNOWLEDGE_SOURCE_NAME`; when both are set and an
+  on-behalf-of user token is available, a `kind="remoteSharePoint"` entry is
+  appended to `knowledgeSourceParams`. Per-user ACL is enforced natively by
+  SharePoint via the forwarded token (same `x-ms-query-source-authorization`
+  header used by Work IQ / Fabric ontology / Fabric Data Agent). MI fallback
+  is never used for remote kinds.
+
+- **OneLake indexed knowledge source (preview, default off).**
+  The Foundry IQ retrieve client can now include an `indexedOneLake`
+  knowledge source, letting Foundry IQ query a Microsoft Fabric OneLake
+  workspace/lakehouse that has been pre-indexed by Foundry IQ. Behavior is
+  gated by `ONELAKE_KS_ENABLED` and `ONELAKE_KNOWLEDGE_SOURCE_NAME` (plus
+  workspace/lakehouse identifiers). Unlike the three remote kinds above,
+  `indexedOneLake` is served by Foundry IQ's own index and does not require
+  an OBO token at retrieve time.
+
+- **SharePoint Indexed knowledge source (preview, default off).**
+  The Foundry IQ retrieve client can now include an `indexedSharePoint`
+  knowledge source, letting Foundry IQ query a SharePoint site indexed by
+  Foundry IQ using app-only Microsoft Graph auth (Sites.Selected preferred).
+  Behavior is gated by `SHAREPOINT_INDEXED_ENABLED` and
+  `SHAREPOINT_INDEXED_KNOWLEDGE_SOURCE_NAME`. Like `indexedOneLake`, this
+  kind is served by Foundry IQ's own index and does not require an OBO
+  token at retrieve time.
+
+- **Web grounding (Grounding with Bing) knowledge source (preview, default off).**
+  The Foundry IQ retrieve client can now include a `web` knowledge source
+  that returns public web results scoped by allow/block domain lists, billed
+  per Bing call. Behavior is gated by `WEB_GROUNDING_ENABLED` and
+  `WEB_GROUNDING_KNOWLEDGE_SOURCE_NAME`. Because the public web has no
+  per-user ACL, `web` is NOT in `_REMOTE_KNOWLEDGE_SOURCE_KINDS` and does
+  not require an OBO token. It does count toward the retrieve-time runtime
+  ceiling to accommodate Bing latency.
+
+### Fixed
+
+- **`_normalize_references` dispatch specificity.**
+  SharePoint remote dispatch now requires the Copilot Retrieval API's unique
+  `resourceMetadata` marker rather than a bare `webUrl` or `extracts`, so
+  SharePoint Indexed (`webUrl` + top-level `title`/`content`) and Work IQ
+  (`attributions` + `extracts`) references route to the correct normalizer.
+
+### Changed
+
 ## [v3.4.1] - 2026-07-13
+
+Hotfix release published directly to `main`. Contents equivalent to v3.4.0
+(Fabric Data Agent knowledge source, listed in detail under v3.4.0 below).
+Back-merged into `develop` on 2026-07-13 via the v3.5.0 sync merge.
+
+## [v3.4.0] - 2026-07-13
 
 ### Added
 

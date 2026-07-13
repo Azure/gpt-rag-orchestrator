@@ -519,6 +519,224 @@ SECTIONS: List[SettingSection] = [
                 ),
             ),
             SettingSpec(
+                key="SHAREPOINT_REMOTE_ENABLED",
+                type="bool",
+                default=False,
+                label="Enable SharePoint remote (Copilot Retrieval API)",
+                description=(
+                    "Opt-in. When enabled, the Foundry IQ retrieve call adds "
+                    "a remoteSharePoint knowledge source that queries "
+                    "SharePoint at retrieval time via the Microsoft 365 "
+                    "Copilot Retrieval API. Item-level SharePoint "
+                    "permissions are enforced natively by M365 via the "
+                    "forwarded per-user OBO token; managed-identity "
+                    "fallback is never used for SharePoint remote."
+                ),
+            ),
+            SettingSpec(
+                key="SHAREPOINT_REMOTE_KNOWLEDGE_SOURCE_NAME",
+                type="string",
+                default="",
+                label="SharePoint remote knowledge source name",
+                description=(
+                    "Name of the remoteSharePoint knowledge source "
+                    "registered on the knowledge base. Required when "
+                    "SHAREPOINT_REMOTE_ENABLED is true. No effect when "
+                    "SharePoint remote is disabled."
+                ),
+            ),
+            SettingSpec(
+                key="SHAREPOINT_REMOTE_FILTER_EXPRESSION_ADD_ON",
+                type="string",
+                default="",
+                label="SharePoint remote filter expression add-on",
+                description=(
+                    "Optional KQL filter appended at retrieval time to the "
+                    "remoteSharePoint knowledge source "
+                    "(filterExpressionAddOn). Use it to scope results to a "
+                    "specific site, path, or content type. Leave empty for "
+                    "no additional filter."
+                ),
+            ),
+            SettingSpec(
+                key="ONELAKE_KS_ENABLED",
+                type="bool",
+                default=False,
+                label="Enable OneLake indexed knowledge source",
+                description=(
+                    "When enabled and ONELAKE_KNOWLEDGE_SOURCE_NAME is set, "
+                    "the Foundry IQ retrieve request appends an "
+                    "indexedOneLake knowledge source for grounding over a "
+                    "Microsoft Fabric OneLake lakehouse. Foundry IQ manages "
+                    "the underlying Azure AI Search index internally, so "
+                    "OneLake is a native (not remote) kind: it does not "
+                    "require a per-user OBO token."
+                ),
+            ),
+            SettingSpec(
+                key="ONELAKE_KNOWLEDGE_SOURCE_NAME",
+                type="string",
+                default="",
+                label="OneLake knowledge source name",
+                description=(
+                    "Name of the indexedOneLake knowledge source registered "
+                    "on the knowledge base. Required when ONELAKE_KS_ENABLED "
+                    "is true. The knowledge source itself binds a Fabric "
+                    "workspace and lakehouse at registration time; no effect "
+                    "when OneLake is disabled."
+                ),
+            ),
+            SettingSpec(
+                key="ONELAKE_WORKSPACE_ID",
+                type="string",
+                default="",
+                label="OneLake Fabric workspace ID",
+                description=(
+                    "Identifier of the Microsoft Fabric workspace that hosts "
+                    "the OneLake lakehouse bound to the indexedOneLake "
+                    "knowledge source. Captured for observability and used "
+                    "by platform provisioning to assign Fabric RBAC to the "
+                    "Foundry IQ managed identity; not sent on retrieve."
+                ),
+            ),
+            SettingSpec(
+                key="ONELAKE_LAKEHOUSE_ID",
+                type="string",
+                default="",
+                label="OneLake Fabric lakehouse ID",
+                description=(
+                    "Identifier of the Microsoft Fabric lakehouse (within "
+                    "ONELAKE_WORKSPACE_ID) bound to the indexedOneLake "
+                    "knowledge source. Captured for observability and "
+                    "documentation; not sent on retrieve."
+                ),
+            ),
+            SettingSpec(
+                key="SHAREPOINT_INDEXED_ENABLED",
+                type="bool",
+                default=False,
+                label="Enable SharePoint Indexed knowledge source (preview)",
+                description=(
+                    "When enabled and SHAREPOINT_INDEXED_KNOWLEDGE_SOURCE_NAME "
+                    "is set, the Foundry IQ retrieve request appends an "
+                    "indexedSharePoint knowledge source. Unlike Work IQ and "
+                    "Fabric IQ, indexedSharePoint is a server-side knowledge "
+                    "source on the AI Search service: it owns its ingestion "
+                    "pipeline and retrieves against a pre-built local index. "
+                    "Auth to SharePoint is app-only via a Federated Identity "
+                    "Credential (managed identity + Graph Sites.Selected), so "
+                    "no OBO token is required at retrieve time. Preview API "
+                    "2026-05-01-preview; ACL / site-group trimming is out of "
+                    "scope for this preview."
+                ),
+            ),
+            SettingSpec(
+                key="SHAREPOINT_INDEXED_KNOWLEDGE_SOURCE_NAME",
+                type="string",
+                default="",
+                label="SharePoint Indexed knowledge source name",
+                description=(
+                    "Name of the indexedSharePoint knowledge source registered "
+                    "on the AI Search service. Required when "
+                    "SHAREPOINT_INDEXED_ENABLED is true. The knowledge source "
+                    "itself carries the SharePoint site URL, tenant, and "
+                    "connectionString at registration time; no effect when "
+                    "SharePoint Indexed is disabled."
+                ),
+            ),
+            SettingSpec(
+                key="SHAREPOINT_INDEXED_INDEX_NAME",
+                type="string",
+                default="",
+                label="SharePoint Indexed target index name",
+                description=(
+                    "Name of the AI Search index generated by the "
+                    "indexedSharePoint knowledge source. AI Search creates the "
+                    "index automatically from the knowledge source definition; "
+                    "this value is stored for observability and setup scripts. "
+                    "Not sent on retrieve requests."
+                ),
+            ),
+            SettingSpec(
+                key="SHAREPOINT_INDEXED_SITE_URL",
+                type="string",
+                default="",
+                label="SharePoint Indexed site URL",
+                description=(
+                    "Absolute URL of the SharePoint site the indexedSharePoint "
+                    "knowledge source ingests from (for example "
+                    "https://contoso.sharepoint.com/sites/knowledge). Stored "
+                    "for observability and setup scripts; the actual ingestion "
+                    "target is set on the knowledge source connectionString at "
+                    "registration time."
+                ),
+            ),
+            SettingSpec(
+                key="SHAREPOINT_INDEXED_TENANT_ID",
+                type="string",
+                default="",
+                label="SharePoint Indexed tenant ID",
+                description=(
+                    "Entra tenant ID that owns the SharePoint site and the "
+                    "Entra app registration with the Federated Identity "
+                    "Credential used by indexedSharePoint. Stored for "
+                    "observability and setup scripts; not sent on retrieve "
+                    "requests."
+                ),
+            ),
+            SettingSpec(
+                key="WEB_GROUNDING_ENABLED",
+                type="bool",
+                default=False,
+                label="Enable web grounding (Grounding with Bing)",
+                description=(
+                    "When enabled and WEB_GROUNDING_KNOWLEDGE_SOURCE_NAME is "
+                    "set, the Foundry IQ retrieve request appends a web "
+                    "knowledge source that grounds answers with Bing Search "
+                    "results over the public internet. Public data, no ACL, "
+                    "no OBO impersonation; the only request-time trimming is "
+                    "the optional allow / block domain lists. Web calls are "
+                    "billed per request by Bing and leave the Azure "
+                    "compliance boundary."
+                ),
+            ),
+            SettingSpec(
+                key="WEB_GROUNDING_KNOWLEDGE_SOURCE_NAME",
+                type="string",
+                default="",
+                label="Web grounding knowledge source name",
+                description=(
+                    "Name of the web knowledge source registered on the "
+                    "knowledge base. Required when WEB_GROUNDING_ENABLED is "
+                    "true. Registration itself is handled by the platform's "
+                    "post-provision script."
+                ),
+            ),
+            SettingSpec(
+                key="WEB_GROUNDING_ALLOWED_DOMAINS",
+                type="string",
+                default="",
+                label="Web grounding allowed domains",
+                description=(
+                    "Optional comma-separated list of hostnames the web "
+                    "knowledge source is allowed to return (for example "
+                    "``learn.microsoft.com,azure.microsoft.com``). Applied "
+                    "at retrieve time under webParameters.domains. Leave "
+                    "empty to search the open web."
+                ),
+            ),
+            SettingSpec(
+                key="WEB_GROUNDING_BLOCKED_DOMAINS",
+                type="string",
+                default="",
+                label="Web grounding blocked domains",
+                description=(
+                    "Optional comma-separated list of hostnames the web "
+                    "knowledge source must never return. Applied at "
+                    "retrieve time under webParameters.domains."
+                ),
+            ),
+            SettingSpec(
                 key="SEARCH_RETRIEVAL_ENABLED",
                 type="bool",
                 default=True,
