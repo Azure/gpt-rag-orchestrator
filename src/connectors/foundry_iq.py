@@ -106,6 +106,28 @@ SHAREPOINT_REMOTE_FILTER_EXPRESSION_ADD_ON_KEY = (
     "SHAREPOINT_REMOTE_FILTER_EXPRESSION_ADD_ON"
 )
 
+# OneLake indexed knowledge source (Microsoft Fabric OneLake, indexed variant).
+# Opt-in; default off. When enabled, the retrieve request appends an
+# ``indexedOneLake`` knowledge source in ``knowledgeSourceParams``. Unlike
+# the remote kinds (workIQ / fabricOntology / fabricDataAgent), Foundry IQ
+# manages the underlying Azure AI Search index internally: at KS registration
+# time it is bound to a Fabric workspace + lakehouse and provisions the
+# datasource, skillset, index, and indexer transparently. GPT-RAG therefore
+# does not maintain a Bicep AI Search sidecar for OneLake; the KS itself
+# owns the pipeline. The retrieve-time entry only needs the knowledge source
+# name and reference flags; workspace / lakehouse identifiers are used only
+# by platform provisioning (postProvision RBAC assignment for the Foundry
+# IQ managed identity on the target Fabric workspace) and by the operator
+# docs. Because content is stored in AI Search, ``indexedOneLake`` is a
+# native (not remote) kind: no OBO requirement and no maxRuntimeInSeconds
+# bump. If the service MI token is forwarded
+# (``FOUNDRY_IQ_FORWARD_SOURCE_AUTH=true``), Foundry IQ evaluates any
+# permission filters against the bound source using that identity.
+ONELAKE_KS_ENABLED_KEY = "ONELAKE_KS_ENABLED"
+ONELAKE_KNOWLEDGE_SOURCE_NAME_KEY = "ONELAKE_KNOWLEDGE_SOURCE_NAME"
+ONELAKE_WORKSPACE_ID_KEY = "ONELAKE_WORKSPACE_ID"
+ONELAKE_LAKEHOUSE_ID_KEY = "ONELAKE_LAKEHOUSE_ID"
+
 # Knowledge source kinds that must never fall back to the service managed
 # identity for x-ms-query-source-authorization. These sources run against
 # external systems (M365, Fabric) where impersonation, not app identity, is
@@ -323,6 +345,22 @@ class FoundryIQClient:
         ).strip()
         self.sharepoint_remote_filter_expression_add_on = (
             self.cfg.get(SHAREPOINT_REMOTE_FILTER_EXPRESSION_ADD_ON_KEY, "") or ""
+        ).strip()
+        # OneLake indexed knowledge source. Native kind (Foundry IQ owns the
+        # underlying AI Search index), so no OBO is required. Workspace and
+        # lakehouse identifiers are read here for observability / logging
+        # only; the retrieve-time entry carries just the KS name.
+        self.onelake_ks_enabled = _as_bool(
+            self.cfg.get(ONELAKE_KS_ENABLED_KEY, False, type=bool)
+        )
+        self.onelake_knowledge_source_name = (
+            self.cfg.get(ONELAKE_KNOWLEDGE_SOURCE_NAME_KEY, "") or ""
+        ).strip()
+        self.onelake_workspace_id = (
+            self.cfg.get(ONELAKE_WORKSPACE_ID_KEY, "") or ""
+        ).strip()
+        self.onelake_lakehouse_id = (
+            self.cfg.get(ONELAKE_LAKEHOUSE_ID_KEY, "") or ""
         ).strip()
         self.credential = self.cfg.aiocredential
 
@@ -570,6 +608,59 @@ class FoundryIQClient:
 
         return {"title": title, "link": link, "content": content}
 
+    @staticmethod
+    def _normalize_onelake_reference(source: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Map an ``indexedOneLake`` ``sourceData`` payload into ``{title, link, content}``.
+
+        Because Foundry IQ manages the underlying Azure AI Search index for
+        OneLake internally, the reference shape is projection-driven: it
+        looks like a native ``azureBlob`` chunk (a snippet plus a file
+        pointer) rather than the ``attributions`` / ``extracts`` shape of
+        remote M365 / Fabric kinds. The exact field names are not fully
+        pinned down in the preview API surface, so the normalizer accepts
+        the plausible variants (``snippet`` / ``content`` / ``text`` for
+        the chunk; ``oneLakeFilePath`` / ``filePath`` / ``path`` /
+        ``abfssPath`` / ``webUrl`` for the pointer) and annotates the
+        citation title with the workspace / lakehouse identifiers when
+        they are present. Returns ``None`` when no textual content can be
+        found so the caller can skip empty hits.
+        """
+        content = (
+            source.get("snippet")
+            or source.get("content")
+            or source.get("text")
+            or ""
+        )
+        if not content:
+            return None
+
+        link = (
+            source.get("webUrl")
+            or source.get("oneLakeFilePath")
+            or source.get("filePath")
+            or source.get("path")
+            or source.get("abfssPath")
+            or ""
+        )
+
+        title = source.get("title") or source.get("fileName") or source.get("name")
+        if not title and link:
+            tail = link.rsplit("/", 1)[-1]
+            title = tail.split("?", 1)[0] or None
+        if not title:
+            title = "OneLake reference"
+
+        workspace_id = str(source.get("workspaceId") or "").strip()
+        lakehouse_id = str(source.get("lakehouseId") or "").strip()
+        if workspace_id and lakehouse_id:
+            title = f"{title} (workspace {workspace_id}, lakehouse {lakehouse_id})"
+        elif workspace_id:
+            title = f"{title} (workspace {workspace_id})"
+        elif lakehouse_id:
+            title = f"{title} (lakehouse {lakehouse_id})"
+
+        return {"title": title, "link": link, "content": content}
+
     @classmethod
     def _normalize_references(cls, payload: Dict[str, Any]) -> List[Dict[str, str]]:
         """Map a retrieve response into ``[{title, link, content}]`` records.
@@ -599,6 +690,11 @@ class FoundryIQClient:
           return ``sourceData.webUrl`` and ``sourceData.resourceMetadata``
           with SharePoint properties (Title, LastModifiedTime, ...) plus
           ``extracts`` snippets. See :meth:`_normalize_sharepoint_remote_reference`.
+        - ``indexedOneLake`` (Microsoft Fabric OneLake, indexed) sources
+          return an azureBlob-shaped projection: a chunk snippet plus a
+          OneLake file pointer, optionally annotated with
+          ``workspaceId`` / ``lakehouseId``. See
+          :meth:`_normalize_onelake_reference`.
 
         We accept the union with explicit priority so the downstream
         ``{title, link, content}`` contract is identical across backends,
@@ -641,6 +737,20 @@ class FoundryIQClient:
                 record = cls._normalize_work_iq_reference(source)
                 if record is not None:
                     records.append(record)
+                continue
+
+            # indexedOneLake shape: azureBlob-like projection with a
+            # OneLake-flavored file pointer or lakehouse identifier.
+            # Checked before the generic azureBlob fallback so the
+            # citation carries workspace / lakehouse context.
+            if (
+                source.get("oneLakeFilePath")
+                or source.get("abfssPath")
+                or source.get("lakehouseId")
+            ):
+                onelake_record = cls._normalize_onelake_reference(source)
+                if onelake_record is not None:
+                    records.append(onelake_record)
                 continue
 
             content = (
@@ -925,6 +1035,45 @@ class FoundryIQClient:
             )
         return params
 
+    def _build_onelake_source_params(self) -> Optional[Dict[str, Any]]:
+        """Build the ``indexedOneLake`` knowledge source entry.
+
+        Returns ``None`` when OneLake does not apply:
+
+        - the feature is disabled, or
+        - no knowledge source name was provisioned.
+
+        Because Foundry IQ owns the underlying AI Search index for the
+        OneLake KS, this is a native (not remote) kind: it does not
+        require an OBO token and does not trigger the
+        ``maxRuntimeInSeconds`` bump. Workspace / lakehouse identifiers
+        are bound at KS registration time; the retrieve-time entry only
+        needs the knowledge source name and reference flags.
+        """
+        if not self.onelake_ks_enabled:
+            return None
+        if not self.onelake_knowledge_source_name:
+            logging.warning(
+                "[FoundryIQClient] ONELAKE_KS_ENABLED=true but "
+                "ONELAKE_KNOWLEDGE_SOURCE_NAME is empty; skipping "
+                "OneLake source."
+            )
+            return None
+
+        logging.info(
+            "[FoundryIQClient][OneLake] Adding indexedOneLake source "
+            "%s (workspace=%s, lakehouse=%s)",
+            self.onelake_knowledge_source_name,
+            self.onelake_workspace_id or "<unset>",
+            self.onelake_lakehouse_id or "<unset>",
+        )
+        return {
+            "knowledgeSourceName": self.onelake_knowledge_source_name,
+            "kind": "indexedOneLake",
+            "includeReferences": True,
+            "includeReferenceSourceData": True,
+        }
+
     def _remote_kinds_enabled(self) -> bool:
         """Return True when any remote (M365 / Fabric) knowledge source is on."""
         return (
@@ -1070,6 +1219,10 @@ class FoundryIQClient:
         )
         if sharepoint_remote_source_params:
             knowledge_source_params.append(sharepoint_remote_source_params)
+
+        onelake_source_params = self._build_onelake_source_params()
+        if onelake_source_params:
+            knowledge_source_params.append(onelake_source_params)
 
         if knowledge_source_params:
             body["knowledgeSourceParams"] = knowledge_source_params
