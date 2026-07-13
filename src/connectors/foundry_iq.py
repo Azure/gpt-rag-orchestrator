@@ -92,12 +92,26 @@ FABRIC_IQ_KNOWLEDGE_SOURCE_NAME_KEY = "FABRIC_IQ_KNOWLEDGE_SOURCE_NAME"
 FABRIC_DATA_AGENT_ENABLED_KEY = "FABRIC_DATA_AGENT_ENABLED"
 FABRIC_DATA_AGENT_KNOWLEDGE_SOURCE_NAME_KEY = "FABRIC_DATA_AGENT_KNOWLEDGE_SOURCE_NAME"
 
+# SharePoint remote (Microsoft 365 Copilot Retrieval API remote knowledge
+# source). Opt-in; default off. When enabled, the retrieve request appends a
+# remoteSharePoint knowledge source in knowledgeSourceParams. SharePoint
+# item-level permissions are enforced natively by M365 via the forwarded
+# per-user OBO token (same x-ms-query-source-authorization header used by
+# Work IQ / Fabric ontology), so no filterAddOn is applied. OBO is required;
+# MI fallback is never used for remote kinds. An optional retrieval-time KQL
+# scope can be forwarded via filterExpressionAddOn.
+SHAREPOINT_REMOTE_ENABLED_KEY = "SHAREPOINT_REMOTE_ENABLED"
+SHAREPOINT_REMOTE_KNOWLEDGE_SOURCE_NAME_KEY = "SHAREPOINT_REMOTE_KNOWLEDGE_SOURCE_NAME"
+SHAREPOINT_REMOTE_FILTER_EXPRESSION_ADD_ON_KEY = (
+    "SHAREPOINT_REMOTE_FILTER_EXPRESSION_ADD_ON"
+)
+
 # Knowledge source kinds that must never fall back to the service managed
 # identity for x-ms-query-source-authorization. These sources run against
 # external systems (M365, Fabric) where impersonation, not app identity, is
 # the security boundary.
 _REMOTE_KNOWLEDGE_SOURCE_KINDS = frozenset(
-    {"workIQ", "fabricOntology", "fabricDataAgent"}
+    {"workIQ", "fabricOntology", "fabricDataAgent", "remoteSharePoint"}
 )
 
 # Search-audience scope used for the service token.
@@ -297,6 +311,19 @@ class FoundryIQClient:
         self.fabric_data_agent_knowledge_source_name = (
             self.cfg.get(FABRIC_DATA_AGENT_KNOWLEDGE_SOURCE_NAME_KEY, "") or ""
         ).strip()
+        # SharePoint remote knowledge source (Copilot Retrieval API). Opt-in;
+        # requires a per-user OBO token (same x-ms-query-source-authorization
+        # header used by Work IQ / Fabric ontology), so anonymous / MI
+        # fallback is never used.
+        self.sharepoint_remote_enabled = _as_bool(
+            self.cfg.get(SHAREPOINT_REMOTE_ENABLED_KEY, False, type=bool)
+        )
+        self.sharepoint_remote_knowledge_source_name = (
+            self.cfg.get(SHAREPOINT_REMOTE_KNOWLEDGE_SOURCE_NAME_KEY, "") or ""
+        ).strip()
+        self.sharepoint_remote_filter_expression_add_on = (
+            self.cfg.get(SHAREPOINT_REMOTE_FILTER_EXPRESSION_ADD_ON_KEY, "") or ""
+        ).strip()
         self.credential = self.cfg.aiocredential
 
         # Shared aiohttp session - reuses TCP connections across calls.
@@ -484,6 +511,65 @@ class FoundryIQClient:
 
         return {"title": title, "link": "", "content": content}
 
+    @staticmethod
+    def _normalize_sharepoint_remote_reference(
+        source: Dict[str, Any],
+    ) -> Optional[Dict[str, str]]:
+        """Map a remoteSharePoint ``sourceData`` payload into ``{title, link, content}``.
+
+        SharePoint remote references come from the Copilot Retrieval API. A
+        reference typically carries:
+
+        - ``webUrl`` - deep link to the SharePoint item (file, page, list
+          item), the natural value for the citation ``link``.
+        - ``resourceMetadata`` - object with SharePoint properties such as
+          ``Title`` / ``Name`` / ``FileName`` / ``LastModifiedTime``.
+        - ``extracts`` - list of ``{text}`` snippets (same shape used by
+          Work IQ) and/or a flat ``text`` / ``content`` / ``snippet`` field
+          when the API returns pre-joined text.
+
+        Returns ``None`` when neither snippet content nor extracts can be
+        recovered so the caller can skip empty hits rather than emit a bare
+        ``reference`` title.
+        """
+        parts: List[str] = []
+        for extract in source.get("extracts") or []:
+            if not isinstance(extract, Mapping):
+                continue
+            text = extract.get("text")
+            if isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+        if not parts:
+            for key in ("text", "content", "snippet"):
+                value = source.get(key)
+                if isinstance(value, str) and value.strip():
+                    parts.append(value.strip())
+                    break
+        if not parts:
+            return None
+        content = "\n\n".join(parts)
+
+        link = ""
+        web_url = source.get("webUrl")
+        if isinstance(web_url, str):
+            link = web_url.strip()
+
+        title = ""
+        metadata = source.get("resourceMetadata")
+        if isinstance(metadata, Mapping):
+            for key in ("Title", "title", "Name", "name", "FileName", "fileName"):
+                value = metadata.get(key)
+                if isinstance(value, str) and value.strip():
+                    title = value.strip()
+                    break
+        if not title and link:
+            tail = link.rsplit("/", 1)[-1]
+            title = tail.split("?", 1)[0]
+        if not title:
+            title = "SharePoint item"
+
+        return {"title": title, "link": link, "content": content}
+
     @classmethod
     def _normalize_references(cls, payload: Dict[str, Any]) -> List[Dict[str, str]]:
         """Map a retrieve response into ``[{title, link, content}]`` records.
@@ -509,6 +595,10 @@ class FoundryIQClient:
           ``sourceData.dataAgentAnswer`` and/or ``sourceData.dataAgentRawData``
           alongside ``workspaceId`` / ``dataAgentId``. See
           :meth:`_normalize_fabric_data_agent_reference`.
+        - ``remoteSharePoint`` (Microsoft 365 Copilot Retrieval API) sources
+          return ``sourceData.webUrl`` and ``sourceData.resourceMetadata``
+          with SharePoint properties (Title, LastModifiedTime, ...) plus
+          ``extracts`` snippets. See :meth:`_normalize_sharepoint_remote_reference`.
 
         We accept the union with explicit priority so the downstream
         ``{title, link, content}`` contract is identical across backends,
@@ -526,6 +616,16 @@ class FoundryIQClient:
                 data_agent_record = cls._normalize_fabric_data_agent_reference(source)
                 if data_agent_record is not None:
                     records.append(data_agent_record)
+                continue
+
+            # SharePoint remote shape (remoteSharePoint / Copilot Retrieval
+            # API): keyed on webUrl + resourceMetadata. Check before Work IQ
+            # because both may carry extracts, but only SharePoint remote
+            # carries a webUrl deep link.
+            if source.get("webUrl") or source.get("resourceMetadata"):
+                sp_record = cls._normalize_sharepoint_remote_reference(source)
+                if sp_record is not None:
+                    records.append(sp_record)
                 continue
 
             # Fabric IQ shape (fabricOntology): distinct fields, no
@@ -773,12 +873,65 @@ class FoundryIQClient:
             "includeReferenceSourceData": True,
         }
 
+    def _build_sharepoint_remote_source_params(
+        self, *, obo_token: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Build the SharePoint remote (Copilot Retrieval API) KS entry.
+
+        Returns ``None`` when SharePoint remote does not apply:
+
+        - the feature is disabled, or
+        - no knowledge source name was provisioned, or
+        - no per-user OBO token is available (remote kinds strictly require
+          impersonation; MI fallback is never used).
+
+        SharePoint remote enforces ACL natively via the forwarded per-user
+        token (item-level M365 permissions), so no ``filterAddOn`` is
+        emitted. An optional retrieval-time KQL scope can be forwarded via
+        ``filterExpressionAddOn`` when configured.
+        """
+        if not self.sharepoint_remote_enabled:
+            return None
+        if not self.sharepoint_remote_knowledge_source_name:
+            logging.warning(
+                "[FoundryIQClient] SHAREPOINT_REMOTE_ENABLED=true but "
+                "SHAREPOINT_REMOTE_KNOWLEDGE_SOURCE_NAME is empty; skipping "
+                "SharePoint remote source."
+            )
+            return None
+        if not obo_token:
+            logging.warning(
+                "[FoundryIQClient] SHAREPOINT_REMOTE_ENABLED=true but no OBO "
+                "token (x-ms-query-source-authorization) available; skipping "
+                "SharePoint remote source. Managed-identity fallback is "
+                "never used for remote knowledge source kinds."
+            )
+            return None
+
+        logging.info(
+            "[FoundryIQClient][SharePointRemote] Adding remoteSharePoint "
+            "source %s (ACL native, no filterAddOn)",
+            self.sharepoint_remote_knowledge_source_name,
+        )
+        params: Dict[str, Any] = {
+            "knowledgeSourceName": self.sharepoint_remote_knowledge_source_name,
+            "kind": "remoteSharePoint",
+            "includeReferences": True,
+            "includeReferenceSourceData": True,
+        }
+        if self.sharepoint_remote_filter_expression_add_on:
+            params["filterExpressionAddOn"] = (
+                self.sharepoint_remote_filter_expression_add_on
+            )
+        return params
+
     def _remote_kinds_enabled(self) -> bool:
         """Return True when any remote (M365 / Fabric) knowledge source is on."""
         return (
             self.work_iq_enabled
             or self.fabric_iq_enabled
             or self.fabric_data_agent_enabled
+            or self.sharepoint_remote_enabled
         )
 
     async def retrieve(
@@ -911,6 +1064,12 @@ class FoundryIQClient:
         )
         if fabric_data_agent_source_params:
             knowledge_source_params.append(fabric_data_agent_source_params)
+
+        sharepoint_remote_source_params = self._build_sharepoint_remote_source_params(
+            obo_token=obo_token
+        )
+        if sharepoint_remote_source_params:
+            knowledge_source_params.append(sharepoint_remote_source_params)
 
         if knowledge_source_params:
             body["knowledgeSourceParams"] = knowledge_source_params

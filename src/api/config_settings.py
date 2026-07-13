@@ -519,6 +519,46 @@ SECTIONS: List[SettingSection] = [
                 ),
             ),
             SettingSpec(
+                key="SHAREPOINT_REMOTE_ENABLED",
+                type="bool",
+                default=False,
+                label="Enable SharePoint remote (Copilot Retrieval API)",
+                description=(
+                    "Opt-in. When enabled, the Foundry IQ retrieve call adds "
+                    "a remoteSharePoint knowledge source that queries "
+                    "SharePoint at retrieval time via the Microsoft 365 "
+                    "Copilot Retrieval API. Item-level SharePoint "
+                    "permissions are enforced natively by M365 via the "
+                    "forwarded per-user OBO token; managed-identity "
+                    "fallback is never used for SharePoint remote."
+                ),
+            ),
+            SettingSpec(
+                key="SHAREPOINT_REMOTE_KNOWLEDGE_SOURCE_NAME",
+                type="string",
+                default="",
+                label="SharePoint remote knowledge source name",
+                description=(
+                    "Name of the remoteSharePoint knowledge source "
+                    "registered on the knowledge base. Required when "
+                    "SHAREPOINT_REMOTE_ENABLED is true. No effect when "
+                    "SharePoint remote is disabled."
+                ),
+            ),
+            SettingSpec(
+                key="SHAREPOINT_REMOTE_FILTER_EXPRESSION_ADD_ON",
+                type="string",
+                default="",
+                label="SharePoint remote filter expression add-on",
+                description=(
+                    "Optional KQL filter appended at retrieval time to the "
+                    "remoteSharePoint knowledge source "
+                    "(filterExpressionAddOn). Use it to scope results to a "
+                    "specific site, path, or content type. Leave empty for "
+                    "no additional filter."
+                ),
+            ),
+            SettingSpec(
                 key="SEARCH_RETRIEVAL_ENABLED",
                 type="bool",
                 default=True,
