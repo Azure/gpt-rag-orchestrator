@@ -559,6 +559,59 @@ SECTIONS: List[SettingSection] = [
                 ),
             ),
             SettingSpec(
+                key="ONELAKE_KS_ENABLED",
+                type="bool",
+                default=False,
+                label="Enable OneLake indexed knowledge source",
+                description=(
+                    "When enabled and ONELAKE_KNOWLEDGE_SOURCE_NAME is set, "
+                    "the Foundry IQ retrieve request appends an "
+                    "indexedOneLake knowledge source for grounding over a "
+                    "Microsoft Fabric OneLake lakehouse. Foundry IQ manages "
+                    "the underlying Azure AI Search index internally, so "
+                    "OneLake is a native (not remote) kind: it does not "
+                    "require a per-user OBO token."
+                ),
+            ),
+            SettingSpec(
+                key="ONELAKE_KNOWLEDGE_SOURCE_NAME",
+                type="string",
+                default="",
+                label="OneLake knowledge source name",
+                description=(
+                    "Name of the indexedOneLake knowledge source registered "
+                    "on the knowledge base. Required when ONELAKE_KS_ENABLED "
+                    "is true. The knowledge source itself binds a Fabric "
+                    "workspace and lakehouse at registration time; no effect "
+                    "when OneLake is disabled."
+                ),
+            ),
+            SettingSpec(
+                key="ONELAKE_WORKSPACE_ID",
+                type="string",
+                default="",
+                label="OneLake Fabric workspace ID",
+                description=(
+                    "Identifier of the Microsoft Fabric workspace that hosts "
+                    "the OneLake lakehouse bound to the indexedOneLake "
+                    "knowledge source. Captured for observability and used "
+                    "by platform provisioning to assign Fabric RBAC to the "
+                    "Foundry IQ managed identity; not sent on retrieve."
+                ),
+            ),
+            SettingSpec(
+                key="ONELAKE_LAKEHOUSE_ID",
+                type="string",
+                default="",
+                label="OneLake Fabric lakehouse ID",
+                description=(
+                    "Identifier of the Microsoft Fabric lakehouse (within "
+                    "ONELAKE_WORKSPACE_ID) bound to the indexedOneLake "
+                    "knowledge source. Captured for observability and "
+                    "documentation; not sent on retrieve."
+                ),
+            ),
+            SettingSpec(
                 key="SEARCH_RETRIEVAL_ENABLED",
                 type="bool",
                 default=True,
