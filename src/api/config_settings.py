@@ -3,16 +3,16 @@
 This module is the **single source of truth** for the curated set of App
 Configuration keys the admin Configuration tab can read and write. It owns
 the human-readable labels, tooltip descriptions, per-option help text, types,
-and validation bounds — both the backend endpoints and the frontend tab
+and validation bounds - both the backend endpoints and the frontend tab
 consume the same metadata (the frontend receives it as part of the GET
 response so we never duplicate the strings on the client).
 
 Two security primitives live here as well:
 
-* :data:`ALLOWED_KEYS` — the orchestrator-specific allowlist. Only keys in
+* :data:`ALLOWED_KEYS` - the orchestrator-specific allowlist. Only keys in
   this set may ever be returned by ``GET /api/dashboard/config`` or accepted
   by ``PUT /api/dashboard/config``.
-* :data:`DENYLIST` — defense in depth: even if a future refactor accidentally
+* :data:`DENYLIST` - defense in depth: even if a future refactor accidentally
   adds a sensitive key to the registry, writes to anything matching the
   denylist are rejected at the API layer.
 
@@ -165,7 +165,7 @@ _FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND_OPTIONS: List[SettingOption] = [
         "Work IQ (Microsoft 365)",
         "Remote Microsoft 365 knowledge source (mail, files, chats). Requires the "
         "gated Work IQ preview and OBO (x-ms-query-source-authorization). ACL is "
-        "enforced natively by M365 — no filterAddOn is applied.",
+        "enforced natively by M365 - no filterAddOn is applied.",
     ),
     SettingOption(
         "fabricOntology",
@@ -173,6 +173,14 @@ _FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND_OPTIONS: List[SettingOption] = [
         "Remote Microsoft Fabric knowledge source backed by a Fabric ontology. "
         "Requires OBO (x-ms-query-source-authorization); ACL is enforced "
         "natively by Fabric so no filterAddOn is applied.",
+    ),
+    SettingOption(
+        "fabricDataAgent",
+        "Fabric Data Agent (Microsoft Fabric)",
+        "Remote Microsoft Fabric knowledge source backed by a Fabric Data "
+        "Agent (virtual analyst over Fabric data). Requires OBO "
+        "(x-ms-query-source-authorization); ACL is enforced natively by "
+        "Fabric so no filterAddOn is applied.",
     ),
 ]
 
@@ -419,7 +427,8 @@ SECTIONS: List[SettingSection] = [
                     "as maxRuntimeInSeconds on the request body. Remote knowledge "
                     "sources such as Work IQ can take 40–60 seconds; the default "
                     "leaves headroom. Only emitted when a remote knowledge source "
-                    "kind (workIQ, fabricOntology) is enabled, so default Pattern A / "
+                    "kind (workIQ, fabricOntology, fabricDataAgent) is enabled, so "
+                    "default Pattern A / "
                     "Pattern B request bodies remain unchanged."
                 ),
                 min=30,
@@ -437,7 +446,7 @@ SECTIONS: List[SettingSection] = [
                     "Foundry IQ retrieve request appends a workIQ knowledge source "
                     "for Microsoft 365 grounding (mail, files, chats). Requires "
                     "the gated Work IQ preview and admin consent on the Foundry "
-                    "connector. OBO is mandatory — anonymous / managed-identity "
+                    "connector. OBO is mandatory - anonymous / managed-identity "
                     "fallback is never used for Work IQ."
                 ),
             ),
@@ -478,6 +487,35 @@ SECTIONS: List[SettingSection] = [
                     "is true. The knowledge source itself binds a Fabric "
                     "workspace and ontology at registration time; no effect "
                     "when Fabric IQ is disabled."
+                ),
+            ),
+            SettingSpec(
+                key="FABRIC_DATA_AGENT_ENABLED",
+                type="bool",
+                default=False,
+                label="Enable Fabric Data Agent knowledge source",
+                description=(
+                    "When enabled and FABRIC_DATA_AGENT_KNOWLEDGE_SOURCE_NAME "
+                    "is set, the Foundry IQ retrieve request appends a "
+                    "fabricDataAgent knowledge source for grounding over a "
+                    "Microsoft Fabric Data Agent (virtual analyst over Fabric "
+                    "data). ACL is enforced natively by Fabric via the "
+                    "forwarded per-user OBO token; managed-identity fallback "
+                    "is never used for Fabric Data Agent."
+                ),
+            ),
+            SettingSpec(
+                key="FABRIC_DATA_AGENT_KNOWLEDGE_SOURCE_NAME",
+                type="string",
+                default="",
+                label="Fabric Data Agent knowledge source name",
+                description=(
+                    "Name of the fabricDataAgent knowledge source registered "
+                    "on the knowledge base. Required when "
+                    "FABRIC_DATA_AGENT_ENABLED is true. The knowledge source "
+                    "itself binds a Fabric workspace and data agent at "
+                    "registration time; no effect when Fabric Data Agent is "
+                    "disabled."
                 ),
             ),
             SettingSpec(
