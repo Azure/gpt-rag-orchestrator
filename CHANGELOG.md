@@ -4,6 +4,14 @@
 
 ### Added
 
+### Fixed
+
+### Changed
+
+## [v3.4.0] - 2026-07-13
+
+### Added
+
 - **Fabric Data Agent (Microsoft Fabric) knowledge source support (opt-in, default off).**
   The Foundry IQ retrieve client can now include a `fabricDataAgent` knowledge
   source alongside existing `azureBlob` / `searchIndex` / `workIQ` /
