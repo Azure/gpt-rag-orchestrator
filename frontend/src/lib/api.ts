@@ -61,8 +61,9 @@ let tokenProvider: AuthTokenProvider | null = null;
  *
  * `main.tsx` wires this to MSAL after `handleRedirectPromise`. The provider
  * is called on every request so token refresh / interaction fallback stays
- * inside MSAL and out of the request path. Passing `null` unregisters it,
- * which is useful in tests.
+ * inside MSAL and out of the request path. Token-acquisition failures are
+ * propagated rather than converted into unauthenticated API calls. Passing
+ * `null` unregisters the provider, which is useful in tests.
  */
 export function setAuthTokenProvider(fn: AuthTokenProvider | null): void {
   tokenProvider = fn;
@@ -109,14 +110,8 @@ async function request<T>(
   const callerSetAuth = hasHeader(init.headers, "authorization");
   const authHeader: Record<string, string> = {};
   if (!callerSetAuth && tokenProvider) {
-    try {
-      const token = await tokenProvider();
-      if (token) authHeader.Authorization = `Bearer ${token}`;
-    } catch {
-      // Token acquisition failure -> proceed unauthenticated; the API will
-      // 401 and the UI will route to the sign-in gate. Swallowing keeps
-      // request() free of MSAL types.
-    }
+    const token = await tokenProvider();
+    if (token) authHeader.Authorization = `Bearer ${token}`;
   }
 
   const res = await fetch(path, {

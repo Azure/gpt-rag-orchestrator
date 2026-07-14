@@ -31,6 +31,12 @@ import {
 import type { AuthConfig } from "./api";
 
 let msalInstance: PublicClientApplication | null = null;
+let inFlightTokenRequest:
+  | {
+      key: string;
+      promise: Promise<string | null>;
+    }
+  | null = null;
 
 /**
  * Build the MSAL instance for a given `AuthConfig`.
@@ -103,13 +109,32 @@ export function getMsalInstance(): PublicClientApplication {
  * render the sign-in gate rather than force a redirect from a random API
  * call, because a background redirect can lose in-progress UI state.
  */
-export async function acquireAdminToken(
+export function acquireAdminToken(
   msal: PublicClientApplication,
   scope: string,
 ): Promise<string | null> {
   const account = pickAccount(msal);
-  if (!account) return null;
+  if (!account) return Promise.resolve(null);
 
+  const requestKey = `${account.homeAccountId}:${scope}`;
+  if (inFlightTokenRequest?.key === requestKey) {
+    return inFlightTokenRequest.promise;
+  }
+
+  const promise = acquireTokenForAccount(msal, account, scope).finally(() => {
+    if (inFlightTokenRequest?.promise === promise) {
+      inFlightTokenRequest = null;
+    }
+  });
+  inFlightTokenRequest = { key: requestKey, promise };
+  return promise;
+}
+
+async function acquireTokenForAccount(
+  msal: PublicClientApplication,
+  account: AccountInfo,
+  scope: string,
+): Promise<string | null> {
   try {
     const result = await msal.acquireTokenSilent({
       account,

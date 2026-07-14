@@ -27,22 +27,28 @@ interface SignInGateProps {
  *    `<AccessDeniedState>`. This centralises the "missing Admin role"
  *    experience instead of repeating it per-tab.
  *
- * The 403 signal is delivered by `setAuthErrorHandler` in `lib/api.ts`,
- * which fires for every request the SPA makes. 401s are intentionally
- * ignored here: msal-react handles interactive reauth via the token
- * provider, and a 401 usually means "token expired mid-flight" rather
- * than "wrong role".
+ * The auth signal is delivered by `setAuthErrorHandler` in `lib/api.ts`,
+ * which fires for every request the SPA makes. A 401 replaces the dashboard
+ * with a reauthentication action, while a 403 shows the role-specific
+ * access-denied state.
  */
 export function SignInGate({ authConfig, children }: SignInGateProps) {
   const { instance, accounts } = useMsal();
-  const account = accounts[0] ?? null;
+  const account = instance.getActiveAccount() ?? accounts[0] ?? null;
   const [accessDenied, setAccessDenied] = useState(false);
+  const [reauthenticationRequired, setReauthenticationRequired] = useState(false);
+  const [authActionPending, setAuthActionPending] = useState(false);
+  const [authActionError, setAuthActionError] = useState("");
 
   useEffect(() => {
     if (!authConfig.authEnabled) return;
     setAuthErrorHandler((kind) => {
       if (kind === "forbidden") {
         setAccessDenied(true);
+        setReauthenticationRequired(false);
+      } else {
+        setAccessDenied(false);
+        setReauthenticationRequired(true);
       }
     });
     return () => setAuthErrorHandler(null);
@@ -54,18 +60,42 @@ export function SignInGate({ authConfig, children }: SignInGateProps) {
   // object reference so we do not re-fire on every render.
   const accountKey = account?.homeAccountId;
   useEffect(() => {
-    if (accountKey) setAccessDenied(false);
+    if (accountKey) {
+      setAccessDenied(false);
+      setReauthenticationRequired(false);
+      setAuthActionError("");
+    }
   }, [accountKey]);
+
+  async function startAuthentication(forceReauthentication = false) {
+    const scope = authConfig.apiScope;
+    setAuthActionPending(true);
+    setAuthActionError("");
+    try {
+      if (forceReauthentication && account && scope) {
+        await instance.acquireTokenRedirect({
+          account,
+          scopes: [scope],
+        });
+      } else {
+        await instance.loginRedirect(scope ? { scopes: [scope] } : { scopes: [] });
+      }
+    } catch {
+      setAuthActionPending(false);
+      setAuthActionError(
+        "Microsoft Entra ID sign-in could not be started. Try again or contact your operator.",
+      );
+    }
+  }
 
   if (!authConfig.authEnabled) {
     return <>{children}</>;
   }
 
   if (!account) {
-    const scope = authConfig.apiScope;
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 p-8 text-center">
-        <h1 className="text-2xl font-semibold text-foreground">Admin dashboard</h1>
+        <h2 className="text-2xl font-semibold text-foreground">Admin dashboard</h2>
         <p className="max-w-md text-sm text-muted-foreground">
           Sign in with your Microsoft Entra ID account. You need the{" "}
           <span className="font-medium">Admin</span> app role assigned in the orchestrator API app
@@ -73,20 +103,53 @@ export function SignInGate({ authConfig, children }: SignInGateProps) {
         </p>
         <button
           type="button"
-          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => {
-            void instance.loginRedirect(scope ? { scopes: [scope] } : { scopes: [] });
-          }}
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70"
+          disabled={authActionPending}
+          onClick={() => void startAuthentication()}
         >
           <LogIn className="h-4 w-4" />
-          Sign in
+          {authActionPending ? "Signing in..." : "Sign in"}
         </button>
+        {authActionError && (
+          <p className="max-w-md text-sm text-destructive" role="alert">
+            {authActionError}
+          </p>
+        )}
       </div>
     );
   }
 
   if (accessDenied) {
-    return <AccessDeniedState username={account.username} />;
+    return <AccessDeniedState accountName={account.name || account.username} />;
+  }
+
+  if (reauthenticationRequired) {
+    return (
+      <div
+        className="flex min-h-[60vh] flex-col items-center justify-center gap-4 p-8 text-center"
+        role="alert"
+      >
+        <h2 className="text-xl font-semibold text-foreground">Session expired</h2>
+        <p className="max-w-md text-sm text-muted-foreground">
+          Your dashboard session is no longer authorized. Sign in again to request a fresh
+          access token for the orchestrator API.
+        </p>
+        <button
+          type="button"
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70"
+          disabled={authActionPending}
+          onClick={() => void startAuthentication(true)}
+        >
+          <LogIn className="h-4 w-4" />
+          {authActionPending ? "Signing in..." : "Sign in again"}
+        </button>
+        {authActionError && (
+          <p className="max-w-md text-sm text-destructive" role="alert">
+            {authActionError}
+          </p>
+        )}
+      </div>
+    );
   }
 
   return <>{children}</>;

@@ -53,10 +53,11 @@ For comprehensive information about GPT-RAG, including architecture details, con
 
 ## Dashboard
 
-The orchestrator ships with an optional admin dashboard mounted at `/dashboard`. It exposes two tabs:
+The orchestrator ships with an optional admin dashboard mounted at `/dashboard`. It exposes three tabs:
 
 - **Overview**: conversation counts for today, the last 7 days, and the last 30 days; a conversations-over-time chart; average user turns per conversation; and the number of active users.
 - **Conversations**: a paginated, newest-first list of conversations across all users, with a detail view that renders the full message history.
+- **Configuration**: an allowlisted editor for supported orchestrator settings in Azure App Configuration.
 
 The data comes from the existing conversation/history Cosmos DB container used by the orchestrator (`CONVERSATIONS_DATABASE_CONTAINER` in `DATABASE_NAME`). The dashboard is read-only.
 
@@ -73,6 +74,8 @@ The data comes from the existing conversation/history Cosmos DB container used b
 | `OAUTH_AZURE_AD_API_SCOPE` | Optional | Override for the scope the SPA requests. Defaults to `api://<OAUTH_AZURE_AD_CLIENT_ID>/access_as_user`. |
 
 The App Registration also needs a **Single-page application** redirect URI pointing at `https://<host>/dashboard/` (trailing slash), an exposed `access_as_user` scope, and an `Admin` app role assigned to every user who should see the dashboard. Full step-by-step in the GPT-RAG docs: [Admin Dashboard Sign-in](https://azure.github.io/GPT-RAG/howto_dashboard_signin/).
+
+Setting only `OAUTH_AZURE_AD_TENANT_ID` is rejected as a server misconfiguration. The dashboard never skips audience validation or silently falls back to unauthenticated mode when auth is partially configured.
 
 **Token scope.** The frontend must request an access token with the orchestrator's own API scope (`api://<client_id>/access_as_user` by default), not a Microsoft Graph scope. App roles are issued in the `roles` claim of an access token only when the token is requested for the application that defines those roles, so a Graph-scoped token will not surface the `Admin` role and every dashboard call will return 403.
 

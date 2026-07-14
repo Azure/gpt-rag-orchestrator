@@ -12,7 +12,11 @@
   `tenantId`, `authority`, and `apiScope` it needs to bootstrap MSAL. The
   SPA acquires an access token via `acquireTokenSilent` and falls back to
   `acquireTokenRedirect` on `InteractionRequiredAuthError`. MSAL tokens
-  are kept in `sessionStorage` (not `localStorage`).
+  are kept in `sessionStorage` (not `localStorage`). The verified token's
+  `Admin` app role is enforced by the API, and incomplete tenant/client
+  configuration now fails closed instead of skipping audience validation.
+  Operator setup is documented in the
+  [Admin Dashboard Sign-in guide](https://azure.github.io/GPT-RAG/howto_dashboard_signin/).
 
 ### Changed
 
@@ -22,29 +26,6 @@
   explicitly-passed `Authorization` header on a request still wins,
   which preserves the scripted-test workflow (`api.request(url, {
   headers: { Authorization: "Bearer <token>" } })`).
-
-### Operator prerequisites
-
-To enable auth on the dashboard SPA, an operator needs to:
-
-1. Create (or reuse) a single Microsoft Entra ID app registration for the
-   orchestrator API.
-2. Add a **SPA** platform redirect URI pointing at the deployed dashboard,
-   for example `https://<host>/dashboard/`.
-3. Expose an `access_as_user` scope on the API.
-4. Define an `Admin` app role and assign it to every user who should see
-   the dashboard.
-5. Set the following App Configuration keys (read by the orchestrator's
-   existing App Config connector):
-   - `OAUTH_AZURE_AD_TENANT_ID`
-   - `OAUTH_AZURE_AD_CLIENT_ID`
-   - `OAUTH_AZURE_AD_API_SCOPE` (optional; defaults to
-     `api://<clientId>/access_as_user`)
-
-If any of `OAUTH_AZURE_AD_TENANT_ID` / `OAUTH_AZURE_AD_CLIENT_ID` are
-unset, `auth-config` reports `authEnabled: false` and the SPA renders
-as before, matching the existing developer / air-gapped deployment
-story.
 
 ### Fixed
 

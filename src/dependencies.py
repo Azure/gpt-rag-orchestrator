@@ -299,7 +299,7 @@ def _force_refresh_jwks_cache(tenant_id: str, jwks_url: Optional[str] = None) ->
         logging.debug("[Auth] Failed to clear JWKS cache", exc_info=True)
 
 async def validate_access_token(token: str) -> Dict:
-    """Validate access token and extract user info (oid, preferred_username, name)."""
+    """Validate an API access token and return its trusted identity and role claims."""
     cfg = get_config()
 
     # Basic integrity / correlation without logging the token.
@@ -404,6 +404,17 @@ async def validate_access_token(token: str) -> Dict:
             status_code=500,
             detail="Authentication not configured (missing OAUTH_AZURE_AD_TENANT_ID)",
         )
+
+    if not client_id:
+        _log_app_config_state(cfg, keys_to_check=["OAUTH_AZURE_AD_CLIENT_ID"], prefix="[Auth]")
+        logging.error(
+            "[Auth] Missing client configuration in Azure App Configuration. "
+            "Audience validation cannot run without OAUTH_AZURE_AD_CLIENT_ID."
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Authentication not configured (missing OAUTH_AZURE_AD_CLIENT_ID)",
+        )
     
     # High-signal debug: which tenant/URLs are used to validate
     if logging.getLogger().isEnabledFor(logging.DEBUG):
@@ -413,15 +424,13 @@ async def validate_access_token(token: str) -> Dict:
             f"https://login.microsoftonline.com/{tenant_id}/v2.0",
             f"https://sts.windows.net/{tenant_id}/",
         ]
-        expected_audiences = None
-        if client_id:
-            expected_audiences = [client_id, f"api://{client_id}"]
+        expected_audiences = [client_id, f"api://{client_id}"]
         logging.debug(
             "[Auth] Validating token: tenant_id=%s jwks_url=%s oidc_config_url=%s expected_audiences=%s",
             tenant_id,
             jwks_url,
             oidc_config_url,
-            expected_audiences or "<not-configured>",
+            expected_audiences,
         )
         logging.debug("[Auth] Issuer candidates: %s", issuer_candidates)
 
@@ -511,7 +520,7 @@ async def validate_access_token(token: str) -> Dict:
                 if client_id:
                     logging.warning(
                         "[Auth] Incoming token audience indicates Microsoft Graph (aud=%s fp=%s). "
-                        "Frontend must request an access token for this API scope: api://%s/user_impersonation (not Graph scopes like User.Read).",
+                        "Frontend must request an access token for this API scope: api://%s/access_as_user (not Graph scopes like User.Read).",
                         graph_aud,
                         token_fp,
                         client_id,
@@ -542,9 +551,7 @@ async def validate_access_token(token: str) -> Dict:
             f"https://sts.windows.net/{tenant_id}/",
         ]
 
-        expected_audiences: list[str] | None = None
-        if client_id:
-            expected_audiences = [client_id, f"api://{client_id}"]
+        expected_audiences = [client_id, f"api://{client_id}"]
 
         # Decide which JWKS endpoint should be used based on the token issuer.
         token_iss = unverified.get("iss")
@@ -570,7 +577,7 @@ async def validate_access_token(token: str) -> Dict:
                             public_key_local,
                             algorithms=["RS256"],
                             options={
-                                "verify_aud": bool(expected_audiences),
+                                "verify_aud": True,
                                 "verify_iss": True,
                             },
                             issuer=issuer,
@@ -633,7 +640,7 @@ async def validate_access_token(token: str) -> Dict:
                         if client_id:
                             logging.warning(
                                 "[Auth] Token audience indicates Microsoft Graph (aud=%s). "
-                                "Frontend must request an API access token scope like api://%s/user_impersonation instead of Graph scopes (e.g., User.Read).",
+                                "Frontend must request an API access token scope like api://%s/access_as_user instead of Graph scopes (e.g., User.Read).",
                                 _unverified_aud,
                                 client_id,
                             )
@@ -652,6 +659,9 @@ async def validate_access_token(token: str) -> Dict:
         user_oid = decoded.get("oid")
         user_username = decoded.get("preferred_username")
         user_name = decoded.get("name")
+        roles = decoded.get("roles")
+        if not isinstance(roles, list):
+            roles = []
 
         if not user_username:
             logging.debug(
@@ -661,11 +671,7 @@ async def validate_access_token(token: str) -> Dict:
                 "set" if user_name else "missing",
             )
 
-        logging.info(
-            "[Auth] User token validated (oid=%s preferred_username=%s)",
-            user_oid,
-            user_username or "<missing>",
-        )
+        logging.info("[Auth] User token validated (oid=%s)", user_oid)
 
         if logging.getLogger().isEnabledFor(logging.DEBUG):
             # Log a compact allowlist snapshot of claims for troubleshooting.
@@ -678,7 +684,8 @@ async def validate_access_token(token: str) -> Dict:
         return {
             "oid": user_oid,
             "preferred_username": user_username,
-            "name": user_name
+            "name": user_name,
+            "roles": roles,
         }
         
     except HTTPException:

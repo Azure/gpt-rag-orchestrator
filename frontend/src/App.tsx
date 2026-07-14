@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import { ThemeProvider } from "next-themes";
 import { useMsal } from "@azure/msal-react";
 import { LayoutDashboard, LogOut, MessageSquare, Settings, User } from "lucide-react";
@@ -11,6 +11,7 @@ import { SignInGate } from "./components/SignInGate";
 import { fetchVersion, type AuthConfig } from "./lib/api";
 
 type Tab = "overview" | "conversations" | "configuration";
+const TAB_ORDER: Tab[] = ["overview", "conversations", "configuration"];
 
 interface AppProps {
   authConfig: AuthConfig;
@@ -24,7 +25,7 @@ interface AppProps {
  */
 function UserChip() {
   const { instance, accounts } = useMsal();
-  const account = accounts[0] ?? null;
+  const account = instance.getActiveAccount() ?? accounts[0] ?? null;
   if (!account) return null;
   return (
     <div className="flex items-center gap-2 rounded-full border border-border bg-muted/40 py-1 pl-2 pr-1 text-xs">
@@ -34,7 +35,7 @@ function UserChip() {
       </span>
       <button
         type="button"
-        onClick={() => void instance.logoutRedirect()}
+        onClick={() => void instance.logoutRedirect({ account })}
         className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-muted-foreground transition hover:bg-background hover:text-foreground"
         title="Sign out"
       >
@@ -52,6 +53,26 @@ function Dashboard({ authConfig }: { authConfig: AuthConfig }) {
   useEffect(() => {
     fetchVersion().then(setVersion).catch(() => setVersion(""));
   }, []);
+
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    let nextTab: Tab | undefined;
+    const currentIndex = TAB_ORDER.indexOf(tab);
+    if (event.key === "ArrowRight") {
+      nextTab = TAB_ORDER[(currentIndex + 1) % TAB_ORDER.length];
+    } else if (event.key === "ArrowLeft") {
+      nextTab = TAB_ORDER[(currentIndex - 1 + TAB_ORDER.length) % TAB_ORDER.length];
+    } else if (event.key === "Home") {
+      nextTab = TAB_ORDER[0];
+    } else if (event.key === "End") {
+      nextTab = TAB_ORDER[TAB_ORDER.length - 1];
+    }
+
+    if (nextTab) {
+      event.preventDefault();
+      setTab(nextTab);
+      document.getElementById(`dashboard-tab-${nextTab}`)?.focus();
+    }
+  }
 
   return (
     <div className="mx-auto min-h-screen max-w-7xl px-4 py-6">
@@ -72,8 +93,15 @@ function Dashboard({ authConfig }: { authConfig: AuthConfig }) {
       </header>
 
       <SignInGate authConfig={authConfig}>
-        <nav className="mb-4 flex gap-1 border-b">
+        <nav className="mb-4 flex gap-1 border-b" role="tablist" aria-label="Dashboard sections">
           <button
+            id="dashboard-tab-overview"
+            type="button"
+            role="tab"
+            aria-selected={tab === "overview"}
+            aria-controls="dashboard-tabpanel"
+            tabIndex={tab === "overview" ? 0 : -1}
+            onKeyDown={handleTabKeyDown}
             onClick={() => setTab("overview")}
             className={`flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               tab === "overview"
@@ -85,6 +113,13 @@ function Dashboard({ authConfig }: { authConfig: AuthConfig }) {
             Overview
           </button>
           <button
+            id="dashboard-tab-conversations"
+            type="button"
+            role="tab"
+            aria-selected={tab === "conversations"}
+            aria-controls="dashboard-tabpanel"
+            tabIndex={tab === "conversations" ? 0 : -1}
+            onKeyDown={handleTabKeyDown}
             onClick={() => setTab("conversations")}
             className={`flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               tab === "conversations"
@@ -96,6 +131,13 @@ function Dashboard({ authConfig }: { authConfig: AuthConfig }) {
             Conversations
           </button>
           <button
+            id="dashboard-tab-configuration"
+            type="button"
+            role="tab"
+            aria-selected={tab === "configuration"}
+            aria-controls="dashboard-tabpanel"
+            tabIndex={tab === "configuration" ? 0 : -1}
+            onKeyDown={handleTabKeyDown}
             onClick={() => setTab("configuration")}
             className={`flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               tab === "configuration"
@@ -108,9 +150,15 @@ function Dashboard({ authConfig }: { authConfig: AuthConfig }) {
           </button>
         </nav>
 
-        {tab === "overview" && <OverviewTab />}
-        {tab === "conversations" && <ConversationsTab />}
-        {tab === "configuration" && <ConfigurationTab />}
+        <div
+          id="dashboard-tabpanel"
+          role="tabpanel"
+          aria-labelledby={`dashboard-tab-${tab}`}
+        >
+          {tab === "overview" && <OverviewTab />}
+          {tab === "conversations" && <ConversationsTab />}
+          {tab === "configuration" && <ConfigurationTab />}
+        </div>
       </SignInGate>
     </div>
   );

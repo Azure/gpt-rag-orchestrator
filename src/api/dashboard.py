@@ -20,7 +20,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 
 from connectors.appconfig import AppConfigClient
 from connectors.cosmosdb_admin import (
@@ -49,6 +49,30 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 # Admin gate
 # ---------------------------------------------------------------------------
 
+def _get_dashboard_auth_registration(
+    cfg: AppConfigClient,
+) -> tuple[Optional[str], Optional[str]]:
+    """Return the configured tenant/client pair, failing closed when incomplete."""
+    tenant_id = cfg.get_value(
+        "OAUTH_AZURE_AD_TENANT_ID", default=None, allow_none=True
+    )
+    if not tenant_id:
+        return None, None
+
+    client_id = cfg.get_value(
+        "OAUTH_AZURE_AD_CLIENT_ID", default=None, allow_none=True
+    )
+    if not client_id:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "OAUTH_AZURE_AD_TENANT_ID is set but OAUTH_AZURE_AD_CLIENT_ID is "
+                "missing; dashboard authentication requires both settings."
+            ),
+        )
+    return tenant_id, client_id
+
+
 async def require_admin(
     authorization: Optional[str] = Header(None),
     cfg: AppConfigClient = Depends(get_config),
@@ -60,7 +84,7 @@ async def require_admin(
     configured, a bearer token is required and the resolved claims must
     include ``Admin`` in the ``roles`` array.
     """
-    tenant_id = cfg.get_value("OAUTH_AZURE_AD_TENANT_ID", default=None, allow_none=True)
+    tenant_id, _ = _get_dashboard_auth_registration(cfg)
     if not tenant_id:
         return  # auth off, dashboard open like the rest of the app in dev
 
@@ -76,8 +100,8 @@ async def require_admin(
         logging.exception("[dashboard] token validation failed: %s", exc)
         raise HTTPException(status_code=401, detail="Invalid bearer token")
 
-    roles = claims.get("roles") or []
-    if "Admin" not in roles:
+    roles = claims.get("roles")
+    if not isinstance(roles, list) or "Admin" not in roles:
         raise HTTPException(status_code=403, detail="Admin role required")
 
 
@@ -104,6 +128,7 @@ async def get_version() -> DashboardVersionResponse:
 
 @router.get("/auth-config", response_model=DashboardAuthConfigResponse)
 async def get_auth_config(
+    response: Response,
     cfg: AppConfigClient = Depends(get_config),
 ) -> DashboardAuthConfigResponse:
     """Return the MSAL configuration the SPA needs to sign the user in.
@@ -120,22 +145,10 @@ async def get_auth_config(
     for tenants where the scope needs to differ from the default
     ``api://<client-id>/access_as_user``.
     """
-    tenant_id = cfg.get_value("OAUTH_AZURE_AD_TENANT_ID", default=None, allow_none=True)
+    response.headers["Cache-Control"] = "no-store"
+    tenant_id, client_id = _get_dashboard_auth_registration(cfg)
     if not tenant_id:
         return DashboardAuthConfigResponse(auth_enabled=False)
-
-    client_id = cfg.get_value("OAUTH_AZURE_AD_CLIENT_ID", default=None, allow_none=True)
-    if not client_id:
-        # Auth is half-configured (tenant set, client id missing). Surface the
-        # misconfiguration to the SPA rather than pretending auth is off,
-        # which would silently let the dashboard load without a sign-in gate.
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "OAUTH_AZURE_AD_TENANT_ID is set but OAUTH_AZURE_AD_CLIENT_ID is "
-                "missing; the dashboard cannot bootstrap MSAL until both are configured."
-            ),
-        )
 
     api_scope = cfg.get_value(
         "OAUTH_AZURE_AD_API_SCOPE", default=None, allow_none=True

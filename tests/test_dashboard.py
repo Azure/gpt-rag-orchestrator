@@ -66,10 +66,31 @@ async def test_require_admin_rejects_missing_token():
     from api.dashboard import require_admin
 
     cfg = MagicMock()
-    cfg.get_value = MagicMock(return_value="tenant-id")
+    cfg.get_value = MagicMock(
+        side_effect=lambda key, **_: {
+            "OAUTH_AZURE_AD_TENANT_ID": "tenant-id",
+            "OAUTH_AZURE_AD_CLIENT_ID": "client-id",
+        }.get(key)
+    )
     with pytest.raises(HTTPException) as exc:
         await require_admin(authorization=None, cfg=cfg)
     assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_require_admin_fails_closed_when_client_id_is_missing():
+    from api.dashboard import require_admin
+
+    cfg = MagicMock()
+    cfg.get_value = MagicMock(
+        side_effect=lambda key, **_: {
+            "OAUTH_AZURE_AD_TENANT_ID": "tenant-id",
+        }.get(key)
+    )
+    with pytest.raises(HTTPException) as exc:
+        await require_admin(authorization="Bearer token", cfg=cfg)
+    assert exc.value.status_code == 500
+    assert "OAUTH_AZURE_AD_CLIENT_ID" in exc.value.detail
 
 
 @pytest.mark.asyncio
@@ -77,7 +98,12 @@ async def test_require_admin_rejects_non_admin_role():
     from api import dashboard
 
     cfg = MagicMock()
-    cfg.get_value = MagicMock(return_value="tenant-id")
+    cfg.get_value = MagicMock(
+        side_effect=lambda key, **_: {
+            "OAUTH_AZURE_AD_TENANT_ID": "tenant-id",
+            "OAUTH_AZURE_AD_CLIENT_ID": "client-id",
+        }.get(key)
+    )
     with patch.object(dashboard, "validate_access_token", new=AsyncMock(return_value={"roles": ["User"]})):
         with pytest.raises(HTTPException) as exc:
             await dashboard.require_admin(authorization="Bearer abc", cfg=cfg)
@@ -89,10 +115,84 @@ async def test_require_admin_accepts_admin_role():
     from api import dashboard
 
     cfg = MagicMock()
-    cfg.get_value = MagicMock(return_value="tenant-id")
+    cfg.get_value = MagicMock(
+        side_effect=lambda key, **_: {
+            "OAUTH_AZURE_AD_TENANT_ID": "tenant-id",
+            "OAUTH_AZURE_AD_CLIENT_ID": "client-id",
+        }.get(key)
+    )
     with patch.object(dashboard, "validate_access_token", new=AsyncMock(return_value={"roles": ["Admin"]})):
         result = await dashboard.require_admin(authorization="Bearer abc", cfg=cfg)
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_require_admin_rejects_malformed_roles_claim():
+    from api import dashboard
+
+    cfg = MagicMock()
+    cfg.get_value = MagicMock(
+        side_effect=lambda key, **_: {
+            "OAUTH_AZURE_AD_TENANT_ID": "tenant-id",
+            "OAUTH_AZURE_AD_CLIENT_ID": "client-id",
+        }.get(key)
+    )
+    with patch.object(
+        dashboard,
+        "validate_access_token",
+        new=AsyncMock(return_value={"roles": "SuperAdmin"}),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await dashboard.require_admin(authorization="Bearer token", cfg=cfg)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_validate_access_token_returns_verified_roles():
+    from dependencies import validate_access_token
+
+    cfg = MagicMock()
+    cfg.get_value = MagicMock(
+        side_effect=lambda key, **_: {
+            "OAUTH_AZURE_AD_TENANT_ID": "tenant-id",
+            "OAUTH_AZURE_AD_CLIENT_ID": "client-id",
+        }.get(key)
+    )
+    unverified_claims = {
+        "tid": "tenant-id",
+        "iss": "https://login.microsoftonline.com/tenant-id/v2.0",
+        "aud": "client-id",
+    }
+    verified_claims = {
+        **unverified_claims,
+        "oid": "user-id",
+        "preferred_username": "admin@example.com",
+        "name": "Admin User",
+        "roles": ["Admin"],
+    }
+
+    with (
+        patch("dependencies.get_config", return_value=cfg),
+        patch(
+            "dependencies._get_cached_public_keys",
+            new=AsyncMock(return_value={"keys": [{"kid": "key-id"}]}),
+        ),
+        patch(
+            "dependencies.jwt.get_unverified_header",
+            return_value={"kid": "key-id", "alg": "RS256"},
+        ),
+        patch(
+            "dependencies.jwt.algorithms.RSAAlgorithm.from_jwk",
+            return_value=object(),
+        ),
+        patch(
+            "dependencies.jwt.decode",
+            side_effect=[unverified_claims, verified_claims],
+        ),
+    ):
+        claims = await validate_access_token("header.payload.signature")
+
+    assert claims["roles"] == ["Admin"]
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +372,7 @@ def test_auth_config_returns_minimal_when_auth_off():
     client = TestClient(app)
     r = client.get("/api/dashboard/auth-config")
     assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-store"
     body = r.json()
     assert body["auth_enabled"] is False
     # No tenant/client/scope leak when auth is off.

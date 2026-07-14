@@ -4,6 +4,7 @@ import { MsalProvider } from "@azure/msal-react";
 
 import "./index.css";
 import App from "./App";
+import { BootstrapError } from "./components/BootstrapError";
 import {
   fetchAuthConfig,
   setAuthTokenProvider,
@@ -33,18 +34,13 @@ async function bootstrap() {
   let authConfig: AuthConfig;
   try {
     authConfig = await fetchAuthConfig();
-  } catch (err) {
+  } catch {
     root.render(
       <StrictMode>
-        <div className="mx-auto max-w-xl p-8 text-center text-sm">
-          <h1 className="mb-2 text-lg font-semibold">Dashboard failed to load</h1>
-          <p className="text-muted-foreground">
-            Could not fetch auth configuration from the orchestrator API.
-          </p>
-          <pre className="mt-3 whitespace-pre-wrap text-left text-xs opacity-70">
-            {(err as Error).message}
-          </pre>
-        </div>
+        <BootstrapError
+          title="Dashboard failed to load"
+          message="Could not fetch authentication configuration from the orchestrator API. Refresh the page, and check the service logs if the problem persists."
+        />
       </StrictMode>,
     );
     return;
@@ -62,15 +58,10 @@ async function bootstrap() {
   if (!authConfig.clientId || !authConfig.authority || !authConfig.apiScope) {
     root.render(
       <StrictMode>
-        <div className="mx-auto max-w-xl p-8 text-center text-sm">
-          <h1 className="mb-2 text-lg font-semibold">Dashboard misconfigured</h1>
-          <p className="text-muted-foreground">
-            Auth is enabled but the server did not return a complete configuration
-            (clientId, authority, apiScope). Ask an operator to check the
-            OAUTH_AZURE_AD_TENANT_ID and OAUTH_AZURE_AD_CLIENT_ID App Config
-            entries.
-          </p>
-        </div>
+        <BootstrapError
+          title="Dashboard misconfigured"
+          message="Authentication is enabled, but the server returned an incomplete MSAL configuration. Check the orchestrator service logs."
+        />
       </StrictMode>,
     );
     return;
@@ -78,13 +69,28 @@ async function bootstrap() {
 
   const msal = createMsalInstance(authConfig);
 
-  // msal-browser 3.x requires initialize() before any other API call.
-  await msal.initialize();
+  try {
+    // msal-browser 3.x requires initialize() before any other API call.
+    await msal.initialize();
 
-  // Complete any in-flight redirect (post-loginRedirect callback) before
-  // we mount, so `<MsalProvider>` sees the resulting account state on
-  // first render and the sign-in gate does not flash.
-  await msal.handleRedirectPromise();
+    // Complete any in-flight redirect before mounting so the provider sees
+    // the resulting account on first render. Explicitly select that account
+    // so a stale cached account cannot win after an account switch.
+    const redirectResult = await msal.handleRedirectPromise();
+    if (redirectResult?.account) {
+      msal.setActiveAccount(redirectResult.account);
+    }
+  } catch {
+    root.render(
+      <StrictMode>
+        <BootstrapError
+          title="Sign-in could not start"
+          message="Microsoft Entra ID authentication could not be initialized. Refresh the page, and check the app registration and service logs if the problem persists."
+        />
+      </StrictMode>,
+    );
+    return;
+  }
 
   const scope = authConfig.apiScope;
   setAuthTokenProvider(() => acquireAdminToken(msal, scope));
