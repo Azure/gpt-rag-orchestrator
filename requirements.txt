@@ -3,7 +3,7 @@ azure-keyvault-secrets==4.8.0
 azure-cosmos==4.5.1
 azure-identity==1.21.0
 azure-mgmt-web==8.0.0
-azure-mgmt-storage==22.1.1
+azure-mgmt-storage==25.0.0
 azure-storage-blob==12.25.1
 azure-appconfiguration==1.7.1
 azure.appconfiguration.provider
