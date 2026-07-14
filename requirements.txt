@@ -9,7 +9,7 @@ azure-appconfiguration==1.7.1
 azure.appconfiguration.provider
 azure-ai-projects==2.0.0b3
 azure-ai-agents>=1.2.0b4
-azure-search-documents==11.7.0b2
+azure-search-documents==12.1.0b1
 
 # AI and NLP dependencies
 tiktoken==0.13.0
