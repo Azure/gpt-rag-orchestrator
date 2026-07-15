@@ -73,7 +73,15 @@ The data comes from the existing conversation/history Cosmos DB container used b
 | `OAUTH_AZURE_AD_CLIENT_ID` | Yes when tenant is set | Application (client) id of the orchestrator API app registration. |
 | `OAUTH_AZURE_AD_API_SCOPE` | Optional | Override for the scope the SPA requests. Defaults to `api://<OAUTH_AZURE_AD_CLIENT_ID>/access_as_user`. |
 
+Use a single Microsoft Entra app registration for both the dashboard SPA and the orchestrator API. The same application (client) id is the MSAL `clientId`, the backend token audience, and the `<client-id>` segment in the default scope `api://<client-id>/access_as_user`. Using separate SPA and API app registrations requires a different configuration model.
+
 The App Registration also needs a **Single-page application** redirect URI pointing at `https://<host>/dashboard/` (trailing slash), an exposed `access_as_user` scope, and an `Admin` app role assigned to every user who should see the dashboard. Full step-by-step in the GPT-RAG docs: [Admin Dashboard Sign-in](https://azure.github.io/GPT-RAG/howto_dashboard_signin/).
+
+Define the role under **Microsoft Entra ID > App registrations > <your app> > App roles**. Create exactly one app role with value `Admin` and allowed member type `Users/Groups`. The backend checks the token's `roles` claim for the exact case-sensitive value `Admin`; other role names or casing are rejected. Assign users under **Enterprise applications > <your app> > Users and groups** by selecting the `Admin` role.
+
+Keep the Enterprise Application setting **Assignment required?** set to **No** when validating the app-level 403 path. With **No**, a signed-in user without the `Admin` app role reaches the dashboard API and receives the dashboard's access-denied state. With **Yes**, Entra blocks the sign-in earlier with `AADSTS50105`, which is useful for strict production gating but does not validate the dashboard's own 403 handling.
+
+After adding or removing the `Admin` role assignment, sign out completely and sign in again. Existing access tokens do not gain or lose `roles` claims retroactively.
 
 Setting only `OAUTH_AZURE_AD_TENANT_ID` is rejected as a server misconfiguration. The dashboard never skips audience validation or silently falls back to unauthenticated mode when auth is partially configured.
 
