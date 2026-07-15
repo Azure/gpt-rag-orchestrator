@@ -53,18 +53,39 @@ For comprehensive information about GPT-RAG, including architecture details, con
 
 ## Dashboard
 
-The orchestrator ships with an optional admin dashboard mounted at `/dashboard`. It exposes two tabs:
+The orchestrator ships with an optional admin dashboard mounted at `/dashboard`. It exposes three tabs:
 
 - **Overview**: conversation counts for today, the last 7 days, and the last 30 days; a conversations-over-time chart; average user turns per conversation; and the number of active users.
 - **Conversations**: a paginated, newest-first list of conversations across all users, with a detail view that renders the full message history.
+- **Configuration**: an allowlisted editor for supported orchestrator settings in Azure App Configuration.
 
 The data comes from the existing conversation/history Cosmos DB container used by the orchestrator (`CONVERSATIONS_DATABASE_CONTAINER` in `DATABASE_NAME`). The dashboard is read-only.
 
 **Enabling the dashboard.** It is disabled by default. Set the App Configuration value `ENABLE_DASHBOARD=true` to mount it. When `ENABLE_DASHBOARD=false` (the default), the `/dashboard` HTML page and every `/api/dashboard/*` route are not registered at all.
 
-**Access control.** When authentication is on (`OAUTH_AZURE_AD_TENANT_ID` is configured), the entire `/api/dashboard/*` surface — except the small `/api/dashboard/version` endpoint used for the header chip — requires the caller's bearer token to include the `Admin` app role. The `/dashboard` HTML page itself is served openly so the SPA can load and render its own access-denied state on a 403 response. When authentication is off, the dashboard is open like the rest of the app in development.
+**Access control.** When authentication is on (`OAUTH_AZURE_AD_TENANT_ID` is configured), the entire `/api/dashboard/*` surface — except the small `/api/dashboard/version` and `/api/dashboard/auth-config` endpoints used by the SPA at bootstrap — requires the caller's bearer token to include the `Admin` app role. The `/dashboard` HTML page itself is served openly so the SPA can load, call `/api/dashboard/auth-config`, and either sign the user in via MSAL (Authorization Code + PKCE) or render an access-denied state on a 403 response. When authentication is off, the dashboard is open like the rest of the app in development.
 
-**Token scope.** The frontend must request an access token with the orchestrator's own API scope (`api://<client_id>/...`), not a Microsoft Graph scope. App roles are issued in the `roles` claim of an access token only when the token is requested for the application that defines those roles, so a Graph-scoped token will not surface the `Admin` role and every dashboard call will return 403.
+**Sign-in configuration.** The SPA reads its runtime auth configuration from `GET /api/dashboard/auth-config`, which is derived from these App Configuration keys under the `gpt-rag-orchestrator` label:
+
+| Key | Required | Purpose |
+| --- | --- | --- |
+| `OAUTH_AZURE_AD_TENANT_ID` | Yes, to enable the gate | Entra tenant id. When unset, the SPA renders without MSAL and `require_admin` is a no-op. |
+| `OAUTH_AZURE_AD_CLIENT_ID` | Yes when tenant is set | Application (client) id of the orchestrator API app registration. |
+| `OAUTH_AZURE_AD_API_SCOPE` | Optional | Override for the scope the SPA requests. Defaults to `api://<OAUTH_AZURE_AD_CLIENT_ID>/access_as_user`. |
+
+Use a single Microsoft Entra app registration for both the dashboard SPA and the orchestrator API. The same application (client) id is the MSAL `clientId`, the backend token audience, and the `<client-id>` segment in the default scope `api://<client-id>/access_as_user`. Using separate SPA and API app registrations requires a different configuration model.
+
+The App Registration also needs a **Single-page application** redirect URI pointing at `https://<host>/dashboard/` (trailing slash), an exposed `access_as_user` scope, and an `Admin` app role assigned to every user who should see the dashboard. Full step-by-step in the GPT-RAG docs: [Admin Dashboard Sign-in](https://azure.github.io/GPT-RAG/howto_dashboard_signin/).
+
+Define the role under **Microsoft Entra ID > App registrations > <your app> > App roles**. Create exactly one app role with value `Admin` and allowed member type `Users/Groups`. The backend checks the token's `roles` claim for the exact case-sensitive value `Admin`; other role names or casing are rejected. Assign users under **Enterprise applications > <your app> > Users and groups** by selecting the `Admin` role.
+
+Keep the Enterprise Application setting **Assignment required?** set to **No** when validating the app-level 403 path. With **No**, a signed-in user without the `Admin` app role reaches the dashboard API and receives the dashboard's access-denied state. With **Yes**, Entra blocks the sign-in earlier with `AADSTS50105`, which is useful for strict production gating but does not validate the dashboard's own 403 handling.
+
+After adding or removing the `Admin` role assignment, sign out completely and sign in again. Existing access tokens do not gain or lose `roles` claims retroactively.
+
+Setting only `OAUTH_AZURE_AD_TENANT_ID` is rejected as a server misconfiguration. The dashboard never skips audience validation or silently falls back to unauthenticated mode when auth is partially configured.
+
+**Token scope.** The frontend must request an access token with the orchestrator's own API scope (`api://<client_id>/access_as_user` by default), not a Microsoft Graph scope. App roles are issued in the `roles` claim of an access token only when the token is requested for the application that defines those roles, so a Graph-scoped token will not surface the `Admin` role and every dashboard call will return 403.
 
 **Building the dashboard bundle.** Production builds happen automatically as part of the `Dockerfile` (an MCR base image stage using Node.js 20 runs `npm run build` and copies the static assets into `src/static`). For local development you can run the Vite dev server with hot reload:
 

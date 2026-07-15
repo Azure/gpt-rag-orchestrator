@@ -233,6 +233,41 @@ class DashboardVersionResponse(BaseModel):
     version: str
 
 
+class DashboardAuthConfigResponse(BaseModel):
+    """Runtime auth configuration for the dashboard SPA.
+
+    Returned by the unauthenticated ``GET /api/dashboard/auth-config`` endpoint
+    so the SPA can decide, at load time, whether to bootstrap MSAL and which
+    tenant/client/scope to sign the user in against. Values are computed
+    server-side so the browser never has to concatenate strings that must
+    match app-registration configuration.
+
+    When auth is off (``OAUTH_AZURE_AD_TENANT_ID`` unset) only ``auth_enabled``
+    is returned; when auth is on the full quartet is included.
+    """
+
+    auth_enabled: bool = Field(
+        ...,
+        description="Whether Entra ID auth is enabled for the orchestrator.",
+    )
+    client_id: Optional[str] = Field(
+        None,
+        description="Entra ID application (client) id for the API app registration.",
+    )
+    tenant_id: Optional[str] = Field(
+        None,
+        description="Entra ID tenant id.",
+    )
+    authority: Optional[str] = Field(
+        None,
+        description="Full MSAL authority URL (login.microsoftonline.com/<tenant>).",
+    )
+    api_scope: Optional[str] = Field(
+        None,
+        description="Delegated scope the SPA must request to call this API.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Configuration tab (admin-only)
 # ---------------------------------------------------------------------------

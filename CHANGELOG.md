@@ -4,6 +4,29 @@
 
 ### Added
 
+- **MSAL sign-in for the admin dashboard SPA.** The dashboard SPA served
+  under `/dashboard/` now authenticates admins with Microsoft Entra ID
+  using the Authorization Code + PKCE flow (`loginRedirect`). A new
+  unauthenticated `GET /api/dashboard/auth-config` endpoint tells the SPA
+  whether auth is enabled and, when it is, returns the `clientId`,
+  `tenantId`, `authority`, and `apiScope` it needs to bootstrap MSAL. The
+  SPA acquires an access token via `acquireTokenSilent` and falls back to
+  `acquireTokenRedirect` on `InteractionRequiredAuthError`. MSAL tokens
+  are kept in `sessionStorage` (not `localStorage`). The verified token's
+  `Admin` app role is enforced by the API, and incomplete tenant/client
+  configuration now fails closed instead of skipping audience validation.
+  Operator setup is documented in the
+  [Admin Dashboard Sign-in guide](https://azure.github.io/GPT-RAG/howto_dashboard_signin/).
+
+### Changed
+
+- **Dashboard bearer token source.** The dashboard SPA no longer reads
+  `localStorage["dashboard.bearer"]` by default. Requests get their
+  bearer from the MSAL token provider registered at bootstrap. An
+  explicitly-passed `Authorization` header on a request still wins,
+  which preserves the scripted-test workflow (`api.request(url, {
+  headers: { Authorization: "Bearer <token>" } })`).
+
 ### Fixed
 
 ### Changed
