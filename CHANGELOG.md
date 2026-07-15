@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v3.5.1] - 2026-07-15
 
 ### Added
 
@@ -26,10 +26,6 @@
   explicitly-passed `Authorization` header on a request still wins,
   which preserves the scripted-test workflow (`api.request(url, {
   headers: { Authorization: "Bearer <token>" } })`).
-
-### Fixed
-
-### Changed
 
 ## [v3.5.0] - 2026-07-13
 
