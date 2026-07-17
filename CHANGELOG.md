@@ -2,21 +2,34 @@
 
 ## [Unreleased]
 
+## [v3.6.0] - 2026-07-17
+
+### Added
+
+- **Streamable HTTP transport support.** The `mcp` strategy now accepts
+  `streamable_http` and resolves the MCP endpoint to `/mcp`. Existing SSE
+  deployments require no configuration changes because `sse` remains supported
+  and remains the default.
+
 ### Changed
 
-- **Existing MCP deployments keep their configuration and SSE behavior.**
-  The `mcp` strategy now runs on request-scoped Microsoft Agent Framework agents
-  and MCP clients instead of Semantic Kernel. The `sse` transport remains the
-  default, streamed responses are unchanged, and `streamable_http` is also
-  supported. The orchestrator appends `/sse` or `/mcp` once based on the
-  selected transport, and rejects unsupported transports, non-positive
-  timeouts, or a conflicting explicit suffix with an actionable configuration
-  error. Per-request identity headers replace the process-wide `h11` patch,
-  preventing caller context from leaking between concurrent requests.
+- **Microsoft Agent Framework MCP runtime and request-scoped headers.** The
+  `mcp` strategy now runs on request-scoped Microsoft Agent Framework agents and
+  MCP clients instead of Semantic Kernel. Native per-request `user-context` and
+  optional `X-API-KEY` headers replace the process-wide `h11` patch, preventing
+  caller context from leaking between concurrent requests while preserving the
+  streaming and conversation persistence contracts.
 
-- **MCP chat-client lifecycle cleanup.** Request-scoped Azure OpenAI clients
-  now close deterministically after successful, failed, or cancelled streams
-  without masking the original request failure.
+- **MCP configuration validation.** The orchestrator now rejects unsupported
+  transport values, non-positive timeouts, and endpoint suffixes that conflict
+  with the selected transport. It appends `/sse` or `/mcp` once when the base
+  endpoint does not already contain the matching suffix.
+
+### Fixed
+
+- **Deterministic Azure OpenAI client cleanup.** Request-scoped clients now
+  close after successful, failed, or cancelled streams without masking the
+  original request failure.
 
 ### Removed
 
