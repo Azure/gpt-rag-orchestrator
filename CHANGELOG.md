@@ -14,6 +14,10 @@
   error. Per-request identity headers replace the process-wide `h11` patch,
   preventing caller context from leaking between concurrent requests.
 
+- **MCP chat-client lifecycle cleanup.** Request-scoped Azure OpenAI clients
+  now close deterministically after successful, failed, or cancelled streams
+  without masking the original request failure.
+
 ### Removed
 
 - **Semantic Kernel runtime dependency.** The remaining plugin decorators now

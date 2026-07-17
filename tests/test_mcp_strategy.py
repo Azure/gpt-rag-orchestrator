@@ -3,7 +3,7 @@ import ast
 import inspect
 from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import h11
 import pytest
@@ -84,6 +84,12 @@ class _FakeAgent:
             await asyncio.Event().wait()
 
 
+class _FakeChatClient:
+    def __init__(self, *, close_error: BaseException | None = None):
+        self.client = MagicMock()
+        self.client.close = AsyncMock(side_effect=close_error)
+
+
 def _fake_mcp_context(state):
     @asynccontextmanager
     async def open_tool(**kwargs):
@@ -106,6 +112,7 @@ async def test_mcp_strategy_streams_assistant_text_and_sums_usage(
     strategy.conversation = {"id": "conversation"}
     strategy.user_context = {"principal_id": "user-one"}
     state = {}
+    chat_client = _FakeChatClient()
     fake_agent = _FakeAgent(
         [
             AgentResponseUpdate(role="assistant", text="Hello "),
@@ -149,7 +156,7 @@ async def test_mcp_strategy_streams_assistant_text_and_sums_usage(
         patch.object(
             strategy,
             "_create_chat_client",
-            return_value=MagicMock(),
+            return_value=chat_client,
         ),
     ):
         chunks = [
@@ -168,6 +175,7 @@ async def test_mcp_strategy_streams_assistant_text_and_sums_usage(
     }
     assert state["closed"] is True
     assert fake_agent.closed is True
+    chat_client.client.close.assert_awaited_once_with()
     assert state["open_kwargs"]["user_context"] == {
         "principal_id": "user-one"
     }
@@ -184,6 +192,7 @@ async def test_mcp_strategy_cleans_up_after_stream_error(
     strategy = await _create_strategy(mock_config)
     strategy.conversation = {}
     state = {}
+    chat_client = _FakeChatClient()
     fake_agent = _FakeAgent(error=RuntimeError("model failed"))
 
     with (
@@ -198,7 +207,7 @@ async def test_mcp_strategy_cleans_up_after_stream_error(
         patch.object(
             strategy,
             "_create_chat_client",
-            return_value=MagicMock(),
+            return_value=chat_client,
         ),
     ):
         with pytest.raises(RuntimeError, match="model failed"):
@@ -209,6 +218,7 @@ async def test_mcp_strategy_cleans_up_after_stream_error(
 
     assert state["closed"] is True
     assert fake_agent.closed is True
+    chat_client.client.close.assert_awaited_once_with()
     assert "messages" not in strategy.conversation
 
 
@@ -220,6 +230,7 @@ async def test_mcp_strategy_cleans_up_after_cancellation(
     strategy = await _create_strategy(mock_config)
     strategy.conversation = {}
     state = {}
+    chat_client = _FakeChatClient()
     fake_agent = _FakeAgent(
         [AgentResponseUpdate(role="assistant", text="started")],
         block=True,
@@ -241,7 +252,7 @@ async def test_mcp_strategy_cleans_up_after_cancellation(
         patch.object(
             strategy,
             "_create_chat_client",
-            return_value=MagicMock(),
+            return_value=chat_client,
         ),
     ):
         task = asyncio.create_task(consume())
@@ -252,7 +263,131 @@ async def test_mcp_strategy_cleans_up_after_cancellation(
 
     assert state["closed"] is True
     assert fake_agent.closed is True
+    chat_client.client.close.assert_awaited_once_with()
     assert "messages" not in strategy.conversation
+
+
+@pytest.mark.asyncio
+async def test_mcp_strategy_preserves_agent_error_when_chat_cleanup_fails(
+    patch_dependencies,
+    mock_config,
+    caplog,
+):
+    strategy = await _create_strategy(mock_config)
+    strategy.conversation = {}
+    state = {}
+    close_error = RuntimeError("chat close failed")
+    chat_client = _FakeChatClient(close_error=close_error)
+    fake_agent = _FakeAgent(error=RuntimeError("model failed"))
+
+    with (
+        patch(
+            "strategies.mcp_strategy.open_mcp_tool",
+            _fake_mcp_context(state),
+        ),
+        patch(
+            "strategies.mcp_strategy.ChatAgent",
+            return_value=fake_agent,
+        ),
+        patch.object(
+            strategy,
+            "_create_chat_client",
+            return_value=chat_client,
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="model failed"):
+            _ = [
+                chunk
+                async for chunk in strategy.initiate_agent_flow("prompt")
+            ]
+
+    assert state["closed"] is True
+    assert fake_agent.closed is True
+    chat_client.client.close.assert_awaited_once_with()
+    assert "Failed to close chat client" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_mcp_strategy_preserves_cancellation_when_chat_cleanup_fails(
+    patch_dependencies,
+    mock_config,
+    caplog,
+):
+    strategy = await _create_strategy(mock_config)
+    strategy.conversation = {}
+    state = {}
+    chat_client = _FakeChatClient(close_error=RuntimeError("chat close failed"))
+    fake_agent = _FakeAgent(
+        [AgentResponseUpdate(role="assistant", text="started")],
+        block=True,
+    )
+
+    async def consume():
+        async for _ in strategy.initiate_agent_flow("prompt"):
+            pass
+
+    with (
+        patch(
+            "strategies.mcp_strategy.open_mcp_tool",
+            _fake_mcp_context(state),
+        ),
+        patch(
+            "strategies.mcp_strategy.ChatAgent",
+            return_value=fake_agent,
+        ),
+        patch.object(
+            strategy,
+            "_create_chat_client",
+            return_value=chat_client,
+        ),
+    ):
+        task = asyncio.create_task(consume())
+        await asyncio.wait_for(fake_agent.blocking.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert state["closed"] is True
+    assert fake_agent.closed is True
+    chat_client.client.close.assert_awaited_once_with()
+    assert "Failed to close chat client" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_mcp_strategy_surfaces_chat_cleanup_error_without_primary_error(
+    patch_dependencies,
+    mock_config,
+):
+    strategy = await _create_strategy(mock_config)
+    strategy.conversation = {}
+    state = {}
+    chat_client = _FakeChatClient(close_error=RuntimeError("chat close failed"))
+    fake_agent = _FakeAgent([AgentResponseUpdate(role="assistant", text="done")])
+
+    with (
+        patch(
+            "strategies.mcp_strategy.open_mcp_tool",
+            _fake_mcp_context(state),
+        ),
+        patch(
+            "strategies.mcp_strategy.ChatAgent",
+            return_value=fake_agent,
+        ),
+        patch.object(
+            strategy,
+            "_create_chat_client",
+            return_value=chat_client,
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="chat close failed"):
+            _ = [
+                chunk
+                async for chunk in strategy.initiate_agent_flow("prompt")
+            ]
+
+    assert state["closed"] is True
+    assert fake_agent.closed is True
+    chat_client.client.close.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio

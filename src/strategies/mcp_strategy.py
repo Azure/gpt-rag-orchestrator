@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 import time
 from typing import Any
 from urllib.parse import urlsplit
@@ -114,6 +115,7 @@ class McpStrategy(BaseAgentStrategy):
         stream_latency_ms = 0.0
         tool_count = 0
         mcp_host = urlsplit(self.mcp_server_url).hostname or ""
+        chat_client: AzureOpenAIChatClient | None = None
 
         with tracer.start_as_current_span(
             "initiate_agent_flow",
@@ -185,6 +187,21 @@ class McpStrategy(BaseAgentStrategy):
                 request_status = "cancelled"
                 raise
             finally:
+                primary_exception = sys.exception()
+                cleanup_error: BaseException | None = None
+                if chat_client is not None:
+                    try:
+                        await chat_client.client.close()
+                    except BaseException:
+                        if primary_exception is not None:
+                            logging.exception(
+                                "[McpStrategy] Failed to close chat client while "
+                                "preserving the primary exception."
+                            )
+                        else:
+                            request_status = "error"
+                            cleanup_error = sys.exception()
+
                 if stream_started is not None and stream_latency_ms == 0.0:
                     stream_latency_ms = (
                         time.monotonic() - stream_started
@@ -207,3 +224,5 @@ class McpStrategy(BaseAgentStrategy):
                     connection_latency_ms,
                     stream_latency_ms,
                 )
+                if cleanup_error is not None:
+                    raise cleanup_error
