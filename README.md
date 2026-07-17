@@ -26,7 +26,7 @@ The **GPT-RAG Orchestrator** service is an agentic orchestration layer built on 
 | `single_agent_rag` | Single Agent RAG | RAG strategy using Azure AI Foundry Agent Service v2 with dynamic routing and direct LLM bypass. |
 | `maf_agent_service` | MAF + Agent Service | Microsoft Agent Framework with Azure AI Foundry Agent Service v2 for server-side threads and tool orchestration, with request-scoped client lifecycle for stable async cleanup. |
 | `maf_lite` | MAF Lite | Microsoft Agent Framework with direct Azure OpenAI model access (no Agent Service dependency). |
-| `mcp` | MCP | Model Context Protocol strategy using Semantic Kernel. |
+| `mcp` | MCP | Request-scoped Microsoft Agent Framework strategy supporting legacy SSE and streamable HTTP MCP servers. |
 | `nl2sql` | NL2SQL | Natural language to SQL translation strategy for structured data queries. |
 
 ### NL2SQL datasource security

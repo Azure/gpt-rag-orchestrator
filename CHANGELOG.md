@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **MCP strategy now uses the pinned Microsoft Agent Framework runtime.**
+  The local MCP strategy now uses request-scoped MAF agents and MCP clients for
+  both legacy SSE and streamable HTTP transports. Existing configuration and
+  response framing remain unchanged, while identity headers can no longer leak
+  between concurrent requests through a process-wide `h11` patch. Unsupported
+  transports and conflicting `/sse` or `/mcp` endpoints now fail with clear
+  configuration errors.
+
+### Removed
+
+- **Semantic Kernel runtime dependency.** The remaining plugin decorators now
+  use MAF `ai_function`, so the orchestrator no longer installs or imports
+  Semantic Kernel.
+
 ## [v3.5.1] - 2026-07-15
 
 ### Added

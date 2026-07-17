@@ -1,10 +1,9 @@
-import h11
 import logging
 import os
 import re
 import json
 
-from typing import Any, Dict, AsyncIterator, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional
 from abc import ABC, abstractmethod
 from azure.ai.projects.aio import AIProjectClient
 from connectors.appconfig import AppConfigClient
