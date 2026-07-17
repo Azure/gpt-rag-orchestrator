@@ -26,8 +26,56 @@ The **GPT-RAG Orchestrator** service is an agentic orchestration layer built on 
 | `single_agent_rag` | Single Agent RAG | RAG strategy using Azure AI Foundry Agent Service v2 with dynamic routing and direct LLM bypass. |
 | `maf_agent_service` | MAF + Agent Service | Microsoft Agent Framework with Azure AI Foundry Agent Service v2 for server-side threads and tool orchestration, with request-scoped client lifecycle for stable async cleanup. |
 | `maf_lite` | MAF Lite | Microsoft Agent Framework with direct Azure OpenAI model access (no Agent Service dependency). |
-| `mcp` | MCP | Model Context Protocol strategy using Semantic Kernel. |
+| `mcp` | MCP | Request-scoped Microsoft Agent Framework strategy supporting legacy SSE and streamable HTTP MCP servers. |
 | `nl2sql` | NL2SQL | Natural language to SQL translation strategy for structured data queries. |
+
+### MCP strategy configuration
+
+The `mcp` strategy now runs on Microsoft Agent Framework instead of Semantic
+Kernel. Existing SSE deployments remain compatible: keep `AGENT_STRATEGY=mcp`
+and the existing MCP configuration keys. The default transport is still `sse`,
+and the streamed response contract is unchanged.
+
+Configure these values in Azure App Configuration. Use the
+`gpt-rag-orchestrator` label for an orchestrator-specific override, or the
+shared `gpt-rag` label when every component should use the same value:
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `MCP_APP_ENDPOINT` | `http://localhost:80` in Azure; local runs use `http://localhost:5000` | Base URL of the trusted MCP server. HTTPS should be used outside local development. |
+| `MCP_SERVER_TRANSPORT` | `sse` | MCP transport. Supported values are `sse` and `streamable_http`. |
+| `MCP_CLIENT_TIMEOUT` | `600` | Connection and read timeout in seconds. It must be an integer greater than zero. |
+| `MCP_APP_APIKEY` | Unset | Optional API key sent to the MCP server as `X-API-KEY`. Store it as a Key Vault reference, not as plain text. |
+| `AGENT_ID` | Unset | Optional agent identifier passed to the request-scoped Microsoft Agent Framework agent. |
+
+The orchestrator resolves the transport endpoint from `MCP_APP_ENDPOINT`:
+
+| Transport | Endpoint suffix | Example resolved endpoint |
+| --- | --- | --- |
+| `sse` | `/sse` | `https://mcp.contoso.com/sse` |
+| `streamable_http` | `/mcp` | `https://mcp.contoso.com/mcp` |
+
+You can configure the base URL or include the matching suffix. The orchestrator
+adds the suffix once, so both `https://mcp.contoso.com` and
+`https://mcp.contoso.com/sse` resolve to the same SSE endpoint. A conflicting
+suffix fails during strategy initialization. For example,
+`MCP_SERVER_TRANSPORT=streamable_http` with an endpoint ending in `/sse` is
+rejected and the error tells the operator to use `/mcp`.
+
+> [!IMPORTANT]
+> The orchestrator forwards the caller's `user-context` header and, when
+> configured, `X-API-KEY` to this endpoint for every request. Use only a trusted
+> MCP server, require HTTPS outside local development, restrict network access,
+> and keep `MCP_APP_APIKEY` in Key Vault.
+
+For a controlled rollout, leave existing deployments on `sse`, deploy the new
+orchestrator revision, and verify that a representative request discovers and
+calls the expected tools. To adopt streamable HTTP, confirm that the server
+exposes `/mcp`, then change the transport and endpoint together. Monitor startup
+and request logs for invalid transport, conflicting endpoint suffix, timeout,
+or connection errors. Because the configuration names and SSE default are
+unchanged, you can roll back to the previous orchestrator image without
+rewriting the existing SSE configuration.
 
 ### NL2SQL datasource security
 

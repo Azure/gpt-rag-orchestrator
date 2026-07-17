@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Existing MCP deployments keep their configuration and SSE behavior.**
+  The `mcp` strategy now runs on request-scoped Microsoft Agent Framework agents
+  and MCP clients instead of Semantic Kernel. The `sse` transport remains the
+  default, streamed responses are unchanged, and `streamable_http` is also
+  supported. The orchestrator appends `/sse` or `/mcp` once based on the
+  selected transport, and rejects unsupported transports, non-positive
+  timeouts, or a conflicting explicit suffix with an actionable configuration
+  error. Per-request identity headers replace the process-wide `h11` patch,
+  preventing caller context from leaking between concurrent requests.
+
+- **MCP chat-client lifecycle cleanup.** Request-scoped Azure OpenAI clients
+  now close deterministically after successful, failed, or cancelled streams
+  without masking the original request failure.
+
+### Removed
+
+- **Semantic Kernel runtime dependency.** The remaining plugin decorators now
+  use MAF `ai_function`, so the orchestrator no longer installs or imports
+  Semantic Kernel.
+
 ## [v3.5.1] - 2026-07-15
 
 ### Added
