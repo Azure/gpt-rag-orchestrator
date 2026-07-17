@@ -1,5 +1,40 @@
 # Changelog
 
+## [v3.6.0] - 2026-07-17
+
+### Added
+
+- **Streamable HTTP transport support.** The `mcp` strategy now accepts
+  `streamable_http` and resolves the MCP endpoint to `/mcp`. Existing SSE
+  deployments require no configuration changes because `sse` remains supported
+  and remains the default.
+
+### Changed
+
+- **Microsoft Agent Framework MCP runtime and request-scoped headers.** The
+  `mcp` strategy now runs on request-scoped Microsoft Agent Framework agents and
+  MCP clients instead of Semantic Kernel. Native per-request `user-context` and
+  optional `X-API-KEY` headers replace the process-wide `h11` patch, preventing
+  caller context from leaking between concurrent requests while preserving the
+  streaming and conversation persistence contracts.
+
+- **MCP configuration validation.** The orchestrator now rejects unsupported
+  transport values, non-positive timeouts, and endpoint suffixes that conflict
+  with the selected transport. It appends `/sse` or `/mcp` once when the base
+  endpoint does not already contain the matching suffix.
+
+### Fixed
+
+- **Deterministic Azure OpenAI client cleanup.** Request-scoped clients now
+  close after successful, failed, or cancelled streams without masking the
+  original request failure.
+
+### Removed
+
+- **Semantic Kernel runtime dependency.** The remaining plugin decorators now
+  use MAF `ai_function`, so the orchestrator no longer installs or imports
+  Semantic Kernel.
+
 ## [v3.5.1] - 2026-07-15
 
 ### Added

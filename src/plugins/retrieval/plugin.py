@@ -1,4 +1,3 @@
-import os
 import re
 import time
 import json
@@ -8,7 +7,7 @@ from typing import Annotated, Optional, List, Dict, Any
 from urllib.parse import urlparse
 
 import aiohttp
-from semantic_kernel.functions import kernel_function
+from agent_framework import ai_function
 from connectors.identity_manager import get_identity_manager
 from dependencies import get_config
 from connectors import AzureOpenAIClient
@@ -53,7 +52,7 @@ class RetrievalPlugin:
                 logging.error("Error during asynchronous HTTP request.", exc_info=True)
                 raise Exception("Failed to execute search query.") from e
 
-    @kernel_function(
+    @ai_function(
         name="VectorIndexRetrieve",
         description="Performs a vector search against Azure Cognitive Search and returns the results as a string."
     )
@@ -139,7 +138,7 @@ class RetrievalPlugin:
             content = content.replace(image_path, image_url)
         return content
 
-    @kernel_function(
+    @ai_function(
         name="MultimodalVectorIndexRetrieve",
         description="Performs a multimodal vector search and returns texts, images, and captions."
     )
@@ -241,7 +240,7 @@ class RetrievalPlugin:
             error=error_message
         )
 
-    @kernel_function(
+    @ai_function(
         name="GetDataPointsFromChatLog",
         description="Extracts data points (e.g., filenames) from a chat log."
     )
