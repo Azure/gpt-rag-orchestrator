@@ -4,13 +4,15 @@
 
 ### Changed
 
-- **MCP strategy now uses the pinned Microsoft Agent Framework runtime.**
-  The local MCP strategy now uses request-scoped MAF agents and MCP clients for
-  both legacy SSE and streamable HTTP transports. Existing configuration and
-  response framing remain unchanged, while identity headers can no longer leak
-  between concurrent requests through a process-wide `h11` patch. Unsupported
-  transports and conflicting `/sse` or `/mcp` endpoints now fail with clear
-  configuration errors.
+- **Existing MCP deployments keep their configuration and SSE behavior.**
+  The `mcp` strategy now runs on request-scoped Microsoft Agent Framework agents
+  and MCP clients instead of Semantic Kernel. The `sse` transport remains the
+  default, streamed responses are unchanged, and `streamable_http` is also
+  supported. The orchestrator appends `/sse` or `/mcp` once based on the
+  selected transport, and rejects unsupported transports, non-positive
+  timeouts, or a conflicting explicit suffix with an actionable configuration
+  error. Per-request identity headers replace the process-wide `h11` patch,
+  preventing caller context from leaking between concurrent requests.
 
 ### Removed
 
