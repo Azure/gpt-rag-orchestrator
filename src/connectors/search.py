@@ -3,7 +3,7 @@ import logging
 import json
 import time
 import hashlib
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict
 from pydantic import BaseModel, Field
 
 from dependencies import get_config
@@ -40,6 +40,7 @@ _global_index_empty_cache: Dict[str, Dict[str, Any]] = {}
 
 # Module-level OBO token cache (shared across callers)
 _obo_cache: Dict[str, Any] = {}
+_MAX_OBO_CACHE_ENTRIES = 256
 _SEARCH_OBO_SCOPE = "https://search.azure.com/user_impersonation"
 
 
@@ -64,7 +65,7 @@ async def acquire_obo_token(
         raise RuntimeError("Missing incoming user access token for OBO exchange")
 
     # Check cache
-    fp = hashlib.sha256(api_access_token.encode()).hexdigest()[:16]
+    fp = hashlib.sha256(api_access_token.encode()).hexdigest()
     cache_key = f"{fp}:{scope}"
     cached = _obo_cache.get(cache_key)
     if cached and time.time() < cached.get("expires_at", 0):
@@ -123,9 +124,19 @@ async def acquire_obo_token(
             token = data.get("access_token")
             if token:
                 ttl = int(data.get("expires_in", 0))
+                now = time.time()
+                expired_keys = [
+                    key
+                    for key, entry in _obo_cache.items()
+                    if now >= entry.get("expires_at", 0)
+                ]
+                for key in expired_keys:
+                    _obo_cache.pop(key, None)
+                while len(_obo_cache) >= _MAX_OBO_CACHE_ENTRIES:
+                    _obo_cache.pop(next(iter(_obo_cache)))
                 _obo_cache[cache_key] = {
                     "token": token,
-                    "expires_at": time.time() + max(0, ttl - 30),
+                    "expires_at": now + max(0, ttl - 30),
                 }
                 logging.info("[OBO] Acquired delegated token")
                 return token
@@ -657,7 +668,7 @@ class SearchClient:
             # Generate embeddings for vector/hybrid search
             if self.search_approach in ["vector", "hybrid"] and self.aoai_client:
                 start_time = time.time()
-                logging.info(f"[Retrieval] Generating embeddings for query")
+                logging.info("[Retrieval] Generating embeddings for query")
                 embeddings_query = await self.aoai_client.get_embeddings(query)
                 logging.info(f"[Retrieval] Embeddings generated in {round(time.time() - start_time, 2)} seconds")
 
@@ -777,19 +788,32 @@ class SearchClient:
         allow_anonymous = self._allow_anonymous
         conversation_id = self._conversation_id
         user_context = dict(getattr(self, "_user_context", {}))
+        mcp_enabled = False
         try:
-            search_user_token = await acquire_obo_search_token(
-                incoming_token,
-                allow_anonymous=allow_anonymous,
-            )
             client = get_foundry_iq_client()
-            records = await client.retrieve(
-                query,
-                obo_token=search_user_token,
-                incoming_token=incoming_token,
-                conversation_id=conversation_id,
-                user_context=user_context,
+            mcp_enabled = bool(
+                getattr(getattr(client, "mcp_config", None), "enabled", False)
             )
+            if mcp_enabled:
+                search_user_token = await acquire_obo_search_token(
+                    incoming_token,
+                    allow_anonymous=allow_anonymous,
+                )
+                records = await client.retrieve(
+                    query,
+                    obo_token=search_user_token,
+                    incoming_token=incoming_token,
+                    conversation_id=conversation_id,
+                    user_context=user_context,
+                )
+            else:
+                search_user_token = await self._get_search_user_token_for_trimming()
+                records = await client.retrieve(
+                    query,
+                    obo_token=search_user_token,
+                    conversation_id=conversation_id,
+                    user_context=user_context,
+                )
 
             results_list = []
             for record in records[: self.search_top_k]:
@@ -815,7 +839,9 @@ class SearchClient:
                     "retrieval_credential_type": "obo" if search_user_token else "managed_identity",
                 },
             )
-            if isinstance(
+            if isinstance(e, McpConfigurationError):
+                raise
+            if mcp_enabled and isinstance(
                 e, (McpConfigurationError, McpCredentialError, McpSourceError)
             ):
                 raise

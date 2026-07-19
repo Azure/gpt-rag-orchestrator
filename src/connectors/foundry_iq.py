@@ -34,6 +34,7 @@ from connectors.foundry_iq_mcp import (
     McpCredentialError,
     McpRuntimeConfig,
     build_mcp_control_headers,
+    redact_mcp_tool_arguments,
 )
 
 # Per-user security on the knowledge base retrieve action (both the native OBO
@@ -1616,13 +1617,9 @@ class FoundryIQClient:
             if self.mcp_config.log_tool_arguments and arguments.get(
                 "toolArguments"
             ) is not None:
-                safe_arguments = json.dumps(
-                    arguments["toolArguments"],
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                    sort_keys=True,
-                    default=str,
-                )[:1000]
+                safe_arguments = redact_mcp_tool_arguments(
+                    arguments["toolArguments"]
+                )
                 logging.debug(
                     "[FoundryIQClient][MCP] source=%s tool=%s arguments=%s",
                     source_name,

@@ -494,8 +494,9 @@ SECTIONS: List[SettingSection] = [
                 default=False,
                 label="Log MCP tool arguments",
                 description=(
-                    "Debug-only opt-in. Tool arguments are redacted from normal "
-                    "telemetry by default because they can contain user data."
+                    "Debug-only opt-in. Normal telemetry omits tool arguments. "
+                    "When enabled, argument values under credential, token, "
+                    "cookie, authorization, and header keys remain redacted."
                 ),
             ),
             SettingSpec(

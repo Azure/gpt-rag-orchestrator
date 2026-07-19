@@ -10,6 +10,16 @@
   request-scoped managed identity, OBO, or Key Vault credentials. The disabled
   default preserves the existing minimal-reasoning intents request and headers.
 
+### Fixed
+
+- **Canonical and safe MCP source handling.** MCP configuration now uses the
+  Search-compatible `serverURL`, object-shaped output parsing, and
+  `reranked`/`always` inclusion modes; URL query strings are rejected and
+  debug argument logging recursively redacts credentials and paired headers.
+- **Disabled Foundry IQ compatibility.** Search OBO failures continue to log
+  and fall back under the legacy disabled MCP path, while enabled MCP sources
+  retain strict credential and source-failure propagation.
+
 ## [v3.6.0] - 2026-07-17
 
 ### Added

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import traceback
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,6 +20,7 @@ from connectors.foundry_iq_mcp import (
     McpQueryHeader,
     McpRuntimeConfig,
     build_mcp_control_headers,
+    redact_mcp_tool_arguments,
 )
 
 
@@ -64,7 +68,7 @@ def _source(
 ):
     return {
         "name": name,
-        "serverUrl": "https://mcp.contoso.com/mcp",
+        "serverURL": "https://mcp.contoso.com/mcp",
         "failOnError": fail_on_error,
         "maxOutputDocuments": max_documents,
         "tools": tools
@@ -72,6 +76,7 @@ def _source(
             {
                 "name": "query_logs",
                 "maxOutputTokens": 2048,
+                "inclusionMode": "reranked",
                 "outputParsing": {
                     "kind": "json",
                     "jsonParameters": {"documentsPath": "$.results[*]"},
@@ -80,6 +85,38 @@ def _source(
         ],
         "queryHeaders": query_headers or [],
     }
+
+
+def _canonical_source_fixture() -> dict:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "foundry_iq_mcp_canonical_source.json"
+    )
+    return json.loads(fixture_path.read_text(encoding="utf-8"))
+
+
+def test_cross_schema_fixture_uses_the_canonical_search_contract():
+    """Keep the orchestrator parser aligned with Azure/gpt-rag PR #568."""
+    source = _canonical_source_fixture()
+
+    config = McpRuntimeConfig.parse(
+        enabled=True,
+        sources_json=[source],
+        reasoning_effort="low",
+        trusted_hosts="mcp.contoso.com",
+        log_tool_arguments=False,
+        api_version="2026-05-01-preview",
+        max_runtime_seconds=120,
+    )
+
+    assert "serverURL" in source
+    assert "serverUrl" not in source
+    assert config.sources[0].server_url == source["serverURL"]
+    assert config.sources[0].tools[0].output_parsing.kind == "json"
+    assert config.sources[0].tools[0].output_parsing.json_parameters.include_context
+    assert config.sources[0].tools[1].output_parsing.kind == "auto"
+    assert config.sources[0].tools[1].inclusion_mode == "always"
 
 
 def _build_client(
@@ -181,7 +218,7 @@ async def test_enabled_uses_messages_reasoning_activity_runtime_and_source_names
         }
     ]
     serialized = json.dumps(body)
-    assert "serverUrl" not in serialized
+    assert "serverURL" not in serialized
     assert "tools" not in serialized
     assert "queryHeaders" not in serialized
     assert "alwaysQuerySource" not in serialized
@@ -391,7 +428,7 @@ async def test_missing_credentials_fail_clearly(
         (
             {
                 "sources_json": [
-                    {**_source(), "serverUrl": "http://mcp.contoso.com/mcp"}
+                    {**_source(), "serverURL": "http://mcp.contoso.com/mcp"}
                 ]
             },
             "must be HTTPS",
@@ -399,7 +436,18 @@ async def test_missing_credentials_fail_clearly(
         (
             {
                 "sources_json": [
-                    {**_source(), "serverUrl": "https://127.0.0.1/mcp"}
+                    {
+                        **_source(),
+                        "serverURL": "https://mcp.contoso.com/mcp?tenant=secret",
+                    }
+                ]
+            },
+            "query string",
+        ),
+        (
+            {
+                "sources_json": [
+                    {**_source(), "serverURL": "https://127.0.0.1/mcp"}
                 ],
                 "trusted_hosts": "127.0.0.1",
             },
@@ -408,7 +456,28 @@ async def test_missing_credentials_fail_clearly(
         (
             {
                 "sources_json": [
-                    {**_source(), "serverUrl": "https://other.contoso.com/mcp"}
+                    {**_source(), "serverURL": "https://127.1/mcp"}
+                ],
+                "trusted_hosts": "127.1",
+            },
+            "reserved host",
+        ),
+        (
+            {
+                "sources_json": [
+                    {
+                        **_source(),
+                        "serverURL": "https://metadata.internal/mcp",
+                    }
+                ],
+                "trusted_hosts": "metadata.internal",
+            },
+            "reserved host",
+        ),
+        (
+            {
+                "sources_json": [
+                    {**_source(), "serverURL": "https://other.contoso.com/mcp"}
                 ]
             },
             "is not in",
@@ -452,6 +521,57 @@ async def test_missing_credentials_fail_clearly(
                 ]
             },
             "documentsPath",
+        ),
+        (
+            {
+                "sources_json": [
+                    {
+                        **_source(),
+                        "tools": [
+                            {
+                                "name": "query",
+                                "outputParsing": "json",
+                            }
+                        ],
+                    }
+                ]
+            },
+            "outputParsing",
+        ),
+        (
+            {
+                "sources_json": [
+                    {
+                        **_source(),
+                        "tools": [
+                            {
+                                "name": "query",
+                                "outputParsing": {
+                                    "kind": "split",
+                                    "splitParameters": {"maximumPagesToTake": 3},
+                                },
+                            }
+                        ],
+                    }
+                ]
+            },
+            "splitParameters",
+        ),
+        (
+            {
+                "sources_json": [
+                    {
+                        **_source(),
+                        "tools": [
+                            {
+                                "name": "query",
+                                "inclusionMode": "all",
+                            }
+                        ],
+                    }
+                ]
+            },
+            "inclusionMode",
         ),
         (
             {"sources_json": "not-json"},
@@ -533,6 +653,125 @@ def test_configuration_error_does_not_echo_rejected_literal_secret():
         traceback.format_exception(exc_info.type, exc_info.value, exc_info.tb)
     )
     assert "literal-secret-marker" not in rendered_traceback
+
+
+@pytest.mark.parametrize(
+    "credential_field",
+    ["access_token", "api-key", "password", "clientSecret", "headers"],
+)
+def test_configuration_rejects_nested_literal_credential_fields(credential_field):
+    source = _source(
+        tools=[
+            {
+                "name": "query_logs",
+                "outputParsing": {
+                    "kind": "json",
+                    "jsonParameters": {
+                        "documentsPath": "$.results[*]",
+                        "unexpected": {credential_field: "literal-secret-marker"},
+                    },
+                },
+            }
+        ]
+    )
+
+    with pytest.raises(McpConfigurationError) as exc_info:
+        McpRuntimeConfig.parse(
+            enabled=True,
+            sources_json=[source],
+            reasoning_effort="low",
+            trusted_hosts="mcp.contoso.com",
+            log_tool_arguments=False,
+            api_version="2026-05-01-preview",
+            max_runtime_seconds=120,
+        )
+
+    assert "literal-secret-marker" not in str(exc_info.value)
+    assert credential_field in str(exc_info.value)
+
+
+def test_tool_argument_redaction_is_recursive_and_bounded():
+    deeply_nested: object = "too-deep-to-log"
+    for _ in range(10):
+        deeply_nested = {"level": deeply_nested}
+    arguments = {
+        "query": "safe query",
+        "Authorization": "authorization-secret",
+        "nested": [
+            {
+                "access_token": "nested-token",
+                "details": {
+                    "api-key": "nested-api-key",
+                    "password": "nested-password",
+                },
+            },
+            {
+                "monitor-mcp-header-value": "paired-header-secret",
+                "public": "visible",
+            },
+        ],
+        "deep": deeply_nested,
+        "large": "x" * 5000,
+    }
+
+    rendered = redact_mcp_tool_arguments(arguments)
+
+    for secret in (
+        "authorization-secret",
+        "nested-token",
+        "nested-api-key",
+        "nested-password",
+        "paired-header-secret",
+        "too-deep-to-log",
+    ):
+        assert secret not in rendered
+    assert "<redacted>" in rendered
+    assert "<truncated>" in rendered
+    assert len(rendered) <= 1011
+
+
+@pytest.mark.asyncio
+async def test_enabled_tool_argument_logging_never_logs_paired_header_values(caplog):
+    secrets = {
+        "Authorization": "authorization-secret",
+        "nested": [
+            {
+                "accessToken": "nested-token",
+                "headers": {
+                    "monitor-mcp-header-value": "paired-header-secret",
+                },
+            }
+        ],
+    }
+    payload = {
+        "activity": [
+            {
+                "type": "mcpServer",
+                "knowledgeSourceName": "monitor-mcp",
+                "status": "succeeded",
+                "mcpServerArguments": {
+                    "toolName": "query_logs",
+                    "toolArguments": secrets,
+                },
+            }
+        ],
+        "references": [],
+    }
+    client, _ = _build_client(
+        payload,
+        config_overrides={"FOUNDRY_IQ_MCP_LOG_TOOL_ARGUMENTS": True},
+    )
+    caplog.set_level(logging.DEBUG)
+
+    await client.retrieve("hello")
+
+    for secret in (
+        "authorization-secret",
+        "nested-token",
+        "paired-header-secret",
+    ):
+        assert secret not in caplog.text
+    assert "<redacted>" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -716,10 +955,14 @@ async def test_scope_aware_obo_cache_does_not_reuse_token_across_scopes():
         "api://one/.default",
         "api://two/.default",
     ]
+    expected_fingerprint = hashlib.sha256(b"incoming").hexdigest()
+    assert {
+        cache_key.partition(":")[0] for cache_key in search._obo_cache
+    } == {expected_fingerprint}
 
 
 @pytest.mark.asyncio
-async def test_singleton_search_path_captures_incoming_token_before_await():
+async def test_singleton_search_path_preserves_disabled_retrieval_arguments():
     from connectors import search
 
     search_client = search.SearchClient.__new__(search.SearchClient)
@@ -729,48 +972,52 @@ async def test_singleton_search_path_captures_incoming_token_before_await():
     search_client._user_context = {"principal_id": "user-a"}
     search_client.search_top_k = 3
     foundry_client = MagicMock()
+    foundry_client.mcp_config = SimpleNamespace(enabled=False)
     foundry_client.retrieve = AsyncMock(return_value=[])
+    search_client._get_search_user_token_for_trimming = AsyncMock(
+        return_value="search-token-a"
+    )
 
-    async def exchange(incoming_token, allow_anonymous=True):
-        search_client._request_api_access_token = "request-b"
-        return "search-token-a"
-
-    with (
-        patch("connectors.search.acquire_obo_search_token", side_effect=exchange),
-        patch(
-            "connectors.search.get_foundry_iq_client",
-            return_value=foundry_client,
-        ),
+    with patch(
+        "connectors.search.get_foundry_iq_client",
+        return_value=foundry_client,
     ):
         await search_client._search_knowledge_base_foundry_iq("hello")
 
     foundry_client.retrieve.assert_awaited_once_with(
         "hello",
         obo_token="search-token-a",
-        incoming_token="request-a",
         conversation_id="conversation-a",
         user_context={"principal_id": "user-a"},
     )
+    search_client._get_search_user_token_for_trimming.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_singleton_search_path_never_swallows_mcp_failures():
+async def test_singleton_search_path_never_swallows_enabled_mcp_failures():
     from connectors import search
 
     search_client = search.SearchClient.__new__(search.SearchClient)
-    search_client._request_api_access_token = None
+    search_client._request_api_access_token = "incoming"
     search_client._allow_anonymous = True
     search_client._conversation_id = None
     search_client._user_context = {}
     search_client.search_top_k = 3
     foundry_client = MagicMock()
+    foundry_client.mcp_config = SimpleNamespace(enabled=True)
     foundry_client.retrieve = AsyncMock(
         side_effect=McpCredentialError("credential failed")
     )
 
-    with patch(
-        "connectors.search.get_foundry_iq_client",
-        return_value=foundry_client,
+    with (
+        patch(
+            "connectors.search.get_foundry_iq_client",
+            return_value=foundry_client,
+        ),
+        patch(
+            "connectors.search.acquire_obo_search_token",
+            new=AsyncMock(return_value="search-obo-token"),
+        ),
     ):
         with pytest.raises(McpCredentialError, match="credential failed"):
             await search_client._search_knowledge_base_foundry_iq("hello")
@@ -814,11 +1061,47 @@ async def test_enabled_credential_transport_and_http_errors_are_mcp_failures():
 
 
 @pytest.mark.asyncio
+async def test_context_provider_logs_and_continues_after_disabled_search_obo_failure(
+    caplog,
+):
+    from strategies.foundry_iq_context_provider import FoundryIQContextProvider
+
+    get_token = AsyncMock(side_effect=RuntimeError("OBO unavailable"))
+    foundry_client = MagicMock()
+    foundry_client.mcp_config = SimpleNamespace(enabled=False)
+    foundry_client.retrieve = AsyncMock(return_value=[])
+    provider = FoundryIQContextProvider(
+        get_obo_token=get_token,
+        request_access_token="incoming",
+        allow_anonymous=False,
+        mcp_enabled=False,
+    )
+    caplog.set_level(logging.WARNING)
+
+    with patch(
+        "strategies.foundry_iq_context_provider.get_foundry_iq_client",
+        return_value=foundry_client,
+    ):
+        context = await provider.invoking(
+            [ChatMessage(role=Role.USER, text="question")]
+        )
+
+    assert not context.messages
+    assert "OBO token acquisition failed" in caplog.text
+    foundry_client.retrieve.assert_awaited_once_with(
+        "question",
+        obo_token=None,
+        conversation_id=None,
+        user_context={},
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "token_result",
     [None, RuntimeError("OBO unavailable")],
 )
-async def test_context_provider_fails_closed_when_anonymous_access_is_disabled(
+async def test_context_provider_fails_closed_for_enabled_mcp_obo_requirements(
     token_result,
 ):
     from strategies.foundry_iq_context_provider import FoundryIQContextProvider
@@ -829,11 +1112,13 @@ async def test_context_provider_fails_closed_when_anonymous_access_is_disabled(
     else:
         get_token.return_value = token_result
     foundry_client = MagicMock()
+    foundry_client.mcp_config = SimpleNamespace(enabled=True)
     foundry_client.retrieve = AsyncMock()
     provider = FoundryIQContextProvider(
         get_obo_token=get_token,
         request_access_token="incoming",
         allow_anonymous=False,
+        mcp_enabled=True,
     )
 
     with patch(
@@ -846,6 +1131,37 @@ async def test_context_provider_fails_closed_when_anonymous_access_is_disabled(
             )
 
     foundry_client.retrieve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_context_provider_propagates_enabled_mcp_source_failure():
+    from connectors.foundry_iq import McpSourceError
+    from strategies.foundry_iq_context_provider import FoundryIQContextProvider
+
+    foundry_client = MagicMock()
+    foundry_client.mcp_config = SimpleNamespace(enabled=True)
+    foundry_client.retrieve = AsyncMock(side_effect=McpSourceError("source failed"))
+    provider = FoundryIQContextProvider(
+        mcp_enabled=True,
+        request_access_token="incoming",
+    )
+
+    with patch(
+        "strategies.foundry_iq_context_provider.get_foundry_iq_client",
+        return_value=foundry_client,
+    ):
+        with pytest.raises(McpSourceError, match="source failed"):
+            await provider.invoking(
+                [ChatMessage(role=Role.USER, text="question")]
+            )
+
+    foundry_client.retrieve.assert_awaited_once_with(
+        "question",
+        obo_token=None,
+        incoming_token="incoming",
+        conversation_id=None,
+        user_context={},
+    )
 
 
 @pytest.mark.asyncio

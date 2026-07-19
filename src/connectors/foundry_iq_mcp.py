@@ -9,7 +9,15 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Literal, Mapping, Optional
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 
 _HEADER_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
@@ -29,8 +37,62 @@ _DENIED_HEADERS = frozenset(
         "upgrade",
     }
 )
-_RESERVED_HOSTS = frozenset({"localhost", "localhost.localdomain"})
-_RESERVED_HOST_SUFFIXES = (".localhost", ".local", ".invalid", ".test", ".example")
+_RESERVED_HOSTS = frozenset(
+    {"localhost", "localhost.localdomain", "home.arpa"}
+)
+_RESERVED_HOST_SUFFIXES = (
+    ".localhost",
+    ".local",
+    ".invalid",
+    ".test",
+    ".example",
+    ".internal",
+    ".home.arpa",
+    ".lan",
+    ".corp",
+    ".intranet",
+    ".private",
+)
+_CANONICAL_CONFIG_KEYS = frozenset(
+    {
+        "name",
+        "description",
+        "serverurl",
+        "failonerror",
+        "maxoutputdocuments",
+        "tools",
+        "queryheaders",
+        "maxoutputtokens",
+        "outputparsing",
+        "inclusionmode",
+        "kind",
+        "jsonparameters",
+        "documentspath",
+        "includecontext",
+        "valuefrom",
+        "scope",
+        "secretname",
+    }
+)
+_LITERAL_CREDENTIAL_KEY_PARTS = (
+    "authorization",
+    "auth",
+    "header",
+    "token",
+    "apikey",
+    "key",
+    "password",
+    "secret",
+    "cookie",
+    "credential",
+    "value",
+)
+_MAX_TOOL_ARGUMENT_LOG_DEPTH = 8
+_MAX_TOOL_ARGUMENT_LOG_ITEMS = 32
+_MAX_TOOL_ARGUMENT_LOG_TEXT_LENGTH = 256
+_MAX_TOOL_ARGUMENT_LOG_LENGTH = 1000
+_REDACTED_LOG_VALUE = "<redacted>"
+_TRUNCATED_LOG_VALUE = "<truncated>"
 
 
 class McpConfigurationError(ValueError):
@@ -41,10 +103,20 @@ class McpCredentialError(RuntimeError):
     """Raised when a configured MCP query credential cannot be resolved."""
 
 
+def is_mcp_enabled(value: Any) -> bool:
+    """Return whether an MCP feature-flag value is explicitly enabled."""
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
 class McpJsonOutputParameters(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     documents_path: str = Field(alias="documentsPath")
+    include_context: Optional[StrictBool] = Field(
+        default=None, alias="includeContext"
+    )
 
     @field_validator("documents_path")
     @classmethod
@@ -58,12 +130,9 @@ class McpJsonOutputParameters(BaseModel):
 class McpOutputParsing(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    kind: Literal["auto", "json", "split", "none"] = "auto"
+    kind: Literal["auto", "json", "split", "none"]
     json_parameters: Optional[McpJsonOutputParameters] = Field(
         default=None, alias="jsonParameters"
-    )
-    split_parameters: Optional[dict[str, Any]] = Field(
-        default=None, alias="splitParameters"
     )
 
     @model_validator(mode="after")
@@ -72,8 +141,6 @@ class McpOutputParsing(BaseModel):
             raise ValueError("json outputParsing requires jsonParameters.documentsPath")
         if self.kind != "json" and self.json_parameters is not None:
             raise ValueError("jsonParameters is only valid for json outputParsing")
-        if self.kind != "split" and self.split_parameters is not None:
-            raise ValueError("splitParameters is only valid for split outputParsing")
         return self
 
 
@@ -81,13 +148,9 @@ class McpTool(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     name: str
-    max_output_tokens: Optional[int] = Field(default=None, alias="maxOutputTokens")
-    inclusion_mode: Optional[Literal["all", "reranked"]] = Field(
-        default=None, alias="inclusionMode"
-    )
-    output_parsing: McpOutputParsing = Field(
-        default_factory=McpOutputParsing, alias="outputParsing"
-    )
+    max_output_tokens: int = Field(alias="maxOutputTokens")
+    inclusion_mode: Literal["reranked", "always"] = Field(alias="inclusionMode")
+    output_parsing: McpOutputParsing = Field(alias="outputParsing")
 
     @field_validator("name")
     @classmethod
@@ -99,8 +162,8 @@ class McpTool(BaseModel):
 
     @field_validator("max_output_tokens")
     @classmethod
-    def validate_max_output_tokens(cls, value: Optional[int]) -> Optional[int]:
-        if value is not None and not 1 <= value <= 8192:
+    def validate_max_output_tokens(cls, value: int) -> int:
+        if not 1 <= value <= 8192:
             raise ValueError("maxOutputTokens must be between 1 and 8192")
         return value
 
@@ -156,7 +219,8 @@ class McpSource(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     name: str
-    server_url: str = Field(alias="serverUrl")
+    description: Optional[str] = None
+    server_url: str = Field(alias="serverURL")
     fail_on_error: bool = Field(default=True, alias="failOnError")
     max_output_documents: Optional[int] = Field(
         default=None, alias="maxOutputDocuments"
@@ -234,25 +298,54 @@ def _parse_trusted_hosts(value: Any) -> frozenset[str]:
     return frozenset(hosts)
 
 
+def _normalize_key_name(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value).casefold())
+
+
+def _is_literal_credential_key(key: Any) -> bool:
+    normalized = _normalize_key_name(key)
+    if normalized in _CANONICAL_CONFIG_KEYS:
+        return False
+    return any(part in normalized for part in _LITERAL_CREDENTIAL_KEY_PARTS)
+
+
+def _reject_literal_credentials(node: Any) -> None:
+    """Reject secret-shaped keys without including their values in errors."""
+    if isinstance(node, Mapping):
+        for key, value in node.items():
+            if _is_literal_credential_key(key):
+                raise McpConfigurationError(
+                    "FOUNDRY_IQ_MCP_SOURCES_JSON contains a forbidden literal "
+                    f"credential field {str(key)!r}"
+                )
+            _reject_literal_credentials(value)
+    elif isinstance(node, list):
+        for item in node:
+            _reject_literal_credentials(item)
+
+
 def _validate_server_url(source: McpSource, trusted_hosts: frozenset[str]) -> None:
     try:
         parsed = urlsplit(source.server_url)
+        host = (parsed.hostname or "").rstrip(".").lower()
+        parsed.port
     except ValueError as exc:
         raise McpConfigurationError(
-            f"MCP source {source.name!r} has an invalid serverUrl"
+            f"MCP source {source.name!r} has an invalid serverURL"
         ) from exc
 
-    host = (parsed.hostname or "").rstrip(".").lower()
     if (
         parsed.scheme.lower() != "https"
         or not host
         or parsed.username is not None
         or parsed.password is not None
+        or parsed.query
+        or "?" in source.server_url
         or parsed.fragment
     ):
         raise McpConfigurationError(
-            f"MCP source {source.name!r} serverUrl must be HTTPS without "
-            "userinfo or a fragment"
+            f"MCP source {source.name!r} serverURL must be HTTPS without a "
+            "query string, userinfo, or a fragment"
         )
     try:
         ipaddress.ip_address(host)
@@ -260,15 +353,16 @@ def _validate_server_url(source: McpSource, trusted_hosts: frozenset[str]) -> No
         pass
     else:
         raise McpConfigurationError(
-            f"MCP source {source.name!r} serverUrl must not use an IP literal"
+            f"MCP source {source.name!r} serverURL must not use an IP literal"
         )
     if (
         host in _RESERVED_HOSTS
         or host.endswith(_RESERVED_HOST_SUFFIXES)
         or "." not in host
+        or host.rsplit(".", 1)[-1].isdigit()
     ):
         raise McpConfigurationError(
-            f"MCP source {source.name!r} serverUrl uses a local or reserved host"
+            f"MCP source {source.name!r} serverURL uses a local or reserved host"
         )
     if host not in trusted_hosts:
         raise McpConfigurationError(
@@ -348,6 +442,7 @@ class McpRuntimeConfig:
             raise McpConfigurationError(
                 "FOUNDRY_IQ_MCP_SOURCES_JSON must contain at least one source"
             )
+        _reject_literal_credentials(raw_sources)
         try:
             sources = tuple(McpSource.model_validate(item) for item in raw_sources)
         except ValidationError as exc:
@@ -457,3 +552,57 @@ async def build_mcp_control_headers(
         credential_modes[source.name] = tuple(modes or ["none"])
 
     return headers, credential_modes
+
+
+def _is_sensitive_tool_argument_key(key: Any) -> bool:
+    normalized = _normalize_key_name(key)
+    return any(part in normalized for part in _LITERAL_CREDENTIAL_KEY_PARTS)
+
+
+def _truncate_log_text(value: str) -> str:
+    if len(value) <= _MAX_TOOL_ARGUMENT_LOG_TEXT_LENGTH:
+        return value
+    return f"{value[:_MAX_TOOL_ARGUMENT_LOG_TEXT_LENGTH]}{_TRUNCATED_LOG_VALUE}"
+
+
+def redact_mcp_tool_arguments(arguments: Any) -> str:
+    """Return a bounded, credential-redacted representation for debug logging."""
+
+    def sanitize(value: Any, depth: int) -> Any:
+        if depth >= _MAX_TOOL_ARGUMENT_LOG_DEPTH:
+            return _TRUNCATED_LOG_VALUE
+        if isinstance(value, Mapping):
+            sanitized: dict[str, Any] = {}
+            for index, (key, nested_value) in enumerate(value.items()):
+                if index >= _MAX_TOOL_ARGUMENT_LOG_ITEMS:
+                    sanitized[_TRUNCATED_LOG_VALUE] = "item limit"
+                    break
+                if _is_sensitive_tool_argument_key(key):
+                    sanitized[f"<redacted-key-{index}>"] = _REDACTED_LOG_VALUE
+                else:
+                    safe_key = _truncate_log_text(str(key))
+                    sanitized[safe_key] = sanitize(nested_value, depth + 1)
+            return sanitized
+        if isinstance(value, list):
+            sanitized_items: list[Any] = []
+            for index, item in enumerate(value):
+                if index >= _MAX_TOOL_ARGUMENT_LOG_ITEMS:
+                    sanitized_items.append(_TRUNCATED_LOG_VALUE)
+                    break
+                sanitized_items.append(sanitize(item, depth + 1))
+            return sanitized_items
+        if isinstance(value, str):
+            return _truncate_log_text(value)
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        return f"<{type(value).__name__}>"
+
+    serialized = json.dumps(
+        sanitize(arguments, 0),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    if len(serialized) <= _MAX_TOOL_ARGUMENT_LOG_LENGTH:
+        return serialized
+    return f"{serialized[:_MAX_TOOL_ARGUMENT_LOG_LENGTH]}{_TRUNCATED_LOG_VALUE}"

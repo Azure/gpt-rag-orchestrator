@@ -105,16 +105,19 @@ add MCP runtime, activity, reasoning, or credential headers.
 Enable it with these non-secret App Configuration settings:
 
 ```dotenv
+RETRIEVAL_BACKEND=foundry_iq
 FOUNDRY_IQ_MCP_ENABLED=true
 FOUNDRY_IQ_MCP_REASONING_EFFORT=low
 FOUNDRY_IQ_MCP_TRUSTED_HOSTS=mcp.contoso.com
 FOUNDRY_IQ_MCP_LOG_TOOL_ARGUMENTS=false
-FOUNDRY_IQ_MCP_SOURCES_JSON=[{"name":"monitor-mcp","serverUrl":"https://mcp.contoso.com/mcp","failOnError":true,"maxOutputDocuments":5,"tools":[{"name":"query_logs","maxOutputTokens":2048,"outputParsing":{"kind":"json","jsonParameters":{"documentsPath":"$.results[*]"}}}],"queryHeaders":[{"name":"Authorization","valueFrom":{"kind":"managedIdentity","scope":"api://monitor-mcp/.default"}}]}]
+FOUNDRY_IQ_MCP_SOURCES_JSON=[{"name":"monitor-mcp","description":"Read-only Azure Monitor MCP source.","serverURL":"https://mcp.contoso.com/mcp","failOnError":true,"maxOutputDocuments":5,"tools":[{"name":"query_logs","outputParsing":{"kind":"json","jsonParameters":{"documentsPath":"$.results[*]","includeContext":true}},"inclusionMode":"reranked","maxOutputTokens":2048}],"queryHeaders":[{"name":"Authorization","valueFrom":{"kind":"managedIdentity","scope":"api://monitor-mcp/.default"}}]}]
 ```
 
-`serverUrl`, tools, and output parsing are validation/provisioning metadata.
-Retrieve requests send only each registered knowledge source name. Query header
-credentials are resolved per request and forwarded with Azure AI Search's paired
+`serverURL`, tools, and output parsing are registration metadata. Retrieve
+requests send only each registered knowledge source name. `queryHeaders` is
+non-secret runtime credential metadata and is never rendered into the
+top-level Search knowledge-source registration. Its values are resolved per
+request and forwarded with Azure AI Search's paired
 `<knowledge-source>-header-name[N]` and
 `<knowledge-source>-header-value[N]` control headers. Supported `valueFrom.kind`
 values are:
@@ -125,10 +128,10 @@ values are:
 - `none`, which forwards no credential
 
 Literal header values and secrets are rejected. MCP hosts require an exact
-trusted-host match and HTTPS; localhost, IP literals, userinfo, fragments, and
-reserved hosts are rejected. The Search service `Authorization` header and
-document-security `x-ms-query-source-authorization` header remain separate from
-MCP credentials.
+trusted-host match and HTTPS; query strings, localhost, IP literals, userinfo,
+fragments, and reserved hosts are rejected. The Search service `Authorization`
+header and document-security `x-ms-query-source-authorization` header remain
+separate from MCP credentials.
 
 Enabling MCP switches retrieval to one user `messages` entry with low or medium
 reasoning, `extractiveData`, activity diagnostics, and the existing bounded
@@ -142,16 +145,23 @@ arguments are not guaranteed to be semantically safe. Use read-only tools,
 least-privilege scopes, bounded time ranges and row counts, and server-side
 argument validation and auditing.
 
+Tool arguments are omitted from normal telemetry. When
+`FOUNDRY_IQ_MCP_LOG_TOOL_ARGUMENTS=true`, debug telemetry writes only a
+bounded, recursively redacted representation. Credential, authorization,
+token, cookie, and header values are always redacted, including paired control
+header values. Keep this setting disabled in production unless the remaining
+argument data is approved for diagnostic logging.
+
 The source JSON schema is:
 
 | Field | Requirement |
 | --- | --- |
 | `name` | Required, unique registered knowledge source name. |
-| `serverUrl` | Required HTTPS provisioning metadata. Its exact host must appear in `FOUNDRY_IQ_MCP_TRUSTED_HOSTS`; it is never sent in retrieve bodies. |
-| `tools` | Required non-empty list with unique tool `name` values. Optional `maxOutputTokens` must be 1–8192. `outputParsing.kind` accepts `auto`, `json`, `split`, or `none`; `json` requires `jsonParameters.documentsPath`. |
+| `serverURL` | Required HTTPS registration metadata. Its exact host must appear in `FOUNDRY_IQ_MCP_TRUSTED_HOSTS`; it is never sent in retrieve bodies. |
+| `tools` | Required non-empty list with unique tool `name` values. Each tool requires `outputParsing`, `inclusionMode`, and `maxOutputTokens`. `outputParsing` is an object: `{ "kind": "auto" \| "none" \| "split" }`, or `{ "kind": "json", "jsonParameters": { "documentsPath": "...", "includeContext": true } }`. `inclusionMode` only accepts `reranked` or `always`; `maxOutputTokens` must be 1–8192. |
 | `failOnError` | Optional, defaults to `true`. A selected source failure fails the request. Set `false` only when partial answers without that source are acceptable. |
 | `maxOutputDocuments` | Optional per-source limit from 1–50. The top-level `FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS` still limits final grounding documents. |
-| `queryHeaders` | Optional ordered list of unique safe header names and `valueFrom` metadata. The first resolved header uses the unnumbered pair; later headers use deterministic numeric suffixes. |
+| `queryHeaders` | Optional ordered runtime-only metadata. Each entry has a safe `name` and non-secret `valueFrom` metadata; it is not rendered into Search registration. The first resolved header uses the unnumbered pair; later headers use deterministic numeric suffixes. |
 
 For `managedIdentity` and `obo`, `valueFrom.scope` is required.
 `keyVaultSecret` requires `valueFrom.secretName`; `none` accepts neither field
