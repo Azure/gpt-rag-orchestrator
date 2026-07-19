@@ -6,7 +6,7 @@ import ipaddress
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Literal, Mapping, Optional
+from typing import Annotated, Any, Awaitable, Callable, Literal, Mapping, Optional
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -14,6 +14,8 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    StrictInt,
+    StrictStr,
     ValidationError,
     field_validator,
     model_validator,
@@ -69,6 +71,12 @@ _CANONICAL_CONFIG_KEYS = frozenset(
         "jsonparameters",
         "documentspath",
         "includecontext",
+        "splitparameters",
+        "textsplitmode",
+        "maximumpagelength",
+        "pageoverlaplength",
+        "maximumpagestotake",
+        "defaultlanguagecode",
         "valuefrom",
         "scope",
         "secretname",
@@ -127,21 +135,91 @@ class McpJsonOutputParameters(BaseModel):
         return value
 
 
-class McpOutputParsing(BaseModel):
+class McpSplitOutputParameters(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    kind: Literal["auto", "json", "split", "none"]
-    json_parameters: Optional[McpJsonOutputParameters] = Field(
-        default=None, alias="jsonParameters"
+    text_split_mode: Optional[Literal["pages", "sentences"]] = Field(
+        default=None, alias="textSplitMode"
+    )
+    maximum_page_length: Optional[StrictInt] = Field(
+        default=None, alias="maximumPageLength"
+    )
+    page_overlap_length: Optional[StrictInt] = Field(
+        default=None, alias="pageOverlapLength"
+    )
+    maximum_pages_to_take: Optional[StrictInt] = Field(
+        default=None, alias="maximumPagesToTake"
+    )
+    default_language_code: Optional[StrictStr] = Field(
+        default=None, alias="defaultLanguageCode"
     )
 
+    @field_validator("maximum_page_length", "maximum_pages_to_take")
+    @classmethod
+    def validate_positive_length(cls, value: Optional[int]) -> Optional[int]:
+        if value is not None and value <= 0:
+            raise ValueError("must be a positive integer")
+        return value
+
+    @field_validator("page_overlap_length")
+    @classmethod
+    def validate_page_overlap_length(cls, value: Optional[int]) -> Optional[int]:
+        if value is not None and value < 0:
+            raise ValueError("must be a non-negative integer")
+        return value
+
+    @field_validator("default_language_code")
+    @classmethod
+    def validate_default_language_code(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("must be a non-empty string")
+        return value
+
     @model_validator(mode="after")
-    def validate_parameters(self) -> "McpOutputParsing":
-        if self.kind == "json" and self.json_parameters is None:
-            raise ValueError("json outputParsing requires jsonParameters.documentsPath")
-        if self.kind != "json" and self.json_parameters is not None:
-            raise ValueError("jsonParameters is only valid for json outputParsing")
+    def validate_overlap(self) -> "McpSplitOutputParameters":
+        if (
+            self.maximum_page_length is not None
+            and self.page_overlap_length is not None
+            and self.page_overlap_length >= self.maximum_page_length
+        ):
+            raise ValueError("pageOverlapLength must be less than maximumPageLength")
         return self
+
+
+class _McpOutputParsingBase(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class McpAutoOutputParsing(_McpOutputParsingBase):
+    kind: Literal["auto"]
+
+
+class McpJsonOutputParsing(_McpOutputParsingBase):
+    kind: Literal["json"]
+    json_parameters: McpJsonOutputParameters = Field(alias="jsonParameters")
+
+
+class McpSplitOutputParsing(_McpOutputParsingBase):
+    kind: Literal["split"]
+    split_parameters: Optional[McpSplitOutputParameters] = Field(
+        default=None, alias="splitParameters"
+    )
+
+
+class McpNoneOutputParsing(_McpOutputParsingBase):
+    kind: Literal["none"]
+
+
+McpOutputParsing = Annotated[
+    McpAutoOutputParsing
+    | McpJsonOutputParsing
+    | McpSplitOutputParsing
+    | McpNoneOutputParsing,
+    Field(discriminator="kind"),
+]
 
 
 class McpTool(BaseModel):

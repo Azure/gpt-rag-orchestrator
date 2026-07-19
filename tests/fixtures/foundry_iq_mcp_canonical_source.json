@@ -22,6 +22,21 @@
       },
       "inclusionMode": "always",
       "maxOutputTokens": 512
+    },
+    {
+      "name": "split_report",
+      "outputParsing": {
+        "kind": "split",
+        "splitParameters": {
+          "textSplitMode": "pages",
+          "maximumPageLength": 4000,
+          "pageOverlapLength": 500,
+          "maximumPagesToTake": 10,
+          "defaultLanguageCode": "en"
+        }
+      },
+      "inclusionMode": "reranked",
+      "maxOutputTokens": 1024
     }
   ]
 }

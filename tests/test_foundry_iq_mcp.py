@@ -117,6 +117,149 @@ def test_cross_schema_fixture_uses_the_canonical_search_contract():
     assert config.sources[0].tools[0].output_parsing.json_parameters.include_context
     assert config.sources[0].tools[1].output_parsing.kind == "auto"
     assert config.sources[0].tools[1].inclusion_mode == "always"
+    split_parsing = config.sources[0].tools[2].output_parsing
+    assert split_parsing.kind == "split"
+    assert split_parsing.split_parameters.text_split_mode == "pages"
+    assert split_parsing.split_parameters.maximum_page_length == 4000
+    assert split_parsing.split_parameters.page_overlap_length == 500
+    assert split_parsing.split_parameters.maximum_pages_to_take == 10
+    assert split_parsing.split_parameters.default_language_code == "en"
+
+
+def test_split_output_parsing_allows_omitted_parameters():
+    source = _source(
+        tools=[
+            {
+                "name": "split_report",
+                "outputParsing": {"kind": "split"},
+                "inclusionMode": "reranked",
+                "maxOutputTokens": 1024,
+            }
+        ]
+    )
+
+    config = McpRuntimeConfig.parse(
+        enabled=True,
+        sources_json=[source],
+        reasoning_effort="low",
+        trusted_hosts="mcp.contoso.com",
+        log_tool_arguments=False,
+        api_version="2026-05-01-preview",
+        max_runtime_seconds=120,
+    )
+
+    split_parsing = config.sources[0].tools[0].output_parsing
+    assert split_parsing.kind == "split"
+    assert split_parsing.split_parameters is None
+
+
+@pytest.mark.parametrize(
+    ("kind", "parameter_name", "parameters"),
+    [
+        (
+            "json",
+            "splitParameters",
+            {
+                "jsonParameters": {"documentsPath": "$.results[*]"},
+                "splitParameters": {"textSplitMode": "pages"},
+            },
+        ),
+        (
+            "split",
+            "jsonParameters",
+            {"jsonParameters": {"documentsPath": "$.results[*]"}},
+        ),
+        (
+            "auto",
+            "jsonParameters",
+            {"jsonParameters": {"documentsPath": "$.results[*]"}},
+        ),
+        (
+            "auto",
+            "splitParameters",
+            {"splitParameters": {"textSplitMode": "pages"}},
+        ),
+        (
+            "none",
+            "jsonParameters",
+            {"jsonParameters": {"documentsPath": "$.results[*]"}},
+        ),
+        (
+            "none",
+            "splitParameters",
+            {"splitParameters": {"textSplitMode": "pages"}},
+        ),
+    ],
+)
+def test_output_parsing_rejects_parameters_for_other_kinds(
+    kind, parameter_name, parameters
+):
+    source = _source(
+        tools=[
+            {
+                "name": "query",
+                "outputParsing": {"kind": kind, **parameters},
+                "inclusionMode": "reranked",
+                "maxOutputTokens": 1024,
+            }
+        ]
+    )
+
+    with pytest.raises(McpConfigurationError, match=parameter_name):
+        McpRuntimeConfig.parse(
+            enabled=True,
+            sources_json=[source],
+            reasoning_effort="low",
+            trusted_hosts="mcp.contoso.com",
+            log_tool_arguments=False,
+            api_version="2026-05-01-preview",
+            max_runtime_seconds=120,
+        )
+
+
+@pytest.mark.parametrize(
+    ("split_parameters", "match"),
+    [
+        ({"unit": "azureOpenAITokens"}, "unit"),
+        ({"textSplitMode": "paragraphs"}, "textSplitMode"),
+        ({"maximumPageLength": True}, "maximumPageLength"),
+        ({"maximumPageLength": 0}, "maximumPageLength"),
+        ({"pageOverlapLength": -1}, "pageOverlapLength"),
+        ({"maximumPagesToTake": 0}, "maximumPagesToTake"),
+        ({"defaultLanguageCode": "  "}, "defaultLanguageCode"),
+        (
+            {"maximumPageLength": 100, "pageOverlapLength": 100},
+            "pageOverlapLength",
+        ),
+    ],
+)
+def test_split_output_parsing_rejects_unknown_or_invalid_fields(
+    split_parameters, match
+):
+    source = _source(
+        tools=[
+            {
+                "name": "split_report",
+                "outputParsing": {
+                    "kind": "split",
+                    "splitParameters": split_parameters,
+                },
+                "inclusionMode": "reranked",
+                "maxOutputTokens": 1024,
+            }
+        ]
+    )
+
+    with pytest.raises(McpConfigurationError, match=match):
+        McpRuntimeConfig.parse(
+            enabled=True,
+            sources_json=[source],
+            reasoning_effort="low",
+            trusted_hosts="mcp.contoso.com",
+            log_tool_arguments=False,
+            api_version="2026-05-01-preview",
+            max_runtime_seconds=120,
+        )
 
 
 def _build_client(
@@ -515,12 +658,14 @@ async def test_missing_credentials_fail_clearly(
                             {
                                 "name": "query",
                                 "outputParsing": {"kind": "json"},
+                                "inclusionMode": "reranked",
+                                "maxOutputTokens": 1024,
                             }
                         ],
                     }
                 ]
             },
-            "documentsPath",
+            "jsonParameters",
         ),
         (
             {
@@ -537,25 +682,6 @@ async def test_missing_credentials_fail_clearly(
                 ]
             },
             "outputParsing",
-        ),
-        (
-            {
-                "sources_json": [
-                    {
-                        **_source(),
-                        "tools": [
-                            {
-                                "name": "query",
-                                "outputParsing": {
-                                    "kind": "split",
-                                    "splitParameters": {"maximumPagesToTake": 3},
-                                },
-                            }
-                        ],
-                    }
-                ]
-            },
-            "splitParameters",
         ),
         (
             {

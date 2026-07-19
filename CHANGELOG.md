@@ -13,9 +13,10 @@
 ### Fixed
 
 - **Canonical and safe MCP source handling.** MCP configuration now uses the
-  Search-compatible `serverURL`, object-shaped output parsing, and
-  `reranked`/`always` inclusion modes; URL query strings are rejected and
-  debug argument logging recursively redacts credentials and paired headers.
+  Search-compatible `serverURL`, strictly discriminated object-shaped output
+  parsing including `splitParameters`, and `reranked`/`always` inclusion modes;
+  URL query strings are rejected and debug argument logging recursively redacts
+  credentials and paired headers.
 - **Disabled Foundry IQ compatibility.** Search OBO failures continue to log
   and fall back under the legacy disabled MCP path, while enabled MCP sources
   retain strict credential and source-failure propagation.
