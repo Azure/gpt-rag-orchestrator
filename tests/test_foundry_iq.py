@@ -538,7 +538,7 @@ def foundry_search_client(patch_dependencies, mock_config):
     }.get(key, default)
     with patch("connectors.search.get_config", return_value=mock_config):
         client = SearchClient()
-    client._get_search_user_token_for_trimming = AsyncMock(return_value="user-obo-token")
+    client._request_api_access_token = "incoming-api-token"
     return client
 
 
@@ -554,6 +554,10 @@ async def test_search_knowledge_base_foundry_iq_branch_contract(foundry_search_c
     with (
         patch("connectors.search.get_retrieval_backend", return_value="foundry_iq"),
         patch("connectors.search.get_foundry_iq_client", return_value=fake_client),
+        patch(
+            "connectors.search.acquire_obo_search_token",
+            new=AsyncMock(return_value="user-obo-token"),
+        ),
     ):
         result = await foundry_search_client.search_knowledge_base("hello")
 

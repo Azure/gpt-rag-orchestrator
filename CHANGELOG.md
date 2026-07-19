@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Optional generic Foundry IQ MCP Server knowledge sources (Preview).**
+  Operators can opt in to preprovisioned `mcpServer` sources with explicit tool
+  allowlists, trusted-host validation, bounded planning/runtime/output, and
+  request-scoped managed identity, OBO, or Key Vault credentials. The disabled
+  default preserves the existing minimal-reasoning intents request and headers.
+
 ## [v3.6.0] - 2026-07-17
 
 ### Added

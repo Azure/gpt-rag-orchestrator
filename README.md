@@ -95,6 +95,73 @@ Work IQ is opt-in and off by default:
 
 Work IQ is currently a gated preview and requires admin consent plus a Work IQ knowledge source provisioned on the same Azure AI Search service. See the enablement guide in the [Azure/GPT-RAG](https://github.com/Azure/GPT-RAG) repo for the end-to-end setup ([issue #543](https://github.com/Azure/GPT-RAG/issues/543)).
 
+#### Generic MCP Server knowledge sources (Preview)
+
+Foundry IQ can optionally call one or more preprovisioned generic MCP Server
+knowledge sources. The feature is disabled by default. When disabled, the
+orchestrator keeps the existing minimal-reasoning `intents` request and does not
+add MCP runtime, activity, reasoning, or credential headers.
+
+Enable it with these non-secret App Configuration settings:
+
+```dotenv
+FOUNDRY_IQ_MCP_ENABLED=true
+FOUNDRY_IQ_MCP_REASONING_EFFORT=low
+FOUNDRY_IQ_MCP_TRUSTED_HOSTS=mcp.contoso.com
+FOUNDRY_IQ_MCP_LOG_TOOL_ARGUMENTS=false
+FOUNDRY_IQ_MCP_SOURCES_JSON=[{"name":"monitor-mcp","serverUrl":"https://mcp.contoso.com/mcp","failOnError":true,"maxOutputDocuments":5,"tools":[{"name":"query_logs","maxOutputTokens":2048,"outputParsing":{"kind":"json","jsonParameters":{"documentsPath":"$.results[*]"}}}],"queryHeaders":[{"name":"Authorization","valueFrom":{"kind":"managedIdentity","scope":"api://monitor-mcp/.default"}}]}]
+```
+
+`serverUrl`, tools, and output parsing are validation/provisioning metadata.
+Retrieve requests send only each registered knowledge source name. Query header
+credentials are resolved per request and forwarded with Azure AI Search's paired
+`<knowledge-source>-header-name[N]` and
+`<knowledge-source>-header-value[N]` control headers. Supported `valueFrom.kind`
+values are:
+
+- `managedIdentity`, with an explicit downstream `scope`
+- `obo`, with an explicit downstream `scope` and an authenticated user request
+- `keyVaultSecret`, with a Key Vault `secretName`
+- `none`, which forwards no credential
+
+Literal header values and secrets are rejected. MCP hosts require an exact
+trusted-host match and HTTPS; localhost, IP literals, userinfo, fragments, and
+reserved hosts are rejected. The Search service `Authorization` header and
+document-security `x-ms-query-source-authorization` header remain separate from
+MCP credentials.
+
+Enabling MCP switches retrieval to one user `messages` entry with low or medium
+reasoning, `extractiveData`, activity diagnostics, and the existing bounded
+Foundry IQ runtime/document limits. Required-source activity failures and
+credential errors fail closed. Optional-source failures can return successful
+references as a partial result and are logged without raw results, credentials,
+query strings, or tool arguments by default.
+
+This is a preview contract on API `2026-05-01-preview`. MCP-generated tool
+arguments are not guaranteed to be semantically safe. Use read-only tools,
+least-privilege scopes, bounded time ranges and row counts, and server-side
+argument validation and auditing.
+
+The source JSON schema is:
+
+| Field | Requirement |
+| --- | --- |
+| `name` | Required, unique registered knowledge source name. |
+| `serverUrl` | Required HTTPS provisioning metadata. Its exact host must appear in `FOUNDRY_IQ_MCP_TRUSTED_HOSTS`; it is never sent in retrieve bodies. |
+| `tools` | Required non-empty list with unique tool `name` values. Optional `maxOutputTokens` must be 1–8192. `outputParsing.kind` accepts `auto`, `json`, `split`, or `none`; `json` requires `jsonParameters.documentsPath`. |
+| `failOnError` | Optional, defaults to `true`. A selected source failure fails the request. Set `false` only when partial answers without that source are acceptable. |
+| `maxOutputDocuments` | Optional per-source limit from 1–50. The top-level `FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS` still limits final grounding documents. |
+| `queryHeaders` | Optional ordered list of unique safe header names and `valueFrom` metadata. The first resolved header uses the unnumbered pair; later headers use deterministic numeric suffixes. |
+
+For `managedIdentity` and `obo`, `valueFrom.scope` is required.
+`keyVaultSecret` requires `valueFrom.secretName`; `none` accepts neither field
+and sends no header. MCP retrieval also validates
+`FOUNDRY_IQ_MAX_RUNTIME_SECONDS` in the 30–600 range. Invalid enabled
+configuration stops retrieval instead of skipping a source.
+
+Track cross-repository provisioning and canonical documentation work in
+[Azure/gpt-rag#567](https://github.com/Azure/GPT-RAG/issues/567).
+
 ## Documentation
 
 For comprehensive information about GPT-RAG, including architecture details, configuration guides, best practices, troubleshooting resources, deployment guidance, customization options, and advanced usage scenarios, please refer to the [official project documentation](https://azure.github.io/GPT-RAG/).

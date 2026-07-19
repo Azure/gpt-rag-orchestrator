@@ -23,12 +23,18 @@ constant (see :data:`DEFAULT_FOUNDRY_IQ_API_VERSION`).
 """
 
 import logging
+import json
 import time
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 import aiohttp
 
 from dependencies import get_config
+from connectors.foundry_iq_mcp import (
+    McpCredentialError,
+    McpRuntimeConfig,
+    build_mcp_control_headers,
+)
 
 # Per-user security on the knowledge base retrieve action (both the native OBO
 # path and the Pattern B filterAddOn path) requires this preview API version.
@@ -64,6 +70,16 @@ FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME_KEY = (
 # Pattern A / Pattern B request bodies remain byte-identical.
 FOUNDRY_IQ_MAX_RUNTIME_SECONDS_KEY = "FOUNDRY_IQ_MAX_RUNTIME_SECONDS"
 DEFAULT_FOUNDRY_IQ_MAX_RUNTIME_SECONDS = 120
+
+# Generic MCP Server knowledge sources. The feature is preview and disabled by
+# default. Server URL, tools, parsing, and auth metadata describe the
+# preprovisioned knowledge source and are validated locally; retrieve requests
+# reference only the registered source name.
+FOUNDRY_IQ_MCP_ENABLED_KEY = "FOUNDRY_IQ_MCP_ENABLED"
+FOUNDRY_IQ_MCP_SOURCES_JSON_KEY = "FOUNDRY_IQ_MCP_SOURCES_JSON"
+FOUNDRY_IQ_MCP_REASONING_EFFORT_KEY = "FOUNDRY_IQ_MCP_REASONING_EFFORT"
+FOUNDRY_IQ_MCP_TRUSTED_HOSTS_KEY = "FOUNDRY_IQ_MCP_TRUSTED_HOSTS"
+FOUNDRY_IQ_MCP_LOG_TOOL_ARGUMENTS_KEY = "FOUNDRY_IQ_MCP_LOG_TOOL_ARGUMENTS"
 
 # Work IQ (Microsoft 365 remote knowledge source). Opt-in; default off. When
 # enabled, the retrieve request appends a workIQ knowledge source in
@@ -177,6 +193,10 @@ _REMOTE_KNOWLEDGE_SOURCE_KINDS = frozenset(
 
 # Search-audience scope used for the service token.
 _SEARCH_SCOPE = "https://search.azure.com/.default"
+
+
+class McpSourceError(RuntimeError):
+    """Raised when a required MCP source fails during Foundry IQ retrieval."""
 
 
 def _odata_escape_string(value: Optional[str]) -> str:
@@ -367,12 +387,32 @@ class FoundryIQClient:
             self.cfg.get(FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME_KEY, "") or ""
         ).strip()
         # Retrieve-runtime ceiling for remote knowledge source kinds.
-        self.max_runtime_seconds = _as_optional_int(
-            self.cfg.get(
-                FOUNDRY_IQ_MAX_RUNTIME_SECONDS_KEY,
-                DEFAULT_FOUNDRY_IQ_MAX_RUNTIME_SECONDS,
-            )
-        ) or DEFAULT_FOUNDRY_IQ_MAX_RUNTIME_SECONDS
+        raw_max_runtime_seconds = self.cfg.get(
+            FOUNDRY_IQ_MAX_RUNTIME_SECONDS_KEY,
+            DEFAULT_FOUNDRY_IQ_MAX_RUNTIME_SECONDS,
+        )
+        self.max_runtime_seconds = (
+            _as_optional_int(raw_max_runtime_seconds)
+            or DEFAULT_FOUNDRY_IQ_MAX_RUNTIME_SECONDS
+        )
+        mcp_enabled = _as_bool(
+            self.cfg.get(FOUNDRY_IQ_MCP_ENABLED_KEY, False, type=bool)
+        )
+        self.mcp_config = McpRuntimeConfig.parse(
+            enabled=mcp_enabled,
+            sources_json=self.cfg.get(FOUNDRY_IQ_MCP_SOURCES_JSON_KEY, "[]"),
+            reasoning_effort=self.cfg.get(
+                FOUNDRY_IQ_MCP_REASONING_EFFORT_KEY, "low"
+            ),
+            trusted_hosts=self.cfg.get(FOUNDRY_IQ_MCP_TRUSTED_HOSTS_KEY, ""),
+            log_tool_arguments=_as_bool(
+                self.cfg.get(
+                    FOUNDRY_IQ_MCP_LOG_TOOL_ARGUMENTS_KEY, False, type=bool
+                )
+            ),
+            api_version=self.api_version,
+            max_runtime_seconds=raw_max_runtime_seconds,
+        )
         # Work IQ (Microsoft 365) remote knowledge source. Opt-in; requires
         # a per-user OBO token - anonymous / MI fallback is never used.
         self.work_iq_enabled = _as_bool(
@@ -892,6 +932,58 @@ class FoundryIQClient:
 
         return {"title": title_text, "link": url_text, "content": snippet_text}
 
+    @staticmethod
+    def _normalize_mcp_reference(ref: Mapping[str, Any]) -> Optional[Dict[str, str]]:
+        """Map an MCP reference into the shared citation contract."""
+        source_data = ref.get("sourceData")
+        source = source_data if isinstance(source_data, Mapping) else {}
+
+        title = source.get("title") or source.get("name") or ref.get("title")
+        if not title:
+            title = ref.get("toolName") or "MCP reference"
+        link = (
+            source.get("url")
+            or source.get("uri")
+            or source.get("link")
+            or source.get("webUrl")
+            or ""
+        )
+        content_value = (
+            source.get("content")
+            or source.get("text")
+            or source.get("snippet")
+            or source.get("description")
+        )
+        if content_value is None and source_data not in (None, "", {}, []):
+            content_value = source_data
+
+        if isinstance(content_value, str):
+            content = content_value.strip()
+        elif content_value is None:
+            content = ""
+        else:
+            try:
+                content = json.dumps(
+                    content_value,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                    default=str,
+                )
+            except (TypeError, ValueError):
+                content = str(content_value)
+        content = content[:4000]
+
+        title_text = str(title).strip() if title is not None else ""
+        link_text = str(link).strip() if link is not None else ""
+        if not content and not link_text:
+            return None
+        return {
+            "title": title_text or "MCP reference",
+            "link": link_text,
+            "content": content,
+        }
+
     @classmethod
     def _normalize_references(cls, payload: Dict[str, Any]) -> List[Dict[str, str]]:
         """Map a retrieve response into ``[{title, link, content}]`` records.
@@ -940,11 +1032,20 @@ class FoundryIQClient:
         records: List[Dict[str, str]] = []
         for ref in payload.get("references", []) or []:
             source = ref.get("sourceData") or {}
+            ref_type = str(ref.get("type") or "").strip().lower()
+
+            if ref_type == "mcpserver":
+                mcp_record = cls._normalize_mcp_reference(ref)
+                if mcp_record is not None:
+                    records.append(mcp_record)
+                continue
+
+            if not isinstance(source, Mapping):
+                continue
 
             # Web grounding shape (kind ``web``): dispatched by the top-level
             # reference ``type`` marker since sourceData.url / snippet overlap
             # with the generic azureBlob / searchIndex path below.
-            ref_type = str(ref.get("type") or "").strip().lower()
             if ref_type == "web":
                 web_record = cls._normalize_web_reference(source)
                 if web_record is not None:
@@ -1448,11 +1549,106 @@ class FoundryIQClient:
             or self.web_grounding_enabled
         )
 
+    def _handle_mcp_activity(
+        self, payload: Mapping[str, Any], *, http_status: int
+    ) -> None:
+        """Log safe MCP activity fields and enforce configured failure policy."""
+        sources = self.mcp_config.source_by_name()
+        failures: list[tuple[str, str]] = []
+
+        for raw_activity in payload.get("activity", []) or []:
+            if not isinstance(raw_activity, Mapping):
+                continue
+            source_name = str(raw_activity.get("knowledgeSourceName") or "")
+            if source_name not in sources:
+                continue
+            arguments = raw_activity.get("mcpServerArguments")
+            arguments = arguments if isinstance(arguments, Mapping) else {}
+            tool_name = str(
+                arguments.get("toolName") or raw_activity.get("toolName") or ""
+            )
+            error = raw_activity.get("error") or raw_activity.get("errors")
+            status_value = raw_activity.get("status")
+            status_text = str(status_value or "").strip().lower()
+            status_code = raw_activity.get("statusCode")
+            failed = bool(error) or status_text in {
+                "error",
+                "failed",
+                "failure",
+                "timeout",
+            }
+            if isinstance(status_code, int) and status_code >= 400:
+                failed = True
+
+            error_code = ""
+            if isinstance(error, Mapping):
+                error_code = str(
+                    error.get("code") or error.get("type") or "activity_error"
+                )
+            elif error:
+                error_code = "activity_error"
+            elif failed:
+                error_code = status_text or str(status_code or "activity_error")
+
+            logging.log(
+                logging.WARNING if failed else logging.INFO,
+                "[FoundryIQClient][MCP] source=%s tool=%s elapsed_ms=%s "
+                "count=%s status=%s error=%s partial=%s reasoning=%s runtime=%s",
+                source_name,
+                tool_name or "<none>",
+                raw_activity.get("elapsedMs"),
+                raw_activity.get("count"),
+                status_text or status_code or "success",
+                error_code or "<none>",
+                http_status == 206,
+                self.mcp_config.reasoning_effort,
+                self.max_runtime_seconds,
+                extra={
+                    "mcp_source": source_name,
+                    "mcp_tool": tool_name,
+                    "mcp_elapsed_ms": raw_activity.get("elapsedMs"),
+                    "mcp_count": raw_activity.get("count"),
+                    "mcp_status": status_text or status_code or "success",
+                    "mcp_error": error_code,
+                    "mcp_partial": http_status == 206,
+                },
+            )
+            if self.mcp_config.log_tool_arguments and arguments.get(
+                "toolArguments"
+            ) is not None:
+                safe_arguments = json.dumps(
+                    arguments["toolArguments"],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                    default=str,
+                )[:1000]
+                logging.debug(
+                    "[FoundryIQClient][MCP] source=%s tool=%s arguments=%s",
+                    source_name,
+                    tool_name or "<none>",
+                    safe_arguments,
+                )
+            if failed:
+                failures.append((source_name, error_code or "activity_error"))
+
+        required_failures = [
+            (source_name, error_code)
+            for source_name, error_code in failures
+            if sources[source_name].fail_on_error
+        ]
+        if required_failures:
+            source_name, error_code = required_failures[0]
+            raise McpSourceError(
+                f"MCP source {source_name!r} failed with {error_code}"
+            )
+
     async def retrieve(
         self,
         query: str,
         *,
         obo_token: Optional[str] = None,
+        incoming_token: Optional[str] = None,
         conversation_id: Optional[str] = None,
         user_context: Optional[Mapping[str, Any]] = None,
     ) -> List[Dict[str, str]]:
@@ -1463,6 +1659,9 @@ class FoundryIQClient:
             present it is forwarded in ``x-ms-query-source-authorization`` for
             per-user document-level security. This is the OBO mechanism, kept
             distinct from the Pattern B ``filterAddOn`` security filter.
+        :param incoming_token: Original user token accepted by the orchestrator.
+            MCP OBO headers exchange this assertion for each configured explicit
+            scope and never reuse the Search-audience ``obo_token``.
         :param conversation_id: Optional conversation scope. When Pattern B
             ``filterAddOn`` is enabled, this narrows runtime-upload documents to
             the current conversation plus shared/global chunks.
@@ -1479,6 +1678,10 @@ class FoundryIQClient:
             token = (await self.credential.get_token(_SEARCH_SCOPE)).token
         except Exception:
             logging.exception("[FoundryIQClient] failed to acquire service token")
+            if self.mcp_config.enabled:
+                raise McpCredentialError(
+                    "Failed to acquire the Foundry IQ service token"
+                ) from None
             raise
 
         headers = {
@@ -1511,19 +1714,62 @@ class FoundryIQClient:
                 "reason=FOUNDRY_IQ_FORWARD_SOURCE_AUTH=false and no OBO token"
             )
 
+        if self.mcp_config.enabled:
+            # Local imports avoid the existing search -> foundry_iq dependency
+            # becoming a module-import cycle.
+            from connectors.keyvault import get_secret
+            from connectors.search import acquire_obo_token
+
+            try:
+                mcp_headers, credential_modes = await build_mcp_control_headers(
+                    self.mcp_config,
+                    credential=self.credential,
+                    incoming_token=incoming_token,
+                    acquire_obo_token=acquire_obo_token,
+                    get_secret=get_secret,
+                )
+            except McpCredentialError:
+                raise
+            except Exception as exc:
+                raise McpCredentialError(
+                    "Failed to resolve an MCP query credential"
+                ) from exc
+            headers.update(mcp_headers)
+            for source_name, modes in credential_modes.items():
+                logging.info(
+                    "[FoundryIQClient][MCP] source=%s credential_modes=%s",
+                    source_name,
+                    ",".join(modes),
+                )
+
         if conversation_id:
             logging.debug("[FoundryIQClient] conversation_id=%s", conversation_id)
 
         # GPT-RAG configures the knowledge base with minimal reasoning, which
         # requires explicit intents rather than chat messages.
-        body: Dict[str, Any] = {
-            "intents": [
-                {
-                    "search": query,
-                    "type": "semantic",
-                }
-            ]
-        }
+        if self.mcp_config.enabled:
+            body: Dict[str, Any] = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": query}],
+                    }
+                ],
+                "retrievalReasoningEffort": {
+                    "kind": self.mcp_config.reasoning_effort
+                },
+                "outputMode": "extractiveData",
+                "includeActivity": True,
+            }
+        else:
+            body = {
+                "intents": [
+                    {
+                        "search": query,
+                        "type": "semantic",
+                    }
+                ]
+            }
         if self.max_output_documents:
             body["maxOutputDocuments"] = self.max_output_documents
 
@@ -1598,29 +1844,60 @@ class FoundryIQClient:
         if web_source_params:
             knowledge_source_params.append(web_source_params)
 
+        if self.mcp_config.enabled:
+            knowledge_source_params.extend(
+                self.mcp_config.knowledge_source_params()
+            )
+
         if knowledge_source_params:
             body["knowledgeSourceParams"] = knowledge_source_params
 
         # Remote kinds (workIQ, future fabric*) can take 40-60s to fan out.
         # Emit the runtime ceiling only when a remote kind is enabled so the
         # default Pattern A / Pattern B request body stays byte-identical.
-        if self._remote_kinds_enabled():
+        if self._remote_kinds_enabled() or self.mcp_config.enabled:
             body["maxRuntimeInSeconds"] = self.max_runtime_seconds
 
         session = await self._get_session()
-        async with session.post(url, headers=headers, json=body) as resp:
-            text = await resp.text()
-            if resp.status >= 400:
-                logging.error("[FoundryIQClient] %s %s", resp.status, text)
-                raise RuntimeError(f"Foundry IQ retrieve failed: {resp.status} {text}")
-            payload = await resp.json()
+        response_status = 0
+        try:
+            async with session.post(url, headers=headers, json=body) as resp:
+                response_status = resp.status
+                text = await resp.text()
+                if resp.status >= 400:
+                    if self.mcp_config.enabled:
+                        logging.error(
+                            "[FoundryIQClient][MCP] retrieve failed status=%s",
+                            resp.status,
+                        )
+                        raise McpSourceError(
+                            "Foundry IQ MCP retrieve failed: "
+                            f"status={resp.status}"
+                        )
+                    logging.error("[FoundryIQClient] %s %s", resp.status, text)
+                    raise RuntimeError(
+                        f"Foundry IQ retrieve failed: {resp.status} {text}"
+                    )
+                payload = await resp.json()
+        except McpSourceError:
+            raise
+        except Exception as exc:
+            if self.mcp_config.enabled:
+                raise McpSourceError(
+                    "Foundry IQ MCP retrieve request failed"
+                ) from exc
+            raise
 
+        if self.mcp_config.enabled:
+            self._handle_mcp_activity(payload, http_status=response_status)
         records = self._normalize_references(payload)
         logging.info(
-            "[FoundryIQClient] Retrieved %d references in %.2fs (knowledge_base=%s)",
+            "[FoundryIQClient] Retrieved %d references in %.2fs "
+            "(knowledge_base=%s, partial=%s)",
             len(records),
             time.time() - start,
             self.knowledge_base_name,
+            response_status == 206,
         )
         return records
 

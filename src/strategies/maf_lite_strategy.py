@@ -199,6 +199,9 @@ class MafLiteStrategy(BaseAgentStrategy):
             logging.warning("[MafLiteStrategy] No search index name configured, skipping search")
             return None
         try:
+            allow_anonymous = self.cfg.get(
+                "ALLOW_ANONYMOUS", default=True, type=bool
+            )
             # Build async embed function for hybrid search
             embed_fn = None
             if self.embedding_deployment:
@@ -212,7 +215,13 @@ class MafLiteStrategy(BaseAgentStrategy):
 
             async def _get_obo_token() -> str | None:
                 token = getattr(self, "request_access_token", None)
-                return await acquire_obo_search_token(token) if token else None
+                return (
+                    await acquire_obo_search_token(
+                        token, allow_anonymous=allow_anonymous
+                    )
+                    if token
+                    else None
+                )
 
             if get_retrieval_backend() == RETRIEVAL_BACKEND_FOUNDRY_IQ:
                 provider = FoundryIQContextProvider(
@@ -220,6 +229,10 @@ class MafLiteStrategy(BaseAgentStrategy):
                     top_k=self.search_top_k,
                     max_content_chars=self.max_content_chars,
                     get_obo_token=_get_obo_token,
+                    request_access_token=getattr(
+                        self, "request_access_token", None
+                    ),
+                    allow_anonymous=allow_anonymous,
                     user_context=self.user_context,
                 )
                 logging.info(
