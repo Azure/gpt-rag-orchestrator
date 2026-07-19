@@ -3,13 +3,14 @@ import logging
 import json
 import time
 import hashlib
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict
 from pydantic import BaseModel, Field
 
 from dependencies import get_config
 from util.metadata import format_custom_metadata, parse_allowed_keys
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
-from connectors.foundry_iq import get_foundry_iq_client
+from connectors.foundry_iq import McpSourceError, get_foundry_iq_client
+from connectors.foundry_iq_mcp import McpConfigurationError, McpCredentialError
 
 # Standardized log markers for retrieval/auth failure paths. Operators can grep
 # these to spot swallowed errors that would otherwise return empty results
@@ -39,24 +40,34 @@ _global_index_empty_cache: Dict[str, Dict[str, Any]] = {}
 
 # Module-level OBO token cache (shared across callers)
 _obo_cache: Dict[str, Any] = {}
+_MAX_OBO_CACHE_ENTRIES = 256
+_SEARCH_OBO_SCOPE = "https://search.azure.com/user_impersonation"
 
 
-async def acquire_obo_search_token(api_access_token: Optional[str], allow_anonymous: bool = True) -> Optional[str]:
-    """Acquire an Azure AI Search OBO token from an incoming API token.
+async def acquire_obo_token(
+    api_access_token: Optional[str],
+    scope: str,
+    allow_anonymous: bool = False,
+) -> Optional[str]:
+    """Acquire an OBO token for an explicit downstream scope.
 
     Reusable helper so any strategy can obtain a search-audience delegated
     token without duplicating the OBO exchange logic.
 
     Returns the Bearer token string (without 'Bearer ' prefix) or None.
     """
+    scope = (scope or "").strip()
+    if not scope:
+        raise ValueError("OBO scope must not be empty")
     if not api_access_token:
         if allow_anonymous:
             return None
-        raise RuntimeError("Missing user access token and ALLOW_ANONYMOUS=false")
+        raise RuntimeError("Missing incoming user access token for OBO exchange")
 
     # Check cache
-    fp = hashlib.sha256(api_access_token.encode()).hexdigest()[:16]
-    cached = _obo_cache.get(fp)
+    fp = hashlib.sha256(api_access_token.encode()).hexdigest()
+    cache_key = f"{fp}:{scope}"
+    cached = _obo_cache.get(cache_key)
     if cached and time.time() < cached.get("expires_at", 0):
         return cached["token"]
 
@@ -70,7 +81,7 @@ async def acquire_obo_search_token(api_access_token: Optional[str], allow_anonym
                         "set" if tenant_id else "missing", "set" if client_id else "missing", "set" if client_secret else "missing")
         if allow_anonymous:
             return None
-        raise RuntimeError("OBO config incomplete and ALLOW_ANONYMOUS=false")
+        raise RuntimeError("OBO configuration is incomplete")
 
     token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
     form = {
@@ -78,7 +89,7 @@ async def acquire_obo_search_token(api_access_token: Optional[str], allow_anonym
         "client_secret": client_secret,
         "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
         "requested_token_use": "on_behalf_of",
-        "scope": "https://search.azure.com/user_impersonation",
+        "scope": scope,
         "assertion": api_access_token,
     }
 
@@ -89,10 +100,10 @@ async def acquire_obo_search_token(api_access_token: Optional[str], allow_anonym
                 level, marker = _classify_retrieval_error(resp.status)
                 logging.log(
                     level,
-                    "%s OBO token exchange failed (status=%d body=%s)",
+                    "%s OBO token exchange failed (status=%d scope_fp=%s)",
                     marker,
                     resp.status,
-                    raw[:300],
+                    hashlib.sha256(scope.encode()).hexdigest()[:12],
                     extra={
                         "retrieval_status": resp.status,
                         "retrieval_credential_type": "obo",
@@ -103,15 +114,46 @@ async def acquire_obo_search_token(api_access_token: Optional[str], allow_anonym
                 raise RuntimeError(f"OBO token exchange failed: status={resp.status}")
             try:
                 data = json.loads(raw)
-            except Exception:
+            except Exception as exc:
                 logging.error("[OBO] Non-JSON response from token endpoint")
-                return None
+                if allow_anonymous:
+                    return None
+                raise RuntimeError(
+                    "OBO token endpoint returned an invalid response"
+                ) from exc
             token = data.get("access_token")
             if token:
                 ttl = int(data.get("expires_in", 0))
-                _obo_cache[fp] = {"token": token, "expires_at": time.time() + max(0, ttl - 30)}
-                logging.info("[OBO] Acquired Search delegated token")
-            return token
+                now = time.time()
+                expired_keys = [
+                    key
+                    for key, entry in _obo_cache.items()
+                    if now >= entry.get("expires_at", 0)
+                ]
+                for key in expired_keys:
+                    _obo_cache.pop(key, None)
+                while len(_obo_cache) >= _MAX_OBO_CACHE_ENTRIES:
+                    _obo_cache.pop(next(iter(_obo_cache)))
+                _obo_cache[cache_key] = {
+                    "token": token,
+                    "expires_at": now + max(0, ttl - 30),
+                }
+                logging.info("[OBO] Acquired delegated token")
+                return token
+            if allow_anonymous:
+                return None
+            raise RuntimeError("OBO token endpoint response missing access_token")
+
+
+async def acquire_obo_search_token(
+    api_access_token: Optional[str], allow_anonymous: bool = True
+) -> Optional[str]:
+    """Compatibility wrapper for Azure AI Search delegated tokens."""
+    return await acquire_obo_token(
+        api_access_token,
+        _SEARCH_OBO_SCOPE,
+        allow_anonymous=allow_anonymous,
+    )
 
 
 class SearchResult(BaseModel):
@@ -626,7 +668,7 @@ class SearchClient:
             # Generate embeddings for vector/hybrid search
             if self.search_approach in ["vector", "hybrid"] and self.aoai_client:
                 start_time = time.time()
-                logging.info(f"[Retrieval] Generating embeddings for query")
+                logging.info("[Retrieval] Generating embeddings for query")
                 embeddings_query = await self.aoai_client.get_embeddings(query)
                 logging.info(f"[Retrieval] Embeddings generated in {round(time.time() - start_time, 2)} seconds")
 
@@ -742,15 +784,36 @@ class SearchClient:
         """
         logging.info("[Retrieval] Using Foundry IQ knowledge base for document retrieval")
         search_user_token = None
+        incoming_token = self._request_api_access_token
+        allow_anonymous = self._allow_anonymous
+        conversation_id = self._conversation_id
+        user_context = dict(getattr(self, "_user_context", {}))
+        mcp_enabled = False
         try:
-            search_user_token = await self._get_search_user_token_for_trimming()
             client = get_foundry_iq_client()
-            records = await client.retrieve(
-                query,
-                obo_token=search_user_token,
-                conversation_id=self._conversation_id,
-                user_context=getattr(self, "_user_context", {}),
+            mcp_enabled = bool(
+                getattr(getattr(client, "mcp_config", None), "enabled", False)
             )
+            if mcp_enabled:
+                search_user_token = await acquire_obo_search_token(
+                    incoming_token,
+                    allow_anonymous=allow_anonymous,
+                )
+                records = await client.retrieve(
+                    query,
+                    obo_token=search_user_token,
+                    incoming_token=incoming_token,
+                    conversation_id=conversation_id,
+                    user_context=user_context,
+                )
+            else:
+                search_user_token = await self._get_search_user_token_for_trimming()
+                records = await client.retrieve(
+                    query,
+                    obo_token=search_user_token,
+                    conversation_id=conversation_id,
+                    user_context=user_context,
+                )
 
             results_list = []
             for record in records[: self.search_top_k]:
@@ -776,7 +839,13 @@ class SearchClient:
                     "retrieval_credential_type": "obo" if search_user_token else "managed_identity",
                 },
             )
-            if not self._allow_anonymous:
+            if isinstance(e, McpConfigurationError):
+                raise
+            if mcp_enabled and isinstance(
+                e, (McpConfigurationError, McpCredentialError, McpSourceError)
+            ):
+                raise
+            if not allow_anonymous:
                 raise
             logging.warning("[Retrieval] Falling back to empty results (ALLOW_ANONYMOUS=true)")
             return json.dumps({"results": [], "query": query, "error": "search_failed"})

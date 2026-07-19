@@ -41,6 +41,7 @@ from .retrieval_intent import (
     build_retrieval_intent_messages,
     parse_retrieval_intent,
 )
+from connectors.foundry_iq_mcp import is_mcp_enabled
 from connectors.multimodal_chat_client import MultimodalChatClient
 from connectors.search import acquire_obo_search_token
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
@@ -239,6 +240,18 @@ class MultimodalStrategy(BaseAgentStrategy):
             logging.warning("[MultimodalStrategy] No search index name configured, skipping search")
             return None
         try:
+            allow_anonymous = self.cfg.get(
+                "ALLOW_ANONYMOUS", default=True, type=bool
+            )
+            retrieval_backend = get_retrieval_backend()
+            mcp_enabled = (
+                retrieval_backend == RETRIEVAL_BACKEND_FOUNDRY_IQ
+                and is_mcp_enabled(
+                    self.cfg.get(
+                        "FOUNDRY_IQ_MCP_ENABLED", default=False, type=bool
+                    )
+                )
+            )
             # Build async embed function for hybrid search
             embed_fn = None
             if self.embedding_deployment:
@@ -252,19 +265,35 @@ class MultimodalStrategy(BaseAgentStrategy):
 
             async def _get_obo_token() -> str | None:
                 token = getattr(self, "request_access_token", None)
-                return await acquire_obo_search_token(token) if token else None
+                return (
+                    await acquire_obo_search_token(
+                        token,
+                        allow_anonymous=(
+                            allow_anonymous if mcp_enabled else True
+                        ),
+                    )
+                    if token
+                    else None
+                )
 
             # Decision #5 (Azure/GPT-RAG#526): multimodal stays on Azure AI Search
             # for v3.0.0 — Pattern A captioning/image parity for Foundry IQ is
             # deferred. The selector is still honored for consistency: when
             # foundry_iq is configured, retrieval is text-only via
             # FoundryIQContextProvider (no image grounding).
-            if get_retrieval_backend() == RETRIEVAL_BACKEND_FOUNDRY_IQ:
+            if retrieval_backend == RETRIEVAL_BACKEND_FOUNDRY_IQ:
                 provider = FoundryIQContextProvider(
                     conversation_id=self.conversation_id,
                     top_k=self.search_top_k,
                     max_content_chars=self.max_content_chars,
                     get_obo_token=_get_obo_token,
+                    request_access_token=(
+                        getattr(self, "request_access_token", None)
+                        if mcp_enabled
+                        else None
+                    ),
+                    allow_anonymous=allow_anonymous,
+                    mcp_enabled=mcp_enabled,
                     user_context=self.user_context,
                 )
                 logging.info(
