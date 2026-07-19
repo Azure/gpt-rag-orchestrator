@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v3.7.0] - 2026-07-19
 
 ### Added
 
@@ -9,6 +9,14 @@
   allowlists, trusted-host validation, bounded planning/runtime/output, and
   request-scoped managed identity, OBO, or Key Vault credentials. The disabled
   default preserves the existing minimal-reasoning intents request and headers.
+
+### Changed
+
+- **MCP-aware Foundry IQ retrieval.** Enabled requests can plan across multiple
+  generic MCP sources and existing knowledge source kinds, return activity and
+  partial-result details, and normalize successful MCP results into the existing
+  citation contract while enforcing configured reasoning, runtime, document, and
+  tool-output bounds.
 
 ### Fixed
 
