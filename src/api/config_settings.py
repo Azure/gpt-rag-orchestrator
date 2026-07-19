@@ -425,16 +425,79 @@ SECTIONS: List[SettingSection] = [
                 description=(
                     "Upper bound on the Foundry IQ retrieve action runtime, sent "
                     "as maxRuntimeInSeconds on the request body. Remote knowledge "
-                    "sources such as Work IQ can take 40–60 seconds; the default "
-                    "leaves headroom. Only emitted when a remote knowledge source "
-                    "kind (workIQ, fabricOntology, fabricDataAgent) is enabled, so "
-                    "default Pattern A / "
-                    "Pattern B request bodies remain unchanged."
+                    "sources and generic MCP tools can take 40–60 seconds; the "
+                    "default leaves headroom. Valid range is 30–600 seconds. Only "
+                    "emitted when a remote, web, or MCP source is enabled, so "
+                    "default Pattern A / Pattern B request bodies remain unchanged."
                 ),
                 min=30,
                 max=600,
                 step=1,
                 unit="seconds",
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_MCP_ENABLED",
+                type="bool",
+                default=False,
+                label="Enable generic MCP knowledge sources (Preview)",
+                description=(
+                    "Opt-in Preview. Uses conversational Foundry IQ planning to "
+                    "invoke preprovisioned mcpServer knowledge sources. Disabled "
+                    "preserves the existing minimal-reasoning intents request."
+                ),
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_MCP_SOURCES_JSON",
+                type="string",
+                default="[]",
+                label="MCP knowledge source metadata (JSON)",
+                description=(
+                    "Validated array of preprovisioned source names, HTTPS server "
+                    "metadata, tool allowlists, parsing limits, failure policy, and "
+                    "query-header valueFrom metadata. Literal credentials are "
+                    "rejected; use managedIdentity, obo, keyVaultSecret, or none."
+                ),
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_MCP_REASONING_EFFORT",
+                type="enum",
+                default="low",
+                label="MCP retrieval reasoning effort",
+                description=(
+                    "Planner reasoning used only when MCP sources are enabled. "
+                    "Low reduces latency and cost; medium can improve tool "
+                    "selection for more complex requests."
+                ),
+                options=[
+                    SettingOption("low", "Low", "Lower latency and cost."),
+                    SettingOption(
+                        "medium",
+                        "Medium",
+                        "More planning for complex tool selection and arguments.",
+                    ),
+                ],
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_MCP_TRUSTED_HOSTS",
+                type="string",
+                default="",
+                label="Trusted MCP server hosts",
+                description=(
+                    "Required comma-separated exact host allowlist for enabled "
+                    "MCP sources. Enter hostnames only, without schemes, ports, "
+                    "paths, wildcards, localhost, or IP literals."
+                ),
+            ),
+            SettingSpec(
+                key="FOUNDRY_IQ_MCP_LOG_TOOL_ARGUMENTS",
+                type="bool",
+                default=False,
+                label="Log MCP tool arguments",
+                description=(
+                    "Debug-only opt-in. Normal telemetry omits tool arguments. "
+                    "When enabled, argument values under credential, token, "
+                    "cookie, authorization, and header keys remain redacted."
+                ),
             ),
             SettingSpec(
                 key="WORK_IQ_ENABLED",

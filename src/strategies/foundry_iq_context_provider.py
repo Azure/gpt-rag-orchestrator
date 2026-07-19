@@ -21,7 +21,8 @@ from typing import Any, Mapping, Optional
 
 from agent_framework import ChatMessage, Context, ContextProvider, Role
 
-from connectors.foundry_iq import get_foundry_iq_client
+from connectors.foundry_iq import McpSourceError, get_foundry_iq_client
+from connectors.foundry_iq_mcp import McpConfigurationError, McpCredentialError
 from connectors.search import _classify_retrieval_error
 from .context_shaping import build_context_text, format_context_part
 
@@ -38,12 +39,18 @@ class FoundryIQContextProvider(ContextProvider):
         top_k: int = 3,
         max_content_chars: int = 1500,
         get_obo_token: Callable[[], Awaitable[Optional[str]]] | None = None,
+        request_access_token: Optional[str] = None,
+        allow_anonymous: bool = True,
+        mcp_enabled: bool = False,
         user_context: Optional[Mapping[str, Any]] = None,
     ) -> None:
         self._conversation_id = (conversation_id or "").strip() or None
         self._top_k = top_k
         self._max_content_chars = max_content_chars
         self._get_obo_token = get_obo_token
+        self._request_access_token = request_access_token
+        self._allow_anonymous = allow_anonymous
+        self._mcp_enabled = mcp_enabled
         self._user_context = dict(user_context or {})
 
     async def __aenter__(self):
@@ -71,21 +78,41 @@ class FoundryIQContextProvider(ContextProvider):
         logger.info("[FoundryIQContextProvider] Query: %r (top_k=%d)", query[:120], self._top_k)
 
         obo_token: Optional[str] = None
+        mcp_enabled = self._mcp_enabled
         try:
+            client = get_foundry_iq_client()
+            client_mcp_config = getattr(client, "mcp_config", None)
+            if client_mcp_config is not None:
+                mcp_enabled = bool(
+                    getattr(client_mcp_config, "enabled", self._mcp_enabled)
+                )
+
             # Acquire OBO token for per-user document-level security if configured.
             if self._get_obo_token:
                 try:
                     obo_token = await self._get_obo_token()
                 except Exception as e:
-                    logger.warning("[FoundryIQContextProvider] OBO token acquisition failed: %s", e)
+                    logger.warning(
+                        "[FoundryIQContextProvider] OBO token acquisition failed: %s",
+                        e,
+                    )
+                    if mcp_enabled:
+                        raise McpCredentialError(
+                            "Failed to acquire the required Search OBO token"
+                        ) from None
+                if mcp_enabled and not obo_token and not self._allow_anonymous:
+                    raise McpCredentialError(
+                        "Search OBO token is required when ALLOW_ANONYMOUS=false"
+                    )
 
-            client = get_foundry_iq_client()
-            records = await client.retrieve(
-                query,
-                obo_token=obo_token,
-                conversation_id=self._conversation_id,
-                user_context=self._user_context,
-            )
+            retrieve_kwargs: dict[str, Any] = {
+                "obo_token": obo_token,
+                "conversation_id": self._conversation_id,
+                "user_context": self._user_context,
+            }
+            if mcp_enabled:
+                retrieve_kwargs["incoming_token"] = self._request_access_token
+            records = await client.retrieve(query, **retrieve_kwargs)
 
             parts: list[str] = []
             for record in records[: self._top_k]:
@@ -110,6 +137,10 @@ class FoundryIQContextProvider(ContextProvider):
                     "retrieval_credential_type": "obo" if obo_token else "managed_identity",
                 },
             )
+            if isinstance(
+                e, (McpConfigurationError, McpCredentialError, McpSourceError)
+            ) and mcp_enabled:
+                raise
             return Context()
 
         logger.info(

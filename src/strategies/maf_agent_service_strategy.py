@@ -35,6 +35,7 @@ from .search_context_provider import SearchContextProvider
 from .foundry_iq_context_provider import FoundryIQContextProvider
 from .maf_plugins import UserProfile, UserProfileMemory
 from . import agent_provider_v2
+from connectors.foundry_iq_mcp import is_mcp_enabled
 from connectors.openai_chat_client import OpenAIChatClient
 from connectors.search import acquire_obo_search_token
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
@@ -181,15 +182,44 @@ Guidelines:
             return None
 
         try:
+            allow_anonymous = self.cfg.get(
+                "ALLOW_ANONYMOUS", default=True, type=bool
+            )
+            retrieval_backend = get_retrieval_backend()
+            mcp_enabled = (
+                retrieval_backend == RETRIEVAL_BACKEND_FOUNDRY_IQ
+                and is_mcp_enabled(
+                    self.cfg.get(
+                        "FOUNDRY_IQ_MCP_ENABLED", default=False, type=bool
+                    )
+                )
+            )
+
             async def _get_obo_token() -> str | None:
                 token = getattr(self, "request_access_token", None)
-                return await acquire_obo_search_token(token) if token else None
+                return (
+                    await acquire_obo_search_token(
+                        token,
+                        allow_anonymous=(
+                            allow_anonymous if mcp_enabled else True
+                        ),
+                    )
+                    if token
+                    else None
+                )
 
-            if get_retrieval_backend() == RETRIEVAL_BACKEND_FOUNDRY_IQ:
+            if retrieval_backend == RETRIEVAL_BACKEND_FOUNDRY_IQ:
                 provider = FoundryIQContextProvider(
                     conversation_id=self.conversation_id,
                     top_k=self.search_top_k,
                     get_obo_token=_get_obo_token,
+                    request_access_token=(
+                        getattr(self, "request_access_token", None)
+                        if mcp_enabled
+                        else None
+                    ),
+                    allow_anonymous=allow_anonymous,
+                    mcp_enabled=mcp_enabled,
                     user_context=self.user_context,
                 )
                 logging.info(
