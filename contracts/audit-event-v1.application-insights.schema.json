@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Azure/GPT-RAG/contracts/audit-event-v1.application-insights.schema.json",
   "title": "GPT-RAG audit event v1 Application Insights wire shape",
-  "description": "Azure Monitor represents custom-event property values as strings. Parse and type the properties according to audit-event-v1.schema.json before logical contract validation.",
+  "description": "Azure Monitor represents custom-event property values as strings and drops null custom properties. Parse and type the properties according to audit-event-v1.schema.json, decode the root parent sentinel to logical null, then perform logical contract validation.",
   "type": "object",
   "additionalProperties": false,
   "required": ["name", "properties"],
@@ -34,6 +34,13 @@
         "omitted_fields",
         "truncated_fields"
       ],
+      "properties": {
+        "parent_event_id": {
+          "type": "string",
+          "pattern": "^evt_[0-9a-f]{32}$",
+          "description": "Wire parent event ID. Exporters must encode logical null as evt_00000000000000000000000000000000 because the pinned Azure Monitor exporter drops null custom properties. Consumers must decode this sentinel back to null and must never join it as an event."
+        }
+      },
       "additionalProperties": {
         "type": "string",
         "maxLength": 16384

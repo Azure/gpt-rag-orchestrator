@@ -85,6 +85,13 @@ disabled by default and use the `gptrag.audit` logger namespace. If regular log
 export is disabled with `AZURE_MONITOR_DISABLE_LOGGING=true`, enabling audit
 events exports only that namespace.
 
+When `AUDIT_EVENTS_ENABLED=false`, no `gptrag.audit.*` events are emitted, no
+audit-only log exporter is enabled, no HMAC key is required, and other
+`AUDIT_*` settings are ignored. Existing response bodies, SSE streams,
+retrieval results, cache behavior, application logs, traces, and metrics remain
+unchanged. The additive server-generated `X-Correlation-ID` response header and
+documented Cosmos correlation metadata are independent of audit emission.
+
 Configure these values in Azure App Configuration. Store `AUDIT_HMAC_KEY` as a
 Key Vault reference and keep it out of the admin dashboard:
 
@@ -98,6 +105,20 @@ Key Vault reference and keep it out of the admin dashboard:
 | `AUDIT_ACTOR_PSEUDONYM_ENABLED` | `false` | Adds a keyed pseudonym for the authenticated actor. Raw identity is never placed in audit events, trace context, or baggage. |
 | `AUDIT_SOURCE_EVENT_LIMIT` | `25` | Per-request source event limit. Accepted range is 1 through 25. |
 | `AUDIT_ADDITIONAL_REDACTED_KEYS` | Empty | Additional comma-separated nested key names that must always be redacted. |
+
+Total and tool budgets are fixed safety limits rather than configuration:
+
+| Budget | Limit |
+| --- | --- |
+| Audit events per request | 64, including one reserved request terminal and at most one `audit.emission.failed` |
+| Tool invocations per request | 16 complete started/terminal pairs |
+| Grounding-source events per request | 25 maximum, optionally lowered by `AUDIT_SOURCE_EVENT_LIMIT` |
+
+Tool pairs are reserved atomically, so a started event is not emitted unless
+capacity also exists for its terminal event. Detail events are suppressed when
+a budget is exhausted, while the request terminal remains reserved. Request
+terminal events report `audit_events_omitted`, `source_events_omitted`, and
+`tool_invocations_omitted`.
 
 Generate a key locally, write it to Key Vault without displaying it, and clear
 the temporary shell variable:
@@ -137,16 +158,55 @@ key, update `AUDIT_HMAC_KEY` and `AUDIT_HMAC_KEY_ID` together, and restart the
 orchestrator. Pseudonyms generated before and after rotation cannot be directly
 correlated.
 
+Audit serialization is bounded before export:
+
+| Limit | Value |
+| --- | --- |
+| Serialized logical event | 16 KiB UTF-8 |
+| Producer attributes | 60 |
+| Metadata strings and nested keys | 512 characters |
+| Allowlisted sensitive fields | 2,048 characters |
+| Nested depth | 6 |
+| Mapping entries inspected | 65, including one truncation lookahead |
+| Sequence items inspected | 33, including one truncation lookahead |
+| Total nested values inspected | 256 |
+| `omitted_fields` / `truncated_fields` entries | 32 |
+
+Optional attributes are removed as needed to satisfy the event-size limit.
+`truncated_fields` identifies shortened strings or collections, while
+`omitted_fields` identifies unsupported, cyclic, over-depth, unknown, or
+size-dropped values. The wire schema permits 64 properties because Azure
+Monitor adds transport attributes around the producer's 60-attribute payload.
+If a bounded logical event still cannot be serialized safely, the original
+event is discarded and one payload-free, constant-safe
+`audit.emission.failed` event is attempted for the request.
+
 The reusable v1 JSON Schema for orchestrator and ingestion producers is
 [`contracts/audit-event-v1.schema.json`](contracts/audit-event-v1.schema.json).
 The ingestion component event names are reserved in that artifact but are not
 emitted by this repository.
 
+Foundry IQ exposes MCP activity only after completion and provides no
+pre-invocation callback. For `foundry_iq.mcp_tool`, the producer accepts only
+finite, nonnegative elapsed durations of at most 24 hours and reconstructs the
+start as the observation time minus that duration. The started event uses the
+reconstructed `event_time_utc`; both events set
+`timing_source=reconstructed`. These timestamps are approximate and do not
+prove when the remote tool began execution. Invalid timing omits the activity
+pair and attempts the bounded constant-safe emission-failure event without
+failing retrieval.
+
 Application Insights stores custom-event property values as strings. The
 corresponding exported shape is documented and tested in
 [`contracts/audit-event-v1.application-insights.schema.json`](contracts/audit-event-v1.application-insights.schema.json).
 Consumers should parse those properties into the logical v1 types before
-validating them against the reusable contract.
+validating them against the reusable contract. Logical root events use
+`parent_event_id=null`. Because the pinned Azure Monitor exporter drops null
+custom properties, the wire adapter encodes logical null as
+`evt_00000000000000000000000000000000`; consumers must decode that reserved
+sentinel to null and must never join it as an event. Contract artifact SHA-256
+digests are recorded in
+[`contracts/audit-event-v1.sha256`](contracts/audit-event-v1.sha256).
 
 ### NL2SQL datasource security
 

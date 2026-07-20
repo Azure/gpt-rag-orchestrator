@@ -26,6 +26,7 @@ from telemetry.audit import (
 )
 from telemetry.audit_contract import (
     AUDIT_LOG_BODY,
+    MAX_AUDIT_EVENTS,
     AuditSettings,
     AuditStatus,
     EventType,
@@ -145,6 +146,57 @@ def test_redaction_failure_discards_payload_and_emits_minimal_failure():
     assert "payload-to-discard" not in str(capture.records[0].__dict__)
 
 
+def test_failure_event_uses_only_constant_safe_metadata(monkeypatch):
+    from telemetry.audit_sanitizer import AuditSanitizationError
+
+    secret = "super-secret-config-value"
+    emitter = AuditEmitter(
+        AuditSettings(
+            enabled=True,
+            sensitive_content_enabled=True,
+            sensitive_content_fields=frozenset({"prompt"}),
+            actor_pseudonym_enabled=False,
+            source_event_limit=25,
+            hmac_key_id=secret,
+            hmac_key=b"k" * 32,
+            additional_redacted_keys=frozenset({secret}),
+        ),
+        service_name=secret,
+        service_version=secret,
+        environment=secret,
+    )
+    AuditEmitter._default = emitter
+    context, token = begin_audit_request()
+    try:
+        monkeypatch.setattr(
+            "telemetry.audit.sanitize_event",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AuditSanitizationError(secret)
+            ),
+        )
+        with capture_audit_logs() as capture:
+            for _ in range(3):
+                emitter.emit(
+                    EventType.REQUEST_STARTED,
+                    operation=secret,
+                    status=AuditStatus.STARTED,
+                    reason_code=ReasonCode.REQUEST_RECEIVED,
+                    metadata={"decision_value": secret},
+                    sensitive={"prompt": secret},
+                )
+    finally:
+        end_audit_request(token)
+
+    assert event_types(capture) == ["audit.emission.failed"]
+    exporter_input = json.dumps(
+        capture.records[0].__dict__, default=str, sort_keys=True
+    )
+    assert secret not in exporter_input
+    assert capture.records[0].service_name == "gpt-rag-orchestrator"
+    assert capture.records[0].environment == "unknown"
+    assert capture.records[0].correlation_id == context.correlation_id
+
+
 def test_enabled_sensitive_allowlist_still_redacts_prohibited_values():
     emitter = enabled_emitter(sensitive_fields=frozenset({"prompt"}))
 
@@ -253,6 +305,84 @@ async def test_tool_success_failure_timeout_and_cancellation_events():
     ]
     serialized = " ".join(str(record.__dict__) for record in capture.records)
     assert "raw failure must not be exported" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_request_and_tool_budgets_bound_export_and_preserve_terminal():
+    emitter = enabled_emitter()
+    AuditEmitter._default = emitter
+    context, token = begin_audit_request()
+    try:
+        with capture_audit_logs() as capture:
+            context.request_started_event_id = emitter.emit(
+                EventType.REQUEST_STARTED,
+                operation="test",
+                status=AuditStatus.STARTED,
+                reason_code=ReasonCode.REQUEST_RECEIVED,
+            )
+            for rank in range(100):
+                emitter.emit_source(
+                    selected=True,
+                    source_type="test",
+                    source_reference=f"source-{rank}",
+                    source_rank=rank,
+                )
+            for index in range(100):
+                assert await invoke_audited_tool(
+                    f"tool-{index}", lambda: "done"
+                ) == "done"
+            for _ in range(100):
+                emitter.emit(
+                    EventType.ROUTE_SELECTED,
+                    operation="test",
+                    status=AuditStatus.SELECTED,
+                    reason_code=ReasonCode.STRATEGY_CONFIGURED,
+                )
+            emitter.emit(
+                EventType.REQUEST_COMPLETED,
+                operation="test",
+                status=AuditStatus.COMPLETED,
+                reason_code=ReasonCode.REQUEST_COMPLETED,
+                started_at=context.started_at,
+                duration_ms=1,
+            )
+    finally:
+        end_audit_request(token)
+
+    assert len(capture.records) <= MAX_AUDIT_EVENTS
+    assert event_types(capture)[-1] == "request.completed"
+    terminal = capture.records[-1]
+    assert terminal.audit_events_omitted > 0
+    assert terminal.source_events_omitted == 75
+    assert terminal.tool_invocations_omitted == 84
+
+
+def test_reserved_failure_survives_terminal_sanitization_failure():
+    emitter = enabled_emitter()
+    AuditEmitter._default = emitter
+    context, token = begin_audit_request()
+    try:
+        with capture_audit_logs() as capture:
+            for _ in range(MAX_AUDIT_EVENTS - 2):
+                emitter.emit(
+                    EventType.ROUTE_SELECTED,
+                    operation="test",
+                    status=AuditStatus.SELECTED,
+                    reason_code=ReasonCode.STRATEGY_CONFIGURED,
+                )
+            emitter.emit(
+                EventType.REQUEST_COMPLETED,
+                operation="test",
+                status=AuditStatus.COMPLETED,
+                reason_code=ReasonCode.REQUEST_COMPLETED,
+                started_at=context.started_at,
+                duration_ms=float("inf"),
+            )
+    finally:
+        end_audit_request(token)
+
+    assert len(capture.records) == MAX_AUDIT_EVENTS - 1
+    assert event_types(capture)[-1] == "audit.emission.failed"
 
 
 def test_source_events_are_hmac_pseudonymized_and_hard_limited():

@@ -14,6 +14,17 @@
   orchestrator now returns a server-generated `X-Correlation-ID`; audit-only
   export does not enable normal application log export.
 
+### Fixed
+
+- **Bounded, observational audit instrumentation.** Restored audit-disabled
+  retrieval and cache compatibility for empty Search and Foundry references,
+  gated Foundry timing reconstruction behind the effective audit flag, rejected
+  malformed or unbounded reconstructed durations without failing retrieval,
+  bounded sanitizer traversal and per-request source/tool/event emission,
+  reserved request terminal capacity with omission counts, made emission
+  failures payload-free and constant-safe, and documented the logical-null to
+  Azure Monitor all-zero root-parent translation.
+
 ## [v3.7.0] - 2026-07-19
 
 ### Added

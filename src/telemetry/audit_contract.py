@@ -26,7 +26,13 @@ MAX_SENSITIVE_STRING = 2048
 MAX_DEPTH = 6
 MAX_COLLECTION_ITEMS = 64
 MAX_EMITTED_ARRAY_ITEMS = 32
+MAX_SANITIZER_NODES = 256
 MAX_SOURCE_EVENTS = 25
+MAX_AUDIT_EVENTS = 64
+MAX_TOOL_INVOCATIONS = 16
+RESERVED_REQUEST_TERMINAL_EVENTS = 1
+RESERVED_EMISSION_FAILURE_EVENTS = 1
+MAX_AUDIT_DURATION_MS = 86_400_000.0
 MAX_ENVIRONMENT_LENGTH = 64
 
 
@@ -171,6 +177,10 @@ OPTIONAL_FIELDS = frozenset(
         "question_id",
         "thread_id",
         "hmac_key_id",
+        "timing_source",
+        "audit_events_omitted",
+        "source_events_omitted",
+        "tool_invocations_omitted",
         *SENSITIVE_FIELDS,
     }
 )
@@ -184,6 +194,16 @@ def new_correlation_id() -> str:
     return f"req_{uuid.uuid4().hex}"
 
 
+def is_safe_correlation_id(value: Any) -> bool:
+    """Return whether a value has the server-generated correlation ID shape."""
+    return (
+        isinstance(value, str)
+        and len(value) == 36
+        and value.startswith("req_")
+        and all(character in "0123456789abcdef" for character in value[4:])
+    )
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -192,6 +212,16 @@ def format_utc(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat(timespec="microseconds").replace(
         "+00:00", "Z"
     )
+
+
+def logical_parent_to_wire(parent_event_id: str | None) -> str:
+    """Encode a logical root parent for Azure Monitor string properties."""
+    return ROOT_PARENT_EVENT_ID if parent_event_id is None else parent_event_id
+
+
+def wire_parent_to_logical(parent_event_id: str) -> str | None:
+    """Decode the Azure Monitor root sentinel to the logical null parent."""
+    return None if parent_event_id == ROOT_PARENT_EVENT_ID else parent_event_id
 
 
 def _config_value(config: Any, key: str, default: Any) -> Any:

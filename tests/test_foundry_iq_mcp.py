@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import traceback
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,6 +23,39 @@ from connectors.foundry_iq_mcp import (
     build_mcp_control_headers,
     redact_mcp_tool_arguments,
 )
+from telemetry.audit import (
+    AuditEmitter,
+    begin_audit_request,
+    end_audit_request,
+)
+from telemetry.audit_contract import (
+    MAX_AUDIT_DURATION_MS,
+    MAX_AUDIT_EVENTS,
+    AuditSettings,
+    AuditStatus,
+    EventType,
+    ReasonCode,
+)
+
+
+def _configure_audit(*, enabled: bool) -> AuditEmitter:
+    emitter = AuditEmitter(
+        AuditSettings(
+            enabled=enabled,
+            sensitive_content_enabled=False,
+            sensitive_content_fields=frozenset(),
+            actor_pseudonym_enabled=False,
+            source_event_limit=25,
+            hmac_key_id="v1",
+            hmac_key=b"k" * 32 if enabled else None,
+            additional_redacted_keys=frozenset(),
+        ),
+        service_name="gpt-rag-orchestrator",
+        service_version="3.7.0",
+        environment="test",
+    )
+    AuditEmitter._default = emitter
+    return emitter
 
 
 class _FakeResponse:
@@ -959,6 +993,135 @@ async def test_partial_required_source_failure_is_surfaced():
 
     with pytest.raises(McpSourceError, match="monitor-mcp.*ToolTimeout"):
         await client.retrieve("hello")
+
+
+def test_disabled_audit_does_not_parse_untrusted_foundry_timing():
+    class MaliciousTiming:
+        def __float__(self):
+            raise AssertionError("disabled audit parsed elapsedMs")
+
+    payload = {
+        "activity": [
+            {
+                "knowledgeSourceName": "monitor-mcp",
+                "status": "succeeded",
+                "elapsedMs": MaliciousTiming(),
+            }
+        ]
+    }
+    client, _ = _build_client(payload)
+    _configure_audit(enabled=False)
+
+    client._handle_mcp_activity(payload, http_status=200)
+
+
+@pytest.mark.parametrize("elapsed_ms", ["Infinity", -1, MAX_AUDIT_DURATION_MS + 1])
+def test_enabled_audit_rejects_invalid_foundry_timing_without_failing_retrieval(
+    elapsed_ms, caplog
+):
+    payload = {
+        "activity": [
+            {
+                "knowledgeSourceName": "monitor-mcp",
+                "status": "succeeded",
+                "elapsedMs": elapsed_ms,
+            }
+        ]
+    }
+    client, _ = _build_client(payload)
+    _configure_audit(enabled=True)
+    context, token = begin_audit_request()
+    context.request_started_event_id = "evt_" + ("1" * 32)
+    caplog.set_level(logging.INFO, logger="gptrag.audit")
+    try:
+        client._handle_mcp_activity(payload, http_status=200)
+    finally:
+        end_audit_request(token)
+
+    audit_records = [
+        record for record in caplog.records if hasattr(record, "event_type")
+    ]
+    assert [record.event_type for record in audit_records] == [
+        "audit.emission.failed"
+    ]
+
+
+def test_foundry_reconstructed_start_uses_honest_event_timestamp(caplog):
+    payload = {
+        "activity": [
+            {
+                "id": "activity-1",
+                "knowledgeSourceName": "monitor-mcp",
+                "status": "succeeded",
+                "elapsedMs": 250,
+            }
+        ]
+    }
+    client, _ = _build_client(payload)
+    _configure_audit(enabled=True)
+    context, token = begin_audit_request()
+    context.request_started_event_id = "evt_" + ("1" * 32)
+    caplog.set_level(logging.INFO, logger="gptrag.audit")
+    try:
+        client._handle_mcp_activity(payload, http_status=200)
+    finally:
+        end_audit_request(token)
+
+    started, completed = [
+        record for record in caplog.records if hasattr(record, "event_type")
+    ]
+    assert started.event_type == "tool.invocation.started"
+    assert completed.event_type == "tool.invocation.completed"
+    assert started.event_time_utc == completed.started_at_utc
+    assert completed.duration_ms == 250.0
+    assert started.timing_source == completed.timing_source == "reconstructed"
+    assert started.parent_event_id == context.request_started_event_id
+    assert completed.parent_event_id == started.event_id
+    reconstructed = datetime.fromisoformat(
+        started.event_time_utc.replace("Z", "+00:00")
+    )
+    observed = datetime.fromisoformat(
+        completed.event_time_utc.replace("Z", "+00:00")
+    )
+    assert 200 <= (observed - reconstructed).total_seconds() * 1000 <= 1000
+
+
+def test_huge_foundry_activity_is_audit_bounded_and_terminal_is_preserved(caplog):
+    payload = {
+        "activity": [
+            {
+                "id": f"activity-{index}",
+                "knowledgeSourceName": "monitor-mcp",
+                "status": "succeeded",
+                "elapsedMs": 1,
+            }
+            for index in range(1000)
+        ]
+    }
+    client, _ = _build_client(payload)
+    emitter = _configure_audit(enabled=True)
+    context, token = begin_audit_request()
+    context.request_started_event_id = "evt_" + ("1" * 32)
+    caplog.set_level(logging.INFO, logger="gptrag.audit")
+    try:
+        client._handle_mcp_activity(payload, http_status=200)
+        emitter.emit(
+            EventType.REQUEST_COMPLETED,
+            operation="test",
+            status=AuditStatus.COMPLETED,
+            reason_code=ReasonCode.REQUEST_COMPLETED,
+            started_at=context.started_at,
+            duration_ms=1,
+        )
+    finally:
+        end_audit_request(token)
+
+    audit_records = [
+        record for record in caplog.records if hasattr(record, "event_type")
+    ]
+    assert len(audit_records) <= MAX_AUDIT_EVENTS
+    assert audit_records[-1].event_type == "request.completed"
+    assert audit_records[-1].tool_invocations_omitted == 984
 
 
 @pytest.mark.asyncio

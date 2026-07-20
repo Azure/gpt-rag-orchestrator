@@ -24,6 +24,7 @@ constant (see :data:`DEFAULT_FOUNDRY_IQ_API_VERSION`).
 
 import logging
 import json
+import math
 import time
 from datetime import timedelta
 from typing import Any, Dict, Iterable, List, Mapping, Optional
@@ -41,7 +42,11 @@ from telemetry import (
     ReasonCode,
     current_audit_context,
 )
-from telemetry.audit_contract import new_event_id, utc_now
+from telemetry.audit_contract import (
+    MAX_AUDIT_DURATION_MS,
+    new_event_id,
+    utc_now,
+)
 from connectors.foundry_iq_mcp import (
     McpCredentialError,
     McpRuntimeConfig,
@@ -1608,72 +1613,101 @@ class FoundryIQClient:
             if isinstance(status_code, int) and status_code >= 400:
                 failed = True
 
-            elapsed_ms_value = raw_activity.get("elapsedMs")
-            try:
-                elapsed_ms = max(0.0, float(elapsed_ms_value or 0))
-            except (TypeError, ValueError):
-                elapsed_ms = 0.0
-            count_value = raw_activity.get("count")
-            if not isinstance(count_value, int) or isinstance(count_value, bool):
-                count_value = None
             emitter = AuditEmitter.default()
-            audit_context = current_audit_context()
-            started_at = utc_now() - timedelta(milliseconds=elapsed_ms)
-            tool_id = emitter.pseudonymize(
-                "tool", f"{source_name}:{tool_name}"
-            )
-            invocation_id = emitter.pseudonymize(
-                "tool-invocation",
-                f"{source_name}:{tool_name}:{raw_activity.get('id') or new_event_id()}",
-            )
-            started_event_id = emitter.emit(
-                EventType.TOOL_STARTED,
-                operation="foundry_iq.mcp_tool",
-                status=AuditStatus.STARTED,
-                reason_code=ReasonCode.TOOL_INVOKED,
-                parent_event_id=(
-                    audit_context.request_started_event_id
-                    if audit_context
-                    else None
-                ),
-                metadata={
-                    "tool_name": "foundry_iq_mcp_tool",
-                    "tool_id": tool_id,
-                    "tool_invocation_id": invocation_id,
-                    "transport": "foundry_iq",
-                },
-            )
-            emitter.emit(
-                EventType.TOOL_FAILED if failed else EventType.TOOL_COMPLETED,
-                operation="foundry_iq.mcp_tool",
-                status=(
-                    AuditStatus.FAILED if failed else AuditStatus.COMPLETED
-                ),
-                reason_code=(
-                    ReasonCode.TIMEOUT
-                    if status_text == "timeout"
-                    else (
-                        ReasonCode.TOOL_FAILED
-                        if failed
-                        else ReasonCode.TOOL_COMPLETED
-                    )
-                ),
-                parent_event_id=started_event_id,
-                started_at=started_at,
-                duration_ms=elapsed_ms,
-                metadata={
-                    "tool_name": "foundry_iq_mcp_tool",
-                    "tool_id": tool_id,
-                    "tool_invocation_id": invocation_id,
-                    "failure_type": (
-                        "timeout"
-                        if status_text == "timeout"
-                        else ("remote_error" if failed else None)
-                    ),
-                    "output_count": count_value,
-                    "partial_output": http_status == 206,
-                },
-            )
+            if emitter.enabled:
+                audit_context = current_audit_context()
+                if audit_context is not None:
+                    elapsed_ms_value = raw_activity.get("elapsedMs")
+                    try:
+                        if isinstance(elapsed_ms_value, bool):
+                            raise ValueError
+                        elapsed_ms = float(elapsed_ms_value)
+                        if (
+                            not math.isfinite(elapsed_ms)
+                            or elapsed_ms < 0
+                            or elapsed_ms > MAX_AUDIT_DURATION_MS
+                        ):
+                            raise ValueError
+                    except (TypeError, ValueError, OverflowError):
+                        emitter.emit_failure(ReasonCode.VALIDATION_FAILED)
+                    else:
+                        if emitter.reserve_tool_invocation():
+                            count_value = raw_activity.get("count")
+                            if not isinstance(count_value, int) or isinstance(
+                                count_value, bool
+                            ):
+                                count_value = None
+                            observed_at = utc_now()
+                            started_at = observed_at - timedelta(
+                                milliseconds=elapsed_ms
+                            )
+                            tool_id = emitter.pseudonymize(
+                                "tool", f"{source_name}:{tool_name}"
+                            )
+                            invocation_id = emitter.pseudonymize(
+                                "tool-invocation",
+                                f"{source_name}:{tool_name}:"
+                                f"{raw_activity.get('id') or new_event_id()}",
+                            )
+                            started_event_id = emitter.emit(
+                                EventType.TOOL_STARTED,
+                                operation="foundry_iq.mcp_tool",
+                                status=AuditStatus.STARTED,
+                                reason_code=ReasonCode.TOOL_INVOKED,
+                                parent_event_id=(
+                                    audit_context.request_started_event_id
+                                ),
+                                event_time=started_at,
+                                metadata={
+                                    "tool_name": "foundry_iq_mcp_tool",
+                                    "tool_id": tool_id,
+                                    "tool_invocation_id": invocation_id,
+                                    "transport": "foundry_iq",
+                                    "timing_source": "reconstructed",
+                                },
+                                _reserved_tool_event=True,
+                                _omission_kind="tool",
+                            )
+                            emitter.emit(
+                                (
+                                    EventType.TOOL_FAILED
+                                    if failed
+                                    else EventType.TOOL_COMPLETED
+                                ),
+                                operation="foundry_iq.mcp_tool",
+                                status=(
+                                    AuditStatus.FAILED
+                                    if failed
+                                    else AuditStatus.COMPLETED
+                                ),
+                                reason_code=(
+                                    ReasonCode.TIMEOUT
+                                    if status_text == "timeout"
+                                    else (
+                                        ReasonCode.TOOL_FAILED
+                                        if failed
+                                        else ReasonCode.TOOL_COMPLETED
+                                    )
+                                ),
+                                parent_event_id=started_event_id,
+                                started_at=started_at,
+                                duration_ms=elapsed_ms,
+                                metadata={
+                                    "tool_name": "foundry_iq_mcp_tool",
+                                    "tool_id": tool_id,
+                                    "tool_invocation_id": invocation_id,
+                                    "failure_type": (
+                                        "timeout"
+                                        if status_text == "timeout"
+                                        else ("remote_error" if failed else None)
+                                    ),
+                                    "output_count": count_value,
+                                    "partial_output": http_status == 206,
+                                    "timing_source": "reconstructed",
+                                },
+                                _reserved_tool_event=True,
+                                _omission_kind="tool",
+                            )
 
             error_code = ""
             if isinstance(error, Mapping):

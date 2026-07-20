@@ -21,6 +21,26 @@ import pytest
 from agent_framework import ChatMessage, Role
 
 from strategies.context_shaping import build_context_text, format_context_part
+from telemetry.audit import AuditEmitter, begin_audit_request, end_audit_request
+from telemetry.audit_contract import AuditSettings
+
+
+def _configure_audit(enabled):
+    AuditEmitter._default = AuditEmitter(
+        AuditSettings(
+            enabled=enabled,
+            sensitive_content_enabled=False,
+            sensitive_content_fields=frozenset(),
+            actor_pseudonym_enabled=False,
+            source_event_limit=25,
+            hmac_key_id="v1",
+            hmac_key=b"k" * 32 if enabled else None,
+            additional_redacted_keys=frozenset(),
+        ),
+        service_name="gpt-rag-orchestrator",
+        service_version="3.7.0",
+        environment="test",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -570,6 +590,55 @@ async def test_search_knowledge_base_foundry_iq_branch_contract(foundry_search_c
     # OBO token acquired and forwarded the same way as the AI Search path.
     _, kwargs = fake_client.retrieve.call_args
     assert kwargs["obo_token"] == "user-obo-token"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("audit_enabled", [False, True])
+async def test_foundry_empty_result_is_returned_regardless_of_audit(
+    foundry_search_client, audit_enabled, caplog
+):
+    records = [{"title": "Empty reference", "link": "empty.txt", "content": ""}]
+    fake_client = MagicMock()
+    fake_client.retrieve = AsyncMock(return_value=records)
+    _configure_audit(audit_enabled)
+    caplog.set_level("INFO", logger="gptrag.audit")
+    token = None
+    if audit_enabled:
+        context, token = begin_audit_request()
+        context.request_started_event_id = "evt_" + ("1" * 32)
+    try:
+        with (
+            patch(
+                "connectors.search.get_retrieval_backend",
+                return_value="foundry_iq",
+            ),
+            patch(
+                "connectors.search.get_foundry_iq_client",
+                return_value=fake_client,
+            ),
+            patch(
+                "connectors.search.acquire_obo_search_token",
+                new=AsyncMock(return_value="user-obo-token"),
+            ),
+        ):
+            result = json.loads(
+                await foundry_search_client.search_knowledge_base("hello")
+            )
+    finally:
+        if token is not None:
+            end_audit_request(token)
+
+    assert result["results"] == [
+        {"title": "Empty reference", "link": "empty.txt", "content": ""}
+    ]
+    audit_types = [
+        record.event_type
+        for record in caplog.records
+        if hasattr(record, "event_type")
+    ]
+    assert audit_types == (
+        ["grounding.source.rejected"] if audit_enabled else []
+    )
 
 
 @pytest.mark.asyncio

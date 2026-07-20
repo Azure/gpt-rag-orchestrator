@@ -1,6 +1,9 @@
 import base64
+import hashlib
 import json
 import re
+import tracemalloc
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import jsonschema
@@ -8,12 +11,15 @@ import pytest
 
 from telemetry.audit_contract import (
     MAX_EVENT_BYTES,
+    ROOT_PARENT_EVENT_ID,
     AuditConfigurationError,
     AuditSettings,
     format_utc,
+    logical_parent_to_wire,
     new_correlation_id,
     new_event_id,
     utc_now,
+    wire_parent_to_logical,
 )
 from telemetry.audit_sanitizer import REDACTED, sanitize_event
 
@@ -63,6 +69,30 @@ def test_golden_event_validates_against_shared_schema():
     jsonschema.Draft202012Validator(schema).validate(golden)
 
 
+def test_root_golden_validates_and_translates_only_at_wire_boundary():
+    schema = json.loads(
+        (ROOT / "contracts" / "audit-event-v1.schema.json").read_text()
+    )
+    golden = json.loads(
+        (ROOT / "tests" / "golden" / "audit_event_v1_root.json").read_text()
+    )
+
+    jsonschema.Draft202012Validator(schema).validate(golden)
+    assert golden["parent_event_id"] is None
+    assert logical_parent_to_wire(golden["parent_event_id"]) == ROOT_PARENT_EVENT_ID
+
+
+def test_published_contract_hashes_match_artifacts():
+    expected = {}
+    for line in (ROOT / "contracts" / "audit-event-v1.sha256").read_text().splitlines():
+        digest, name = line.split(maxsplit=1)
+        expected[name] = digest
+
+    for name, digest in expected.items():
+        content = (ROOT / "contracts" / name).read_bytes()
+        assert hashlib.sha256(content).hexdigest() == digest
+
+
 def test_ids_and_timestamp_have_canonical_shapes():
     assert re.fullmatch(r"evt_[0-9a-f]{32}", new_event_id())
     assert re.fullmatch(r"req_[0-9a-f]{32}", new_correlation_id())
@@ -70,6 +100,15 @@ def test_ids_and_timestamp_have_canonical_shapes():
         r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z",
         format_utc(utc_now()),
     )
+
+
+def test_root_parent_logical_wire_conversion_is_lossless():
+    child = "evt_" + ("1" * 32)
+
+    assert logical_parent_to_wire(None) == ROOT_PARENT_EVENT_ID
+    assert logical_parent_to_wire(child) == child
+    assert wire_parent_to_logical(ROOT_PARENT_EVENT_ID) is None
+    assert wire_parent_to_logical(child) == child
 
 
 def test_disabled_settings_need_no_hmac_key():
@@ -258,3 +297,102 @@ def test_additional_redaction_keys_cannot_corrupt_required_identifiers():
     assert result.attributes["event_id"].startswith("evt_")
     assert result.attributes["correlation_id"].startswith("req_")
     assert "redact-me" not in result.serialized
+
+
+def test_sanitizer_uses_bounded_iteration_for_virtual_containers():
+    class CountingSequence(Sequence):
+        def __init__(self):
+            self.iterations = 0
+
+        def __len__(self):
+            return 10**12
+
+        def __getitem__(self, index):
+            self.iterations += 1
+            if self.iterations > 33:
+                raise AssertionError("sequence was iterated beyond its bound")
+            return index
+
+    class CountingMapping(Mapping):
+        def __init__(self):
+            self.iterations = 0
+
+        def __len__(self):
+            return 10**12
+
+        def __getitem__(self, key):
+            raise KeyError(key)
+
+        def __iter__(self):
+            raise AssertionError("items() must be used")
+
+        def items(self):
+            for index in range(10**12):
+                self.iterations += 1
+                if self.iterations > 65:
+                    raise AssertionError("mapping was iterated beyond its bound")
+                yield str(index), index
+
+    class UnknownInfiniteIterable:
+        def __iter__(self):
+            raise AssertionError("unknown iterables must not be inspected")
+
+    sequence = CountingSequence()
+    mapping = CountingMapping()
+    event = _base_event()
+    event["tool_arguments"] = {
+        "sequence": sequence,
+        "mapping": mapping,
+        "unknown": UnknownInfiniteIterable(),
+    }
+
+    tracemalloc.start()
+    try:
+        result = sanitize_event(event, additional_redacted_keys=frozenset())
+        _, peak_bytes = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert sequence.iterations == 33
+    assert mapping.iterations == 65
+    assert peak_bytes < 2 * 1024 * 1024
+    assert "tool_arguments.unknown" in result.attributes["omitted_fields"]
+    assert "tool_arguments.sequence" in result.attributes["truncated_fields"]
+    assert "tool_arguments.mapping" in result.attributes["truncated_fields"]
+
+
+def test_sanitizer_bounds_work_before_scanning_oversized_strings():
+    event = _base_event()
+    event["source_excerpt"] = "\x01" * (8 * 1024 * 1024)
+
+    tracemalloc.start()
+    try:
+        result = sanitize_event(event, additional_redacted_keys=frozenset())
+        _, peak_bytes = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert result.attributes["source_excerpt"] == ""
+    assert "source_excerpt" in result.attributes["truncated_fields"]
+    assert peak_bytes < 2 * 1024 * 1024
+
+
+def test_oversized_nested_key_is_omitted_before_redaction_classification():
+    event = _base_event()
+    key = ("a" * 512) + "_password"
+    event["tool_arguments"] = {key: "short-sensitive-credential"}
+
+    result = sanitize_event(event, additional_redacted_keys=frozenset())
+
+    assert "short-sensitive-credential" not in result.serialized
+    assert any(
+        field.startswith("tool_arguments.")
+        for field in result.attributes["omitted_fields"]
+    )
+    assert all(
+        len(field) <= 512
+        for field in (
+            result.attributes["omitted_fields"]
+            + result.attributes["truncated_fields"]
+        )
+    )

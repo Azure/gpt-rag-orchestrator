@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from itertools import islice
 from typing import Any
 
 from .audit_contract import (
@@ -14,6 +16,7 @@ from .audit_contract import (
     MAX_EMITTED_ARRAY_ITEMS,
     MAX_EVENT_BYTES,
     MAX_METADATA_STRING,
+    MAX_SANITIZER_NODES,
     MAX_SENSITIVE_STRING,
     OPTIONAL_FIELDS,
     REQUIRED_FIELDS,
@@ -96,23 +99,28 @@ def contains_prohibited_value(value: str) -> bool:
 
 def _is_prohibited_key(key: str, additional_keys: frozenset[str]) -> bool:
     normalized = normalize_key(key)
-    normalized_additional = {normalize_key(item) for item in additional_keys}
     return any(part in normalized for part in _PROHIBITED_KEY_PARTS) or any(
-        part and part in normalized for part in normalized_additional
+        part and part in normalized for part in additional_keys
     )
 
 
 class _Sanitizer:
     def __init__(self, additional_keys: frozenset[str]) -> None:
-        self.additional_keys = additional_keys
+        self.additional_keys = frozenset(
+            normalize_key(item[:MAX_METADATA_STRING])
+            for item in additional_keys
+            if item
+        )
         self.omitted: list[str] = []
         self.truncated: list[str] = []
         self.redaction_applied = False
         self._seen: set[int] = set()
+        self._nodes_visited = 0
 
     def _record(self, target: list[str], path: str) -> None:
-        if path not in target and len(target) < MAX_EMITTED_ARRAY_ITEMS:
-            target.append(path)
+        bounded_path = path[:MAX_METADATA_STRING]
+        if bounded_path not in target and len(target) < MAX_EMITTED_ARRAY_ITEMS:
+            target.append(bounded_path)
 
     def value(
         self,
@@ -122,6 +130,10 @@ class _Sanitizer:
         depth: int,
         sensitive: bool,
     ) -> Any:
+        self._nodes_visited += 1
+        if self._nodes_visited > MAX_SANITIZER_NODES:
+            self._record(self.omitted, path)
+            return None
         if depth > MAX_DEPTH:
             self._record(self.omitted, path)
             return None
@@ -130,35 +142,55 @@ class _Sanitizer:
             return value
 
         if isinstance(value, str):
+            limit = MAX_SENSITIVE_STRING if sensitive else MAX_METADATA_STRING
+            if len(value) > limit:
+                self._record(self.truncated, path)
+                value = value[:limit]
             cleaned = _CONTROL_CHARACTERS.sub("", value)
             if contains_prohibited_value(cleaned):
                 self.redaction_applied = True
                 return REDACTED
-            limit = MAX_SENSITIVE_STRING if sensitive else MAX_METADATA_STRING
-            if len(cleaned) > limit:
-                self._record(self.truncated, path)
-                cleaned = cleaned[:limit]
             return cleaned
 
-        if isinstance(value, (dict, list, tuple)):
+        if isinstance(value, (Mapping, Sequence)) and not isinstance(
+            value, (str, bytes, bytearray)
+        ):
             identity = id(value)
             if identity in self._seen:
                 self._record(self.omitted, path)
                 return None
             self._seen.add(identity)
             try:
-                if isinstance(value, dict):
+                if isinstance(value, Mapping):
                     output: dict[str, Any] = {}
-                    items = list(value.items())
-                    if len(items) > MAX_COLLECTION_ITEMS:
-                        self._record(self.truncated, path)
-                    for raw_key, child in items[:MAX_COLLECTION_ITEMS]:
+                    try:
+                        items = iter(value.items())
+                        bounded_items = islice(items, MAX_COLLECTION_ITEMS + 1)
+                    except Exception:
+                        self._record(self.omitted, path)
+                        return None
+                    for index, item in enumerate(bounded_items):
+                        if index == MAX_COLLECTION_ITEMS:
+                            self._record(self.truncated, path)
+                            break
+                        try:
+                            raw_key, child = item
+                        except (TypeError, ValueError):
+                            self._record(self.omitted, f"{path}.*")
+                            continue
                         if not isinstance(raw_key, str):
                             self._record(self.omitted, f"{path}.*")
                             continue
-                        child_path = f"{path}.{raw_key}"
-                        if _is_prohibited_key(raw_key, self.additional_keys):
-                            output[raw_key[:MAX_METADATA_STRING]] = REDACTED
+                        bounded_key = raw_key[:MAX_METADATA_STRING]
+                        child_path = f"{path}.{bounded_key}"
+                        if len(raw_key) > MAX_METADATA_STRING:
+                            self._record(self.truncated, child_path)
+                            self._record(self.omitted, child_path)
+                            continue
+                        if _is_prohibited_key(
+                            bounded_key, self.additional_keys
+                        ):
+                            output[bounded_key] = REDACTED
                             self.redaction_applied = True
                             continue
                         sanitized = self.value(
@@ -168,14 +200,19 @@ class _Sanitizer:
                             sensitive=sensitive,
                         )
                         if sanitized is not None:
-                            output[raw_key[:MAX_METADATA_STRING]] = sanitized
+                            output[bounded_key] = sanitized
                     return output
 
-                values = list(value)
-                if len(values) > MAX_COLLECTION_ITEMS:
-                    self._record(self.truncated, path)
+                try:
+                    values = islice(iter(value), MAX_EMITTED_ARRAY_ITEMS + 1)
+                except Exception:
+                    self._record(self.omitted, path)
+                    return None
                 emitted: list[Any] = []
-                for index, child in enumerate(values[:MAX_EMITTED_ARRAY_ITEMS]):
+                for index, child in enumerate(values):
+                    if index == MAX_EMITTED_ARRAY_ITEMS:
+                        self._record(self.truncated, path)
+                        break
                     sanitized = self.value(
                         child,
                         path=f"{path}[{index}]",
@@ -184,9 +221,10 @@ class _Sanitizer:
                     )
                     if sanitized is not None:
                         emitted.append(sanitized)
-                if len(values) > MAX_EMITTED_ARRAY_ITEMS:
-                    self._record(self.truncated, path)
                 return emitted
+            except Exception:
+                self._record(self.omitted, path)
+                return None
             finally:
                 self._seen.remove(identity)
 
@@ -200,15 +238,35 @@ def sanitize_event(
     additional_redacted_keys: frozenset[str],
 ) -> SanitizedEvent:
     sanitizer = _Sanitizer(additional_redacted_keys)
-    for path in event.get("omitted_fields", []) or []:
-        if isinstance(path, str):
-            sanitizer._record(sanitizer.omitted, path)
-    for path in event.get("truncated_fields", []) or []:
-        if isinstance(path, str):
-            sanitizer._record(sanitizer.truncated, path)
+    for field_name, target in (
+        ("omitted_fields", sanitizer.omitted),
+        ("truncated_fields", sanitizer.truncated),
+    ):
+        paths = event.get(field_name, []) or []
+        if isinstance(paths, Sequence) and not isinstance(
+            paths, (str, bytes, bytearray)
+        ):
+            try:
+                for path in islice(iter(paths), MAX_EMITTED_ARRAY_ITEMS):
+                    if isinstance(path, str):
+                        sanitizer._record(target, path)
+            except Exception:
+                sanitizer._record(sanitizer.omitted, field_name)
     attributes: dict[str, Any] = {}
 
-    for key, value in event.items():
+    bounded_event_items = islice(iter(event.items()), MAX_ATTRIBUTES + 1)
+    for index, (raw_key, value) in enumerate(bounded_event_items):
+        if index == MAX_ATTRIBUTES:
+            sanitizer._record(sanitizer.omitted, "*")
+            break
+        if not isinstance(raw_key, str):
+            sanitizer._record(sanitizer.omitted, "*")
+            continue
+        key = raw_key[:MAX_METADATA_STRING]
+        if len(raw_key) > MAX_METADATA_STRING:
+            sanitizer._record(sanitizer.truncated, key)
+            sanitizer._record(sanitizer.omitted, key)
+            continue
         if key not in REQUIRED_FIELDS and key not in OPTIONAL_FIELDS:
             sanitizer._record(sanitizer.omitted, key)
             continue

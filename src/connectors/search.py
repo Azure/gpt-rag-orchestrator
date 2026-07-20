@@ -715,7 +715,8 @@ class SearchClient:
                 title = result.get('title', 'reference') or 'reference'
                 link = result.get('filepath') or result.get('url', '') or ''
                 content = result.get('content', '')
-                if not content:
+                source_selected = bool(content)
+                if not source_selected:
                     AuditEmitter.default().emit_source(
                         selected=False,
                         source_type="azure_ai_search",
@@ -723,7 +724,6 @@ class SearchClient:
                         source_rank=rank,
                         reason_code=ReasonCode.SOURCE_EMPTY,
                     )
-                    continue
 
                 # Prepend the formatted metadata block before content when enabled.
                 # Read defensively: the field may be absent or null on a result.
@@ -750,13 +750,14 @@ class SearchClient:
                     custom_metadata=raw_metadata,
                 )
                 results_list.append(search_result.model_dump())
-                AuditEmitter.default().emit_source(
-                    selected=True,
-                    source_type="azure_ai_search",
-                    source_reference=link or str(result.get("chunk_id") or title),
-                    source_rank=rank,
-                    source_excerpt=content,
-                )
+                if source_selected:
+                    AuditEmitter.default().emit_source(
+                        selected=True,
+                        source_type="azure_ai_search",
+                        source_reference=link or str(result.get("chunk_id") or title),
+                        source_rank=rank,
+                        source_excerpt=content,
+                    )
 
             # If we found results, force cache to non-empty so routing can recover
             # immediately from any stale empty-cache state.
@@ -852,21 +853,29 @@ class SearchClient:
             for rank, record in enumerate(records[: self.search_top_k]):
                 content = record.get("content") or ""
                 if not content:
-                    continue
+                    AuditEmitter.default().emit_source(
+                        selected=False,
+                        source_type=getattr(record, "source_type", source_type),
+                        source_reference=record.get("link")
+                        or record.get("title"),
+                        source_rank=rank,
+                        reason_code=ReasonCode.SOURCE_EMPTY,
+                    )
                 search_result = SearchResult(
                     title=record.get("title") or "reference",
                     link=record.get("link") or "",
                     content=content,
                 )
                 results_list.append(search_result.model_dump())
-                AuditEmitter.default().emit_source(
-                    selected=True,
-                    source_type=getattr(record, "source_type", source_type),
-                    source_reference=record.get("link")
-                    or record.get("title"),
-                    source_rank=rank,
-                    source_excerpt=content,
-                )
+                if content:
+                    AuditEmitter.default().emit_source(
+                        selected=True,
+                        source_type=getattr(record, "source_type", source_type),
+                        source_reference=record.get("link")
+                        or record.get("title"),
+                        source_rank=rank,
+                        source_excerpt=content,
+                    )
 
             logging.info(f"[Retrieval] Found {len(results_list)} results from Foundry IQ")
             if not results_list:

@@ -8,9 +8,11 @@ import hashlib
 import hmac
 import inspect
 import logging
+import math
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from opentelemetry import trace
@@ -19,6 +21,11 @@ from .audit_contract import (
     AUDIT_EVENT_PREFIX,
     AUDIT_LOG_BODY,
     AUDIT_LOGGER_NAME,
+    MAX_AUDIT_DURATION_MS,
+    MAX_AUDIT_EVENTS,
+    MAX_TOOL_INVOCATIONS,
+    RESERVED_EMISSION_FAILURE_EVENTS,
+    RESERVED_REQUEST_TERMINAL_EVENTS,
     SCHEMA_VERSION,
     AuditSettings,
     AuditStatus,
@@ -26,6 +33,8 @@ from .audit_contract import (
     ReasonCode,
     ROOT_PARENT_EVENT_ID,
     format_utc,
+    is_safe_correlation_id,
+    logical_parent_to_wire,
     new_correlation_id,
     new_event_id,
     utc_now,
@@ -36,6 +45,21 @@ from .audit_sanitizer import AuditSanitizationError, sanitize_event
 T = TypeVar("T")
 _logger = logging.getLogger(AUDIT_LOGGER_NAME)
 _warning_logger = logging.getLogger("gptrag.audit_warning")
+_failure_emission_active: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "gptrag_audit_failure_emission_active", default=False
+)
+_REQUEST_TERMINAL_EVENTS = frozenset(
+    {
+        EventType.REQUEST_COMPLETED,
+        EventType.REQUEST_FAILED,
+        EventType.REQUEST_CANCELLED,
+    }
+)
+_DETAIL_EVENT_LIMIT = (
+    MAX_AUDIT_EVENTS
+    - RESERVED_REQUEST_TERMINAL_EVENTS
+    - RESERVED_EMISSION_FAILURE_EVENTS
+)
 _SOURCE_TYPE_ALIASES = {
     "azure_ai_search": "azure_ai_search",
     "azure_ai_search_multimodal": "azure_ai_search_multimodal",
@@ -71,6 +95,14 @@ class AuditRequestContext:
     source_events_emitted: int = 0
     partial_output: bool = False
     output_count: int = 0
+    event_slots_used: int = 0
+    reserved_tool_event_slots: int = 0
+    tool_invocations_reserved: int = 0
+    audit_events_omitted: int = 0
+    source_events_omitted: int = 0
+    tool_invocations_omitted: int = 0
+    request_terminal_claimed: bool = False
+    emission_failure_claimed: bool = False
     started_at: Any = field(default_factory=utc_now)
 
 
@@ -162,6 +194,93 @@ class AuditEmitter:
             return "0" * 32, "0" * 16
         return f"{span_context.trace_id:032x}", f"{span_context.span_id:016x}"
 
+    def reserve_tool_invocation(self) -> bool:
+        """Atomically reserve a bounded started/terminal tool-event pair."""
+        if not self.enabled:
+            return False
+        context = _current_context.get()
+        if context is None:
+            return False
+        if (
+            context.tool_invocations_reserved >= MAX_TOOL_INVOCATIONS
+            or context.event_slots_used + context.reserved_tool_event_slots + 2
+            > _DETAIL_EVENT_LIMIT
+        ):
+            context.tool_invocations_omitted += 1
+            context.audit_events_omitted += 2
+            return False
+        context.tool_invocations_reserved += 1
+        context.reserved_tool_event_slots += 2
+        return True
+
+    def _claim_event_slot(
+        self,
+        event_type: EventType,
+        *,
+        reserved_tool_event: bool,
+        omission_kind: str | None,
+    ) -> bool:
+        context = _current_context.get()
+        if context is None:
+            return True
+
+        if event_type in _REQUEST_TERMINAL_EVENTS:
+            if context.request_terminal_claimed:
+                return False
+            context.request_terminal_claimed = True
+            if context.event_slots_used >= MAX_AUDIT_EVENTS:
+                return False
+            context.event_slots_used += 1
+            return True
+
+        if reserved_tool_event:
+            if context.reserved_tool_event_slots <= 0:
+                context.audit_events_omitted += 1
+                if omission_kind == "tool":
+                    context.tool_invocations_omitted += 1
+                return False
+            context.reserved_tool_event_slots -= 1
+            context.event_slots_used += 1
+            return True
+
+        if (
+            context.event_slots_used + context.reserved_tool_event_slots
+            >= _DETAIL_EVENT_LIMIT
+        ):
+            context.audit_events_omitted += 1
+            if omission_kind == "source":
+                context.source_events_omitted += 1
+            return False
+        context.event_slots_used += 1
+        return True
+
+    @staticmethod
+    def _bounded_datetime(value: Any, *, observed_at: datetime) -> datetime:
+        if (
+            not isinstance(value, datetime)
+            or value.tzinfo is None
+            or value.utcoffset() is None
+        ):
+            raise ValueError("Audit event timestamp must be timezone-aware.")
+        normalized = value.astimezone(timezone.utc)
+        delta_ms = abs((observed_at - normalized).total_seconds() * 1000)
+        if not math.isfinite(delta_ms) or delta_ms > MAX_AUDIT_DURATION_MS:
+            raise ValueError("Audit event timestamp is outside the allowed window.")
+        return normalized
+
+    @staticmethod
+    def _bounded_duration(value: Any) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("Audit duration must be numeric.")
+        duration = float(value)
+        if (
+            not math.isfinite(duration)
+            or duration < 0
+            or duration > MAX_AUDIT_DURATION_MS
+        ):
+            raise ValueError("Audit duration is outside the allowed range.")
+        return round(duration, 3)
+
     def emit(
         self,
         event_type: EventType,
@@ -173,62 +292,89 @@ class AuditEmitter:
         parent_event_id: str | None = None,
         started_at: Any | None = None,
         duration_ms: float | None = None,
+        event_time: datetime | None = None,
         metadata: dict[str, Any] | None = None,
         sensitive: dict[str, Any] | None = None,
+        _reserved_tool_event: bool = False,
+        _omission_kind: str | None = None,
     ) -> str | None:
         if not self.enabled:
             return None
 
         context = _current_context.get()
-        event_id = new_event_id()
-        event_time = utc_now()
-        trace_id, span_id = self._trace_fields()
-        event: dict[str, Any] = {
-            "schema_version": SCHEMA_VERSION,
-            "event_id": event_id,
-            "event_type": event_type.value,
-            "event_time_utc": format_utc(event_time),
-            "correlation_id": correlation_id
-            or (context.correlation_id if context else new_correlation_id()),
-            "trace_id": trace_id,
-            "span_id": span_id,
-            # The Azure Monitor exporter drops None-valued custom properties.
-            # A reserved all-zero event ID keeps the required root field
-            # transport-safe while the shared schema remains nullable.
-            "parent_event_id": parent_event_id or ROOT_PARENT_EVENT_ID,
-            "service_name": self.service_name,
-            "service_version": self.service_version,
-            "environment": self.environment,
-            "operation": operation,
-            "status": status.value,
-            "reason_code": reason_code.value,
-            "capture_mode": self.settings.capture_mode.value,
-            "redaction_applied": False,
-            "omitted_fields": [],
-            "truncated_fields": [],
-            "hmac_key_id": self.settings.hmac_key_id,
-        }
-        if started_at is not None:
-            event["started_at_utc"] = format_utc(started_at)
-        if duration_ms is not None:
-            event["duration_ms"] = max(0.0, round(duration_ms, 3))
-        if metadata:
-            event.update(metadata)
-
-        sensitive_values = sensitive or {}
-        for field_name, value in sensitive_values.items():
-            if (
-                self.settings.sensitive_content_enabled
-                and field_name in self.settings.sensitive_content_fields
-            ):
-                event[field_name] = value
-            else:
-                event["omitted_fields"].append(field_name)
-
+        if not self._claim_event_slot(
+            event_type,
+            reserved_tool_event=_reserved_tool_event,
+            omission_kind=_omission_kind,
+        ):
+            return None
         try:
+            event_id = new_event_id()
+            observed_at = utc_now()
+            effective_event_time = (
+                self._bounded_datetime(event_time, observed_at=observed_at)
+                if event_time is not None
+                else observed_at
+            )
+            trace_id, span_id = self._trace_fields()
+            event: dict[str, Any] = {
+                "schema_version": SCHEMA_VERSION,
+                "event_id": event_id,
+                "event_type": event_type.value,
+                "event_time_utc": format_utc(effective_event_time),
+                "correlation_id": correlation_id
+                or (context.correlation_id if context else new_correlation_id()),
+                "trace_id": trace_id,
+                "span_id": span_id,
+                "parent_event_id": parent_event_id,
+                "service_name": self.service_name,
+                "service_version": self.service_version,
+                "environment": self.environment,
+                "operation": operation,
+                "status": status.value,
+                "reason_code": reason_code.value,
+                "capture_mode": self.settings.capture_mode.value,
+                "redaction_applied": False,
+                "omitted_fields": [],
+                "truncated_fields": [],
+                "hmac_key_id": self.settings.hmac_key_id,
+            }
+            if started_at is not None:
+                event["started_at_utc"] = format_utc(
+                    self._bounded_datetime(started_at, observed_at=observed_at)
+                )
+            if duration_ms is not None:
+                event["duration_ms"] = self._bounded_duration(duration_ms)
+            if metadata:
+                event.update(metadata)
+            if context is not None and event_type in _REQUEST_TERMINAL_EVENTS:
+                event.update(
+                    {
+                        "audit_events_omitted": context.audit_events_omitted,
+                        "source_events_omitted": context.source_events_omitted,
+                        "tool_invocations_omitted": (
+                            context.tool_invocations_omitted
+                        ),
+                    }
+                )
+
+            sensitive_values = sensitive or {}
+            for field_name, value in sensitive_values.items():
+                if (
+                    self.settings.sensitive_content_enabled
+                    and field_name in self.settings.sensitive_content_fields
+                ):
+                    event[field_name] = value
+                else:
+                    event["omitted_fields"].append(field_name)
+
             sanitized = sanitize_event(
                 event,
                 additional_redacted_keys=self.settings.additional_redacted_keys,
+            )
+            wire_attributes = dict(sanitized.attributes)
+            wire_attributes["parent_event_id"] = logical_parent_to_wire(
+                wire_attributes["parent_event_id"]
             )
             _logger.info(
                 AUDIT_LOG_BODY,
@@ -236,10 +382,12 @@ class AuditEmitter:
                     "microsoft.custom_event.name": (
                         f"{AUDIT_EVENT_PREFIX}{event_type.value}"
                     ),
-                    **sanitized.attributes,
+                    **wire_attributes,
                 },
             )
-        except AuditSanitizationError as exc:
+        except (AuditSanitizationError, TypeError, ValueError) as exc:
+            if context is not None:
+                context.audit_events_omitted += 1
             failure = str(exc).casefold()
             if "serialization" in failure:
                 reason = ReasonCode.SERIALIZATION_FAILURE
@@ -252,33 +400,58 @@ class AuditEmitter:
             self._emit_failure(reason)
             return None
         except BaseException:
+            if context is not None:
+                context.audit_events_omitted += 1
             self._emit_failure(ReasonCode.EXPORT_FAILURE)
             return None
         return event_id
 
     def _emit_failure(self, reason: ReasonCode) -> None:
         """Emit a payload-free failure event, then degrade to a fixed warning."""
+        if _failure_emission_active.get():
+            return
+        context = _current_context.get()
+        if context is not None:
+            if context.emission_failure_claimed:
+                return
+            terminal_reservation = (
+                0
+                if context.request_terminal_claimed
+                else RESERVED_REQUEST_TERMINAL_EVENTS
+            )
+            if (
+                context.event_slots_used + context.reserved_tool_event_slots
+                >= MAX_AUDIT_EVENTS - terminal_reservation
+            ):
+                return
+            context.emission_failure_claimed = True
+            context.event_slots_used += 1
+        safe_reason = reason if isinstance(reason, ReasonCode) else ReasonCode.UNKNOWN
+        guard_token = _failure_emission_active.set(True)
         event_time = utc_now()
         trace_id, span_id = self._trace_fields()
-        context = _current_context.get()
+        correlation_id = (
+            context.correlation_id
+            if context is not None
+            and is_safe_correlation_id(context.correlation_id)
+            else new_correlation_id()
+        )
         attributes = {
             "schema_version": SCHEMA_VERSION,
             "event_id": new_event_id(),
             "event_type": EventType.EMISSION_FAILED.value,
             "event_time_utc": format_utc(event_time),
-            "correlation_id": (
-                context.correlation_id if context else new_correlation_id()
-            ),
+            "correlation_id": correlation_id,
             "trace_id": trace_id,
             "span_id": span_id,
             "parent_event_id": ROOT_PARENT_EVENT_ID,
-            "service_name": self.service_name,
-            "service_version": self.service_version,
-            "environment": self.environment,
+            "service_name": "gpt-rag-orchestrator",
+            "service_version": "audit-fallback-v1",
+            "environment": "unknown",
             "operation": "audit.emit",
             "status": AuditStatus.FAILED.value,
-            "reason_code": reason.value,
-            "capture_mode": self.settings.capture_mode.value,
+            "reason_code": safe_reason.value,
+            "capture_mode": "metadata_only",
             "redaction_applied": True,
             "omitted_fields": [],
             "truncated_fields": [],
@@ -300,6 +473,13 @@ class AuditEmitter:
                 )
             except BaseException:
                 pass
+        finally:
+            _failure_emission_active.reset(guard_token)
+
+    def emit_failure(self, reason: ReasonCode) -> None:
+        """Attempt one constant-safe failure event for the current request."""
+        if self.enabled:
+            self._emit_failure(reason)
 
     def emit_source(
         self,
@@ -315,6 +495,8 @@ class AuditEmitter:
         if not context or not self.enabled:
             return None
         if context.source_events_emitted >= self.settings.source_event_limit:
+            context.source_events_omitted += 1
+            context.audit_events_omitted += 1
             return None
         context.source_events_emitted += 1
         normalized_source_type = "".join(
@@ -340,6 +522,7 @@ class AuditEmitter:
             parent_event_id=context.request_started_event_id,
             metadata=metadata,
             sensitive={"source_excerpt": source_excerpt},
+            _omission_kind="source",
         )
 
 
@@ -370,6 +553,9 @@ async def invoke_audited_tool(
     if not emitter.enabled or context is None:
         result = invocation()
         return await result if inspect.isawaitable(result) else result
+    if not emitter.reserve_tool_invocation():
+        result = invocation()
+        return await result if inspect.isawaitable(result) else result
 
     started_at = utc_now()
     started_monotonic = time.monotonic()
@@ -390,6 +576,8 @@ async def invoke_audited_tool(
             "decision_type": tool_kind,
         },
         sensitive={"tool_arguments": sensitive_arguments},
+        _reserved_tool_event=True,
+        _omission_kind="tool",
     )
     try:
         result = invocation()
@@ -409,6 +597,8 @@ async def invoke_audited_tool(
                 "tool_invocation_id": invocation_id,
                 "failure_type": "cancelled",
             },
+            _reserved_tool_event=True,
+            _omission_kind="tool",
         )
         raise
     except TimeoutError:
@@ -426,6 +616,8 @@ async def invoke_audited_tool(
                 "tool_invocation_id": invocation_id,
                 "failure_type": "timeout",
             },
+            _reserved_tool_event=True,
+            _omission_kind="tool",
         )
         raise
     except Exception:
@@ -443,6 +635,8 @@ async def invoke_audited_tool(
                 "tool_invocation_id": invocation_id,
                 "failure_type": "exception",
             },
+            _reserved_tool_event=True,
+            _omission_kind="tool",
         )
         raise
 
@@ -460,6 +654,8 @@ async def invoke_audited_tool(
             "tool_invocation_id": invocation_id,
         },
         sensitive={"tool_result": value},
+        _reserved_tool_event=True,
+        _omission_kind="tool",
     )
     return value
 
