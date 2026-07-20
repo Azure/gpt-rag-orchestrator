@@ -1,22 +1,39 @@
 # Changelog
 
-## [Unreleased]
+## [v3.8.0] - 2026-07-20
 
 ### Added
 
-- **Versioned, privacy-conscious audit events.** Added a disabled-by-default,
-  metadata-only-by-default v1
-  activity contract over the existing OpenTelemetry and Application Insights
+- **Optional, privacy-conscious audit evidence.** Operators can now enable a v1
+  activity trail over the existing OpenTelemetry and Application Insights
   pipeline for correlated request lifecycle, route, grounding-source, tool, and
-  outcome events. Events use bounded metadata, keyed pseudonyms, recursive
-  prohibited-data filtering, fixed names and enums, explicit cancellation and
-  partial-output states, and an opt-in sensitive-content allowlist. The
-  orchestrator now returns a server-generated `X-Correlation-ID`; audit-only
-  export does not enable normal application log export. The shared contract
-  reserves exactly seven ingestion events: `ingestion.run.started`,
-  `ingestion.run.completed`, `ingestion.run.failed`,
-  `ingestion.run.cancelled`, `ingestion.document.indexed`,
-  `ingestion.document.rejected`, and `ingestion.document.deleted`.
+  outcome events. Auditing remains disabled by default and metadata-only by
+  default. Capturing prompts, responses, source excerpts, tool arguments, or tool
+  results requires both explicit sensitive-content opt-in and a non-empty field
+  allowlist. Events use bounded metadata, keyed pseudonyms, recursive
+  prohibited-data filtering, fixed names and enums, and explicit cancellation
+  and partial-output states. The orchestrator now returns a server-generated
+  `X-Correlation-ID`; audit-only export does not enable normal application log
+  export. See [Azure/GPT-RAG#571](https://github.com/Azure/GPT-RAG/issues/571)
+  and [PR #277](https://github.com/Azure/gpt-rag-orchestrator/pull/277).
+
+- **Shared v1 contract for component integration.** Added reusable logical and
+  Application Insights wire schemas. The canonical ingestion taxonomy reserves
+  exactly seven events: `ingestion.run.started`, `ingestion.run.completed`,
+  `ingestion.run.failed`, `ingestion.run.cancelled`,
+  `ingestion.document.indexed`, `ingestion.document.rejected`, and
+  `ingestion.document.deleted`. These names are reserved for ingestion component
+  integration and are not emitted by the orchestrator.
+
+### Changed
+
+- **Explicit evidence boundaries.** Audit events are best-effort operational
+  evidence, not an immutable ledger or a legal or regulatory compliance claim.
+  Fixed event budgets can omit detail while reporting omission counters;
+  asynchronous Azure Monitor delivery has no application callback; failures
+  before endpoint handling may not include `X-Correlation-ID`; and reconstructed
+  Foundry IQ tool start times are approximate rather than proof of remote
+  execution timing.
 
 ### Fixed
 
@@ -28,6 +45,15 @@
   reserved request terminal capacity with omission counts, made emission
   failures payload-free and constant-safe, and documented the logical-null to
   Azure Monitor all-zero root-parent translation.
+
+### Validation
+
+- **Reviewed release evidence.** At reviewed commit
+  `844fe14757d07a2cdc828189105fbce831f3c11d`, all 533 tests passed, the Docker
+  build passed, Ruff passed for every changed Python file, `compileall` passed,
+  and `pip check` passed in the freshly built pinned image. The committed logical
+  and Application Insights schema raw-byte SHA-256 hashes were independently
+  reproduced.
 
 ## [v3.7.0] - 2026-07-19
 
