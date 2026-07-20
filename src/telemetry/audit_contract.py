@@ -61,14 +61,13 @@ class EventType(StrEnum):
 # component. The orchestrator deliberately does not emit them.
 INGESTION_EVENT_TYPES = frozenset(
     {
-        "ingestion.request.started",
-        "ingestion.request.completed",
-        "ingestion.request.failed",
-        "ingestion.request.cancelled",
-        "ingestion.document.selected",
+        "ingestion.run.started",
+        "ingestion.run.completed",
+        "ingestion.run.failed",
+        "ingestion.run.cancelled",
+        "ingestion.document.indexed",
         "ingestion.document.rejected",
-        "ingestion.outcome.produced",
-        "ingestion.outcome.rejected",
+        "ingestion.document.deleted",
     }
 )
 

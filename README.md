@@ -183,8 +183,15 @@ event is discarded and one payload-free, constant-safe
 
 The reusable v1 JSON Schema for orchestrator and ingestion producers is
 [`contracts/audit-event-v1.schema.json`](contracts/audit-event-v1.schema.json).
-The ingestion component event names are reserved in that artifact but are not
-emitted by this repository.
+The ingestion component reserves exactly these event names, with no aliases:
+
+| Scope | Events |
+| --- | --- |
+| Run lifecycle | `ingestion.run.started`, `ingestion.run.completed`, `ingestion.run.failed`, `ingestion.run.cancelled` |
+| Document lifecycle | `ingestion.document.indexed`, `ingestion.document.rejected`, `ingestion.document.deleted` |
+
+They are part of both the logical and Application Insights wire schemas but are
+not emitted by this repository.
 
 Foundry IQ exposes MCP activity only after completion and provides no
 pre-invocation callback. For `foundry_iq.mcp_tool`, the producer accepts only

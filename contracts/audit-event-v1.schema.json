@@ -50,14 +50,13 @@
         "outcome.produced",
         "outcome.rejected",
         "audit.emission.failed",
-        "ingestion.request.started",
-        "ingestion.request.completed",
-        "ingestion.request.failed",
-        "ingestion.request.cancelled",
-        "ingestion.document.selected",
+        "ingestion.run.started",
+        "ingestion.run.completed",
+        "ingestion.run.failed",
+        "ingestion.run.cancelled",
+        "ingestion.document.indexed",
         "ingestion.document.rejected",
-        "ingestion.outcome.produced",
-        "ingestion.outcome.rejected"
+        "ingestion.document.deleted"
       ]
     },
     "event_time_utc": {
@@ -195,9 +194,9 @@
               "tool.invocation.completed",
               "tool.invocation.failed",
               "tool.invocation.cancelled",
-              "ingestion.request.completed",
-              "ingestion.request.failed",
-              "ingestion.request.cancelled"
+              "ingestion.run.completed",
+              "ingestion.run.failed",
+              "ingestion.run.cancelled"
             ]
           }
         },

@@ -10,10 +10,12 @@ import jsonschema
 import pytest
 
 from telemetry.audit_contract import (
+    INGESTION_EVENT_TYPES,
     MAX_EVENT_BYTES,
     ROOT_PARENT_EVENT_ID,
     AuditConfigurationError,
     AuditSettings,
+    EventType,
     format_utc,
     logical_parent_to_wire,
     new_correlation_id,
@@ -25,6 +27,17 @@ from telemetry.audit_sanitizer import REDACTED, sanitize_event
 
 
 ROOT = Path(__file__).resolve().parents[1]
+EXPECTED_INGESTION_EVENT_TYPES = frozenset(
+    {
+        "ingestion.run.started",
+        "ingestion.run.completed",
+        "ingestion.run.failed",
+        "ingestion.run.cancelled",
+        "ingestion.document.indexed",
+        "ingestion.document.rejected",
+        "ingestion.document.deleted",
+    }
+)
 
 
 class Config:
@@ -58,6 +71,22 @@ def _base_event():
     }
 
 
+def _as_application_insights_event(event):
+    def stringify(value):
+        if value is None:
+            return ROOT_PARENT_EVENT_ID
+        if isinstance(value, bool):
+            return str(value).lower()
+        if isinstance(value, (list, dict)):
+            return json.dumps(value, separators=(",", ":"))
+        return str(value)
+
+    return {
+        "name": f"gptrag.audit.{event['event_type']}",
+        "properties": {key: stringify(value) for key, value in event.items()},
+    }
+
+
 def test_golden_event_validates_against_shared_schema():
     schema = json.loads(
         (ROOT / "contracts" / "audit-event-v1.schema.json").read_text()
@@ -82,6 +111,93 @@ def test_root_golden_validates_and_translates_only_at_wire_boundary():
     assert logical_parent_to_wire(golden["parent_event_id"]) == ROOT_PARENT_EVENT_ID
 
 
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "audit_event_v1_ingestion_run.json",
+        "audit_event_v1_ingestion_document.json",
+    ],
+)
+def test_ingestion_goldens_validate_against_logical_and_wire_schemas(fixture_name):
+    logical_schema = json.loads(
+        (ROOT / "contracts" / "audit-event-v1.schema.json").read_text()
+    )
+    wire_schema = json.loads(
+        (
+            ROOT
+            / "contracts"
+            / "audit-event-v1.application-insights.schema.json"
+        ).read_text()
+    )
+    golden = json.loads((ROOT / "tests" / "golden" / fixture_name).read_text())
+
+    jsonschema.Draft202012Validator(logical_schema).validate(golden)
+    jsonschema.Draft202012Validator(wire_schema).validate(
+        _as_application_insights_event(golden)
+    )
+
+
+def test_ingestion_taxonomy_is_exact_across_python_and_both_schemas():
+    logical_schema = json.loads(
+        (ROOT / "contracts" / "audit-event-v1.schema.json").read_text()
+    )
+    wire_schema = json.loads(
+        (
+            ROOT
+            / "contracts"
+            / "audit-event-v1.application-insights.schema.json"
+        ).read_text()
+    )
+    orchestrator_event_types = {event_type.value for event_type in EventType}
+    expected_event_types = orchestrator_event_types | EXPECTED_INGESTION_EVENT_TYPES
+
+    assert INGESTION_EVENT_TYPES == EXPECTED_INGESTION_EVENT_TYPES
+    assert set(logical_schema["properties"]["event_type"]["enum"]) == expected_event_types
+    assert (
+        set(wire_schema["properties"]["properties"]["properties"]["event_type"]["enum"])
+        == expected_event_types
+    )
+    assert {
+        name.removeprefix("gptrag.audit.")
+        for name in wire_schema["properties"]["name"]["enum"]
+    } == expected_event_types
+
+
+def test_legacy_ingestion_aliases_are_rejected_by_both_schemas():
+    logical_schema = json.loads(
+        (ROOT / "contracts" / "audit-event-v1.schema.json").read_text()
+    )
+    wire_schema = json.loads(
+        (
+            ROOT
+            / "contracts"
+            / "audit-event-v1.application-insights.schema.json"
+        ).read_text()
+    )
+    legacy_aliases = {
+        f"ingestion.{scope}.{action}"
+        for scope, action in (
+            ("request", "started"),
+            ("request", "completed"),
+            ("request", "failed"),
+            ("request", "cancelled"),
+            ("document", "selected"),
+            ("outcome", "produced"),
+            ("outcome", "rejected"),
+        )
+    }
+
+    for alias in legacy_aliases:
+        event = _base_event()
+        event["event_type"] = alias
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.Draft202012Validator(logical_schema).validate(event)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.Draft202012Validator(wire_schema).validate(
+                _as_application_insights_event(event)
+            )
+
+
 def test_published_contract_hashes_match_artifacts():
     expected = {}
     for line in (ROOT / "contracts" / "audit-event-v1.sha256").read_text().splitlines():
@@ -89,7 +205,7 @@ def test_published_contract_hashes_match_artifacts():
         expected[name] = digest
 
     for name, digest in expected.items():
-        content = (ROOT / "contracts" / name).read_bytes()
+        content = (ROOT / "contracts" / name).read_bytes().replace(b"\r\n", b"\n")
         assert hashlib.sha256(content).hexdigest() == digest
 
 

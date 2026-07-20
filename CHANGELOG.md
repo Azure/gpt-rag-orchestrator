@@ -12,7 +12,11 @@
   prohibited-data filtering, fixed names and enums, explicit cancellation and
   partial-output states, and an opt-in sensitive-content allowlist. The
   orchestrator now returns a server-generated `X-Correlation-ID`; audit-only
-  export does not enable normal application log export.
+  export does not enable normal application log export. The shared contract
+  reserves exactly seven ingestion events: `ingestion.run.started`,
+  `ingestion.run.completed`, `ingestion.run.failed`,
+  `ingestion.run.cancelled`, `ingestion.document.indexed`,
+  `ingestion.document.rejected`, and `ingestion.document.deleted`.
 
 ### Fixed
 
