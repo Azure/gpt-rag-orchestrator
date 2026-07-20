@@ -904,6 +904,7 @@ DENYLIST = frozenset(
         "OAUTH_AZURE_AD_CLIENT_SECRET",
         "OAUTH_AZURE_AD_CLIENT_ID",
         "OAUTH_AZURE_AD_TENANT_ID",
+        "AUDIT_HMAC_KEY",
         "APP_CONFIG_ENDPOINT",
     }
 )

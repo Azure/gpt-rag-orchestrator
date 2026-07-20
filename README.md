@@ -77,6 +77,77 @@ or connection errors. Because the configuration names and SSE default are
 unchanged, you can roll back to the previous orchestrator image without
 rewriting the existing SSE configuration.
 
+### Audit event configuration
+
+The orchestrator can emit a versioned, metadata-only-by-default activity trail through its
+existing OpenTelemetry and Application Insights connection. Audit events are
+disabled by default and use the `gptrag.audit` logger namespace. If regular log
+export is disabled with `AZURE_MONITOR_DISABLE_LOGGING=true`, enabling audit
+events exports only that namespace.
+
+Configure these values in Azure App Configuration. Store `AUDIT_HMAC_KEY` as a
+Key Vault reference and keep it out of the admin dashboard:
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `AUDIT_EVENTS_ENABLED` | `false` | Enables v1 audit custom events. Enabling without a valid 256-bit HMAC key fails startup. |
+| `AUDIT_HMAC_KEY` | Unset | Base64, Base64URL, or hexadecimal encoding of exactly 32 random bytes. Used only to pseudonymize source, conversation, question, thread, tool, and optional actor identifiers. |
+| `AUDIT_HMAC_KEY_ID` | `v1` | Non-secret key version recorded with events to support rotation. Change it together with the key. |
+| `AUDIT_SENSITIVE_CONTENT_ENABLED` | `false` | Allows approved sensitive fields to be considered for capture. The allowlist must also be non-empty. |
+| `AUDIT_SENSITIVE_CONTENT_FIELDS` | Empty | Comma-separated allowlist from `prompt`, `response`, `source_excerpt`, `tool_arguments`, and `tool_result`. Empty captures none. |
+| `AUDIT_ACTOR_PSEUDONYM_ENABLED` | `false` | Adds a keyed pseudonym for the authenticated actor. Raw identity is never placed in audit events, trace context, or baggage. |
+| `AUDIT_SOURCE_EVENT_LIMIT` | `25` | Per-request source event limit. Accepted range is 1 through 25. |
+| `AUDIT_ADDITIONAL_REDACTED_KEYS` | Empty | Additional comma-separated nested key names that must always be redacted. |
+
+Generate a key locally, write it to Key Vault without displaying it, and clear
+the temporary shell variable:
+
+```powershell
+$auditKey = python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+az keyvault secret set --vault-name <vault-name> --name audit-hmac-key --value $auditKey --query id --output tsv
+$auditKey = $null
+```
+
+Once the endpoint handler runs, successful orchestrator and feedback responses
+return a new server-generated `X-Correlation-ID`; an inbound value is ignored.
+Dependency failures and request-body validation failures that occur before the
+handler may not include this header. The identifier is recorded in audit events
+only when auditing is enabled. W3C `traceparent` remains the distributed tracing
+context and is preserved independently. `X-Correlation-ID` is not an
+authentication, authorization, idempotency, proof-of-delivery, or immutability
+mechanism.
+
+> [!IMPORTANT]
+> Sensitive-content capture can include prompts, responses, retrieved excerpts,
+> tool arguments, or tool results. It increases privacy, retention, and access
+> control obligations. Tokens, credentials, authorization material, cookies,
+> connection strings, SAS values, and private keys are filtered before export
+> even when sensitive capture is enabled. This filtering is defense in depth,
+> not a data-loss-prevention boundary. Operators must still prevent secrets from
+> entering content approved for capture.
+
+To roll back, set `AUDIT_EVENTS_ENABLED=false` and restart the orchestrator.
+This stops new audit events and does not delete telemetry already exported.
+These best-effort operational events can support customer-owned governance,
+security, and incident processes, but they are not an immutable ledger and do
+not establish legal or regulatory compliance.
+
+Audit settings are loaded at startup. For HMAC rotation, create a new 256-bit
+key, update `AUDIT_HMAC_KEY` and `AUDIT_HMAC_KEY_ID` together, and restart the
+orchestrator. Pseudonyms generated before and after rotation cannot be directly
+correlated.
+
+The reusable v1 JSON Schema for orchestrator and ingestion producers is
+[`contracts/audit-event-v1.schema.json`](contracts/audit-event-v1.schema.json).
+The ingestion component event names are reserved in that artifact but are not
+emitted by this repository.
+
+Application Insights stores custom-event property values as strings. The
+corresponding exported shape is documented and tested in
+[`contracts/audit-event-v1.application-insights.schema.json`](contracts/audit-event-v1.application-insights.schema.json).
+Consumers should parse those properties into the logical v1 types before
+validating them against the reusable contract.
+
 ### NL2SQL datasource security
 
 > [!IMPORTANT]

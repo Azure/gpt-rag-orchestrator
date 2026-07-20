@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Azure/GPT-RAG/contracts/audit-event-v1.application-insights.schema.json",
+  "title": "GPT-RAG audit event v1 Application Insights wire shape",
+  "description": "Azure Monitor represents custom-event property values as strings. Parse and type the properties according to audit-event-v1.schema.json before logical contract validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "properties"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^gptrag\\.audit\\.[a-z0-9.]+$"
+    },
+    "properties": {
+      "type": "object",
+      "maxProperties": 64,
+      "required": [
+        "schema_version",
+        "event_id",
+        "event_type",
+        "event_time_utc",
+        "correlation_id",
+        "trace_id",
+        "span_id",
+        "parent_event_id",
+        "service_name",
+        "service_version",
+        "environment",
+        "operation",
+        "status",
+        "reason_code",
+        "capture_mode",
+        "redaction_applied",
+        "omitted_fields",
+        "truncated_fields"
+      ],
+      "additionalProperties": {
+        "type": "string",
+        "maxLength": 16384
+      }
+    }
+  }
+}

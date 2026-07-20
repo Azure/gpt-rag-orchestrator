@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Versioned, privacy-conscious audit events.** Added a disabled-by-default,
+  metadata-only-by-default v1
+  activity contract over the existing OpenTelemetry and Application Insights
+  pipeline for correlated request lifecycle, route, grounding-source, tool, and
+  outcome events. Events use bounded metadata, keyed pseudonyms, recursive
+  prohibited-data filtering, fixed names and enums, explicit cancellation and
+  partial-output states, and an opt-in sensitive-content allowlist. The
+  orchestrator now returns a server-generated `X-Correlation-ID`; audit-only
+  export does not enable normal application log export.
+
 ## [v3.7.0] - 2026-07-19
 
 ### Added

@@ -24,6 +24,7 @@ from agent_framework import ChatMessage, Context, ContextProvider, Role
 from connectors.foundry_iq import McpSourceError, get_foundry_iq_client
 from connectors.foundry_iq_mcp import McpConfigurationError, McpCredentialError
 from connectors.search import _classify_retrieval_error
+from telemetry import AuditEmitter, ReasonCode
 from .context_shaping import build_context_text, format_context_part
 
 logger = logging.getLogger(__name__)
@@ -115,7 +116,7 @@ class FoundryIQContextProvider(ContextProvider):
             records = await client.retrieve(query, **retrieve_kwargs)
 
             parts: list[str] = []
-            for record in records[: self._top_k]:
+            for rank, record in enumerate(records[: self._top_k]):
                 title = record.get("title") or "reference"
                 link = record.get("link") or ""
                 content = record.get("content") or ""
@@ -124,7 +125,23 @@ class FoundryIQContextProvider(ContextProvider):
                 if len(content) > self._max_content_chars:
                     content = content[: self._max_content_chars] + "..."
                 parts.append(format_context_part(title, link, content))
+                AuditEmitter.default().emit_source(
+                    selected=True,
+                    source_type=getattr(
+                        record,
+                        "source_type",
+                        "foundry_iq_mcp" if mcp_enabled else "foundry_iq",
+                    ),
+                    source_reference=link or title,
+                    source_rank=rank,
+                    source_excerpt=content,
+                )
         except Exception as e:
+            AuditEmitter.default().emit_source(
+                selected=False,
+                source_type="foundry_iq_mcp" if mcp_enabled else "foundry_iq",
+                reason_code=ReasonCode.SOURCE_REJECTED,
+            )
             level, marker = _classify_retrieval_error(e)
             logger.log(
                 level,
@@ -150,6 +167,11 @@ class FoundryIQContextProvider(ContextProvider):
         )
 
         if not parts:
+            AuditEmitter.default().emit_source(
+                selected=False,
+                source_type="foundry_iq_mcp" if mcp_enabled else "foundry_iq",
+                reason_code=ReasonCode.SOURCE_EMPTY,
+            )
             return Context()
 
         context_text = build_context_text(parts)

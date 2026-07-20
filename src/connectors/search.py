@@ -8,6 +8,10 @@ from pydantic import BaseModel, Field
 
 from dependencies import get_config
 from util.metadata import format_custom_metadata, parse_allowed_keys
+from telemetry import AuditEmitter, ReasonCode
+from opentelemetry.trace.propagation.tracecontext import (
+    TraceContextTextMapPropagator,
+)
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
 from connectors.foundry_iq import McpSourceError, get_foundry_iq_client
 from connectors.foundry_iq_mcp import McpConfigurationError, McpCredentialError
@@ -504,6 +508,7 @@ class SearchClient:
         # Optional: user context token for permission trimming.
         if search_user_token:
             headers["x-ms-query-source-authorization"] = search_user_token
+        TraceContextTextMapPropagator().inject(headers)
 
         session = await self._get_session()
         async with session.post(url, headers=headers, json=body) as resp:
@@ -706,10 +711,19 @@ class SearchClient:
 
             # Process search results
             results_list = []
-            for result in search_results.get('value', []):
+            for rank, result in enumerate(search_results.get('value', [])):
                 title = result.get('title', 'reference') or 'reference'
                 link = result.get('filepath') or result.get('url', '') or ''
                 content = result.get('content', '')
+                if not content:
+                    AuditEmitter.default().emit_source(
+                        selected=False,
+                        source_type="azure_ai_search",
+                        source_reference=link or str(result.get("chunk_id") or ""),
+                        source_rank=rank,
+                        reason_code=ReasonCode.SOURCE_EMPTY,
+                    )
+                    continue
 
                 # Prepend the formatted metadata block before content when enabled.
                 # Read defensively: the field may be absent or null on a result.
@@ -736,6 +750,13 @@ class SearchClient:
                     custom_metadata=raw_metadata,
                 )
                 results_list.append(search_result.model_dump())
+                AuditEmitter.default().emit_source(
+                    selected=True,
+                    source_type="azure_ai_search",
+                    source_reference=link or str(result.get("chunk_id") or title),
+                    source_rank=rank,
+                    source_excerpt=content,
+                )
 
             # If we found results, force cache to non-empty so routing can recover
             # immediately from any stale empty-cache state.
@@ -746,9 +767,20 @@ class SearchClient:
                 }
 
             logging.info(f"[Retrieval] Found {len(results_list)} results from Azure AI Search")
+            if not results_list:
+                AuditEmitter.default().emit_source(
+                    selected=False,
+                    source_type="azure_ai_search",
+                    reason_code=ReasonCode.SOURCE_EMPTY,
+                )
             return json.dumps({"results": results_list, "query": query})
 
         except Exception as e:
+            AuditEmitter.default().emit_source(
+                selected=False,
+                source_type="azure_ai_search",
+                reason_code=ReasonCode.SOURCE_REJECTED,
+            )
             level, marker = _classify_retrieval_error(e)
             logging.log(
                 level,
@@ -816,18 +848,41 @@ class SearchClient:
                 )
 
             results_list = []
-            for record in records[: self.search_top_k]:
+            source_type = "foundry_iq_mcp" if mcp_enabled else "foundry_iq"
+            for rank, record in enumerate(records[: self.search_top_k]):
+                content = record.get("content") or ""
+                if not content:
+                    continue
                 search_result = SearchResult(
                     title=record.get("title") or "reference",
                     link=record.get("link") or "",
-                    content=record.get("content") or "",
+                    content=content,
                 )
                 results_list.append(search_result.model_dump())
+                AuditEmitter.default().emit_source(
+                    selected=True,
+                    source_type=getattr(record, "source_type", source_type),
+                    source_reference=record.get("link")
+                    or record.get("title"),
+                    source_rank=rank,
+                    source_excerpt=content,
+                )
 
             logging.info(f"[Retrieval] Found {len(results_list)} results from Foundry IQ")
+            if not results_list:
+                AuditEmitter.default().emit_source(
+                    selected=False,
+                    source_type=source_type,
+                    reason_code=ReasonCode.SOURCE_EMPTY,
+                )
             return json.dumps({"results": results_list, "query": query})
 
         except Exception as e:
+            AuditEmitter.default().emit_source(
+                selected=False,
+                source_type="foundry_iq_mcp" if mcp_enabled else "foundry_iq",
+                reason_code=ReasonCode.SOURCE_REJECTED,
+            )
             level, marker = _classify_retrieval_error(e)
             logging.log(
                 level,
