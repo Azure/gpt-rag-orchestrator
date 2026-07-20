@@ -18,7 +18,7 @@ openai==2.41.1
 
 # Async and data dependencies
 aiohttp==3.13.4
-pydantic==2.11.4
+pydantic==2.13.4
 
 # Authentication and token validation
 PyJWT==2.12.0
