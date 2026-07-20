@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 import logging
 import json
 import time
@@ -24,6 +25,14 @@ from . import agent_provider_v2
 from dependencies import get_config
 from connectors.search import get_search_client
 from connectors.aifoundry import get_genai_client
+from telemetry import (
+    AuditEmitter,
+    AuditStatus,
+    EventType,
+    ReasonCode,
+    current_audit_context,
+    invoke_audited_tool,
+)
 from openai import BadRequestError
 
 # Stable name for the single, reusable Foundry prompt agent.
@@ -239,7 +248,12 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         async def _bound_search(query: str) -> str:
             self._apply_search_request_context()
             t_ret = time.time()
-            result = await search_client.search_knowledge_base(query=query)
+            result = await invoke_audited_tool(
+                "search_knowledge_base",
+                lambda: search_client.search_knowledge_base(query=query),
+                tool_kind="retrieval",
+                sensitive_arguments={"query": query},
+            )
             logging.info(f"[Agent Flow V2] Retrieval tool executed in {time.time() - t_ret:.2f}s")
             return format_results(result)
 
@@ -263,10 +277,38 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
 
         # 1. Bypass Routing: Empty Index goes directly to Chat Completion for ~Instant TTFB
         if is_empty and not self.cfg.get("BING_RETRIEVAL_ENABLED", False, type=bool):
+            context = current_audit_context()
+            AuditEmitter.default().emit(
+                EventType.ROUTE_SELECTED,
+                operation="single_agent_rag.select_route",
+                status=AuditStatus.SELECTED,
+                reason_code=ReasonCode.DIRECT_MODEL_SELECTED,
+                parent_event_id=(
+                    context.request_started_event_id if context else None
+                ),
+                metadata={
+                    "decision_type": "single_agent_rag_route",
+                    "decision_value": "direct_model",
+                },
+            )
             logging.info("[Agent Flow V2] ⚡ Routing locally directly to LLM (Search Index is empty, bypassing Agents)")
             async for chunk in self._stream_direct_llm(user_message):
                 yield chunk
         else:
+            context = current_audit_context()
+            AuditEmitter.default().emit(
+                EventType.ROUTE_SELECTED,
+                operation="single_agent_rag.select_route",
+                status=AuditStatus.SELECTED,
+                reason_code=ReasonCode.AGENT_SELECTED,
+                parent_event_id=(
+                    context.request_started_event_id if context else None
+                ),
+                metadata={
+                    "decision_type": "single_agent_rag_route",
+                    "decision_value": "agent_service",
+                },
+            )
             # 2. Complex Routing: Use Azure AI Agents SDK
             logging.info("[Agent Flow V2] 🤖 Routing to Azure AI Agents SDK (Search Index has data or Bing enabled)")
             async for chunk in self._stream_agent(user_message):
@@ -282,8 +324,6 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         stream_start = time.time()
 
         aisearch_enabled = self.cfg.get("SEARCH_RETRIEVAL_ENABLED", True, type=bool)
-        bing_enabled = self.cfg.get("BING_RETRIEVAL_ENABLED", False, type=bool)
-
         # This path is the empty-index bypass: no search tool is bound here. When a
         # knowledge base is configured (aisearch enabled) but has no content to
         # ground on, answer strictly: greet on small talk, otherwise tell the user

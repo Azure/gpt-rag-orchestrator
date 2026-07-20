@@ -2,13 +2,12 @@ import os
 import logging
 import logging.config
 import platform
+from typing import Any
 
 from azure.monitor.opentelemetry import configure_azure_monitor
 from opentelemetry import trace
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource, SERVICE_INSTANCE_ID, SERVICE_VERSION, SERVICE_NAMESPACE
 from opentelemetry.trace import Span, Status, StatusCode, Tracer
-from dependencies import get_config
-from connectors.appconfig import AppConfigClient
 
 # Custom filter to exclude trace logs
 class ExcludeTraceLogsFilter(logging.Filter):
@@ -40,9 +39,10 @@ class Telemetry:
     langchain_log_level : int = logging.NOTSET
     api_name : str = None
     telemetry_connection_string : str = None
+    monitor_log_export_mode: str = "disabled"
 
     @staticmethod
-    def configure_basic(config: AppConfigClient):
+    def configure_basic(config: Any):
         # Determine app log level
         level = Telemetry.translate_log_level(config.get('LOG_LEVEL', 'INFO'))
 
@@ -102,7 +102,12 @@ class Telemetry:
 
 
     @staticmethod
-    def configure_monitoring(config: AppConfigClient, telemetry_connection_string: str, api_name : str):
+    def configure_monitoring(
+        config: Any,
+        telemetry_connection_string: str,
+        api_name: str,
+        service_version: str,
+    ):
 
         # Try to get the connection string without throwing if config is disabled/unavailable.
         try:
@@ -128,7 +133,7 @@ class Telemetry:
             {
                 SERVICE_NAME: f"{Telemetry.api_name}",
                 SERVICE_NAMESPACE : api_name,
-                SERVICE_VERSION: f"1.0.0",
+                SERVICE_VERSION: service_version,
                 SERVICE_INSTANCE_ID: f"{platform.node()}"
             })
 
@@ -149,6 +154,18 @@ class Telemetry:
             # Allow users to opt-in to sending application logs to App Insights.
             # Tracing remains enabled by default.
             disable_logging_export = str(config.get("AZURE_MONITOR_DISABLE_LOGGING", os.getenv("AZURE_MONITOR_DISABLE_LOGGING", "true"))).lower() == "true"
+            audit_enabled = str(
+                config.get(
+                    "AUDIT_EVENTS_ENABLED",
+                    os.getenv("AUDIT_EVENTS_ENABLED", "false"),
+                )
+            ).lower() in {"1", "true", "yes", "on"}
+            if not disable_logging_export:
+                Telemetry.monitor_log_export_mode = "all"
+            elif audit_enabled:
+                Telemetry.monitor_log_export_mode = "audit"
+            else:
+                Telemetry.monitor_log_export_mode = "disabled"
 
             # Configure Azure Monitor defaults
             configure_azure_monitor(
@@ -156,8 +173,13 @@ class Telemetry:
                 disable_offline_storage=True,
                 disable_metrics=True,
                 disable_tracing=False,
-                disable_logging=disable_logging_export,
-                resource=resource
+                disable_logging=Telemetry.monitor_log_export_mode == "disabled",
+                logger_name=(
+                    "gptrag.audit"
+                    if Telemetry.monitor_log_export_mode == "audit"
+                    else ""
+                ),
+                resource=resource,
             )
         finally:
             # Restore original levels
@@ -210,7 +232,7 @@ class Telemetry:
         return synonyms.get(s.lower(), logging.INFO)
 
     @staticmethod
-    def configure_logging(config: AppConfigClient):
+    def configure_logging(config: Any):
         # Resolve log levels with robust parsing; default INFO for app, WARNING for azure SDK
         Telemetry.log_level = Telemetry.translate_log_level(
             config.get("LOG_LEVEL", default="INFO")
@@ -230,11 +252,6 @@ class Telemetry:
             Telemetry.azure_http_logs_disabled = True
 
         enable_console_logging = str(config.get("ENABLE_CONSOLE_LOGGING", default='true')).lower()
-
-        handlers = []
-
-        if Telemetry.log_level == logging.DEBUG:
-            handlers.append(logging.StreamHandler())
 
         #Logging configuration
         LOGGING = {
@@ -306,15 +323,24 @@ class Telemetry:
             }
         }
 
-        #remove console if prod env (cut down on duplicate log data)
-        if enable_console_logging != 'true':
-            LOGGING['root']['handlers'] = ["azure"]
+        root_handlers = []
+        if Telemetry.monitor_log_export_mode == "all":
+            root_handlers.append("azure")
+        if enable_console_logging == "true":
+            root_handlers.append("console")
+        LOGGING["root"]["handlers"] = root_handlers
+        LOGGING["loggers"][""]["handlers"] = (
+            ["console"] if enable_console_logging == "true" else []
+        )
 
         #set the logging configuration
         logging.config.dictConfig(LOGGING)
+        audit_logger = logging.getLogger("gptrag.audit")
+        audit_logger.setLevel(logging.INFO)
+        audit_logger.propagate = Telemetry.monitor_log_export_mode != "audit"
 
     @staticmethod
-    def log_log_level_diagnostics(config: AppConfigClient) -> None:
+    def log_log_level_diagnostics(config: Any) -> None:
         """Log the resolved LOG_LEVEL and the effective root logger level.
 
         Prefers the environment variable LOG_LEVEL, then App Configuration,

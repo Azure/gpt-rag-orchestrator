@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 import logging
 import os
 from pathlib import Path
@@ -7,9 +8,8 @@ from typing import Optional
 from collections.abc import Mapping
 
 import uvicorn
-from fastapi import FastAPI, Request, HTTPException, Depends, Header
+from fastapi import FastAPI, Request, Response, HTTPException, Depends, Header
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
@@ -28,7 +28,7 @@ from connectors.cosmosdb import (
     soft_delete_conversation,
 )
 from dependencies import get_config, validate_auth, validate_access_token
-from telemetry import Telemetry
+from telemetry import AuditEmitter, Telemetry, new_correlation_id
 from schemas import (
     OrchestratorRequest,
     ORCHESTRATOR_RESPONSES,
@@ -218,7 +218,17 @@ if getattr(cfg, "auth_failed", False):
 async def lifespan(app: FastAPI):
     import time
     _startup_banner()
-    Telemetry.configure_monitoring(cfg, APPLICATION_INSIGHTS_CONNECTION_STRING, APP_NAME)
+    AuditEmitter.configure(
+        cfg,
+        service_name=APP_NAME,
+        service_version=APP_VERSION,
+    )
+    Telemetry.configure_monitoring(
+        cfg,
+        APPLICATION_INSIGHTS_CONNECTION_STRING,
+        APP_NAME,
+        APP_VERSION,
+    )
     
     # ---------------------------------------------------------
     # Pre-warming Clients to reduce Cold Start Latency
@@ -229,8 +239,6 @@ async def lifespan(app: FastAPI):
         from connectors.search import get_search_client
         from connectors.cosmosdb import get_cosmosdb_client
         from connectors.identity_manager import get_identity_manager
-        import asyncio
-
         # 1. Warm up Identity Singleton
         identity_manager = get_identity_manager()
         credential = identity_manager.get_aio_credential()
@@ -280,6 +288,7 @@ app = FastAPI(
 )
 async def orchestrator_endpoint(
     request: Request,
+    response: Response,
     body: OrchestratorRequest,
     x_api_key: Optional[str] = Header(None, alias="X-API-KEY"),
     dapr_api_token: Optional[str] = Header(None, alias="dapr-api-token"),
@@ -289,6 +298,10 @@ async def orchestrator_endpoint(
     Accepts JSON payload with ask/question, optional conversation_id and context,
     then streams back an answer via SSE.
     """
+
+    correlation_id = new_correlation_id()
+    request.state.correlation_id = correlation_id
+    response.headers["X-Correlation-ID"] = correlation_id
 
     # Determine operation type first (defensive: body may not include type)
     op_type = getattr(body, "type", None)
@@ -490,7 +503,11 @@ async def orchestrator_endpoint(
             raise HTTPException(status_code=400, detail="No 'conversation_id' field in request body")
 
         # Create orchestrator instance and save feedback
-        orchestrator = await Orchestrator.create(conversation_id=conversation_id, user_context=user_context)
+        orchestrator = await Orchestrator.create(
+            conversation_id=conversation_id,
+            user_context=user_context,
+            correlation_id=correlation_id,
+        )
         # Build feedback dict defensively; optional fields may be absent
         _qid = getattr(body, "question_id", None)
         feedback = {
@@ -514,6 +531,7 @@ async def orchestrator_endpoint(
         conversation_id=body.conversation_id,
         user_context=user_context,
         request_access_token=access_token if authorization else None,
+        correlation_id=correlation_id,
     )
     logging.info(f"[Timing][main.py] Orchestrator.create took {time.time() - orchestrator_create_start:.3f}s")
 
@@ -522,13 +540,14 @@ async def orchestrator_endpoint(
             _qid = getattr(body, "question_id", None) 
             async for chunk in orchestrator.stream_response(ask, _qid):
                 yield f"{chunk}"
-        except Exception as e:
+        except Exception:
             logging.exception("Error in SSE generator")
             yield "event: error\ndata: An internal server error occurred.\n\n"
 
     return StreamingResponse(
         sse_event_generator(),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
+        headers={"X-Correlation-ID": correlation_id},
     )
 
 

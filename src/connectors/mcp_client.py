@@ -12,6 +12,10 @@ import httpx
 from agent_framework import MCPStreamableHTTPTool
 from agent_framework._mcp import MCPTool
 from mcp.client.sse import sse_client
+from opentelemetry.instrumentation.utils import suppress_http_instrumentation
+from opentelemetry.trace.propagation.tracecontext import (
+    TraceContextTextMapPropagator,
+)
 
 MCPTransport = Literal["sse", "streamable_http"]
 _SUPPORTED_TRANSPORTS = frozenset({"sse", "streamable_http"})
@@ -19,6 +23,41 @@ _TRANSPORT_PATHS: dict[MCPTransport, str] = {
     "sse": "sse",
     "streamable_http": "mcp",
 }
+
+
+class _TraceContextOnlyAsyncTransport(httpx.AsyncBaseTransport):
+    """Delegate HTTPX calls while excluding ambient OpenTelemetry baggage."""
+
+    def __init__(
+        self,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._transport = transport or httpx.AsyncHTTPTransport()
+
+    async def handle_async_request(
+        self,
+        request: httpx.Request,
+    ) -> httpx.Response:
+        request.headers.pop("baggage", None)
+        request.headers.pop("traceparent", None)
+        request.headers.pop("tracestate", None)
+        TraceContextTextMapPropagator().inject(request.headers)
+        # The global HTTPX instrumentor would otherwise inject the default
+        # composite propagator, including baggage, into the delegated request.
+        with suppress_http_instrumentation():
+            return await self._transport.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self._transport.aclose()
+
+
+def _trace_context_only_http_client_factory(
+    *args: Any,
+    **kwargs: Any,
+) -> httpx.AsyncClient:
+    """Create the SSE HTTP client without composite baggage propagation."""
+    kwargs["transport"] = _TraceContextOnlyAsyncTransport()
+    return httpx.AsyncClient(*args, **kwargs)
 
 
 def normalize_mcp_transport(value: str | None) -> MCPTransport:
@@ -136,19 +175,29 @@ async def open_mcp_tool(
     headers = build_mcp_headers(user_context, api_key)
 
     if normalized_transport == "sse":
+        # The legacy SSE client is aiohttp-based and is not covered by the
+        # process-wide HTTPX instrumentation. Inject W3C trace context only;
+        # baggage is intentionally excluded.
+        TraceContextTextMapPropagator().inject(headers)
         tool = LegacySSEMCPTool(
             name="McpServerPlugin",
             url=url,
             headers=headers,
             request_timeout=timeout,
+            httpx_client_factory=_trace_context_only_http_client_factory,
         )
         async with tool:
             yield tool
         return
 
+    client_kwargs: dict[str, Any] = {
+        "headers": headers,
+        "timeout": httpx.Timeout(float(timeout)),
+    }
+    if http_client_factory is httpx.AsyncClient:
+        client_kwargs["transport"] = _TraceContextOnlyAsyncTransport()
     http_client = http_client_factory(
-        headers=headers,
-        timeout=httpx.Timeout(float(timeout)),
+        **client_kwargs,
     )
     async with http_client:
         tool = MCPStreamableHTTPTool(
