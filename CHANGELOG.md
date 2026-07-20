@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Versioned, privacy-conscious audit events.** Added a disabled-by-default,
+  metadata-only-by-default v1
+  activity contract over the existing OpenTelemetry and Application Insights
+  pipeline for correlated request lifecycle, route, grounding-source, tool, and
+  outcome events. Events use bounded metadata, keyed pseudonyms, recursive
+  prohibited-data filtering, fixed names and enums, explicit cancellation and
+  partial-output states, and an opt-in sensitive-content allowlist. The
+  orchestrator now returns a server-generated `X-Correlation-ID`; audit-only
+  export does not enable normal application log export. The shared contract
+  reserves exactly seven ingestion events: `ingestion.run.started`,
+  `ingestion.run.completed`, `ingestion.run.failed`,
+  `ingestion.run.cancelled`, `ingestion.document.indexed`,
+  `ingestion.document.rejected`, and `ingestion.document.deleted`.
+
+### Fixed
+
+- **Bounded, observational audit instrumentation.** Restored audit-disabled
+  retrieval and cache compatibility for empty Search and Foundry references,
+  gated Foundry timing reconstruction behind the effective audit flag, rejected
+  malformed or unbounded reconstructed durations without failing retrieval,
+  bounded sanitizer traversal and per-request source/tool/event emission,
+  reserved request terminal capacity with omission counts, made emission
+  failures payload-free and constant-safe, and documented the logical-null to
+  Azure Monitor all-zero root-parent translation.
+
 ## [v3.7.0] - 2026-07-19
 
 ### Added

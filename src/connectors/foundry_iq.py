@@ -24,12 +24,29 @@ constant (see :data:`DEFAULT_FOUNDRY_IQ_API_VERSION`).
 
 import logging
 import json
+import math
 import time
+from datetime import timedelta
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 import aiohttp
+from opentelemetry.trace.propagation.tracecontext import (
+    TraceContextTextMapPropagator,
+)
 
 from dependencies import get_config
+from telemetry import (
+    AuditEmitter,
+    AuditStatus,
+    EventType,
+    ReasonCode,
+    current_audit_context,
+)
+from telemetry.audit_contract import (
+    MAX_AUDIT_DURATION_MS,
+    new_event_id,
+    utc_now,
+)
 from connectors.foundry_iq_mcp import (
     McpCredentialError,
     McpRuntimeConfig,
@@ -42,6 +59,12 @@ from connectors.foundry_iq_mcp import (
 # Core retrieval is GA at 2026-04-01, but we pin the preview so the security
 # features are always available. Override via the FOUNDRY_IQ_API_VERSION key.
 DEFAULT_FOUNDRY_IQ_API_VERSION = "2026-05-01-preview"
+
+
+class _FoundryIQRecord(dict[str, str]):
+    """Normalized record with non-payload source-kind provenance."""
+
+    source_type: str
 
 # Config key names (kept here so the connector layer doesn't import from api/).
 KNOWLEDGE_BASE_NAME_KEY = "KNOWLEDGE_BASE_NAME"
@@ -1031,14 +1054,23 @@ class FoundryIQClient:
         carry one (true for ``azureBlob`` references).
         """
         records: List[Dict[str, str]] = []
+
+        def append_record(
+            record: Optional[Dict[str, str]],
+            source_type: str,
+        ) -> None:
+            if record is not None:
+                tagged_record = _FoundryIQRecord(record)
+                tagged_record.source_type = source_type
+                records.append(tagged_record)
+
         for ref in payload.get("references", []) or []:
             source = ref.get("sourceData") or {}
             ref_type = str(ref.get("type") or "").strip().lower()
 
             if ref_type == "mcpserver":
                 mcp_record = cls._normalize_mcp_reference(ref)
-                if mcp_record is not None:
-                    records.append(mcp_record)
+                append_record(mcp_record, "mcpServer")
                 continue
 
             if not isinstance(source, Mapping):
@@ -1049,16 +1081,14 @@ class FoundryIQClient:
             # with the generic azureBlob / searchIndex path below.
             if ref_type == "web":
                 web_record = cls._normalize_web_reference(source)
-                if web_record is not None:
-                    records.append(web_record)
+                append_record(web_record, "web")
                 continue
 
             # Fabric Data Agent shape (fabricDataAgent): distinct fields,
             # no overlap with fabricOntology / workIQ.
             if source.get("dataAgentAnswer") or source.get("dataAgentRawData"):
                 data_agent_record = cls._normalize_fabric_data_agent_reference(source)
-                if data_agent_record is not None:
-                    records.append(data_agent_record)
+                append_record(data_agent_record, "fabricDataAgent")
                 continue
 
             # SharePoint remote shape (remoteSharePoint / Copilot Retrieval
@@ -1068,23 +1098,20 @@ class FoundryIQClient:
             # bare ``webUrl`` alone is ambiguous with SharePoint Indexed).
             if source.get("resourceMetadata"):
                 sp_record = cls._normalize_sharepoint_remote_reference(source)
-                if sp_record is not None:
-                    records.append(sp_record)
+                append_record(sp_record, "remoteSharePoint")
                 continue
 
             # Fabric IQ shape (fabricOntology): distinct fields, no
             # attributions/extracts overlap with Work IQ.
             if source.get("fabricAnswer") or source.get("fabricRawData"):
                 fabric_record = cls._normalize_fabric_iq_reference(source)
-                if fabric_record is not None:
-                    records.append(fabric_record)
+                append_record(fabric_record, "fabricOntology")
                 continue
 
             # Work IQ shape (workIQ): attributions + extracts.
             if source.get("attributions") or source.get("extracts"):
                 record = cls._normalize_work_iq_reference(source)
-                if record is not None:
-                    records.append(record)
+                append_record(record, "workIQ")
                 continue
 
             # indexedOneLake shape: azureBlob-like projection with a
@@ -1097,8 +1124,7 @@ class FoundryIQClient:
                 or source.get("lakehouseId")
             ):
                 onelake_record = cls._normalize_onelake_reference(source)
-                if onelake_record is not None:
-                    records.append(onelake_record)
+                append_record(onelake_record, "indexedOneLake")
                 continue
 
             # SharePoint Indexed shape (indexedSharePoint): SharePoint-oriented
@@ -1118,7 +1144,7 @@ class FoundryIQClient:
             ):
                 sharepoint_record = cls._normalize_sharepoint_indexed_reference(source)
                 if sharepoint_record is not None:
-                    records.append(sharepoint_record)
+                    append_record(sharepoint_record, "indexedSharePoint")
                     continue
                 # Fall through only if the SharePoint-oriented extractor
                 # could not produce content; the generic path may still
@@ -1151,7 +1177,13 @@ class FoundryIQClient:
             if not title:
                 title = "reference"
 
-            records.append({"title": title, "link": link, "content": content})
+            append_record(
+                {"title": title, "link": link, "content": content},
+                {
+                    "searchindex": "searchIndex",
+                    "azureblob": "azureBlob",
+                }.get(ref_type, "foundryIQ"),
+            )
         return records
 
     def _build_conversation_source_params(
@@ -1581,6 +1613,102 @@ class FoundryIQClient:
             if isinstance(status_code, int) and status_code >= 400:
                 failed = True
 
+            emitter = AuditEmitter.default()
+            if emitter.enabled:
+                audit_context = current_audit_context()
+                if audit_context is not None:
+                    elapsed_ms_value = raw_activity.get("elapsedMs")
+                    try:
+                        if isinstance(elapsed_ms_value, bool):
+                            raise ValueError
+                        elapsed_ms = float(elapsed_ms_value)
+                        if (
+                            not math.isfinite(elapsed_ms)
+                            or elapsed_ms < 0
+                            or elapsed_ms > MAX_AUDIT_DURATION_MS
+                        ):
+                            raise ValueError
+                    except (TypeError, ValueError, OverflowError):
+                        emitter.emit_failure(ReasonCode.VALIDATION_FAILED)
+                    else:
+                        if emitter.reserve_tool_invocation():
+                            count_value = raw_activity.get("count")
+                            if not isinstance(count_value, int) or isinstance(
+                                count_value, bool
+                            ):
+                                count_value = None
+                            observed_at = utc_now()
+                            started_at = observed_at - timedelta(
+                                milliseconds=elapsed_ms
+                            )
+                            tool_id = emitter.pseudonymize(
+                                "tool", f"{source_name}:{tool_name}"
+                            )
+                            invocation_id = emitter.pseudonymize(
+                                "tool-invocation",
+                                f"{source_name}:{tool_name}:"
+                                f"{raw_activity.get('id') or new_event_id()}",
+                            )
+                            started_event_id = emitter.emit(
+                                EventType.TOOL_STARTED,
+                                operation="foundry_iq.mcp_tool",
+                                status=AuditStatus.STARTED,
+                                reason_code=ReasonCode.TOOL_INVOKED,
+                                parent_event_id=(
+                                    audit_context.request_started_event_id
+                                ),
+                                event_time=started_at,
+                                metadata={
+                                    "tool_name": "foundry_iq_mcp_tool",
+                                    "tool_id": tool_id,
+                                    "tool_invocation_id": invocation_id,
+                                    "transport": "foundry_iq",
+                                    "timing_source": "reconstructed",
+                                },
+                                _reserved_tool_event=True,
+                                _omission_kind="tool",
+                            )
+                            emitter.emit(
+                                (
+                                    EventType.TOOL_FAILED
+                                    if failed
+                                    else EventType.TOOL_COMPLETED
+                                ),
+                                operation="foundry_iq.mcp_tool",
+                                status=(
+                                    AuditStatus.FAILED
+                                    if failed
+                                    else AuditStatus.COMPLETED
+                                ),
+                                reason_code=(
+                                    ReasonCode.TIMEOUT
+                                    if status_text == "timeout"
+                                    else (
+                                        ReasonCode.TOOL_FAILED
+                                        if failed
+                                        else ReasonCode.TOOL_COMPLETED
+                                    )
+                                ),
+                                parent_event_id=started_event_id,
+                                started_at=started_at,
+                                duration_ms=elapsed_ms,
+                                metadata={
+                                    "tool_name": "foundry_iq_mcp_tool",
+                                    "tool_id": tool_id,
+                                    "tool_invocation_id": invocation_id,
+                                    "failure_type": (
+                                        "timeout"
+                                        if status_text == "timeout"
+                                        else ("remote_error" if failed else None)
+                                    ),
+                                    "output_count": count_value,
+                                    "partial_output": http_status == 206,
+                                    "timing_source": "reconstructed",
+                                },
+                                _reserved_tool_event=True,
+                                _omission_kind="tool",
+                            )
+
             error_code = ""
             if isinstance(error, Mapping):
                 error_code = str(
@@ -1685,6 +1813,7 @@ class FoundryIQClient:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}",
         }
+        TraceContextTextMapPropagator().inject(headers)
         if obo_token:
             # Per-user document-level security (query-time ACL/RBAC enforcement).
             headers["x-ms-query-source-authorization"] = obo_token

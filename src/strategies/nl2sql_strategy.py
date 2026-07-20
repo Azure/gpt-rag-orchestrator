@@ -11,6 +11,7 @@ from .base_agent_strategy import BaseAgentStrategy
 from .agent_strategies import AgentStrategies
 from connectors.openai_chat_client import OpenAIChatClient
 from plugins.nl2sql.plugin import NL2SQLPlugin
+from telemetry import AuditEmitter, ReasonCode, invoke_audited_tool
 
 
 class NL2SQLStrategy(BaseAgentStrategy):
@@ -186,16 +187,41 @@ class NL2SQLStrategy(BaseAgentStrategy):
                     return names
         return names
 
+    async def _invoke_plugin(
+        self,
+        method_name: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        method = getattr(self._nl2sql_plugin, method_name)
+        return await invoke_audited_tool(
+            f"nl2sql_{method_name}",
+            lambda: method(*args, **kwargs),
+            tool_kind="nl2sql",
+            sensitive_arguments={"args": args, "kwargs": kwargs},
+        )
+
     async def _collect_schema_context(self, datasource_name: str, user_message: str) -> dict[str, Any]:
-        table_candidates = await self._nl2sql_plugin.tables_retrieval(user_message, datasource=datasource_name)
-        all_tables = await self._nl2sql_plugin.get_all_tables_info(datasource_name)
+        table_candidates = await self._invoke_plugin(
+            "tables_retrieval", user_message, datasource=datasource_name
+        )
+        all_tables = await self._invoke_plugin(
+            "get_all_tables_info", datasource_name
+        )
         table_names = self._selected_table_names(table_candidates, all_tables)
         schemas_task = asyncio.gather(
-            *(self._nl2sql_plugin.get_schema_info(datasource_name, table_name) for table_name in table_names)
+            *(
+                self._invoke_plugin(
+                    "get_schema_info", datasource_name, table_name
+                )
+                for table_name in table_names
+            )
         )
         schemas, similar_queries = await asyncio.gather(
             schemas_task,
-            self._nl2sql_plugin.queries_retrieval(user_message, datasource=datasource_name),
+            self._invoke_plugin(
+                "queries_retrieval", user_message, datasource=datasource_name
+            ),
         )
         return {
             "table_candidates": table_candidates,
@@ -236,8 +262,8 @@ class NL2SQLStrategy(BaseAgentStrategy):
 
         try:
             datasources_info, broad_table_candidates = await asyncio.gather(
-                self._nl2sql_plugin.get_all_datasources_info(),
-                self._nl2sql_plugin.tables_retrieval(user_message),
+                self._invoke_plugin("get_all_datasources_info"),
+                self._invoke_plugin("tables_retrieval", user_message),
             )
             triage_context = (
                 f"Conversation history:\n{self._build_history_context()}\n\n"
@@ -261,10 +287,20 @@ class NL2SQLStrategy(BaseAgentStrategy):
             datasource_name = selection.get("datasource_name")
             datasource_type = selection.get("datasource_type")
             if not datasource_name:
+                AuditEmitter.default().emit_source(
+                    selected=False,
+                    source_type="nl2sql_datasource",
+                    reason_code=ReasonCode.SOURCE_REJECTED,
+                )
                 full_response = "I could not identify a configured SQL datasource that matches this question."
                 yield full_response
                 self._append_conversation_turn(user_message, full_response)
                 return
+            AuditEmitter.default().emit_source(
+                selected=True,
+                source_type="nl2sql_datasource",
+                source_reference=str(datasource_name),
+            )
 
             if datasource_type not in {"sql_endpoint", "sql_database", None}:
                 full_response = (
@@ -297,7 +333,9 @@ class NL2SQLStrategy(BaseAgentStrategy):
                 self._append_conversation_turn(user_message, full_response)
                 return
 
-            validation = await self._nl2sql_plugin.validate_sql_query(sql_query)
+            validation = await self._invoke_plugin(
+                "validate_sql_query", sql_query
+            )
             if not self._get_field(validation, "is_valid", False):
                 error = self._get_field(validation, "error", "unknown validation error")
                 full_response = f"I generated a SQL query, but it did not pass validation: {error}"
@@ -305,7 +343,9 @@ class NL2SQLStrategy(BaseAgentStrategy):
                 self._append_conversation_turn(user_message, full_response)
                 return
 
-            query_result = await self._nl2sql_plugin.execute_sql_query(datasource_name, sql_query)
+            query_result = await self._invoke_plugin(
+                "execute_sql_query", datasource_name, sql_query
+            )
             result_error = self._get_field(query_result, "error")
             if result_error:
                 full_response = f"The SQL query could not be executed: {result_error}"

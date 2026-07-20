@@ -33,6 +33,7 @@ from azure.storage.blob.aio import BlobClient as AzureBlobClient
 from connectors.multimodal_chat_client import MULTIMODAL_PREFIX
 from connectors.search import _classify_retrieval_error, build_conversation_filter
 from dependencies import get_config
+from telemetry import AuditEmitter, ReasonCode
 from util.metadata import format_custom_metadata, parse_allowed_keys
 
 logger = logging.getLogger(__name__)
@@ -369,6 +370,11 @@ class MultimodalSearchContextProvider(ContextProvider):
                         async for doc in results:
                             docs.append(doc)
                 except Exception as retry_e:
+                    AuditEmitter.default().emit_source(
+                        selected=False,
+                        source_type="azure_ai_search_multimodal",
+                        reason_code=ReasonCode.SOURCE_REJECTED,
+                    )
                     level, marker = _classify_retrieval_error(retry_e)
                     logger.log(
                         level,
@@ -384,6 +390,11 @@ class MultimodalSearchContextProvider(ContextProvider):
                     )
                     return Context()
             else:
+                AuditEmitter.default().emit_source(
+                    selected=False,
+                    source_type="azure_ai_search_multimodal",
+                    reason_code=ReasonCode.SOURCE_REJECTED,
+                )
                 level, marker = _classify_retrieval_error(e)
                 logger.log(
                     level,
@@ -405,6 +416,11 @@ class MultimodalSearchContextProvider(ContextProvider):
         )
 
         if not docs:
+            AuditEmitter.default().emit_source(
+                selected=False,
+                source_type="azure_ai_search_multimodal",
+                reason_code=ReasonCode.SOURCE_EMPTY,
+            )
             return Context()
 
         # ---- Build multimodal content parts ----
@@ -416,7 +432,7 @@ class MultimodalSearchContextProvider(ContextProvider):
         # Start with the context prompt as the first text part
         content_parts.append({"type": "text", "text": _CONTEXT_PROMPT})
 
-        for doc in docs:
+        for rank, doc in enumerate(docs):
             title = doc.get("title") or doc.get("filepath") or doc.get("id") or "Unknown"
             link = doc.get("filepath") or doc.get("url") or ""
             full_text = doc.get("content") or ""
@@ -424,7 +440,21 @@ class MultimodalSearchContextProvider(ContextProvider):
             image_captions = doc.get("imageCaptions") or ""
 
             if not full_text:
+                AuditEmitter.default().emit_source(
+                    selected=False,
+                    source_type="azure_ai_search_multimodal",
+                    source_reference=link or str(doc.get("id") or ""),
+                    source_rank=rank,
+                    reason_code=ReasonCode.SOURCE_EMPTY,
+                )
                 continue
+            AuditEmitter.default().emit_source(
+                selected=True,
+                source_type="azure_ai_search_multimodal",
+                source_reference=link or str(doc.get("id") or title),
+                source_rank=rank,
+                source_excerpt=full_text,
+            )
 
             # Build mapping: figure path → blob URL (from relatedImages list)
             figure_url_map: dict[str, str] = {}

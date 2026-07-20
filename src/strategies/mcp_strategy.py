@@ -15,7 +15,7 @@ from connectors.mcp_client import (
     open_mcp_tool,
     resolve_mcp_endpoint,
 )
-from telemetry import Telemetry
+from telemetry import Telemetry, wrap_ai_functions
 from util.tools import is_azure_environment
 
 from .agent_strategies import AgentStrategies
@@ -137,7 +137,11 @@ class McpStrategy(BaseAgentStrategy):
                     connection_latency_ms = (
                         time.monotonic() - connection_started
                     ) * 1000
-                    tool_count = len(mcp_tool.functions)
+                    audited_functions = wrap_ai_functions(
+                        mcp_tool.functions,
+                        tool_kind="mcp",
+                    )
+                    tool_count = len(audited_functions)
                     span.set_attribute("mcp.tool_count", tool_count)
 
                     chat_client = self._create_chat_client()
@@ -145,7 +149,7 @@ class McpStrategy(BaseAgentStrategy):
                         chat_client=chat_client,
                         id=self.existing_agent_id,
                         name="MultiPluginAgent",
-                        tools=mcp_tool.functions,
+                        tools=audited_functions,
                     ) as agent:
                         conv["agent_id"] = agent.id
                         thread = agent.get_new_thread()

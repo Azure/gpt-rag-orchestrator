@@ -11,7 +11,7 @@ the Azure Search SDK.
 
 import logging
 import time
-from collections.abc import Awaitable, Callable, MutableSequence, Sequence
+from collections.abc import Awaitable, Callable, MutableSequence
 from typing import Any, Optional
 
 from agent_framework import ChatMessage, Context, ContextProvider, Role
@@ -22,7 +22,8 @@ from azure.search.documents.models import VectorizedQuery, QueryType, QueryCapti
 from connectors.search import _classify_retrieval_error, build_conversation_filter
 from dependencies import get_config
 from util.metadata import format_custom_metadata, parse_allowed_keys
-from .context_shaping import CONTEXT_PROMPT as _CONTEXT_PROMPT, build_context_text, format_context_part
+from telemetry import AuditEmitter, ReasonCode
+from .context_shaping import build_context_text, format_context_part
 logger = logging.getLogger(__name__)
 
 
@@ -142,11 +143,21 @@ class SearchContextProvider(ContextProvider):
                 results = await client.search(**search_params)
 
                 parts: list[str] = []
+                rank = 0
                 async for doc in results:
+                    current_rank = rank
+                    rank += 1
                     title = doc.get("title") or doc.get("filepath") or doc.get("id") or "Unknown"
                     link = doc.get("filepath") or doc.get("url") or ""
                     content = doc.get("content") or ""
                     if not content:
+                        AuditEmitter.default().emit_source(
+                            selected=False,
+                            source_type="azure_ai_search",
+                            source_reference=link or str(doc.get("id") or ""),
+                            source_rank=current_rank,
+                            reason_code=ReasonCode.SOURCE_EMPTY,
+                        )
                         continue
                     if len(content) > self._max_content_chars:
                         content = content[:self._max_content_chars] + "..."
@@ -159,7 +170,19 @@ class SearchContextProvider(ContextProvider):
                         if metadata_block:
                             content = f"{metadata_block}\n\n{content}"
                     parts.append(format_context_part(title, link, content))
+                    AuditEmitter.default().emit_source(
+                        selected=True,
+                        source_type="azure_ai_search",
+                        source_reference=link or str(doc.get("id") or title),
+                        source_rank=current_rank,
+                        source_excerpt=content,
+                    )
         except Exception as e:
+            AuditEmitter.default().emit_source(
+                selected=False,
+                source_type="azure_ai_search",
+                reason_code=ReasonCode.SOURCE_REJECTED,
+            )
             level, marker = _classify_retrieval_error(e)
             logger.log(
                 level,
@@ -178,6 +201,11 @@ class SearchContextProvider(ContextProvider):
         logger.info("[SearchContextProvider] Search returned %d documents in %.2fs", len(parts), time.time() - search_start)
 
         if not parts:
+            AuditEmitter.default().emit_source(
+                selected=False,
+                source_type="azure_ai_search",
+                reason_code=ReasonCode.SOURCE_EMPTY,
+            )
             return Context()
 
         context_text = build_context_text(parts)

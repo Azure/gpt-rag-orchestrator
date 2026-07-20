@@ -158,6 +158,20 @@ def test_put_config_rejects_denylist_key():
     cfg.set_value.assert_not_called()
 
 
+def test_put_config_rejects_audit_hmac_key():
+    cfg = _build_cfg({})
+    app = _make_app(cfg)
+    client = TestClient(app)
+    response = client.put(
+        "/api/dashboard/config",
+        json={"settings": [{"key": "AUDIT_HMAC_KEY", "value": "secret"}]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["errors"][0]["key"] == "AUDIT_HMAC_KEY"
+    cfg.set_value.assert_not_called()
+
+
 def test_put_config_happy_path_writes_and_refreshes_cache():
     cfg = _build_cfg({"AGENT_STRATEGY": "single_agent_rag", "CHAT_TEMPERATURE": "0.7"})
     refreshed_cfg = _build_cfg({"AGENT_STRATEGY": "maf_lite", "CHAT_TEMPERATURE": "1.2"})
