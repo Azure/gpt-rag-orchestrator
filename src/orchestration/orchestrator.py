@@ -10,6 +10,7 @@ from orchestration.conversation_compaction import (
     compact_conversation_for_persistence,
     load_conversation_compaction_config,
 )
+from orchestration.turn import TurnRequest
 from strategies.agent_strategy_factory import AgentStrategyFactory
 from strategies.base_agent_strategy import BaseAgentStrategy
 from dependencies import get_config
@@ -94,6 +95,36 @@ class Orchestrator:
             pass
 
         return instance
+
+    @classmethod
+    async def from_turn_request(cls, request: TurnRequest) -> "Orchestrator":
+        """Create an Orchestrator from a :class:`TurnRequest`.
+
+        This is the **typed boundary entry point** for the orchestration core.
+        Any runtime (FastAPI, hosted agent, test harness) that holds a
+        ``TurnRequest`` can create an ``Orchestrator`` without knowing about
+        HTTP headers, FastAPI dependencies, or Pydantic schemas.
+        """
+        return await cls.create(
+            conversation_id=request.conversation_id,
+            user_context=request.user_context or {},
+            request_access_token=request.request_access_token,
+            correlation_id=request.correlation_id,
+        )
+
+    async def stream_turn(self, request: TurnRequest):
+        """Stream a response for a :class:`TurnRequest`.
+
+        Typed counterpart to :meth:`stream_response`.  Prefer this method
+        when calling from hosted-agent runtimes or test harnesses so that
+        the full typed contract is exercised end-to-end.
+
+        Yields:
+            str: Chunks of the agent response, identical to
+            :meth:`stream_response`.
+        """
+        async for chunk in self.stream_response(request.ask, request.question_id):
+            yield chunk
 
     async def stream_response(self, ask: str, question_id: Optional[str] = None):
         with tracer.start_as_current_span('stream_response', kind=SpanKind.SERVER) as span:

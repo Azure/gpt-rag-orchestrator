@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from orchestration.orchestrator import Orchestrator
+from orchestration.turn import TurnRequest
 from connectors.appconfig import AppConfigClient
 from connectors.cosmosdb import (
     query_user_conversations,
@@ -526,19 +527,22 @@ async def orchestrator_endpoint(
     if not ask:
         raise HTTPException(status_code=400, detail="No 'ask' or 'question' field in request body")
 
-    orchestrator_create_start = time.time()
-    orchestrator = await Orchestrator.create(
+    turn = TurnRequest(
+        ask=ask,
         conversation_id=body.conversation_id,
+        question_id=getattr(body, "question_id", None),
         user_context=user_context,
         request_access_token=access_token if authorization else None,
         correlation_id=correlation_id,
     )
+
+    orchestrator_create_start = time.time()
+    orchestrator = await Orchestrator.from_turn_request(turn)
     logging.info(f"[Timing][main.py] Orchestrator.create took {time.time() - orchestrator_create_start:.3f}s")
 
     async def sse_event_generator():
         try:
-            _qid = getattr(body, "question_id", None) 
-            async for chunk in orchestrator.stream_response(ask, _qid):
+            async for chunk in orchestrator.stream_turn(turn):
                 yield f"{chunk}"
         except Exception:
             logging.exception("Error in SSE generator")

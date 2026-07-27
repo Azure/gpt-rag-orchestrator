@@ -34,8 +34,12 @@ async def test_endpoint_replaces_inbound_correlation_id_and_returns_server_id():
     async def stream_response(_ask, _question_id):
         yield "answer"
 
+    async def stream_turn(_turn):
+        yield "answer"
+
     orchestrator = SimpleNamespace(
         stream_response=stream_response,
+        stream_turn=stream_turn,
         save_feedback=AsyncMock(),
     )
     body = SimpleNamespace(
