@@ -43,6 +43,7 @@ from .retrieval_intent import (
 from connectors.foundry_iq_mcp import is_mcp_enabled
 from connectors.openai_chat_client import OpenAIChatClient
 from connectors.search import acquire_obo_search_token
+from orchestration.agent_events import AgentEventTranslator
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
 from dependencies import get_config
 from openai import BadRequestError
@@ -410,11 +411,14 @@ class MafLiteStrategy(BaseAgentStrategy):
                 # Stream the agent response
                 stream_start = time.time()
                 full_response = ""
+                event_translator = AgentEventTranslator()
                 async for chunk in agent.run_stream(
                     input_messages,
                     thread=thread,
                     options={"max_completion_tokens": self.max_completion_tokens, "reasoning_effort": self.reasoning_effort},
                 ):
+                    for event in event_translator.translate(chunk):
+                        yield event
                     if chunk.text:
                         full_response += chunk.text
                         yield chunk.text

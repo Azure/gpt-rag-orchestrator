@@ -1,421 +1,437 @@
-"""Compatibility tests for the runtime-neutral orchestration boundary.
-
-These tests verify that:
-- ``TurnRequest`` is a well-formed typed contract (no transport imports).
-- ``Orchestrator.from_turn_request`` produces a correctly configured
-  orchestrator instance.
-- ``Orchestrator.stream_turn`` delegates faithfully to ``stream_response``
-  and propagates all chunks.
-- All registered strategies remain accessible through the typed boundary.
-- Cancellation and exceptions propagate correctly through ``stream_turn``.
-- Classic FastAPI behavior is unaffected by the new boundary layer.
-"""
+"""Compatibility tests for the runtime-neutral turn boundary."""
 
 from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
+import os
+from pathlib import Path
+import subprocess
 import sys
-from typing import Any, AsyncIterator
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from agent_framework import (
+    CitationAnnotation,
+    FunctionCallContent,
+    FunctionResultContent,
+    TextContent,
+)
+
+from api.turn_sse import serialize_turn_event
+from orchestration.agent_events import AgentEventTranslator
+from orchestration.turn import (
+    TurnCancelledEvent,
+    TurnCitation,
+    TurnCitationEvent,
+    TurnConversationEvent,
+    TurnErrorEvent,
+    TurnRequest,
+    TurnTextEvent,
+    TurnToolActivity,
+    TurnToolActivityEvent,
+    TurnToolStatus,
+)
+from orchestration.orchestrator import Orchestrator
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def _make_turn(**overrides: Any) -> TurnRequest:
+    values = {
+        "ask": "What is the retrieval policy?",
+        "conversation_id": "conv-abc",
+        "question_id": "q-001",
+        "user_context": {"principal_id": "user-1"},
+        "request_access_token": None,
+        "correlation_id": "req_abc123",
+    }
+    values.update(overrides)
+    return TurnRequest(**values)
 
-def _make_turn(**kwargs: Any):
-    from orchestration.turn import TurnRequest
-    defaults = dict(
-        ask="What is the retrieval policy?",
-        conversation_id="conv-abc",
-        question_id="q-001",
-        user_context={"principal_id": "user-1"},
-        request_access_token=None,
-        correlation_id="req_abc123",
+
+def _isolated_import_modules(import_statement: str) -> set[str]:
+    repo_root = Path(__file__).resolve().parents[1]
+    script = (
+        "import json, sys\n"
+        "before = set(sys.modules)\n"
+        f"{import_statement}\n"
+        "print(json.dumps(sorted(set(sys.modules) - before)))\n"
     )
-    defaults.update(kwargs)
-    return TurnRequest(**defaults)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(repo_root / "src")
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return set(json.loads(completed.stdout))
 
 
-async def _collect(gen: AsyncIterator[str]) -> list[str]:
-    """Drain an async generator into a list."""
-    result = []
-    async for chunk in gen:
-        result.append(chunk)
-    return result
+async def _collect(stream):
+    return [event async for event in stream]
 
 
-# ---------------------------------------------------------------------------
-# TurnRequest contract tests — no transport dependency allowed
-# ---------------------------------------------------------------------------
+class TestDependencyNeutralImport:
+    def test_turn_submodule_import_does_not_load_runtime_dependencies(self):
+        modules = _isolated_import_modules("import orchestration.turn")
 
-class TestTurnRequestContract:
-    """TurnRequest must be transport-neutral (no FastAPI / Pydantic imports)."""
+        assert "orchestration.orchestrator" not in modules
+        assert "fastapi" not in modules
+        assert "pydantic" not in modules
+        assert not any(name == "azure" or name.startswith("azure.") for name in modules)
 
-    def test_turn_request_is_a_dataclass(self):
-        from orchestration.turn import TurnRequest
+    def test_package_turn_export_remains_dependency_neutral(self):
+        modules = _isolated_import_modules("from orchestration import TurnRequest")
+
+        assert "orchestration.orchestrator" not in modules
+        assert "fastapi" not in modules
+        assert "pydantic" not in modules
+        assert not any(name == "azure" or name.startswith("azure.") for name in modules)
+
+
+class TestTurnContracts:
+    def test_request_is_a_stdlib_dataclass_with_isolated_context(self):
+        first = TurnRequest(ask="first")
+        second = TurnRequest(ask="second")
+        first.user_context["key"] = "value"
+
         assert dataclasses.is_dataclass(TurnRequest)
+        assert second.user_context == {}
 
-    def test_turn_request_has_no_fastapi_dependency(self):
-        """Importing TurnRequest must not pull in fastapi."""
-        # Import after ensuring fastapi is not already cached by TurnRequest
-        import orchestration.turn  # noqa: F401 – side-effect: caches module
+    def test_output_contract_covers_required_event_kinds(self):
+        events = [
+            TurnConversationEvent("conv-1"),
+            TurnTextEvent("answer"),
+            TurnCitationEvent(TurnCitation("source-1", title="Source")),
+            TurnToolActivityEvent(
+                TurnToolActivity("search", TurnToolStatus.STARTED, call_id="call-1")
+            ),
+            TurnErrorEvent(),
+            TurnCancelledEvent(),
+        ]
 
-        turn_module = sys.modules["orchestration.turn"]
-        # fastapi must not be listed in the module's globals
-        assert "fastapi" not in turn_module.__dict__, (
-            "TurnRequest pulled in fastapi — the boundary is no longer transport-neutral"
+        assert all(dataclasses.is_dataclass(event) for event in events)
+
+
+class TestClassicSseSerialization:
+    def test_serializes_every_typed_event_kind(self):
+        assert serialize_turn_event(TurnConversationEvent("conv-1")) == "conv-1 "
+        assert serialize_turn_event(TurnTextEvent("answer")) == "answer"
+        assert (
+            serialize_turn_event(
+                TurnCitationEvent(TurnCitation("source-1"), text="[source]")
+            )
+            == "[source]"
+        )
+        assert (
+            serialize_turn_event(
+                TurnToolActivityEvent(
+                    TurnToolActivity("search", TurnToolStatus.COMPLETED),
+                    text="[search complete]",
+                )
+            )
+            == "[search complete]"
+        )
+        assert serialize_turn_event(TurnCitationEvent(TurnCitation("source-1"))) is None
+        assert (
+            serialize_turn_event(
+                TurnToolActivityEvent(
+                    TurnToolActivity("search", TurnToolStatus.STARTED)
+                )
+            )
+            is None
+        )
+        assert (
+            serialize_turn_event(TurnErrorEvent())
+            == "event: error\ndata: An internal server error occurred.\n\n"
+        )
+        assert serialize_turn_event(TurnCancelledEvent()) is None
+
+
+class TestAgentEventTranslation:
+    def test_translates_tool_lifecycle_and_citations(self):
+        translator = AgentEventTranslator()
+        update = MagicMock(
+            contents=[
+                FunctionCallContent(
+                    call_id="call-1",
+                    name="search_knowledge_base",
+                    arguments={"query": "policy"},
+                ),
+                FunctionResultContent(call_id="call-1", result={"count": 1}),
+                TextContent(
+                    "answer",
+                    annotations=[
+                        CitationAnnotation(
+                            title="Policy",
+                            url="https://example.test/policy",
+                            file_id="policy.pdf",
+                            snippet="Relevant excerpt",
+                        )
+                    ],
+                ),
+            ]
         )
 
-    def test_turn_request_has_no_pydantic_dependency(self):
-        """TurnRequest must use stdlib dataclasses, not Pydantic."""
-        import orchestration.turn as tm
+        events = list(translator.translate(update))
 
-        assert "pydantic" not in tm.__dict__, (
-            "TurnRequest should use dataclasses, not Pydantic"
+        assert events == [
+            TurnToolActivityEvent(
+                TurnToolActivity(
+                    "search_knowledge_base",
+                    TurnToolStatus.STARTED,
+                    call_id="call-1",
+                )
+            ),
+            TurnToolActivityEvent(
+                TurnToolActivity(
+                    "search_knowledge_base",
+                    TurnToolStatus.COMPLETED,
+                    call_id="call-1",
+                )
+            ),
+            TurnCitationEvent(
+                TurnCitation(
+                    "policy.pdf",
+                    title="Policy",
+                    url="https://example.test/policy",
+                    snippet="Relevant excerpt",
+                )
+            ),
+        ]
+
+    def test_emits_one_started_event_for_streamed_argument_deltas(self):
+        translator = AgentEventTranslator()
+
+        first = MagicMock(
+            contents=[
+                FunctionCallContent(
+                    call_id="call-1",
+                    name="search_knowledge_base",
+                    arguments='{"query":',
+                )
+            ]
+        )
+        continuation = MagicMock(
+            contents=[
+                FunctionCallContent(
+                    call_id="call-1",
+                    name="search_knowledge_base",
+                    arguments='"policy"}',
+                ),
+                FunctionCallContent(
+                    call_id="",
+                    name="",
+                    arguments='"ignored continuation"',
+                ),
+            ]
         )
 
-    def test_required_field_ask(self):
-        from orchestration.turn import TurnRequest
-        t = TurnRequest(ask="hello")
-        assert t.ask == "hello"
+        events = [
+            *translator.translate(first),
+            *translator.translate(continuation),
+        ]
 
-    def test_optional_fields_default_to_none_or_empty(self):
-        from orchestration.turn import TurnRequest
-        t = TurnRequest(ask="x")
-        assert t.conversation_id is None
-        assert t.question_id is None
-        assert t.user_context == {}
-        assert t.request_access_token is None
-        assert t.correlation_id is None
+        assert events == [
+            TurnToolActivityEvent(
+                TurnToolActivity(
+                    "search_knowledge_base",
+                    TurnToolStatus.STARTED,
+                    call_id="call-1",
+                )
+            )
+        ]
 
-    def test_all_fields_settable(self):
-        from orchestration.turn import TurnRequest
-        t = TurnRequest(
-            ask="question",
-            conversation_id="conv-1",
-            question_id="q-1",
-            user_context={"principal_id": "u-1"},
-            request_access_token="tok",
-            correlation_id="req_xyz",
-        )
-        assert t.ask == "question"
-        assert t.conversation_id == "conv-1"
-        assert t.question_id == "q-1"
-        assert t.user_context == {"principal_id": "u-1"}
-        assert t.request_access_token == "tok"
-        assert t.correlation_id == "req_xyz"
-
-    def test_user_context_is_independent_between_instances(self):
-        """Mutable default must not be shared between instances."""
-        from orchestration.turn import TurnRequest
-        a = TurnRequest(ask="a")
-        b = TurnRequest(ask="b")
-        a.user_context["key"] = "value"
-        assert "key" not in b.user_context
-
-
-# ---------------------------------------------------------------------------
-# Orchestrator.from_turn_request — factory boundary tests
-# ---------------------------------------------------------------------------
 
 class TestFromTurnRequest:
-    """from_turn_request must propagate all TurnRequest fields to create()."""
-
     @pytest.fixture(autouse=True)
     def _patch_deps(self, patch_dependencies, mock_config, mock_cosmos):
         with (
             patch("orchestration.orchestrator.get_config", return_value=mock_config),
-            patch("orchestration.orchestrator.get_cosmosdb_client", return_value=mock_cosmos),
+            patch(
+                "orchestration.orchestrator.get_cosmosdb_client",
+                return_value=mock_cosmos,
+            ),
         ):
             yield
 
     @pytest.mark.asyncio
-    async def test_from_turn_request_returns_orchestrator(self):
-        from orchestration.orchestrator import Orchestrator
-        from orchestration.turn import TurnRequest
-
-        turn = TurnRequest(ask="hello", conversation_id="conv-1")
-
-        mock_strategy = MagicMock()
-        mock_strategy.set_context = MagicMock()
-
-        with patch("orchestration.orchestrator.AgentStrategyFactory.get_strategy",
-                   new=AsyncMock(return_value=mock_strategy)):
-            orch = await Orchestrator.from_turn_request(turn)
-
-        assert isinstance(orch, Orchestrator)
-
-    @pytest.mark.asyncio
-    async def test_conversation_id_propagated(self):
-        from orchestration.orchestrator import Orchestrator
-        from orchestration.turn import TurnRequest
-
-        turn = TurnRequest(ask="hello", conversation_id="conv-abc")
-
-        mock_strategy = MagicMock()
-        mock_strategy.set_context = MagicMock()
-
-        with patch("orchestration.orchestrator.AgentStrategyFactory.get_strategy",
-                   new=AsyncMock(return_value=mock_strategy)):
-            orch = await Orchestrator.from_turn_request(turn)
-
-        assert orch.conversation_id == "conv-abc"
-
-    @pytest.mark.asyncio
-    async def test_user_context_propagated(self):
-        from orchestration.orchestrator import Orchestrator
-        from orchestration.turn import TurnRequest
-
-        ctx = {"principal_id": "user-xyz", "principal_name": "Alice"}
-        turn = TurnRequest(ask="q", user_context=ctx)
-
-        mock_strategy = MagicMock()
-        mock_strategy.set_context = MagicMock()
-
-        with patch("orchestration.orchestrator.AgentStrategyFactory.get_strategy",
-                   new=AsyncMock(return_value=mock_strategy)):
-            orch = await Orchestrator.from_turn_request(turn)
-
-        assert orch.user_context == ctx
-
-    @pytest.mark.asyncio
-    async def test_correlation_id_propagated(self):
-        from orchestration.orchestrator import Orchestrator
-        from orchestration.turn import TurnRequest
-
-        turn = TurnRequest(ask="q", correlation_id="req_correlate")
-
-        mock_strategy = MagicMock()
-        mock_strategy.set_context = MagicMock()
-
-        with patch("orchestration.orchestrator.AgentStrategyFactory.get_strategy",
-                   new=AsyncMock(return_value=mock_strategy)):
-            orch = await Orchestrator.from_turn_request(turn)
-
-        assert orch.correlation_id == "req_correlate"
-
-    @pytest.mark.asyncio
-    async def test_access_token_propagated(self):
-        from orchestration.orchestrator import Orchestrator
-        from orchestration.turn import TurnRequest
-
-        turn = TurnRequest(ask="q", request_access_token="obo-token-123")
-
-        mock_strategy = MagicMock()
-        mock_strategy.set_context = MagicMock()
-
-        with patch("orchestration.orchestrator.AgentStrategyFactory.get_strategy",
-                   new=AsyncMock(return_value=mock_strategy)):
-            orch = await Orchestrator.from_turn_request(turn)
-
-        assert orch.request_access_token == "obo-token-123"
-
-
-# ---------------------------------------------------------------------------
-# Orchestrator.stream_turn — typed streaming boundary tests
-# ---------------------------------------------------------------------------
-
-class TestStreamTurn:
-    """stream_turn must delegate faithfully to stream_response."""
-
-    @pytest.fixture(autouse=True)
-    def _patch_deps(self, patch_dependencies, mock_config, mock_cosmos):
-        with (
-            patch("orchestration.orchestrator.get_config", return_value=mock_config),
-            patch("orchestration.orchestrator.get_cosmosdb_client", return_value=mock_cosmos),
-        ):
-            yield
-
-    def _make_orchestrator(self, mock_config, mock_cosmos):
-        from orchestration.orchestrator import Orchestrator
-        orch = Orchestrator.__new__(Orchestrator)
-        orch.conversation_id = "conv-1"
-        orch.principal_id = "user-1"
-        orch.correlation_id = None
-        orch.user_context = {}
-        orch.request_access_token = None
-        orch.database_client = mock_cosmos
-        orch.database_container = "conversations"
-        from orchestration.conversation_compaction import load_conversation_compaction_config
-        orch.conversation_compaction_config = load_conversation_compaction_config(mock_config)
-        return orch
-
-    @pytest.mark.asyncio
-    async def test_stream_turn_yields_same_chunks_as_stream_response(
-        self, mock_config, mock_cosmos
-    ):
-        """stream_turn and stream_response must produce identical output."""
-        from orchestration.turn import TurnRequest
-
-        orch = self._make_orchestrator(mock_config, mock_cosmos)
-
-        sentinel_chunks = ["conv-1 ", "Hello ", "world"]
-
-        async def fake_stream_response(ask, question_id=None):
-            for c in sentinel_chunks:
-                yield c
-
-        orch.stream_response = fake_stream_response
-
-        turn = TurnRequest(ask="hello", conversation_id="conv-1", question_id="q-1")
-        result = await _collect(orch.stream_turn(turn))
-
-        assert result == sentinel_chunks
-
-    @pytest.mark.asyncio
-    async def test_stream_turn_passes_ask_to_stream_response(
-        self, mock_config, mock_cosmos
-    ):
-        orch = self._make_orchestrator(mock_config, mock_cosmos)
-
-        captured: dict = {}
-
-        async def fake_stream_response(ask, question_id=None):
-            captured["ask"] = ask
-            captured["question_id"] = question_id
-            yield "done"
-
-        orch.stream_response = fake_stream_response
-
-        from orchestration.turn import TurnRequest
-        turn = TurnRequest(ask="my question", question_id="q-42")
-        await _collect(orch.stream_turn(turn))
-
-        assert captured["ask"] == "my question"
-        assert captured["question_id"] == "q-42"
-
-    @pytest.mark.asyncio
-    async def test_stream_turn_propagates_cancellation(
-        self, mock_config, mock_cosmos
-    ):
-        orch = self._make_orchestrator(mock_config, mock_cosmos)
-
-        async def fake_stream_response(ask, question_id=None):
-            raise asyncio.CancelledError()
-            yield  # make it an async generator
-
-        orch.stream_response = fake_stream_response
-
-        from orchestration.turn import TurnRequest
-        turn = TurnRequest(ask="cancel me")
-        with pytest.raises(asyncio.CancelledError):
-            await _collect(orch.stream_turn(turn))
-
-    @pytest.mark.asyncio
-    async def test_stream_turn_propagates_exceptions(
-        self, mock_config, mock_cosmos
-    ):
-        orch = self._make_orchestrator(mock_config, mock_cosmos)
-
-        async def fake_stream_response(ask, question_id=None):
-            raise RuntimeError("strategy failure")
-            yield  # make it an async generator
-
-        orch.stream_response = fake_stream_response
-
-        from orchestration.turn import TurnRequest
-        turn = TurnRequest(ask="will fail")
-        with pytest.raises(RuntimeError, match="strategy failure"):
-            await _collect(orch.stream_turn(turn))
-
-
-# ---------------------------------------------------------------------------
-# Strategy availability through the typed boundary
-# ---------------------------------------------------------------------------
-
-class TestStrategyAvailabilityThroughBoundary:
-    """All registered strategies must remain reachable via from_turn_request."""
-
-    @pytest.fixture(autouse=True)
-    def _patch_deps(self, patch_dependencies, mock_config, mock_cosmos):
-        with (
-            patch("orchestration.orchestrator.get_config", return_value=mock_config),
-            patch("orchestration.orchestrator.get_cosmosdb_client", return_value=mock_cosmos),
-        ):
-            yield
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("strategy_key", [
-        "single_agent_rag",
-        "maf_agent_service",
-        "maf_lite",
-        "mcp",
-        "nl2sql",
-        "multimodal",
-    ])
-    async def test_strategy_reachable_through_turn_request(
-        self, strategy_key, mock_config, mock_cosmos
-    ):
-        """Each registered strategy must be instantiable via from_turn_request."""
-        from orchestration.orchestrator import Orchestrator
-        from orchestration.turn import TurnRequest
-
-        mock_config.get.side_effect = lambda key, default=None, type=str: {
-            "AGENT_STRATEGY": strategy_key,
-            "AI_FOUNDRY_PROJECT_ENDPOINT": "https://fake.openai.azure.com",
-            "AI_FOUNDRY_ACCOUNT_ENDPOINT": "https://fake-account.openai.azure.com",
-            "CHAT_DEPLOYMENT_NAME": "gpt-4o",
-            "OPENAI_API_VERSION": "2025-04-01-preview",
-            "PROMPT_SOURCE": "file",
-            "CONVERSATIONS_DATABASE_CONTAINER": "conversations",
-            "CONVERSATION_MAX_TOKENS": "8000",
-            "CONVERSATION_MAX_MESSAGES": "50",
-            "CONVERSATION_MAX_QUESTIONS": "100",
-        }.get(key, default)
-
-        mock_strategy = MagicMock()
-        mock_strategy.set_context = MagicMock()
-
-        turn = TurnRequest(ask="test question")
+    async def test_propagates_request_fields(self):
+        strategy = MagicMock()
+        turn = _make_turn(request_access_token="token")
         with patch(
             "orchestration.orchestrator.AgentStrategyFactory.get_strategy",
-            new=AsyncMock(return_value=mock_strategy),
-        ) as mock_get:
-            orch = await Orchestrator.from_turn_request(turn)
-            mock_get.assert_awaited_once_with(strategy_key)
+            new=AsyncMock(return_value=strategy),
+        ):
+            orchestrator = await Orchestrator.from_turn_request(turn)
 
-        assert isinstance(orch, Orchestrator)
+        assert orchestrator.conversation_id == "conv-abc"
+        assert orchestrator.user_context == {"principal_id": "user-1"}
+        assert orchestrator.request_access_token == "token"
+        assert orchestrator.correlation_id == "req_abc123"
+        strategy.set_context.assert_called_once_with("conv-abc")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "strategy_key",
+        [
+            "single_agent_rag",
+            "maf_agent_service",
+            "maf_lite",
+            "mcp",
+            "nl2sql",
+            "multimodal",
+        ],
+    )
+    async def test_forwards_registered_selector_to_factory(
+        self,
+        strategy_key,
+        mock_config,
+    ):
+        """Prove selector forwarding, not live Azure-backed construction."""
+        original_get = mock_config.get.side_effect
+        mock_config.get.side_effect = (
+            lambda key, default=None, type=str: strategy_key
+            if key == "AGENT_STRATEGY"
+            else original_get(key, default, type)
+        )
+        strategy = MagicMock()
+        get_strategy = AsyncMock(return_value=strategy)
+        with patch(
+            "orchestration.orchestrator.AgentStrategyFactory.get_strategy",
+            new=get_strategy,
+        ):
+            await Orchestrator.from_turn_request(_make_turn())
+
+        get_strategy.assert_awaited_once_with(strategy_key)
 
 
-# ---------------------------------------------------------------------------
-# Classic FastAPI behavior preservation
-# ---------------------------------------------------------------------------
+class TestStreamTurn:
+    @staticmethod
+    def _orchestrator(conversation_id: str = "conv-1"):
+        orchestrator = Orchestrator.__new__(Orchestrator)
+        orchestrator.conversation_id = conversation_id
+        return orchestrator
 
-class TestClassicBehaviorPreservation:
-    """Verify that the Orchestrator public API is unchanged for classic callers."""
+    @pytest.mark.asyncio
+    async def test_exposes_identity_and_text_without_classic_prefix(self):
+        orchestrator = self._orchestrator()
 
-    def test_orchestrator_still_has_create_classmethod(self):
-        from orchestration.orchestrator import Orchestrator
-        assert callable(getattr(Orchestrator, "create", None))
+        async def classic_stream(_ask, _question_id, *, _event_sink=None):
+            yield "conv-1 "
+            yield "Hello "
+            yield "world"
 
-    def test_orchestrator_still_has_stream_response(self):
-        from orchestration.orchestrator import Orchestrator
-        assert callable(getattr(Orchestrator, "stream_response", None))
+        orchestrator.stream_response = classic_stream
+        events = await _collect(orchestrator.stream_turn(_make_turn()))
 
-    def test_orchestrator_still_has_save_feedback(self):
-        from orchestration.orchestrator import Orchestrator
-        assert callable(getattr(Orchestrator, "save_feedback", None))
+        assert events == [
+            TurnConversationEvent("conv-1"),
+            TurnTextEvent("Hello "),
+            TurnTextEvent("world"),
+        ]
 
-    def test_turn_request_exported_from_orchestration_package(self):
-        from orchestration import TurnRequest  # noqa: F401
-        assert TurnRequest is not None
+    @pytest.mark.asyncio
+    async def test_fastapi_serialization_is_byte_compatible_with_classic_stream(self):
+        orchestrator = self._orchestrator()
+        classic_chunks = ["conv-1 ", "Hello ", "world", " [source 1]"]
 
-    def test_orchestrator_exported_from_orchestration_package(self):
-        from orchestration import Orchestrator  # noqa: F401
-        assert Orchestrator is not None
+        async def classic_stream(_ask, _question_id, *, _event_sink=None):
+            for chunk in classic_chunks:
+                yield chunk
 
-    def test_all_registered_strategy_keys_in_factory(self):
-        from strategies.agent_strategy_factory import AgentStrategyFactory
-        from strategies.agent_strategies import AgentStrategies
+        orchestrator.stream_response = classic_stream
+        events = await _collect(orchestrator.stream_turn(_make_turn()))
+        serialized = [
+            chunk
+            for event in events
+            if (chunk := serialize_turn_event(event)) is not None
+        ]
 
-        registered = AgentStrategyFactory.registered_strategy_names()
-        assert "single_agent_rag" in registered
-        assert "maf_agent_service" in registered
-        assert "maf_lite" in registered
-        assert "mcp" in registered
-        assert "nl2sql" in registered
-        assert "multimodal" in registered
+        assert serialized == classic_chunks
+        assert "".join(serialized).encode() == "".join(classic_chunks).encode()
+
+    @pytest.mark.asyncio
+    async def test_routes_ask_and_question_id(self):
+        orchestrator = self._orchestrator()
+        captured = {}
+
+        async def classic_stream(ask, question_id, *, _event_sink=None):
+            captured.update(ask=ask, question_id=question_id)
+            yield "conv-1 "
+
+        orchestrator.stream_response = classic_stream
+        await _collect(orchestrator.stream_turn(_make_turn()))
+
+        assert captured == {
+            "ask": "What is the retrieval policy?",
+            "question_id": "q-001",
+        }
+
+    @pytest.mark.asyncio
+    async def test_exposes_structured_strategy_events_in_stream_order(self):
+        orchestrator = self._orchestrator()
+        citation = TurnCitationEvent(TurnCitation("source-1", title="Source"))
+        tool = TurnToolActivityEvent(
+            TurnToolActivity("search", TurnToolStatus.STARTED, call_id="call-1")
+        )
+
+        async def classic_stream(_ask, _question_id, *, _event_sink=None):
+            yield "conv-1 "
+            _event_sink(citation)
+            _event_sink(tool)
+            yield "answer"
+
+        orchestrator.stream_response = classic_stream
+        events = await _collect(orchestrator.stream_turn(_make_turn()))
+
+        assert events == [
+            TurnConversationEvent("conv-1"),
+            citation,
+            tool,
+            TurnTextEvent("answer"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_emits_typed_error_then_propagates_exception(self):
+        orchestrator = self._orchestrator()
+
+        async def classic_stream(_ask, _question_id, *, _event_sink=None):
+            raise RuntimeError("strategy failure")
+            yield
+
+        orchestrator.stream_response = classic_stream
+        stream = orchestrator.stream_turn(_make_turn())
+
+        assert await anext(stream) == TurnErrorEvent()
+        with pytest.raises(RuntimeError, match="strategy failure"):
+            await anext(stream)
+
+    @pytest.mark.asyncio
+    async def test_emits_typed_cancellation_then_propagates_cancellation(self):
+        orchestrator = self._orchestrator()
+
+        async def classic_stream(_ask, _question_id, *, _event_sink=None):
+            raise asyncio.CancelledError
+            yield
+
+        orchestrator.stream_response = classic_stream
+        stream = orchestrator.stream_turn(_make_turn())
+
+        assert await anext(stream) == TurnCancelledEvent()
+        with pytest.raises(asyncio.CancelledError):
+            await anext(stream)
+
+
+class TestClassicApiPreservation:
+    def test_lazy_package_export_preserves_orchestrator_consumer(self):
+        from orchestration import Orchestrator
+
+        assert callable(Orchestrator.create)
+        assert callable(Orchestrator.stream_response)
+        assert callable(Orchestrator.save_feedback)

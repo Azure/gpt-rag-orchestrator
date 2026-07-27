@@ -4,37 +4,28 @@
 
 ### Added
 
-- **Runtime-neutral orchestration boundary (`TurnRequest`).** Introduced
-  `src/orchestration/turn.py` with the `TurnRequest` dataclass — a typed,
-  transport-independent contract that captures everything the orchestration core
-  needs for a single conversational turn (`ask`, `conversation_id`,
-  `question_id`, `user_context`, `request_access_token`, `correlation_id`).
-  The new dataclass uses stdlib `dataclasses` and has no FastAPI or Pydantic
-  dependency, making it safe to import in any runtime (hosted agents, CLI,
-  or test harnesses).
+- **Dependency-neutral turn contracts.** Added stdlib dataclasses for
+  `TurnRequest` and typed output events covering conversation identity, streamed
+  text, citations, tool activity, errors, and cancellation. The
+  `orchestration` package now resolves `Orchestrator` lazily, so importing
+  `orchestration.turn` does not load the web framework, Pydantic, or Azure
+  runtime modules.
 
-- **`Orchestrator.from_turn_request()` and `Orchestrator.stream_turn()`.** The
-  `Orchestrator` class now exposes two typed entry points for the boundary:
-  `from_turn_request(TurnRequest)` creates an orchestrator from the typed
-  contract (replaces the direct `create()` call that transport adapters used to
-  make), and `stream_turn(TurnRequest)` streams the response through the same
-  typed contract.  The legacy `create()` and `stream_response()` methods are
-  preserved unchanged for callers that depend on them. See
+- **Typed orchestration output boundary with classic SSE compatibility.**
+  Added `Orchestrator.from_turn_request()` and `stream_turn()`, with FastAPI
+  serialization isolated in `api.turn_sse`. The existing `create()` and
+  `stream_response()` APIs remain available, and the `/orchestrator` endpoint
+  retains the classic conversation-prefix, text-chunk, error, and cancellation
+  wire behavior. Eligible Agent Framework strategies translate explicit
+  citation and tool-call signals into the typed event stream without adding
+  bytes to the classic response. See
   [Azure/GPT-RAG#590](https://github.com/Azure/GPT-RAG/issues/590).
 
-- **FastAPI adapter updated to the typed boundary.** The `/orchestrator`
-  endpoint in `main.py` now builds a `TurnRequest` and calls
-  `Orchestrator.from_turn_request` / `Orchestrator.stream_turn` instead of
-  constructing the orchestrator directly, making the FastAPI layer a thin
-  adapter over the typed contract.
-
-- **Focused compatibility tests for the boundary.** Added
-  `tests/test_orchestration_turn.py` with 28 tests covering: `TurnRequest`
-  dataclass contract (no transport imports, mutable-default safety), field
-  propagation through `from_turn_request`, chunk and exception/cancellation
-  propagation through `stream_turn`, reachability of all six registered
-  strategies through the boundary, and preservation of the classic `create` /
-  `stream_response` / `save_feedback` API.
+- **Boundary regression evidence.** Added clean-subprocess import isolation,
+  typed-event and terminal-state coverage, byte-for-byte classic SSE parity,
+  request-field propagation, and explicit strategy-selector forwarding tests.
+  The selector tests intentionally do not claim to construct Azure-backed
+  strategies.
 
 ## [v3.8.0] - 2026-07-20
 

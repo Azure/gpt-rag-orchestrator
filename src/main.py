@@ -20,7 +20,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from orchestration.orchestrator import Orchestrator
-from orchestration.turn import TurnRequest
+from orchestration.turn import TurnErrorEvent, TurnRequest
+from api.turn_sse import serialize_turn_event
 from connectors.appconfig import AppConfigClient
 from connectors.cosmosdb import (
     query_user_conversations,
@@ -541,12 +542,18 @@ async def orchestrator_endpoint(
     logging.info(f"[Timing][main.py] Orchestrator.create took {time.time() - orchestrator_create_start:.3f}s")
 
     async def sse_event_generator():
+        error_event_emitted = False
         try:
-            async for chunk in orchestrator.stream_turn(turn):
-                yield f"{chunk}"
+            async for event in orchestrator.stream_turn(turn):
+                if isinstance(event, TurnErrorEvent):
+                    error_event_emitted = True
+                chunk = serialize_turn_event(event)
+                if chunk is not None:
+                    yield chunk
         except Exception:
             logging.exception("Error in SSE generator")
-            yield "event: error\ndata: An internal server error occurred.\n\n"
+            if not error_event_emitted:
+                yield "event: error\ndata: An internal server error occurred.\n\n"
 
     return StreamingResponse(
         sse_event_generator(),
