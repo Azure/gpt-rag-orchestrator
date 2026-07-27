@@ -542,8 +542,8 @@ async def orchestrator_endpoint(
 
     async def sse_event_generator():
         try:
-            async for chunk in orchestrator.stream_turn(turn):
-                yield f"{chunk}"
+            async for event in orchestrator.stream_turn(turn):
+                yield event.to_sse_str()
         except Exception:
             logging.exception("Error in SSE generator")
             yield "event: error\ndata: An internal server error occurred.\n\n"

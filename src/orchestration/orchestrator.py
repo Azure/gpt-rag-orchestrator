@@ -10,7 +10,7 @@ from orchestration.conversation_compaction import (
     compact_conversation_for_persistence,
     load_conversation_compaction_config,
 )
-from orchestration.turn import TurnRequest
+from orchestration.turn import TurnRequest, TurnEvent
 from strategies.agent_strategy_factory import AgentStrategyFactory
 from strategies.base_agent_strategy import BaseAgentStrategy
 from dependencies import get_config
@@ -113,18 +113,32 @@ class Orchestrator:
         )
 
     async def stream_turn(self, request: TurnRequest):
-        """Stream a response for a :class:`TurnRequest`.
+        """Stream a response as typed :class:`~orchestration.turn.TurnEvent` objects.
 
         Typed counterpart to :meth:`stream_response`.  Prefer this method
         when calling from hosted-agent runtimes or test harnesses so that
         the full typed contract is exercised end-to-end.
 
+        The first yielded event always has ``kind="conversation_id"`` and
+        carries the conversation identifier — matching the leading prefix that
+        :meth:`stream_response` yields in the classic SSE wire format.
+        Subsequent events have ``kind="text"`` and carry response chunks.
+
+        The FastAPI SSE adapter serialises events back to the existing wire
+        format via :meth:`~orchestration.turn.TurnEvent.to_sse_str`, ensuring
+        byte-for-byte parity with the classic path.
+
         Yields:
-            str: Chunks of the agent response, identical to
-            :meth:`stream_response`.
+            TurnEvent: Typed event objects.
         """
+        first = True
         async for chunk in self.stream_response(request.ask, request.question_id):
-            yield chunk
+            if first:
+                first = False
+                # stream_response always leads with "{conversation_id} "
+                yield TurnEvent(kind="conversation_id", data=chunk.rstrip())
+            else:
+                yield TurnEvent(kind="text", data=chunk)
 
     async def stream_response(self, ask: str, question_id: Optional[str] = None):
         with tracer.start_as_current_span('stream_response', kind=SpanKind.SERVER) as span:

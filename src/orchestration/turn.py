@@ -16,15 +16,15 @@ Usage (FastAPI adapter)::
         correlation_id=correlation_id,
     )
     orchestrator = await Orchestrator.from_turn_request(turn)
-    async for chunk in orchestrator.stream_turn(turn):
-        yield chunk
+    async for event in orchestrator.stream_turn(turn):
+        yield event.to_sse_str()
 
 Usage (hosted-agent runtime)::
 
     turn = TurnRequest(ask=invocation.text, user_context=invocation.identity)
     orchestrator = await Orchestrator.from_turn_request(turn)
-    async for chunk in orchestrator.stream_turn(turn):
-        await sink.write(chunk)
+    async for event in orchestrator.stream_turn(turn):
+        await sink.write(event)
 """
 
 from __future__ import annotations
@@ -62,3 +62,57 @@ class TurnRequest:
     user_context: Dict[str, Any] = field(default_factory=dict)
     request_access_token: Optional[str] = None
     correlation_id: Optional[str] = None
+
+
+@dataclass
+class TurnEvent:
+    """Typed output event from a single orchestration turn.
+
+    Instances are yielded by :meth:`Orchestrator.stream_turn` so that
+    downstream consumers (FastAPI SSE adapter, WebSocket adapter, hosted-agent
+    sink, test assertions) can inspect the *kind* of data they received and
+    serialise it in whatever form the transport requires — without parsing raw
+    strings.
+
+    The FastAPI adapter serialises events back to the existing SSE wire format
+    so that no breaking change is introduced for existing clients::
+
+        if event.kind == "conversation_id":
+            yield f"{event.data} "
+        else:
+            yield event.data
+
+    Attributes:
+        kind: Event classification.  One of:
+
+            - ``"conversation_id"`` — identifies the conversation for this
+              turn.  Always the first event in every stream.
+            - ``"text"`` — carries a text chunk from the agent response.
+            - ``"citations"`` — carries structured citation data embedded by
+              the strategy layer.
+            - ``"tool_call"`` — carries tool / function-call activity metadata
+              emitted by the strategy during retrieval or reasoning steps.
+            - ``"error"`` — carries a human-readable error description;
+              emitted by the transport adapter when the stream fails.
+            - ``"cancelled"`` — indicates the turn was cancelled before
+              completion.
+
+        data: Event payload.  Interpretation depends on ``kind``.  For
+            ``"conversation_id"`` this is the raw conversation identifier
+            string (without the trailing space used in the SSE wire format).
+            For all other kinds this is a string payload (text, JSON, …).
+    """
+
+    kind: str
+    data: str = ""
+
+    def to_sse_str(self) -> str:
+        """Serialise this event to the classic SSE wire-format string.
+
+        Preserves byte-for-byte compatibility with the original
+        ``stream_response`` output so that existing SSE clients are
+        unaffected by the introduction of the typed boundary.
+        """
+        if self.kind == "conversation_id":
+            return f"{self.data} "
+        return self.data

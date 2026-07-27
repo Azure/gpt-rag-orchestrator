@@ -31,11 +31,14 @@ async def test_endpoint_replaces_inbound_correlation_id_and_returns_server_id():
     with patch("dependencies.get_config", return_value=Config()):
         main = importlib.import_module("main")
 
+    from orchestration.turn import TurnEvent
+
     async def stream_response(_ask, _question_id):
         yield "answer"
 
     async def stream_turn(_turn):
-        yield "answer"
+        yield TurnEvent(kind="conversation_id", data="conv-test")
+        yield TurnEvent(kind="text", data="answer")
 
     orchestrator = SimpleNamespace(
         stream_response=stream_response,
@@ -84,4 +87,4 @@ async def test_endpoint_replaces_inbound_correlation_id_and_returns_server_id():
     assert correlation_id != "req_attacker"
     assert response.headers["X-Correlation-ID"] == correlation_id
     assert create.await_args.kwargs["correlation_id"] == correlation_id
-    assert chunks == ["answer"]
+    assert chunks == ["conv-test ", "answer"]

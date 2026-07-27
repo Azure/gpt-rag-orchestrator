@@ -1,12 +1,17 @@
 """Compatibility tests for the runtime-neutral orchestration boundary.
 
 These tests verify that:
-- ``TurnRequest`` is a well-formed typed contract (no transport imports).
+- ``TurnRequest`` and ``TurnEvent`` are well-formed typed contracts (no
+  transport imports).
+- Importing ``orchestration.turn`` in a clean process does *not* pull in
+  FastAPI, Pydantic, or Azure runtime modules (subprocess sys.modules check).
 - ``Orchestrator.from_turn_request`` produces a correctly configured
   orchestrator instance.
-- ``Orchestrator.stream_turn`` delegates faithfully to ``stream_response``
-  and propagates all chunks.
-- All registered strategies remain accessible through the typed boundary.
+- ``Orchestrator.stream_turn`` yields ``TurnEvent`` objects and delegates
+  faithfully to ``stream_response``.
+- SSE serialisation via ``TurnEvent.to_sse_str`` is byte-for-byte compatible
+  with the classic ``stream_response`` output.
+- Strategy selector forwarding: each registered key triggers the factory lookup.
 - Cancellation and exceptions propagate correctly through ``stream_turn``.
 - Classic FastAPI behavior is unaffected by the new boundary layer.
 """
@@ -15,7 +20,9 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import subprocess
 import sys
+import textwrap
 from typing import Any, AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -40,11 +47,11 @@ def _make_turn(**kwargs: Any):
     return TurnRequest(**defaults)
 
 
-async def _collect(gen: AsyncIterator[str]) -> list[str]:
+async def _collect_events(gen: AsyncIterator) -> list:
     """Drain an async generator into a list."""
     result = []
-    async for chunk in gen:
-        result.append(chunk)
+    async for item in gen:
+        result.append(item)
     return result
 
 
@@ -59,24 +66,81 @@ class TestTurnRequestContract:
         from orchestration.turn import TurnRequest
         assert dataclasses.is_dataclass(TurnRequest)
 
-    def test_turn_request_has_no_fastapi_dependency(self):
-        """Importing TurnRequest must not pull in fastapi."""
-        # Import after ensuring fastapi is not already cached by TurnRequest
-        import orchestration.turn  # noqa: F401 – side-effect: caches module
+    def test_turn_event_is_a_dataclass(self):
+        from orchestration.turn import TurnEvent
+        assert dataclasses.is_dataclass(TurnEvent)
 
-        turn_module = sys.modules["orchestration.turn"]
-        # fastapi must not be listed in the module's globals
-        assert "fastapi" not in turn_module.__dict__, (
-            "TurnRequest pulled in fastapi — the boundary is no longer transport-neutral"
+    # ------------------------------------------------------------------
+    # Subprocess sys.modules regression tests
+    # ------------------------------------------------------------------
+
+    def _run_isolation_check(self, forbidden_prefix: str) -> None:
+        """Spawn a clean interpreter, import orchestration.turn, then assert
+        that no module whose name starts with ``forbidden_prefix`` is loaded."""
+        src_dir = str(
+            __import__("pathlib").Path(__file__).resolve().parent.parent / "src"
+        )
+        script = textwrap.dedent(f"""\
+            import sys
+            sys.path.insert(0, {src_dir!r})
+            import orchestration.turn
+            bad = [m for m in sys.modules if m == {forbidden_prefix!r} or m.startswith({forbidden_prefix!r} + ".")]
+            if bad:
+                print("FAIL:" + str(bad))
+                sys.exit(1)
+            print("OK")
+        """)
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"subprocess exited {result.returncode}: stdout={result.stdout!r} "
+            f"stderr={result.stderr!r}"
+        )
+        assert result.stdout.strip() == "OK", (
+            f"Importing orchestration.turn pulled in {forbidden_prefix!r}: "
+            f"{result.stdout.strip()}"
         )
 
-    def test_turn_request_has_no_pydantic_dependency(self):
-        """TurnRequest must use stdlib dataclasses, not Pydantic."""
-        import orchestration.turn as tm
+    def test_turn_module_does_not_import_fastapi(self):
+        """Importing orchestration.turn must not pull in fastapi."""
+        self._run_isolation_check("fastapi")
 
-        assert "pydantic" not in tm.__dict__, (
-            "TurnRequest should use dataclasses, not Pydantic"
+    def test_turn_module_does_not_import_pydantic(self):
+        """Importing orchestration.turn must not pull in pydantic."""
+        self._run_isolation_check("pydantic")
+
+    def test_turn_module_does_not_import_azure(self):
+        """Importing orchestration.turn must not pull in azure SDK modules."""
+        self._run_isolation_check("azure")
+
+    def test_turn_module_does_not_import_orchestrator(self):
+        """Importing orchestration.turn must not eagerly load Orchestrator."""
+        src_dir = str(
+            __import__("pathlib").Path(__file__).resolve().parent.parent / "src"
         )
+        script = textwrap.dedent(f"""\
+            import sys
+            sys.path.insert(0, {src_dir!r})
+            import orchestration.turn
+            loaded = "orchestration.orchestrator" in sys.modules
+            print("FAIL" if loaded else "OK")
+        """)
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert result.stdout.strip() == "OK", (
+            "Importing orchestration.turn also loaded orchestration.orchestrator"
+        )
+
+    # ------------------------------------------------------------------
+    # TurnRequest field tests
+    # ------------------------------------------------------------------
 
     def test_required_field_ask(self):
         from orchestration.turn import TurnRequest
@@ -116,6 +180,39 @@ class TestTurnRequestContract:
         b = TurnRequest(ask="b")
         a.user_context["key"] = "value"
         assert "key" not in b.user_context
+
+    # ------------------------------------------------------------------
+    # TurnEvent field and serialisation tests
+    # ------------------------------------------------------------------
+
+    def test_turn_event_kind_required(self):
+        from orchestration.turn import TurnEvent
+        e = TurnEvent(kind="text")
+        assert e.kind == "text"
+        assert e.data == ""
+
+    def test_turn_event_all_kinds_constructible(self):
+        from orchestration.turn import TurnEvent
+        for kind in ("conversation_id", "text", "citations", "tool_call", "error", "cancelled"):
+            e = TurnEvent(kind=kind, data="payload")
+            assert e.kind == kind
+            assert e.data == "payload"
+
+    def test_to_sse_str_conversation_id_appends_space(self):
+        from orchestration.turn import TurnEvent
+        e = TurnEvent(kind="conversation_id", data="conv-123")
+        assert e.to_sse_str() == "conv-123 "
+
+    def test_to_sse_str_text_returns_data_unchanged(self):
+        from orchestration.turn import TurnEvent
+        e = TurnEvent(kind="text", data="Hello world")
+        assert e.to_sse_str() == "Hello world"
+
+    def test_to_sse_str_other_kinds_return_data(self):
+        from orchestration.turn import TurnEvent
+        for kind in ("citations", "tool_call", "error", "cancelled"):
+            e = TurnEvent(kind=kind, data="payload")
+            assert e.to_sse_str() == "payload"
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +317,7 @@ class TestFromTurnRequest:
 # ---------------------------------------------------------------------------
 
 class TestStreamTurn:
-    """stream_turn must delegate faithfully to stream_response."""
+    """stream_turn must yield TurnEvent objects and delegate to stream_response."""
 
     @pytest.fixture(autouse=True)
     def _patch_deps(self, patch_dependencies, mock_config, mock_cosmos):
@@ -245,26 +342,89 @@ class TestStreamTurn:
         return orch
 
     @pytest.mark.asyncio
-    async def test_stream_turn_yields_same_chunks_as_stream_response(
-        self, mock_config, mock_cosmos
-    ):
-        """stream_turn and stream_response must produce identical output."""
-        from orchestration.turn import TurnRequest
+    async def test_stream_turn_yields_turn_events(self, mock_config, mock_cosmos):
+        """stream_turn must yield TurnEvent objects, not raw strings."""
+        from orchestration.turn import TurnEvent, TurnRequest
 
         orch = self._make_orchestrator(mock_config, mock_cosmos)
 
-        sentinel_chunks = ["conv-1 ", "Hello ", "world"]
-
         async def fake_stream_response(ask, question_id=None):
-            for c in sentinel_chunks:
-                yield c
+            yield "conv-1 "
+            yield "Hello "
+            yield "world"
 
         orch.stream_response = fake_stream_response
 
         turn = TurnRequest(ask="hello", conversation_id="conv-1", question_id="q-1")
-        result = await _collect(orch.stream_turn(turn))
+        events = await _collect_events(orch.stream_turn(turn))
 
-        assert result == sentinel_chunks
+        assert all(isinstance(e, TurnEvent) for e in events)
+
+    @pytest.mark.asyncio
+    async def test_stream_turn_first_event_is_conversation_id(
+        self, mock_config, mock_cosmos
+    ):
+        """First event must have kind='conversation_id' with the conversation id."""
+        from orchestration.turn import TurnRequest
+
+        orch = self._make_orchestrator(mock_config, mock_cosmos)
+
+        async def fake_stream_response(ask, question_id=None):
+            yield "conv-1 "
+            yield "answer"
+
+        orch.stream_response = fake_stream_response
+
+        turn = TurnRequest(ask="hello", conversation_id="conv-1")
+        events = await _collect_events(orch.stream_turn(turn))
+
+        assert events[0].kind == "conversation_id"
+        assert events[0].data == "conv-1"
+
+    @pytest.mark.asyncio
+    async def test_stream_turn_subsequent_events_are_text(
+        self, mock_config, mock_cosmos
+    ):
+        """All events after the first must have kind='text'."""
+        from orchestration.turn import TurnRequest
+
+        orch = self._make_orchestrator(mock_config, mock_cosmos)
+
+        async def fake_stream_response(ask, question_id=None):
+            yield "conv-1 "
+            yield "Hello "
+            yield "world"
+
+        orch.stream_response = fake_stream_response
+
+        turn = TurnRequest(ask="hello", conversation_id="conv-1")
+        events = await _collect_events(orch.stream_turn(turn))
+
+        assert all(e.kind == "text" for e in events[1:])
+        assert [e.data for e in events[1:]] == ["Hello ", "world"]
+
+    @pytest.mark.asyncio
+    async def test_stream_turn_sse_parity(self, mock_config, mock_cosmos):
+        """to_sse_str() must reproduce the exact SSE bytes that stream_response yields."""
+        from orchestration.turn import TurnRequest
+
+        orch = self._make_orchestrator(mock_config, mock_cosmos)
+        raw_chunks = ["conv-1 ", "Hello ", "world", "[citation JSON]"]
+
+        async def fake_stream_response(ask, question_id=None):
+            for c in raw_chunks:
+                yield c
+
+        orch.stream_response = fake_stream_response
+
+        # Collect SSE bytes via the typed boundary
+        turn = TurnRequest(ask="hello", conversation_id="conv-1", question_id="q-1")
+        events = await _collect_events(orch.stream_turn(turn))
+        serialised = [e.to_sse_str() for e in events]
+
+        assert serialised == raw_chunks, (
+            "TurnEvent.to_sse_str() output does not match classic stream_response output"
+        )
 
     @pytest.mark.asyncio
     async def test_stream_turn_passes_ask_to_stream_response(
@@ -277,13 +437,14 @@ class TestStreamTurn:
         async def fake_stream_response(ask, question_id=None):
             captured["ask"] = ask
             captured["question_id"] = question_id
+            yield "conv-1 "
             yield "done"
 
         orch.stream_response = fake_stream_response
 
         from orchestration.turn import TurnRequest
         turn = TurnRequest(ask="my question", question_id="q-42")
-        await _collect(orch.stream_turn(turn))
+        await _collect_events(orch.stream_turn(turn))
 
         assert captured["ask"] == "my question"
         assert captured["question_id"] == "q-42"
@@ -303,7 +464,7 @@ class TestStreamTurn:
         from orchestration.turn import TurnRequest
         turn = TurnRequest(ask="cancel me")
         with pytest.raises(asyncio.CancelledError):
-            await _collect(orch.stream_turn(turn))
+            await _collect_events(orch.stream_turn(turn))
 
     @pytest.mark.asyncio
     async def test_stream_turn_propagates_exceptions(
@@ -320,15 +481,21 @@ class TestStreamTurn:
         from orchestration.turn import TurnRequest
         turn = TurnRequest(ask="will fail")
         with pytest.raises(RuntimeError, match="strategy failure"):
-            await _collect(orch.stream_turn(turn))
+            await _collect_events(orch.stream_turn(turn))
 
 
 # ---------------------------------------------------------------------------
-# Strategy availability through the typed boundary
+# Strategy selector forwarding through the typed boundary
 # ---------------------------------------------------------------------------
 
-class TestStrategyAvailabilityThroughBoundary:
-    """All registered strategies must remain reachable via from_turn_request."""
+class TestStrategySelectorForwarding:
+    """Each registered strategy key must be forwarded to the factory by from_turn_request.
+
+    These tests verify that the typed boundary correctly forwards the active
+    strategy key to ``AgentStrategyFactory.get_strategy``.  The factory is
+    mocked so no Azure credentials are required; the claim tested is
+    *selector forwarding*, not strategy instantiation.
+    """
 
     @pytest.fixture(autouse=True)
     def _patch_deps(self, patch_dependencies, mock_config, mock_cosmos):
@@ -347,10 +514,10 @@ class TestStrategyAvailabilityThroughBoundary:
         "nl2sql",
         "multimodal",
     ])
-    async def test_strategy_reachable_through_turn_request(
+    async def test_strategy_key_forwarded_to_factory(
         self, strategy_key, mock_config, mock_cosmos
     ):
-        """Each registered strategy must be instantiable via from_turn_request."""
+        """from_turn_request must forward the configured strategy key to get_strategy."""
         from orchestration.orchestrator import Orchestrator
         from orchestration.turn import TurnRequest
 
@@ -380,6 +547,16 @@ class TestStrategyAvailabilityThroughBoundary:
 
         assert isinstance(orch, Orchestrator)
 
+    def test_all_parametrized_keys_are_registered_in_factory(self):
+        """The factory registry must contain every key used in parametrized tests above."""
+        from strategies.agent_strategy_factory import AgentStrategyFactory
+
+        registered = AgentStrategyFactory.registered_strategy_names()
+        for key in ("single_agent_rag", "maf_agent_service", "maf_lite", "mcp", "nl2sql", "multimodal"):
+            assert key in registered, (
+                f"Strategy key {key!r} is missing from AgentStrategyFactory._REGISTRY"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Classic FastAPI behavior preservation
@@ -404,13 +581,16 @@ class TestClassicBehaviorPreservation:
         from orchestration import TurnRequest  # noqa: F401
         assert TurnRequest is not None
 
+    def test_turn_event_exported_from_orchestration_package(self):
+        from orchestration import TurnEvent  # noqa: F401
+        assert TurnEvent is not None
+
     def test_orchestrator_exported_from_orchestration_package(self):
         from orchestration import Orchestrator  # noqa: F401
         assert Orchestrator is not None
 
     def test_all_registered_strategy_keys_in_factory(self):
         from strategies.agent_strategy_factory import AgentStrategyFactory
-        from strategies.agent_strategies import AgentStrategies
 
         registered = AgentStrategyFactory.registered_strategy_names()
         assert "single_agent_rag" in registered
