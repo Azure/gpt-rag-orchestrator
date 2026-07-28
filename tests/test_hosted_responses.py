@@ -251,7 +251,7 @@ class TestHostedStrategyGuard:
     def test_eligible_strategies_pass(self, strategy: str):
         guard_hosted_strategy(strategy)  # must not raise
 
-    @pytest.mark.parametrize("strategy", ["multimodal", "nl2sql", "multiagent", "unknown_strategy"])
+    @pytest.mark.parametrize("strategy", ["multimodal", "nl2sql", "multiagent", "unknown_strategy", "mcp"])
     def test_unsupported_strategies_raise_value_error(self, strategy: str):
         with pytest.raises(ValueError, match="not supported in the hosted runtime"):
             guard_hosted_strategy(strategy)
@@ -264,8 +264,79 @@ class TestHostedStrategyGuard:
         for eligible in HOSTED_ELIGIBLE_STRATEGIES:
             assert eligible in msg
 
+    def test_mcp_is_not_in_eligible_strategies(self):
+        assert "mcp" not in HOSTED_ELIGIBLE_STRATEGIES
 
-# ── Hosted stream (no Cosmos) ────────────────────────────────────────────────
+
+# ── build_hosted_conversation SDK-boundary tests ─────────────────────────────
+
+class TestBuildHostedConversation:
+    """Tests for the build_hosted_conversation helper."""
+
+    def test_external_conversation_id_sets_thread_id_for_server_thread_strategies(self):
+        from strategies.hosted_strategies import build_hosted_conversation
+
+        for strategy_key in ("maf_agent_service", "single_agent_rag"):
+            conv = build_hosted_conversation(
+                strategy_key,
+                "foundry-conv-abc",
+                [],
+                external_conversation_id=True,
+            )
+            assert conv["thread_id"] == "foundry-conv-abc", (
+                f"{strategy_key} should carry thread_id when external id is provided"
+            )
+
+    def test_absent_external_conversation_id_does_not_set_thread_id(self):
+        """A synthesised UUID must not be forwarded as thread_id."""
+        from strategies.hosted_strategies import build_hosted_conversation
+
+        for strategy_key in ("maf_agent_service", "single_agent_rag"):
+            conv = build_hosted_conversation(
+                strategy_key,
+                "00000000-0000-0000-0000-000000000000",
+                [],
+                external_conversation_id=False,
+            )
+            assert "thread_id" not in conv, (
+                f"{strategy_key} must not receive a synthesised UUID as thread_id"
+            )
+
+    def test_absent_external_id_still_tags_agent_backend_for_server_thread_strategies(self):
+        """agent_backend tag must be set so reset_legacy_thread behaves correctly."""
+        from strategies.hosted_strategies import build_hosted_conversation
+        from strategies.agent_provider_v2 import AGENT_BACKEND_TAG
+
+        for strategy_key in ("maf_agent_service", "single_agent_rag"):
+            conv = build_hosted_conversation(
+                strategy_key,
+                "any-id",
+                [],
+                external_conversation_id=False,
+            )
+            assert conv.get("agent_backend") == AGENT_BACKEND_TAG
+
+    def test_non_server_thread_strategy_never_sets_thread_id(self):
+        from strategies.hosted_strategies import build_hosted_conversation
+
+        conv = build_hosted_conversation(
+            "maf_lite",
+            "foundry-conv-xyz",
+            [],
+            external_conversation_id=True,
+        )
+        assert "thread_id" not in conv
+
+    def test_messages_are_deep_copied(self):
+        from strategies.hosted_strategies import build_hosted_conversation
+
+        original = [{"role": "user", "text": "hello"}]
+        conv = build_hosted_conversation("maf_lite", "conv-1", original)
+        conv["messages"][0]["role"] = "mutated"
+        assert original[0]["role"] == "user"
+
+
+
 
 class TestHostedStream:
     """Tests for the _hosted_stream execution path."""
@@ -425,8 +496,70 @@ class TestHostedStream:
         assert len(conv_events) == 1
         assert conv_events[0].conversation_id  # non-empty generated id
 
+    @pytest.mark.parametrize("strategy_key", ["maf_agent_service", "single_agent_rag"])
     @pytest.mark.asyncio
-    async def test_passes_structured_events_through(self):
+    async def test_absent_conversation_id_does_not_pre_set_thread_id_for_server_thread_strategies(
+        self,
+        strategy_key: str,
+    ):
+        """When Foundry omits conversation_id, server-thread strategies must not
+        receive a synthesised UUID as thread_id; each strategy creates a real
+        Foundry conversation on first use via get_new_thread() / ensure_conversation_id()."""
+        from api.hosted_entrypoint import _hosted_stream
+
+        received_conversations = []
+
+        class RecordingStrategy:
+            def set_context(self, _conversation_id):
+                pass
+
+            async def initiate_agent_flow(self, _ask):
+                received_conversations.append(deepcopy(self.conversation))
+                yield "answer"
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=RecordingStrategy()),
+        ):
+            turn = TurnRequest(ask="Hi", conversation_id=None)
+            [event async for event in _hosted_stream(turn, strategy_key)]
+
+        assert len(received_conversations) == 1
+        assert "thread_id" not in received_conversations[0], (
+            f"{strategy_key} must not receive a synthesised UUID as thread_id"
+        )
+
+    @pytest.mark.parametrize("strategy_key", ["maf_agent_service", "single_agent_rag"])
+    @pytest.mark.asyncio
+    async def test_supplied_conversation_id_is_forwarded_as_thread_id_for_server_thread_strategies(
+        self,
+        strategy_key: str,
+    ):
+        """When Foundry supplies a real conversation_id, server-thread strategies
+        receive it as thread_id so they can resume the existing server-side thread."""
+        from api.hosted_entrypoint import _hosted_stream
+
+        received_conversations = []
+
+        class RecordingStrategy:
+            def set_context(self, _conversation_id):
+                pass
+
+            async def initiate_agent_flow(self, _ask):
+                received_conversations.append(deepcopy(self.conversation))
+                yield "answer"
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=RecordingStrategy()),
+        ):
+            turn = TurnRequest(ask="Hi", conversation_id="foundry-conv-real")
+            [event async for event in _hosted_stream(turn, strategy_key)]
+
+        assert len(received_conversations) == 1
+        assert received_conversations[0]["thread_id"] == "foundry-conv-real"
+
+
         from api.hosted_entrypoint import _hosted_stream
 
         citation = TurnCitationEvent(TurnCitation("src-1", title="Source"))
@@ -443,7 +576,7 @@ class TestHostedStream:
             "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
             new=AsyncMock(return_value=strategy),
         ):
-            events = [e async for e in _hosted_stream(turn, "mcp")]
+            events = [e async for e in _hosted_stream(turn, "maf_lite")]
 
         assert citation in events
 
@@ -778,6 +911,22 @@ class TestHostedEntrypointAPI:
         )
 
         assert resp.status_code == 422
+
+    def test_invocations_rejects_trailing_non_user_message(self, client):
+        """A message list ending with an assistant turn is malformed; the Foundry
+        invocation contract always places the current user ask last."""
+        resp = client.post(
+            "/invocations",
+            json={
+                "messages": [
+                    {"role": "user", "content": "question"},
+                    {"role": "assistant", "content": "trailing assistant turn"},
+                ],
+            },
+        )
+
+        assert resp.status_code == 422
+        assert "last message" in resp.json()["detail"].lower()
 
     def test_invocations_rejects_empty_user_message(self, client):
         resp = client.post(

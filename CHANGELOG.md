@@ -17,28 +17,40 @@
   `api.hosted_entrypoint` — a standalone FastAPI application for running the
   GPT-RAG orchestration core as an Azure AI Foundry hosted agent.  The
   `POST /invocations` endpoint accepts the Foundry invocation request format,
-  projects the complete ordered prior request history into the strategy contract,
-  binds Responses-backed strategies to the stable managed Conversation id, and
-  streams a Responses API SSE response without constructing or accessing a
-  Cosmos client.  Caller-provided identity is not trusted: Cosmos-backed profile
-  memory remains disabled until the platform supplies authenticated Foundry
-  identity.  The `GET /health` endpoint returns the immutable image version and
-  the set of admitted strategies for container readiness probes.
+  validates that the last message has role ``user`` (rejecting trailing
+  assistant turns with HTTP 422 rather than silently discarding them), projects
+  the complete ordered prior request history into the strategy contract, and
+  forwards the Foundry-managed conversation id as ``thread_id`` to
+  Responses-backed strategies (``maf_agent_service``, ``single_agent_rag``)
+  only when supplied by the Foundry runtime — a synthesised UUID fallback is
+  never passed as a service thread id; each strategy creates a real Foundry
+  conversation object on first use.  The endpoint streams a Responses API SSE
+  response without constructing or accessing a Cosmos client.
+  Caller-provided identity is not trusted: Cosmos-backed profile memory remains
+  disabled until the platform supplies authenticated Foundry identity.  The
+  `GET /health` endpoint returns the immutable image version and the set of
+  admitted strategies for container readiness probes.
 
 - **Explicit hosted-runtime strategy guard.** Added `strategies.hosted_strategies`
   with `HOSTED_ELIGIBLE_STRATEGIES` (``maf_lite``, ``maf_agent_service``,
-  ``single_agent_rag``, ``mcp``) and `guard_hosted_strategy(key)` which raises
+  ``single_agent_rag``) and `guard_hosted_strategy(key)` which raises
   `ValueError` immediately for any strategy outside that set.  The guard is
   called in `_hosted_stream` before strategy construction and surfaced as
-  HTTP 422 from `POST /invocations`.  `multimodal` and `nl2sql` are excluded
-  pending ADR approval.
+  HTTP 422 from `POST /invocations`.  ``multimodal``, ``nl2sql``, and ``mcp``
+  are excluded: ``mcp`` creates a fresh thread on every call and cannot provide
+  the same managed Conversations continuity guarantee as the other eligible
+  strategies; it can be re-admitted once history injection is implemented safely.
 
 - **Focused hosted adapter tests.** Added coverage for Responses API SSE
   serialization of every event kind and optional field; terminal closing
-  frames; strategy guard pass/fail; genuine two-turn history and thread
-  continuity; no-Cosmos construction and profile access; caller/conversation
-  isolation; hosted stream errors and cancellation; and `GET /health` plus
-  `POST /invocations` behavior including the `X-Response-ID` response header.
+  frames; strategy guard pass/fail (including explicit rejection of ``mcp``);
+  `build_hosted_conversation` SDK-boundary behavior for external vs synthesised
+  conversation ids; `_hosted_stream` thread_id forwarding with and without an
+  external conversation id; explicit rejection of malformed message order;
+  genuine two-turn history and thread continuity; no-Cosmos construction and
+  profile access; caller/conversation isolation; hosted stream errors and
+  cancellation; and `GET /health` plus `POST /invocations` behavior including
+  the `X-Response-ID` response header.
   See
   [Azure/GPT-RAG#598](https://github.com/Azure/GPT-RAG/issues/598).
 

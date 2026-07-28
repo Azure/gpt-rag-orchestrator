@@ -13,12 +13,14 @@ from typing import TypedDict
 from strategies.agent_provider_v2 import AGENT_BACKEND_TAG
 
 # ADR-eligible strategies for the hosted runtime.
-# multimodal and nl2sql are excluded pending further ADR investigation.
+# multimodal and nl2sql are excluded pending ADR investigation.
+# mcp is excluded because its flow creates a fresh thread on every call and
+# does not support history injection; it cannot provide the same managed
+# Conversations continuity guarantee as the other eligible strategies.
 HOSTED_ELIGIBLE_STRATEGIES: frozenset[str] = frozenset({
     "maf_lite",
     "maf_agent_service",
     "single_agent_rag",
-    "mcp",
 })
 
 HOSTED_SERVER_THREAD_STRATEGIES: frozenset[str] = frozenset({
@@ -36,19 +38,30 @@ def build_hosted_conversation(
     strategy_key: str,
     conversation_id: str,
     messages: Sequence[HostedConversationMessage],
+    *,
+    external_conversation_id: bool = True,
 ) -> dict:
     """Build request-local strategy state from a managed Conversation.
 
     The complete ordered prior history is copied so strategy mutations cannot
-    leak into another request. Foundry Responses-backed strategies reuse the
-    managed conversation id as their stable server-side thread id.
+    leak into another request.
+
+    For Responses-backed server-thread strategies (``maf_agent_service``,
+    ``single_agent_rag``), the Foundry-managed conversation id is passed
+    through as ``thread_id`` **only when** ``external_conversation_id`` is
+    ``True`` — i.e., the id was supplied by the Foundry runtime rather than
+    synthesised locally.  A synthesised UUID is *not* a valid Foundry
+    conversation object and must not be passed to ``get_new_thread(service_thread_id=...)``
+    or ``ensure_conversation_id``; letting ``thread_id`` remain absent allows
+    each strategy to create a proper server-side conversation on first use.
     """
     conversation = {
         "id": conversation_id,
         "messages": [dict(message) for message in messages],
     }
     if strategy_key in HOSTED_SERVER_THREAD_STRATEGIES:
-        conversation["thread_id"] = conversation_id
+        if external_conversation_id:
+            conversation["thread_id"] = conversation_id
         conversation["agent_backend"] = AGENT_BACKEND_TAG
     return conversation
 

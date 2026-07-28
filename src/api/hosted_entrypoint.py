@@ -118,6 +118,13 @@ async def _hosted_stream(
     Conversations. Per-user profile memory remains disabled because the hosted
     invocation contract does not yet expose an authenticated Foundry identity.
 
+    For Responses-backed server-thread strategies (``maf_agent_service``,
+    ``single_agent_rag``), the Foundry-managed ``conversation_id`` is forwarded
+    as the stable server-side thread id when it was provided by the Foundry
+    runtime.  When absent, ``thread_id`` is intentionally left unset so each
+    strategy can create a real Foundry conversation object on first use rather
+    than receiving a synthesised UUID that is not a valid Foundry conversation.
+
     Raises :class:`ValueError` for unsupported strategies — never silently
     falls back.
     """
@@ -127,6 +134,7 @@ async def _hosted_stream(
         hosted_runtime=True,
     )
 
+    external_conversation_id = turn.conversation_id is not None
     conversation_id = turn.conversation_id or str(uuid.uuid4())
 
     if hasattr(strategy, "set_context"):
@@ -137,6 +145,7 @@ async def _hosted_stream(
         strategy_key,
         conversation_id,
         history,
+        external_conversation_id=external_conversation_id,
     )
 
     yield TurnConversationEvent(conversation_id=conversation_id)
@@ -274,22 +283,25 @@ async def invocations(body: InvocationRequest) -> StreamingResponse:
     """
     # Derive the current ask and ordered prior history without duplicating the
     # current user message inside strategy input.
-    ask_index = next(
-        (index for index in range(len(body.messages) - 1, -1, -1)
-         if body.messages[index].role == "user"),
-        None,
-    )
-    if ask_index is None:
+    # The Foundry invocation contract requires the last message to be the current
+    # user turn; an assistant message (or any other role) at the end indicates
+    # a malformed invocation — reject explicitly rather than silently discarding.
+    if body.messages[-1].role != "user":
         raise HTTPException(
             status_code=422,
-            detail="At least one message with role='user' is required.",
+            detail=(
+                "The last message must have role 'user'. "
+                "The Foundry invocation contract requires the current user turn "
+                "to be the final message in the list."
+            ),
         )
-    ask = body.messages[ask_index].content.strip()
+    ask = body.messages[-1].content.strip()
     if not ask:
         raise HTTPException(
             status_code=422,
             detail="The last user message must not be empty.",
         )
+    ask_index = len(body.messages) - 1
 
     # Resolve and guard the strategy.
     cfg = get_config()
