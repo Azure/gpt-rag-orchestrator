@@ -13,15 +13,30 @@
   `response.content_part.done`, `response.output_item.done`,
   `response.completed`) once all deltas have been streamed.
 
-- **Hosted agent entrypoint with managed Conversations.** Added
-  `api.hosted_entrypoint` — a standalone FastAPI application for running the
+- **Hosted agent entrypoint with managed Conversations and isolated profile memory.**
+  Added `api.hosted_entrypoint` — a standalone FastAPI application for running the
   GPT-RAG orchestration core as an Azure AI Foundry hosted agent.  The
   `POST /invocations` endpoint accepts the Foundry invocation request format,
-  resolves the strategy, and streams a Responses API SSE response without any
-  Cosmos DB dependency: conversation history is managed by Foundry Conversations
-  and each strategy's own thread/session.  The `GET /health` endpoint returns
-  the immutable image version and the set of admitted strategies for container
-  readiness probes.
+  resolves the strategy, and streams a Responses API SSE response.  Key behaviors:
+
+  - **Conversation history injection.** All messages before the last user turn in
+    the Foundry invocation request are extracted as prior-turn history and injected
+    directly into `strategy.conversation["messages"]`, restoring multi-turn context
+    for `maf_lite` and `single_agent_rag` without any Cosmos DB read.
+  - **No Cosmos DB profile reads or writes.** The `"hosted_mode": True` sentinel is
+    set on every `strategy.conversation`.  `MafLiteStrategy` and
+    `MafAgentServiceStrategy` check this flag and initialise `UserProfileMemory`
+    from an empty in-memory `UserProfile` instead of loading from Cosmos, and skip
+    the post-turn profile save entirely.  This eliminates both the Cosmos dependency
+    and the cross-user contamination risk that would arise from the `"default_user"`
+    fallback used when no `user_id` is present.
+  - **`maf_agent_service` thread continuity.** An in-process `_maf_thread_cache`
+    (keyed by `conversation_id`) stores the Foundry Agent Service thread id after
+    each turn and restores it at the start of the next turn in the same Foundry
+    Conversation, so consecutive turns reuse the same server-side thread.  The cache
+    is local to the process; Foundry Conversations owns the authoritative history.
+  - The `GET /health` endpoint returns the immutable image version and the set of
+    admitted strategies for container readiness probes.
 
 - **Explicit hosted-runtime strategy guard.** Added `strategies.hosted_strategies`
   with `HOSTED_ELIGIBLE_STRATEGIES` (``maf_lite``, ``maf_agent_service``,
@@ -32,14 +47,17 @@
   pending ADR approval.
 
 - **Focused hosted adapter tests.** Added `tests/test_hosted_responses.py` with
-  42 tests covering: Responses API SSE serialization of every event kind and
+  51 tests covering: Responses API SSE serialization of every event kind and
   all optional fields; terminal closing frames; strategy guard pass/fail for
   every eligible and ineligible key; hosted stream execution (conversation
   identity, ask propagation, text events, structured events, error/cancellation
-  propagation, generated conversation id); and `GET /health` plus
+  propagation, generated conversation id); two-turn continuity for `maf_lite` and
+  `single_agent_rag` proving turn 2 receives turn 1 history; `maf_agent_service`
+  thread-id cache across turns; Cosmos isolation (no profile read/write in hosted
+  mode) and caller-conversation state isolation; and `GET /health` plus
   `POST /invocations` FastAPI endpoint behaviour including the `X-Response-ID`
-  response header.  See
-  [Azure/GPT-RAG#598](https://github.com/Azure/GPT-RAG/issues/598).
+  response header.  Full suite: **605 passed, 0 failures** (554 pre-existing + 51 new).
+  See [Azure/GPT-RAG#598](https://github.com/Azure/GPT-RAG/issues/598).
 
 - **Dependency-neutral turn contracts.** Added stdlib dataclasses for
   `TurnRequest` and typed output events covering conversation identity, streamed

@@ -335,20 +335,27 @@ class MafLiteStrategy(BaseAgentStrategy):
 
         conv = self.conversation
         is_new_session = not conv.get("session_initialized", False)
-        user_id = conv.get("user_id", "default_user")
+        hosted_mode: bool = conv.get("hosted_mode", False)
+        user_id: str = conv.get("user_id", "default_user")
 
         try:
             chat_client = self._get_or_create_chat_client()
 
-            # Load or initialise user-profile memory
+            # Load or initialise user-profile memory.
+            # In hosted mode (no authenticated identity contract yet) skip Cosmos
+            # entirely to prevent cross-user profile contamination.
             if self._user_memory is None:
                 t0 = time.time()
-                user_profile = await self._load_user_profile(user_id)
+                if hosted_mode:
+                    user_profile = UserProfile()
+                    logging.info("[MafLiteStrategy] hosted_mode: using empty in-memory profile (no Cosmos)")
+                else:
+                    user_profile = await self._load_user_profile(user_id)
+                    logging.info("[MafLiteStrategy] user_profile_load: %.2fs (user=%s)", time.time() - t0, user_id)
                 self._user_memory = UserProfileMemory(
                     chat_client=chat_client,
                     user_profile=user_profile,
                 )
-                logging.info("[MafLiteStrategy] user_profile_load: %.2fs (user=%s)", time.time() - t0, user_id)
 
             # Initialize search provider if not done
             if self._search_provider is None:
@@ -432,8 +439,10 @@ class MafLiteStrategy(BaseAgentStrategy):
 
             logging.info("[MafLiteStrategy] === Flow done === total: %.2fs", time.time() - flow_start)
 
-            # Post-flow: flush + save as background task so SSE stream closes immediately
-            asyncio.create_task(self._post_flow_cleanup(user_id))
+            # Post-flow: flush + save as background task so SSE stream closes immediately.
+            # Skipped in hosted mode — no Cosmos write is performed.
+            if not hosted_mode:
+                asyncio.create_task(self._post_flow_cleanup(user_id))
 
         except Exception as e:
             logging.error(f"[MafLiteStrategy] Agent flow failed: {e}", exc_info=True)

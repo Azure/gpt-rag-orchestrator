@@ -277,14 +277,20 @@ Guidelines:
 
         conv = self.conversation
         is_new_session = not conv.get("session_initialized", False)
+        hosted_mode: bool = conv.get("hosted_mode", False)
 
         # Get user ID from conversation context
         user_id = conv.get("user_id", "default_user")
 
         try:
             t0 = time.time()
-            user_profile = await self._load_user_profile(user_id)
-            logging.info("[MafAgentServiceStrategy] user_profile_load: %.2fs (user=%s)", time.time() - t0, user_id)
+            # In hosted mode skip Cosmos to prevent cross-user profile contamination.
+            if hosted_mode:
+                user_profile = UserProfile()
+                logging.info("[MafAgentServiceStrategy] hosted_mode: using empty in-memory profile (no Cosmos)")
+            else:
+                user_profile = await self._load_user_profile(user_id)
+                logging.info("[MafAgentServiceStrategy] user_profile_load: %.2fs (user=%s)", time.time() - t0, user_id)
 
             # Initialize search provider if not done
             if self._search_provider is None:
@@ -382,10 +388,10 @@ Guidelines:
                 conv["messages"].append({"role": "user", "text": user_message})
                 conv["messages"].append({"role": "assistant", "text": full_response})
 
-            # Flush any pending background profile extraction before persisting so
-            # the saved profile reflects this turn (parity with MafLiteStrategy).
-            await user_memory.flush()
-            await self._save_user_profile(user_id, user_memory.user_profile)
+            # Flush and persist profile — skipped in hosted mode (no Cosmos write).
+            if not hosted_mode:
+                await user_memory.flush()
+                await self._save_user_profile(user_id, user_memory.user_profile)
 
             logging.info(f"[MafAgentServiceStrategy] Flow completed in {round(time.time() - flow_start, 2)}s")
 

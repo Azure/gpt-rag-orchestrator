@@ -4,8 +4,18 @@ This FastAPI application wires the runtime-neutral orchestration core to the
 Foundry Responses API streaming format.  It is intentionally separate from the
 classic ``main.py`` so that:
 
-- No Cosmos DB or orchestrator Container Apps dependency exists in the hosted
-  execution path (conversation history is managed by Foundry Conversations).
+- No Cosmos DB reads or writes occur in the hosted execution path.
+  Conversation history comes from Foundry Conversations (the ordered
+  ``messages`` list in each invocation request) and is injected directly into
+  the strategy's ``conversation["messages"]`` on every turn.  Per-user profile
+  memory (which the classic path persists to Cosmos) is disabled via the
+  ``"hosted_mode": True`` sentinel in the conversation dict; strategies skip
+  profile load and save when this flag is set.
+- For ``maf_agent_service``, server-side thread continuity within a process is
+  maintained via an in-memory mapping of ``conversation_id → thread_id``
+  (``_maf_thread_cache``).  The cache is scoped to a single process and is lost
+  on restart; Foundry Conversations continues to own the authoritative message
+  history.
 - Only ADR-eligible strategies are admitted; unsupported strategies fail
   explicitly rather than silently falling back.
 - The hosted image is immutable: the ``VERSION`` file is read once at startup
@@ -47,6 +57,13 @@ from strategies.agent_strategy_factory import AgentStrategyFactory
 from strategies.hosted_strategies import HOSTED_ELIGIBLE_STRATEGIES, guard_hosted_strategy
 
 logger = logging.getLogger(__name__)
+
+# In-process thread-id cache for maf_agent_service continuity.
+# Maps conversation_id → Foundry Agent Service thread_id so that consecutive
+# turns within the same conversation reuse the same server-side thread.
+# The cache is local to this process; Foundry Conversations owns the
+# authoritative message history and is not affected by a process restart.
+_maf_thread_cache: dict[str, str] = {}
 
 # ── Immutable version (read once; never changes at runtime) ──────────────────
 _VERSION_FILE = Path(__file__).resolve().parents[2] / "VERSION"
@@ -102,12 +119,19 @@ class HealthResponse(BaseModel):
 async def _hosted_stream(
     turn: TurnRequest,
     strategy_key: str,
+    history_messages: list[dict] | None = None,
 ) -> AsyncIterator[TurnOutputEvent]:
     """Run one turn via the strategy without any Cosmos DB dependency.
 
-    Conversation history is managed by Foundry Conversations; this path
-    communicates only with the Azure AI Foundry / Agent Service endpoints that
-    the individual strategy already uses.
+    Conversation history is injected from *history_messages* (the ordered prior
+    turns from the Foundry invocation request) directly into
+    ``strategy.conversation["messages"]``.  The ``"hosted_mode": True`` sentinel
+    tells history-owning strategies (``maf_lite``, ``maf_agent_service``) to skip
+    per-user profile load and save so no Cosmos DB operations occur.
+
+    For ``maf_agent_service`` the server-side thread id is restored from the
+    in-process ``_maf_thread_cache`` (keyed by *conversation_id*) so consecutive
+    turns within the same Foundry Conversation reuse the same agent thread.
 
     Raises :class:`ValueError` for unsupported strategies — never silently
     falls back.
@@ -121,9 +145,16 @@ async def _hosted_stream(
         strategy.set_context(conversation_id)
 
     strategy.user_context = turn.user_context or {}
-    # Provide a minimal conversation stub so strategies that read
-    # ``strategy.conversation["id"]`` don't raise a KeyError.
-    strategy.conversation = {"id": conversation_id}
+    strategy.conversation = {
+        "id": conversation_id,
+        "hosted_mode": True,
+        "messages": list(history_messages or []),
+    }
+
+    # Restore the Agent Service server-side thread so maf_agent_service resumes
+    # the same thread for every turn in the same Foundry Conversation.
+    if strategy_key == "maf_agent_service" and conversation_id in _maf_thread_cache:
+        strategy.conversation["thread_id"] = _maf_thread_cache[conversation_id]
 
     yield TurnConversationEvent(conversation_id=conversation_id)
 
@@ -143,6 +174,13 @@ async def _hosted_stream(
     except Exception:
         yield TurnErrorEvent()
         raise
+    finally:
+        # Persist thread_id for maf_agent_service so the next turn in the same
+        # Foundry Conversation can resume the existing server-side thread.
+        if strategy_key == "maf_agent_service":
+            thread_id = strategy.conversation.get("thread_id")
+            if thread_id:
+                _maf_thread_cache[conversation_id] = thread_id
 
 
 def _sse_generator(
@@ -150,6 +188,7 @@ def _sse_generator(
     strategy_key: str,
     response_id: str,
     item_id: str,
+    history_messages: list[dict] | None = None,
 ) -> AsyncIterator[str]:
     """Wrap ``_hosted_stream`` and serialize events to Responses API SSE."""
 
@@ -158,7 +197,7 @@ def _sse_generator(
         error_emitted = False
 
         try:
-            async for event in _hosted_stream(turn, strategy_key):
+            async for event in _hosted_stream(turn, strategy_key, history_messages):
                 frames = serialize_responses_events(
                     event,
                     response_id=response_id,
@@ -253,9 +292,12 @@ async def health() -> HealthResponse:
 async def invocations(body: InvocationRequest) -> StreamingResponse:
     """Translate a Foundry invocation into a Responses API SSE stream.
 
-    The last ``user`` message in ``body.messages`` is used as the current ask.
-    The ``conversation_id`` is passed through to the strategy as the Foundry
-    Conversations thread id; when absent a transient id is generated.
+    All messages in ``body.messages`` before the last user message are treated
+    as the prior conversation history and injected into
+    ``strategy.conversation["messages"]`` so that history-owning strategies
+    (``maf_lite``, ``single_agent_rag``) restore multi-turn context.  The last
+    ``user`` message is the current ask.  ``conversation_id`` is passed through
+    to the strategy; when absent a transient id is generated.
     """
     # Derive the current ask from the last user message.
     user_messages = [m for m in body.messages if m.role == "user"]
@@ -280,6 +322,16 @@ async def invocations(body: InvocationRequest) -> StreamingResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # Build prior-turn history: all messages before the last user message.
+    # This maps the ordered Foundry Conversations history into the exact
+    # ``conversation["messages"]`` dict format consumed by maf_lite and
+    # single_agent_rag (both accept either "content" or "text" key).
+    last_user_idx = max(i for i, m in enumerate(body.messages) if m.role == "user")
+    history_messages = [
+        {"role": m.role, "content": m.content}
+        for m in body.messages[:last_user_idx]
+    ]
+
     # Build the transport-neutral turn request.
     metadata = body.metadata or {}
     turn = TurnRequest(
@@ -294,14 +346,15 @@ async def invocations(body: InvocationRequest) -> StreamingResponse:
     item_id = f"item_{uuid.uuid4().hex}"
 
     logger.info(
-        "[hosted] invocation: strategy=%s conversation_id=%s response_id=%s",
+        "[hosted] invocation: strategy=%s conversation_id=%s history=%d response_id=%s",
         strategy_key,
         body.conversation_id or "∅",
+        len(history_messages),
         response_id,
     )
 
     return StreamingResponse(
-        _sse_generator(turn, strategy_key, response_id, item_id),
+        _sse_generator(turn, strategy_key, response_id, item_id, history_messages),
         media_type="text/event-stream",
         headers={"X-Response-ID": response_id},
     )
