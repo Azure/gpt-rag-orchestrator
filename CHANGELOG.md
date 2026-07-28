@@ -18,7 +18,9 @@
   retains the classic conversation-prefix, text-chunk, error, and cancellation
   wire behavior. Eligible Agent Framework strategies translate explicit
   citation and tool-call signals into the typed event stream without adding
-  bytes to the classic response. See
+  bytes to the classic response. In Phase 1, `nl2sql` and `multimodal` remain
+  text-only, and direct-LLM or other non-Agent-Framework paths do not emit typed
+  tool or citation events. See
   [Azure/GPT-RAG#590](https://github.com/Azure/GPT-RAG/issues/590).
 
 - **Boundary regression evidence.** Added clean-subprocess import isolation,
