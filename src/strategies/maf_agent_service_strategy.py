@@ -3,10 +3,13 @@ Microsoft Agent Framework (MAF) + Agent Service V2 Strategy.
 
 This strategy implements a conversational agent using Microsoft Agent Framework
 with Azure AI Foundry Agent Service V2 as the backend. It provides:
-- Memory persistence for user profile (across sessions)
+- Memory persistence for user profile in the classic runtime (across sessions)
 - Optional agentic search over documents via Agent Service V2
 - Extensible context providers for custom capabilities
 - Server-side thread management via Agent Service V2
+
+Hosted mode reuses the Foundry-managed conversation as its server thread and
+disables profile memory until authenticated Foundry identity is available.
 """
 
 import logging
@@ -173,6 +176,42 @@ Guidelines:
         except Exception as e:
             logging.error(f"[MafAgentServiceStrategy] Failed to save user profile: {e}")
 
+    async def _create_user_memory(
+        self,
+        user_id: Optional[str],
+    ) -> Optional[UserProfileMemory]:
+        """Create classic profile memory only when trusted identity is available."""
+        if not self.profile_memory_enabled:
+            return None
+        if user_id is None:
+            raise RuntimeError("Profile memory requires a trusted user identity.")
+        t0 = time.time()
+        user_profile = await self._load_user_profile(user_id)
+        logging.info(
+            "[MafAgentServiceStrategy] user_profile_load: %.2fs (user=%s)",
+            time.time() - t0,
+            user_id,
+        )
+        return UserProfileMemory(
+            chat_client=self._get_or_create_memory_chat_client(),
+            user_profile=user_profile,
+        )
+
+    async def _persist_user_memory(
+        self,
+        user_id: Optional[str],
+        user_memory: Optional[UserProfileMemory],
+    ) -> None:
+        """Persist classic profile memory; hosted mode is deliberately a no-op."""
+        if (
+            not self.profile_memory_enabled
+            or user_id is None
+            or user_memory is None
+        ):
+            return
+        await user_memory.flush()
+        await self._save_user_profile(user_id, user_memory.user_profile)
+
     async def _create_search_provider(self) -> Optional[SearchContextProvider]:
         """Create the search context provider for retrieval."""
         if not self.search_endpoint:
@@ -279,12 +318,14 @@ Guidelines:
         is_new_session = not conv.get("session_initialized", False)
 
         # Get user ID from conversation context
-        user_id = conv.get("user_id", "default_user")
+        user_id = (
+            conv.get("user_id", "default_user")
+            if self.profile_memory_enabled
+            else None
+        )
 
         try:
-            t0 = time.time()
-            user_profile = await self._load_user_profile(user_id)
-            logging.info("[MafAgentServiceStrategy] user_profile_load: %.2fs (user=%s)", time.time() - t0, user_id)
+            user_memory = await self._create_user_memory(user_id)
 
             # Initialize search provider if not done
             if self._search_provider is None:
@@ -317,12 +358,7 @@ Guidelines:
             # ids; drop them before reusing the server thread.
             agent_provider_v2.reset_legacy_thread(conv)
 
-            user_memory = UserProfileMemory(
-                chat_client=self._get_or_create_memory_chat_client(),
-                user_profile=user_profile,
-            )
-
-            context_providers = [user_memory]
+            context_providers = [user_memory] if user_memory is not None else []
             if self._search_provider:
                 context_providers.append(self._search_provider)
 
@@ -331,7 +367,11 @@ Guidelines:
             # close it on exit, so the singleton survives across requests.
             async with provider.as_agent(
                 details,
-                context_provider=CompositeContextProvider(context_providers),
+                context_provider=(
+                    CompositeContextProvider(context_providers)
+                    if context_providers
+                    else None
+                ),
             ) as agent:
 
                 # Get or create thread
@@ -347,7 +387,11 @@ Guidelines:
                         conv["thread_id"] = thread.service_thread_id
 
                 # If new session with existing profile, provide summary
-                if is_new_session and user_memory.has_minimum_context():
+                if (
+                    is_new_session
+                    and user_memory is not None
+                    and user_memory.has_minimum_context()
+                ):
                     conv["session_initialized"] = True
                     session_summary = self._build_session_summary(user_memory)
                     yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
@@ -384,8 +428,7 @@ Guidelines:
 
             # Flush any pending background profile extraction before persisting so
             # the saved profile reflects this turn (parity with MafLiteStrategy).
-            await user_memory.flush()
-            await self._save_user_profile(user_id, user_memory.user_profile)
+            await self._persist_user_memory(user_id, user_memory)
 
             logging.info(f"[MafAgentServiceStrategy] Flow completed in {round(time.time() - flow_start, 2)}s")
 

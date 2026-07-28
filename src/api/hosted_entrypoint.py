@@ -25,7 +25,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -44,7 +44,12 @@ from orchestration.turn import (
     TurnToolActivityEvent,
 )
 from strategies.agent_strategy_factory import AgentStrategyFactory
-from strategies.hosted_strategies import HOSTED_ELIGIBLE_STRATEGIES, guard_hosted_strategy
+from strategies.hosted_strategies import (
+    HOSTED_ELIGIBLE_STRATEGIES,
+    HostedConversationMessage,
+    build_hosted_conversation,
+    guard_hosted_strategy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +90,10 @@ class InvocationRequest(BaseModel):
     )
     metadata: Optional[dict[str, Any]] = Field(
         default_factory=dict,
-        description="Arbitrary pass-through metadata (e.g. correlation_id, run_id).",
+        description=(
+            "Request metadata such as correlation_id and question_id. "
+            "Caller-provided identity fields are not trusted by hosted mode."
+        ),
     )
 
 
@@ -102,28 +110,34 @@ class HealthResponse(BaseModel):
 async def _hosted_stream(
     turn: TurnRequest,
     strategy_key: str,
+    history: Sequence[HostedConversationMessage] = (),
 ) -> AsyncIterator[TurnOutputEvent]:
-    """Run one turn via the strategy without any Cosmos DB dependency.
+    """Run one turn with managed history and no Cosmos-backed runtime state.
 
-    Conversation history is managed by Foundry Conversations; this path
-    communicates only with the Azure AI Foundry / Agent Service endpoints that
-    the individual strategy already uses.
+    The caller supplies the complete ordered prior history from Foundry managed
+    Conversations. Per-user profile memory remains disabled because the hosted
+    invocation contract does not yet expose an authenticated Foundry identity.
 
     Raises :class:`ValueError` for unsupported strategies — never silently
     falls back.
     """
     guard_hosted_strategy(strategy_key)
-    strategy = await AgentStrategyFactory.get_strategy(strategy_key)
+    strategy = await AgentStrategyFactory.get_strategy(
+        strategy_key,
+        hosted_runtime=True,
+    )
 
     conversation_id = turn.conversation_id or str(uuid.uuid4())
 
     if hasattr(strategy, "set_context"):
         strategy.set_context(conversation_id)
 
-    strategy.user_context = turn.user_context or {}
-    # Provide a minimal conversation stub so strategies that read
-    # ``strategy.conversation["id"]`` don't raise a KeyError.
-    strategy.conversation = {"id": conversation_id}
+    strategy.user_context = {}
+    strategy.conversation = build_hosted_conversation(
+        strategy_key,
+        conversation_id,
+        history,
+    )
 
     yield TurnConversationEvent(conversation_id=conversation_id)
 
@@ -150,6 +164,7 @@ def _sse_generator(
     strategy_key: str,
     response_id: str,
     item_id: str,
+    history: Sequence[HostedConversationMessage] = (),
 ) -> AsyncIterator[str]:
     """Wrap ``_hosted_stream`` and serialize events to Responses API SSE."""
 
@@ -158,7 +173,7 @@ def _sse_generator(
         error_emitted = False
 
         try:
-            async for event in _hosted_stream(turn, strategy_key):
+            async for event in _hosted_stream(turn, strategy_key, history):
                 frames = serialize_responses_events(
                     event,
                     response_id=response_id,
@@ -257,14 +272,19 @@ async def invocations(body: InvocationRequest) -> StreamingResponse:
     The ``conversation_id`` is passed through to the strategy as the Foundry
     Conversations thread id; when absent a transient id is generated.
     """
-    # Derive the current ask from the last user message.
-    user_messages = [m for m in body.messages if m.role == "user"]
-    if not user_messages:
+    # Derive the current ask and ordered prior history without duplicating the
+    # current user message inside strategy input.
+    ask_index = next(
+        (index for index in range(len(body.messages) - 1, -1, -1)
+         if body.messages[index].role == "user"),
+        None,
+    )
+    if ask_index is None:
         raise HTTPException(
             status_code=422,
             detail="At least one message with role='user' is required.",
         )
-    ask = user_messages[-1].content.strip()
+    ask = body.messages[ask_index].content.strip()
     if not ask:
         raise HTTPException(
             status_code=422,
@@ -282,11 +302,15 @@ async def invocations(body: InvocationRequest) -> StreamingResponse:
 
     # Build the transport-neutral turn request.
     metadata = body.metadata or {}
+    history: list[HostedConversationMessage] = [
+        {"role": message.role, "text": message.content}
+        for message in body.messages[:ask_index]
+    ]
     turn = TurnRequest(
         ask=ask,
         conversation_id=body.conversation_id,
         question_id=metadata.get("question_id"),
-        user_context=metadata.get("user_context") or {},
+        user_context={},
         correlation_id=metadata.get("correlation_id"),
     )
 
@@ -301,7 +325,7 @@ async def invocations(body: InvocationRequest) -> StreamingResponse:
     )
 
     return StreamingResponse(
-        _sse_generator(turn, strategy_key, response_id, item_id),
+        _sse_generator(turn, strategy_key, response_id, item_id, history),
         media_type="text/event-stream",
         headers={"X-Response-ID": response_id},
     )

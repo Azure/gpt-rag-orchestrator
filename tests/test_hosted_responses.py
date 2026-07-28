@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from copy import deepcopy
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -446,6 +447,272 @@ class TestHostedStream:
 
         assert citation in events
 
+    @pytest.mark.parametrize("strategy_key", ["maf_lite", "single_agent_rag"])
+    @pytest.mark.asyncio
+    async def test_two_turn_history_reaches_history_owning_strategy(
+        self,
+        strategy_key: str,
+    ):
+        """Turn two receives the complete ordered turn-one exchange."""
+        from api.hosted_entrypoint import _hosted_stream
+
+        received_conversations = []
+
+        class RecordingStrategy:
+            def set_context(self, _conversation_id):
+                pass
+
+            async def initiate_agent_flow(self, ask):
+                received_conversations.append(deepcopy(self.conversation))
+                self.conversation["messages"].extend([
+                    {"role": "user", "text": ask},
+                    {"role": "assistant", "text": f"answer to {ask}"},
+                ])
+                yield f"answer to {ask}"
+
+        strategies = [RecordingStrategy(), RecordingStrategy()]
+        factory = AsyncMock(side_effect=strategies)
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=factory,
+        ):
+            first_turn = TurnRequest(ask="first question", conversation_id="conv-1")
+            [event async for event in _hosted_stream(first_turn, strategy_key)]
+
+            prior_history = [
+                {"role": "user", "text": "first question"},
+                {"role": "assistant", "text": "answer to first question"},
+            ]
+            second_turn = TurnRequest(ask="follow-up", conversation_id="conv-1")
+            [event async for event in _hosted_stream(
+                second_turn,
+                strategy_key,
+                prior_history,
+            )]
+
+        assert [
+            {
+                "id": conversation["id"],
+                "messages": conversation["messages"],
+            }
+            for conversation in received_conversations
+        ] == [
+            {"id": "conv-1", "messages": []},
+            {"id": "conv-1", "messages": prior_history},
+        ]
+        if strategy_key == "single_agent_rag":
+            assert [
+                conversation["thread_id"]
+                for conversation in received_conversations
+            ] == ["conv-1", "conv-1"]
+        assert factory.await_args_list[0].kwargs == {"hosted_runtime": True}
+        assert factory.await_args_list[1].kwargs == {"hosted_runtime": True}
+
+    @pytest.mark.asyncio
+    async def test_two_turn_agent_service_reuses_managed_conversation_thread(self):
+        from api.hosted_entrypoint import _hosted_stream
+        from strategies.agent_provider_v2 import AGENT_BACKEND_TAG
+
+        received_conversations = []
+
+        class RecordingStrategy:
+            def set_context(self, _conversation_id):
+                pass
+
+            async def initiate_agent_flow(self, _ask):
+                received_conversations.append(deepcopy(self.conversation))
+                yield "answer"
+
+        factory = AsyncMock(
+            side_effect=[RecordingStrategy(), RecordingStrategy()],
+        )
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=factory,
+        ):
+            first_turn = TurnRequest(ask="first", conversation_id="conv-thread")
+            [event async for event in _hosted_stream(
+                first_turn,
+                "maf_agent_service",
+            )]
+            second_turn = TurnRequest(ask="second", conversation_id="conv-thread")
+            [event async for event in _hosted_stream(
+                second_turn,
+                "maf_agent_service",
+                [
+                    {"role": "user", "text": "first"},
+                    {"role": "assistant", "text": "answer"},
+                ],
+            )]
+
+        assert [conversation["thread_id"] for conversation in received_conversations] == [
+            "conv-thread",
+            "conv-thread",
+        ]
+        assert all(
+            conversation["agent_backend"] == AGENT_BACKEND_TAG
+            for conversation in received_conversations
+        )
+
+    @pytest.mark.asyncio
+    async def test_separate_conversations_and_untrusted_callers_share_no_state(self):
+        from api.hosted_entrypoint import _hosted_stream
+
+        received = []
+
+        class MutatingStrategy:
+            def set_context(self, _conversation_id):
+                pass
+
+            async def initiate_agent_flow(self, ask):
+                received.append({
+                    "conversation": deepcopy(self.conversation),
+                    "user_context": deepcopy(self.user_context),
+                })
+                self.conversation["messages"].append(
+                    {"role": "assistant", "text": f"private {ask}"}
+                )
+                self.user_context["mutated"] = True
+                yield "answer"
+
+        histories = [
+            [{"role": "user", "text": "caller A secret"}],
+            [{"role": "user", "text": "caller B secret"}],
+        ]
+        factory = AsyncMock(
+            side_effect=[MutatingStrategy(), MutatingStrategy()],
+        )
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=factory,
+        ):
+            for index, conversation_id in enumerate(("conv-a", "conv-b")):
+                turn = TurnRequest(
+                    ask=f"ask-{index}",
+                    conversation_id=conversation_id,
+                    user_context={
+                        "principal_id": f"untrusted-caller-{index}",
+                        "groups": ["untrusted"],
+                    },
+                )
+                [event async for event in _hosted_stream(
+                    turn,
+                    "maf_lite",
+                    histories[index],
+                )]
+
+        assert received == [
+            {
+                "conversation": {
+                    "id": "conv-a",
+                    "messages": [{"role": "user", "text": "caller A secret"}],
+                },
+                "user_context": {},
+            },
+            {
+                "conversation": {
+                    "id": "conv-b",
+                    "messages": [{"role": "user", "text": "caller B secret"}],
+                },
+                "user_context": {},
+            },
+        ]
+        assert histories == [
+            [{"role": "user", "text": "caller A secret"}],
+            [{"role": "user", "text": "caller B secret"}],
+        ]
+
+
+class TestHostedConstruction:
+    @pytest.mark.parametrize("strategy_key", sorted(HOSTED_ELIGIBLE_STRATEGIES))
+    @pytest.mark.asyncio
+    async def test_eligible_strategy_construction_never_creates_cosmos_client(
+        self,
+        strategy_key: str,
+        mock_config,
+        mock_identity_manager,
+    ):
+        from strategies.agent_strategy_factory import AgentStrategyFactory
+        from strategies.base_agent_strategy import BaseAgentStrategy
+
+        class ProbeStrategy(BaseAgentStrategy):
+            async def initiate_agent_flow(self, _user_message):
+                yield "unused"
+
+        cosmos_factory = MagicMock(
+            side_effect=AssertionError("Cosmos must not be constructed"),
+        )
+        with (
+            patch.dict(
+                AgentStrategyFactory._REGISTRY,
+                {strategy_key: lambda: ProbeStrategy()},
+            ),
+            patch(
+                "strategies.base_agent_strategy.get_config",
+                return_value=mock_config,
+            ),
+            patch(
+                "strategies.base_agent_strategy.get_identity_manager",
+                return_value=mock_identity_manager,
+            ),
+            patch(
+                "strategies.base_agent_strategy.get_cosmosdb_client",
+                new=cosmos_factory,
+            ),
+            patch("strategies.base_agent_strategy.AIProjectClient"),
+        ):
+            strategy = await AgentStrategyFactory.get_strategy(
+                strategy_key,
+                hosted_runtime=True,
+            )
+
+        cosmos_factory.assert_not_called()
+        assert strategy.cosmos is None
+        assert strategy.hosted_runtime is True
+        assert strategy.profile_memory_enabled is False
+
+    @pytest.mark.asyncio
+    async def test_classic_strategy_construction_still_uses_cosmos(
+        self,
+        mock_config,
+        mock_identity_manager,
+        mock_cosmos,
+    ):
+        from strategies.agent_strategy_factory import AgentStrategyFactory
+        from strategies.base_agent_strategy import BaseAgentStrategy
+
+        class ProbeStrategy(BaseAgentStrategy):
+            async def initiate_agent_flow(self, _user_message):
+                yield "unused"
+
+        cosmos_factory = MagicMock(return_value=mock_cosmos)
+        with (
+            patch.dict(
+                AgentStrategyFactory._REGISTRY,
+                {"maf_lite": lambda: ProbeStrategy()},
+            ),
+            patch(
+                "strategies.base_agent_strategy.get_config",
+                return_value=mock_config,
+            ),
+            patch(
+                "strategies.base_agent_strategy.get_identity_manager",
+                return_value=mock_identity_manager,
+            ),
+            patch(
+                "strategies.base_agent_strategy.get_cosmosdb_client",
+                new=cosmos_factory,
+            ),
+            patch("strategies.base_agent_strategy.AIProjectClient"),
+        ):
+            strategy = await AgentStrategyFactory.get_strategy("maf_lite")
+
+        cosmos_factory.assert_called_once_with()
+        assert strategy.cosmos is mock_cosmos
+        assert strategy.hosted_runtime is False
+        assert strategy.profile_memory_enabled is True
+
 
 # ── Hosted FastAPI endpoints ─────────────────────────────────────────────────
 
@@ -584,6 +851,62 @@ class TestHostedEntrypointAPI:
         assert resp.status_code == 200
         assert "X-Response-ID" in resp.headers
         assert resp.headers["X-Response-ID"].startswith("resp_")
+
+    def test_invocations_projects_prior_history_and_discards_untrusted_identity(
+        self,
+        client,
+        mock_config,
+    ):
+        original = mock_config.get.side_effect
+        mock_config.get.side_effect = (
+            lambda key, default=None, type=str:
+            "maf_lite" if key == "AGENT_STRATEGY" else original(key, default, type)
+        )
+        received = {}
+
+        async def fake_flow(ask):
+            received["ask"] = ask
+            received["conversation"] = deepcopy(strategy.conversation)
+            received["user_context"] = deepcopy(strategy.user_context)
+            yield "answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            resp = client.post(
+                "/invocations",
+                json={
+                    "messages": [
+                        {"role": "user", "content": "first question"},
+                        {"role": "assistant", "content": "first answer"},
+                        {"role": "user", "content": "follow-up"},
+                    ],
+                    "conversation_id": "conv-two-turn",
+                    "metadata": {
+                        "user_context": {
+                            "principal_id": "caller-controlled",
+                            "groups": ["caller-controlled"],
+                        }
+                    },
+                },
+            )
+
+        assert resp.status_code == 200
+        assert received == {
+            "ask": "follow-up",
+            "conversation": {
+                "id": "conv-two-turn",
+                "messages": [
+                    {"role": "user", "text": "first question"},
+                    {"role": "assistant", "text": "first answer"},
+                ],
+            },
+            "user_context": {},
+        }
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

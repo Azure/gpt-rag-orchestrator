@@ -345,7 +345,8 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
 
         messages = [{"role": "system", "content": system_prompt}]
 
-        # Optional: Append history from CosmosDB conversation if we want context.
+        # Append history supplied by the active runtime (Cosmos in classic mode,
+        # Foundry managed Conversations in hosted mode).
         # Stored entries use the "text" key, while the chat completions API expects
         # "content"; normalize and drop empties to avoid 400 "content is null" errors.
         history = self.conversation.get("messages", [])

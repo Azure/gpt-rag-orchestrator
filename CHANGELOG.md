@@ -17,11 +17,13 @@
   `api.hosted_entrypoint` — a standalone FastAPI application for running the
   GPT-RAG orchestration core as an Azure AI Foundry hosted agent.  The
   `POST /invocations` endpoint accepts the Foundry invocation request format,
-  resolves the strategy, and streams a Responses API SSE response without any
-  Cosmos DB dependency: conversation history is managed by Foundry Conversations
-  and each strategy's own thread/session.  The `GET /health` endpoint returns
-  the immutable image version and the set of admitted strategies for container
-  readiness probes.
+  projects the complete ordered prior request history into the strategy contract,
+  binds Responses-backed strategies to the stable managed Conversation id, and
+  streams a Responses API SSE response without constructing or accessing a
+  Cosmos client.  Caller-provided identity is not trusted: Cosmos-backed profile
+  memory remains disabled until the platform supplies authenticated Foundry
+  identity.  The `GET /health` endpoint returns the immutable image version and
+  the set of admitted strategies for container readiness probes.
 
 - **Explicit hosted-runtime strategy guard.** Added `strategies.hosted_strategies`
   with `HOSTED_ELIGIBLE_STRATEGIES` (``maf_lite``, ``maf_agent_service``,
@@ -31,14 +33,13 @@
   HTTP 422 from `POST /invocations`.  `multimodal` and `nl2sql` are excluded
   pending ADR approval.
 
-- **Focused hosted adapter tests.** Added `tests/test_hosted_responses.py` with
-  42 tests covering: Responses API SSE serialization of every event kind and
-  all optional fields; terminal closing frames; strategy guard pass/fail for
-  every eligible and ineligible key; hosted stream execution (conversation
-  identity, ask propagation, text events, structured events, error/cancellation
-  propagation, generated conversation id); and `GET /health` plus
-  `POST /invocations` FastAPI endpoint behaviour including the `X-Response-ID`
-  response header.  See
+- **Focused hosted adapter tests.** Added coverage for Responses API SSE
+  serialization of every event kind and optional field; terminal closing
+  frames; strategy guard pass/fail; genuine two-turn history and thread
+  continuity; no-Cosmos construction and profile access; caller/conversation
+  isolation; hosted stream errors and cancellation; and `GET /health` plus
+  `POST /invocations` behavior including the `X-Response-ID` response header.
+  See
   [Azure/GPT-RAG#598](https://github.com/Azure/GPT-RAG/issues/598).
 
 - **Dependency-neutral turn contracts.** Added stdlib dataclasses for
