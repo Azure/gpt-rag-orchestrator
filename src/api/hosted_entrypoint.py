@@ -25,13 +25,14 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Literal, Optional, Sequence
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.responses_adapter import responses_terminal_events, serialize_responses_events
+from connectors.foundry_conversations import resolve_managed_conversation_id
 from dependencies import get_config
 from orchestration.turn import (
     TurnCancelledEvent,
@@ -46,6 +47,7 @@ from orchestration.turn import (
 from strategies.agent_strategy_factory import AgentStrategyFactory
 from strategies.hosted_strategies import (
     HOSTED_ELIGIBLE_STRATEGIES,
+    HOSTED_SERVER_THREAD_STRATEGIES,
     HostedConversationMessage,
     build_hosted_conversation,
     guard_hosted_strategy,
@@ -66,27 +68,33 @@ except FileNotFoundError:
 class InvocationMessage(BaseModel):
     """One message turn in the inbound invocation request."""
 
-    role: str = Field(..., description="Message role: 'user' or 'assistant'")
+    role: Literal["user", "assistant"] = Field(
+        ...,
+        description="Message role: 'user' or 'assistant'",
+    )
     content: str = Field(..., description="Message text content")
 
 
 class InvocationRequest(BaseModel):
     """Inbound invocation from the Foundry runtime to the hosted agent.
 
-    The Foundry runtime provides at least one user message and an optional
-    ``conversation_id`` that identifies the Foundry-managed Conversation thread.
-    When ``conversation_id`` is absent the agent generates a transient id for
-    the duration of the response.
+    The final message is the current user ask. An optional ``conversation_id``
+    identifies the Foundry-managed Conversation. Responses-backed strategies
+    validate a supplied id or create a real managed Conversation when it is
+    absent.
     """
 
     messages: list[InvocationMessage] = Field(
         ...,
         min_length=1,
-        description="Ordered message history; the last user message is the current ask.",
+        description="Ordered message history; the final message is the current user ask.",
     )
     conversation_id: Optional[str] = Field(
         None,
-        description="Foundry-managed conversation/thread id (optional).",
+        description=(
+            "Foundry-managed Conversation id. Responses-backed strategies create "
+            "one through the Foundry SDK when it is omitted."
+        ),
     )
     metadata: Optional[dict[str, Any]] = Field(
         default_factory=dict,
@@ -115,7 +123,9 @@ async def _hosted_stream(
     """Run one turn with managed history and no Cosmos-backed runtime state.
 
     The caller supplies the complete ordered prior history from Foundry managed
-    Conversations. Per-user profile memory remains disabled because the hosted
+    Conversations. Responses-backed strategies validate or create the backing
+    managed Conversation through the Foundry SDK before using its id as a
+    service thread. Per-user profile memory remains disabled because the hosted
     invocation contract does not yet expose an authenticated Foundry identity.
 
     Raises :class:`ValueError` for unsupported strategies — never silently
@@ -127,7 +137,13 @@ async def _hosted_stream(
         hosted_runtime=True,
     )
 
-    conversation_id = turn.conversation_id or str(uuid.uuid4())
+    if strategy_key in HOSTED_SERVER_THREAD_STRATEGIES:
+        conversation_id = await resolve_managed_conversation_id(
+            strategy.project_client,
+            turn.conversation_id,
+        )
+    else:
+        conversation_id = turn.conversation_id or str(uuid.uuid4())
 
     if hasattr(strategy, "set_context"):
         strategy.set_context(conversation_id)
@@ -268,23 +284,21 @@ async def health() -> HealthResponse:
 async def invocations(body: InvocationRequest) -> StreamingResponse:
     """Translate a Foundry invocation into a Responses API SSE stream.
 
-    The last ``user`` message in ``body.messages`` is used as the current ask.
-    The ``conversation_id`` is passed through to the strategy as the Foundry
-    Conversations thread id; when absent a transient id is generated.
+    The final message must be the current user ask. Messages after the current
+    ask are rejected rather than silently discarded. Responses-backed
+    strategies validate a supplied ``conversation_id`` or create a real managed
+    Conversation when it is absent.
     """
-    # Derive the current ask and ordered prior history without duplicating the
-    # current user message inside strategy input.
-    ask_index = next(
-        (index for index in range(len(body.messages) - 1, -1, -1)
-         if body.messages[index].role == "user"),
-        None,
-    )
-    if ask_index is None:
+    current_message = body.messages[-1]
+    if current_message.role != "user":
         raise HTTPException(
             status_code=422,
-            detail="At least one message with role='user' is required.",
+            detail=(
+                "The final message must have role='user'; messages after the "
+                "current ask are not allowed."
+            ),
         )
-    ask = body.messages[ask_index].content.strip()
+    ask = current_message.content.strip()
     if not ask:
         raise HTTPException(
             status_code=422,
@@ -304,7 +318,7 @@ async def invocations(body: InvocationRequest) -> StreamingResponse:
     metadata = body.metadata or {}
     history: list[HostedConversationMessage] = [
         {"role": message.role, "text": message.content}
-        for message in body.messages[:ask_index]
+        for message in body.messages[:-1]
     ]
     turn = TurnRequest(
         ask=ask,

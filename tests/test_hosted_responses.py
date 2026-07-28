@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -337,9 +338,15 @@ class TestHostedStream:
         strategy.initiate_agent_flow = fake_flow
         turn = TurnRequest(ask="Hi", conversation_id="conv-1")
 
-        with patch(
-            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
-            new=AsyncMock(return_value=strategy),
+        with (
+            patch(
+                "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+                new=AsyncMock(return_value=strategy),
+            ),
+            patch(
+                "api.hosted_entrypoint.resolve_managed_conversation_id",
+                new=AsyncMock(return_value="conv-1"),
+            ),
         ):
             events = [e async for e in _hosted_stream(turn, "single_agent_rag")]
 
@@ -447,7 +454,10 @@ class TestHostedStream:
 
         assert citation in events
 
-    @pytest.mark.parametrize("strategy_key", ["maf_lite", "single_agent_rag"])
+    @pytest.mark.parametrize(
+        "strategy_key",
+        ["maf_lite", "single_agent_rag", "mcp"],
+    )
     @pytest.mark.asyncio
     async def test_two_turn_history_reaches_history_owning_strategy(
         self,
@@ -459,6 +469,8 @@ class TestHostedStream:
         received_conversations = []
 
         class RecordingStrategy:
+            project_client = MagicMock()
+
             def set_context(self, _conversation_id):
                 pass
 
@@ -473,9 +485,15 @@ class TestHostedStream:
         strategies = [RecordingStrategy(), RecordingStrategy()]
         factory = AsyncMock(side_effect=strategies)
 
-        with patch(
-            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
-            new=factory,
+        with (
+            patch(
+                "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+                new=factory,
+            ),
+            patch(
+                "api.hosted_entrypoint.resolve_managed_conversation_id",
+                new=AsyncMock(return_value="conv-1"),
+            ),
         ):
             first_turn = TurnRequest(ask="first question", conversation_id="conv-1")
             [event async for event in _hosted_stream(first_turn, strategy_key)]
@@ -517,6 +535,8 @@ class TestHostedStream:
         received_conversations = []
 
         class RecordingStrategy:
+            project_client = MagicMock()
+
             def set_context(self, _conversation_id):
                 pass
 
@@ -527,9 +547,15 @@ class TestHostedStream:
         factory = AsyncMock(
             side_effect=[RecordingStrategy(), RecordingStrategy()],
         )
-        with patch(
-            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
-            new=factory,
+        with (
+            patch(
+                "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+                new=factory,
+            ),
+            patch(
+                "api.hosted_entrypoint.resolve_managed_conversation_id",
+                new=AsyncMock(return_value="conv-thread"),
+            ),
         ):
             first_turn = TurnRequest(ask="first", conversation_id="conv-thread")
             [event async for event in _hosted_stream(
@@ -554,6 +580,117 @@ class TestHostedStream:
             conversation["agent_backend"] == AGENT_BACKEND_TAG
             for conversation in received_conversations
         )
+
+    @pytest.mark.asyncio
+    async def test_agent_service_validates_supplied_managed_conversation(self):
+        from api.hosted_entrypoint import _hosted_stream
+
+        openai_client = MagicMock()
+        openai_client.__aenter__ = AsyncMock(return_value=openai_client)
+        openai_client.__aexit__ = AsyncMock(return_value=False)
+        openai_client.conversations.retrieve = AsyncMock(
+            return_value=SimpleNamespace(id="conv_existing"),
+        )
+        openai_client.conversations.create = AsyncMock()
+
+        strategy = MagicMock()
+        strategy.project_client.get_openai_client.return_value = openai_client
+        received = []
+
+        async def fake_flow(_ask):
+            received.append(deepcopy(strategy.conversation))
+            yield "answer"
+
+        strategy.initiate_agent_flow = fake_flow
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            events = [
+                event
+                async for event in _hosted_stream(
+                    TurnRequest(ask="hello", conversation_id="conv_existing"),
+                    "maf_agent_service",
+                )
+            ]
+
+        openai_client.conversations.retrieve.assert_awaited_once_with(
+            "conv_existing"
+        )
+        openai_client.conversations.create.assert_not_awaited()
+        assert received[0]["thread_id"] == "conv_existing"
+        assert events[0].conversation_id == "conv_existing"
+
+    @pytest.mark.asyncio
+    async def test_agent_service_creates_managed_conversation_when_id_absent(self):
+        from api.hosted_entrypoint import _hosted_stream
+
+        openai_client = MagicMock()
+        openai_client.__aenter__ = AsyncMock(return_value=openai_client)
+        openai_client.__aexit__ = AsyncMock(return_value=False)
+        openai_client.conversations.retrieve = AsyncMock()
+        openai_client.conversations.create = AsyncMock(
+            return_value=SimpleNamespace(id="conv_created"),
+        )
+
+        strategy = MagicMock()
+        strategy.project_client.get_openai_client.return_value = openai_client
+        received = []
+
+        async def fake_flow(_ask):
+            received.append(deepcopy(strategy.conversation))
+            yield "answer"
+
+        strategy.initiate_agent_flow = fake_flow
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            events = [
+                event
+                async for event in _hosted_stream(
+                    TurnRequest(ask="hello", conversation_id=None),
+                    "maf_agent_service",
+                )
+            ]
+
+        openai_client.conversations.create.assert_awaited_once_with()
+        openai_client.conversations.retrieve.assert_not_awaited()
+        assert received[0]["thread_id"] == "conv_created"
+        assert events[0].conversation_id == "conv_created"
+
+    @pytest.mark.asyncio
+    async def test_agent_service_rejects_failed_conversation_validation(self):
+        from api.hosted_entrypoint import _hosted_stream
+
+        openai_client = MagicMock()
+        openai_client.__aenter__ = AsyncMock(return_value=openai_client)
+        openai_client.__aexit__ = AsyncMock(return_value=False)
+        openai_client.conversations.retrieve = AsyncMock(
+            side_effect=RuntimeError("conversation not found"),
+        )
+
+        strategy = MagicMock()
+        strategy.project_client.get_openai_client.return_value = openai_client
+        strategy.initiate_agent_flow = AsyncMock()
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            with pytest.raises(RuntimeError, match="conversation not found"):
+                _ = [
+                    event
+                    async for event in _hosted_stream(
+                        TurnRequest(
+                            ask="hello",
+                            conversation_id="conv_missing",
+                        ),
+                        "maf_agent_service",
+                    )
+                ]
+
+        strategy.initiate_agent_flow.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_separate_conversations_and_untrusted_callers_share_no_state(self):
@@ -786,6 +923,23 @@ class TestHostedEntrypointAPI:
         )
 
         assert resp.status_code == 422
+
+    def test_invocations_rejects_messages_after_current_user_ask(self, client):
+        resp = client.post(
+            "/invocations",
+            json={
+                "messages": [
+                    {"role": "user", "content": "current ask"},
+                    {"role": "assistant", "content": "unexpected trailing message"},
+                ]
+            },
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == (
+            "The final message must have role='user'; messages after the "
+            "current ask are not allowed."
+        )
 
     def test_invocations_streams_sse_with_eligible_strategy(self, client, mock_config):
         original = mock_config.get.side_effect

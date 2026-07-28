@@ -17,13 +17,16 @@
   `api.hosted_entrypoint` — a standalone FastAPI application for running the
   GPT-RAG orchestration core as an Azure AI Foundry hosted agent.  The
   `POST /invocations` endpoint accepts the Foundry invocation request format,
-  projects the complete ordered prior request history into the strategy contract,
-  binds Responses-backed strategies to the stable managed Conversation id, and
-  streams a Responses API SSE response without constructing or accessing a
-  Cosmos client.  Caller-provided identity is not trusted: Cosmos-backed profile
-  memory remains disabled until the platform supplies authenticated Foundry
-  identity.  The `GET /health` endpoint returns the immutable image version and
-  the set of admitted strategies for container readiness probes.
+  projects the complete ordered prior request history into every admitted
+  strategy contract (including `mcp`), validates supplied managed Conversation
+  ids for Responses-backed strategies, and creates a real Foundry Conversation
+  through the supported SDK when an id is absent.  Requests with messages after
+  the current user ask are rejected rather than truncated.  The endpoint streams
+  a Responses API SSE response without constructing or accessing a Cosmos
+  client. Caller-provided identity is not trusted: Cosmos-backed profile memory
+  remains disabled until the platform supplies authenticated Foundry identity.
+  The `GET /health` endpoint returns the immutable image version and the set of
+  admitted strategies for container readiness probes.
 
 - **Explicit hosted-runtime strategy guard.** Added `strategies.hosted_strategies`
   with `HOSTED_ELIGIBLE_STRATEGIES` (``maf_lite``, ``maf_agent_service``,
