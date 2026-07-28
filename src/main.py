@@ -20,6 +20,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from orchestration.orchestrator import Orchestrator
+from orchestration.turn import TurnErrorEvent, TurnRequest
+from api.turn_sse import serialize_turn_event
 from connectors.appconfig import AppConfigClient
 from connectors.cosmosdb import (
     query_user_conversations,
@@ -526,23 +528,32 @@ async def orchestrator_endpoint(
     if not ask:
         raise HTTPException(status_code=400, detail="No 'ask' or 'question' field in request body")
 
-    orchestrator_create_start = time.time()
-    orchestrator = await Orchestrator.create(
+    turn = TurnRequest(
+        ask=ask,
         conversation_id=body.conversation_id,
+        question_id=getattr(body, "question_id", None),
         user_context=user_context,
         request_access_token=access_token if authorization else None,
         correlation_id=correlation_id,
     )
+
+    orchestrator_create_start = time.time()
+    orchestrator = await Orchestrator.from_turn_request(turn)
     logging.info(f"[Timing][main.py] Orchestrator.create took {time.time() - orchestrator_create_start:.3f}s")
 
     async def sse_event_generator():
+        error_event_emitted = False
         try:
-            _qid = getattr(body, "question_id", None) 
-            async for chunk in orchestrator.stream_response(ask, _qid):
-                yield f"{chunk}"
+            async for event in orchestrator.stream_turn(turn):
+                if isinstance(event, TurnErrorEvent):
+                    error_event_emitted = True
+                chunk = serialize_turn_event(event)
+                if chunk is not None:
+                    yield chunk
         except Exception:
             logging.exception("Error in SSE generator")
-            yield "event: error\ndata: An internal server error occurred.\n\n"
+            if not error_event_emitted:
+                yield "event: error\ndata: An internal server error occurred.\n\n"
 
     return StreamingResponse(
         sse_event_generator(),

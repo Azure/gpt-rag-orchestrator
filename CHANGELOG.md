@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Dependency-neutral turn contracts.** Added stdlib dataclasses for
+  `TurnRequest` and typed output events covering conversation identity, streamed
+  text, citations, tool activity, errors, and cancellation. The
+  `orchestration` package now resolves `Orchestrator` lazily, so importing
+  `orchestration.turn` does not load the web framework, Pydantic, or Azure
+  runtime modules.
+
+- **Typed orchestration output boundary with classic SSE compatibility.**
+  Added `Orchestrator.from_turn_request()` and `stream_turn()`, with FastAPI
+  serialization isolated in `api.turn_sse`. The existing `create()` and
+  `stream_response()` APIs remain available, and the `/orchestrator` endpoint
+  retains the classic conversation-prefix, text-chunk, error, and cancellation
+  wire behavior. Eligible Agent Framework strategies translate explicit
+  citation and tool-call signals into the typed event stream without adding
+  bytes to the classic response. In Phase 1, `nl2sql` and `multimodal` remain
+  text-only, and direct-LLM or other non-Agent-Framework paths do not emit typed
+  tool or citation events. See
+  [Azure/GPT-RAG#590](https://github.com/Azure/GPT-RAG/issues/590).
+
+- **Boundary regression evidence.** Added clean-subprocess import isolation,
+  typed-event and terminal-state coverage, byte-for-byte classic SSE parity,
+  request-field propagation, and explicit strategy-selector forwarding tests.
+  The selector tests intentionally do not claim to construct Azure-backed
+  strategies.
+
 ## [v3.8.0] - 2026-07-20
 
 ### Added

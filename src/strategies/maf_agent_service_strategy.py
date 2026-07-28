@@ -38,6 +38,7 @@ from . import agent_provider_v2
 from connectors.foundry_iq_mcp import is_mcp_enabled
 from connectors.openai_chat_client import OpenAIChatClient
 from connectors.search import acquire_obo_search_token
+from orchestration.agent_events import AgentEventTranslator
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
 from dependencies import get_config
 
@@ -358,12 +359,15 @@ Guidelines:
                 # option); only ``max_tokens`` is passed per run, with a one-shot
                 # fallback to no options if the service ever rejects it too.
                 full_response = ""
+                event_translator = AgentEventTranslator()
                 async for chunk in agent_provider_v2.stream_agent_run(
                     agent,
                     user_message,
                     thread=thread,
                     options={"max_tokens": self.max_completion_tokens},
                 ):
+                    for event in event_translator.translate(chunk):
+                        yield event
                     if chunk.text:
                         full_response += chunk.text
                         yield chunk.text

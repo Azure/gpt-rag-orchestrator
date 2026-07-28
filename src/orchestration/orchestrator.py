@@ -4,11 +4,22 @@ import logging
 import time
 
 from datetime import datetime, timezone
+from collections.abc import AsyncIterator, Callable
 from typing import Dict, Optional
 from connectors.cosmosdb import get_cosmosdb_client
 from orchestration.conversation_compaction import (
     compact_conversation_for_persistence,
     load_conversation_compaction_config,
+)
+from orchestration.turn import (
+    TurnCancelledEvent,
+    TurnConversationEvent,
+    TurnErrorEvent,
+    TurnOutputEvent,
+    TurnRequest,
+    TurnTextEvent,
+    TurnCitationEvent,
+    TurnToolActivityEvent,
 )
 from strategies.agent_strategy_factory import AgentStrategyFactory
 from strategies.base_agent_strategy import BaseAgentStrategy
@@ -95,7 +106,71 @@ class Orchestrator:
 
         return instance
 
-    async def stream_response(self, ask: str, question_id: Optional[str] = None):
+    @classmethod
+    async def from_turn_request(cls, request: TurnRequest) -> "Orchestrator":
+        """Create an Orchestrator from a :class:`TurnRequest`.
+
+        This is the **typed boundary entry point** for the orchestration core.
+        Any runtime (FastAPI, hosted agent, test harness) that holds a
+        ``TurnRequest`` can create an ``Orchestrator`` without knowing about
+        HTTP headers, FastAPI dependencies, or Pydantic schemas.
+        """
+        return await cls.create(
+            conversation_id=request.conversation_id,
+            user_context=request.user_context or {},
+            request_access_token=request.request_access_token,
+            correlation_id=request.correlation_id,
+        )
+
+    async def stream_turn(
+        self,
+        request: TurnRequest,
+    ) -> AsyncIterator[TurnOutputEvent]:
+        """Expose the classic orchestration flow as transport-neutral events."""
+        first_chunk = True
+        pending_events: list[TurnOutputEvent] = []
+        try:
+            async for chunk in self.stream_response(
+                request.ask,
+                request.question_id,
+                _event_sink=pending_events.append,
+            ):
+                if first_chunk:
+                    first_chunk = False
+                    expected = f"{self.conversation_id} "
+                    if chunk != expected:
+                        raise RuntimeError(
+                            "Classic stream did not start with its conversation identity"
+                        )
+                    yield TurnConversationEvent(conversation_id=self.conversation_id)
+                    continue
+                while pending_events:
+                    yield pending_events.pop(0)
+                if not isinstance(chunk, str):
+                    raise TypeError(
+                        f"Classic strategy emitted unsupported chunk type: {type(chunk).__name__}"
+                    )
+                yield TurnTextEvent(text=chunk)
+            while pending_events:
+                yield pending_events.pop(0)
+        except asyncio.CancelledError:
+            while pending_events:
+                yield pending_events.pop(0)
+            yield TurnCancelledEvent()
+            raise
+        except Exception:
+            while pending_events:
+                yield pending_events.pop(0)
+            yield TurnErrorEvent()
+            raise
+
+    async def stream_response(
+        self,
+        ask: str,
+        question_id: Optional[str] = None,
+        *,
+        _event_sink: Callable[[TurnOutputEvent], None] | None = None,
+    ):
         with tracer.start_as_current_span('stream_response', kind=SpanKind.SERVER) as span:
             emitter = AuditEmitter.default()
             span_conversation_id = (
@@ -226,6 +301,21 @@ class Orchestrator:
                 # 3) Stream all chunks from the strategy
                 yield f"{self.conversation_id} "
                 async for chunk in self.agentic_strategy.initiate_agent_flow(ask):
+                    if isinstance(
+                        chunk,
+                        (TurnCitationEvent, TurnToolActivityEvent),
+                    ):
+                        if _event_sink is not None:
+                            _event_sink(chunk)
+                            continue
+                        chunk = chunk.text
+                        if not chunk:
+                            continue
+                    if not isinstance(chunk, str):
+                        raise TypeError(
+                            "Agent strategy emitted unsupported chunk type: "
+                            f"{type(chunk).__name__}"
+                        )
                     if audit_context is not None:
                         audit_context.output_count += len(chunk)
                         audit_context.partial_output = True

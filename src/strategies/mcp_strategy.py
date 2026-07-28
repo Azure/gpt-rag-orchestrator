@@ -15,6 +15,7 @@ from connectors.mcp_client import (
     open_mcp_tool,
     resolve_mcp_endpoint,
 )
+from orchestration.agent_events import AgentEventTranslator
 from telemetry import Telemetry, wrap_ai_functions
 from util.tools import is_azure_environment
 
@@ -153,6 +154,7 @@ class McpStrategy(BaseAgentStrategy):
                     ) as agent:
                         conv["agent_id"] = agent.id
                         thread = agent.get_new_thread()
+                        event_translator = AgentEventTranslator()
                         stream_started = time.monotonic()
 
                         async for update in agent.run_stream(
@@ -165,6 +167,8 @@ class McpStrategy(BaseAgentStrategy):
                             prompt_tokens += update_prompt_tokens
                             completion_tokens += update_completion_tokens
 
+                            for event in event_translator.translate(update):
+                                yield event
                             text = self._assistant_text(update)
                             if not text:
                                 continue

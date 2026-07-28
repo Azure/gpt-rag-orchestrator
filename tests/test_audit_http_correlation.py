@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import Response
+from orchestration.turn import TurnConversationEvent, TurnTextEvent
 from starlette.requests import Request
 
 
@@ -31,11 +32,12 @@ async def test_endpoint_replaces_inbound_correlation_id_and_returns_server_id():
     with patch("dependencies.get_config", return_value=Config()):
         main = importlib.import_module("main")
 
-    async def stream_response(_ask, _question_id):
-        yield "answer"
+    async def stream_turn(_turn):
+        yield TurnConversationEvent("conversation-id")
+        yield TurnTextEvent("answer")
 
     orchestrator = SimpleNamespace(
-        stream_response=stream_response,
+        stream_turn=stream_turn,
         save_feedback=AsyncMock(),
     )
     body = SimpleNamespace(
@@ -62,7 +64,7 @@ async def test_endpoint_replaces_inbound_correlation_id_and_returns_server_id():
 
     with patch.object(
         main.Orchestrator,
-        "create",
+        "from_turn_request",
         new=AsyncMock(return_value=orchestrator),
     ) as create:
         streaming = await main.orchestrator_endpoint(
@@ -79,5 +81,5 @@ async def test_endpoint_replaces_inbound_correlation_id_and_returns_server_id():
     assert re.fullmatch(r"req_[0-9a-f]{32}", correlation_id)
     assert correlation_id != "req_attacker"
     assert response.headers["X-Correlation-ID"] == correlation_id
-    assert create.await_args.kwargs["correlation_id"] == correlation_id
-    assert chunks == ["answer"]
+    assert create.await_args.args[0].correlation_id == correlation_id
+    assert chunks == ["conversation-id ", "answer"]

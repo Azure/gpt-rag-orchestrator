@@ -25,6 +25,7 @@ from . import agent_provider_v2
 from dependencies import get_config
 from connectors.search import get_search_client
 from connectors.aifoundry import get_genai_client
+from orchestration.agent_events import AgentEventTranslator
 from telemetry import (
     AuditEmitter,
     AuditStatus,
@@ -501,6 +502,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
 
         self._stream_start_time = stream_start
         full_response = ""
+        event_translator = AgentEventTranslator()
         try:
             async with agent:
                 # Back the chat thread with a dedicated server-side conversation
@@ -523,6 +525,8 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                     thread=thread,
                     options={"max_tokens": self.max_completion_tokens},
                 ):
+                    for event in event_translator.translate(chunk):
+                        yield event
                     if chunk.text:
                         if not first_token:
                             logging.info(f"[Agent Flow V2] 🤖 First Token: {time.time() - stream_start:.2f}s")
