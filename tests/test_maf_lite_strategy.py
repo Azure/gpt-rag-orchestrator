@@ -1,7 +1,7 @@
 """Tests for MafLiteStrategy (src/strategies/maf_lite_strategy.py)."""
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
 
 from strategies.agent_strategies import AgentStrategies
 
@@ -37,6 +37,26 @@ class TestMafLiteStrategy:
             client = s._get_or_create_chat_client()
             MockClient.assert_called_once()
             assert client is MockClient.return_value
+
+    @pytest.mark.asyncio
+    async def test_hosted_mode_never_reads_or_writes_user_profiles(self):
+        from strategies.base_agent_strategy import hosted_runtime_construction
+        from strategies.maf_lite_strategy import MafLiteStrategy
+
+        with hosted_runtime_construction():
+            strategy = MafLiteStrategy()
+        strategy._load_user_profile = AsyncMock()
+        strategy._save_user_profile = AsyncMock()
+        strategy._user_memory = None
+
+        await strategy._ensure_user_memory("untrusted-caller", MagicMock())
+        await strategy._post_flow_cleanup("untrusted-caller")
+
+        assert strategy.cosmos is None
+        assert strategy.profile_memory_enabled is False
+        strategy._load_user_profile.assert_not_awaited()
+        strategy._save_user_profile.assert_not_awaited()
+        assert strategy._user_memory is None
 
 
 # ======================================================================

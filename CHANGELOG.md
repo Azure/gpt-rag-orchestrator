@@ -4,6 +4,47 @@
 
 ### Added
 
+- **Foundry Responses API adapter.** Added `api.responses_adapter` which
+  translates every typed `TurnOutputEvent` (conversation identity, text delta,
+  citation, tool-call started/completed/failed, error, cancellation) into the
+  Azure AI Foundry Responses API SSE wire format.  `serialize_responses_events`
+  expands each event into one or more SSE frames; `responses_terminal_events`
+  emits the four closing frames (`response.output_text.done`,
+  `response.content_part.done`, `response.output_item.done`,
+  `response.completed`) once all deltas have been streamed.
+
+- **Hosted agent entrypoint with managed Conversations.** Added
+  `api.hosted_entrypoint` — a standalone FastAPI application for running the
+  GPT-RAG orchestration core as an Azure AI Foundry hosted agent.  The
+  `POST /invocations` endpoint accepts the Foundry invocation request format,
+  projects the complete ordered prior request history into every admitted
+  strategy contract (including `mcp`), validates supplied managed Conversation
+  ids for Responses-backed strategies, and creates a real Foundry Conversation
+  through the supported SDK when an id is absent.  Requests with messages after
+  the current user ask are rejected rather than truncated.  The endpoint streams
+  a Responses API SSE response without constructing or accessing a Cosmos
+  client. Caller-provided identity is not trusted: Cosmos-backed profile memory
+  remains disabled until the platform supplies authenticated Foundry identity.
+  The `GET /health` endpoint returns the immutable image version and the set of
+  admitted strategies for container readiness probes.
+
+- **Explicit hosted-runtime strategy guard.** Added `strategies.hosted_strategies`
+  with `HOSTED_ELIGIBLE_STRATEGIES` (``maf_lite``, ``maf_agent_service``,
+  ``single_agent_rag``, ``mcp``) and `guard_hosted_strategy(key)` which raises
+  `ValueError` immediately for any strategy outside that set.  The guard is
+  called in `_hosted_stream` before strategy construction and surfaced as
+  HTTP 422 from `POST /invocations`.  `multimodal` and `nl2sql` are excluded
+  pending ADR approval.
+
+- **Focused hosted adapter tests.** Added coverage for Responses API SSE
+  serialization of every event kind and optional field; terminal closing
+  frames; strategy guard pass/fail; genuine two-turn history and thread
+  continuity; no-Cosmos construction and profile access; caller/conversation
+  isolation; hosted stream errors and cancellation; and `GET /health` plus
+  `POST /invocations` behavior including the `X-Response-ID` response header.
+  See
+  [Azure/GPT-RAG#598](https://github.com/Azure/GPT-RAG/issues/598).
+
 - **Dependency-neutral turn contracts.** Added stdlib dataclasses for
   `TurnRequest` and typed output events covering conversation identity, streamed
   text, citations, tool activity, errors, and cancellation. The

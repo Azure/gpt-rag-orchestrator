@@ -61,6 +61,7 @@ class _FakeAgent:
         self.entered = False
         self.closed = False
         self.thread = object()
+        self.received_messages = None
         self.blocking = asyncio.Event()
 
     async def __aenter__(self):
@@ -75,6 +76,7 @@ class _FakeAgent:
 
     async def run_stream(self, messages, *, thread):
         assert thread is self.thread
+        self.received_messages = messages
         if self.error:
             raise self.error
         for update in self.updates:
@@ -182,6 +184,64 @@ async def test_mcp_strategy_streams_assistant_text_and_sums_usage(
     chat_agent.assert_called_once()
     assert chat_agent.call_args.kwargs["id"] == "configured-agent"
     assert chat_agent.call_args.kwargs["name"] == "MultiPluginAgent"
+
+
+@pytest.mark.asyncio
+async def test_mcp_strategy_replays_ordered_hosted_history(
+    patch_dependencies,
+    mock_config,
+):
+    strategy = await _create_strategy(mock_config)
+    strategy.hosted_runtime = True
+    strategy.conversation = {
+        "id": "conversation",
+        "messages": [
+            {"role": "user", "text": "first question"},
+            {"role": "assistant", "text": "first answer"},
+        ],
+    }
+    strategy.user_context = {}
+    state = {}
+    chat_client = _FakeChatClient()
+    fake_agent = _FakeAgent(
+        [AgentResponseUpdate(role="assistant", text="follow-up answer")]
+    )
+
+    with (
+        patch(
+            "strategies.mcp_strategy.open_mcp_tool",
+            _fake_mcp_context(state),
+        ),
+        patch(
+            "strategies.mcp_strategy.ChatAgent",
+            return_value=fake_agent,
+        ),
+        patch.object(
+            strategy,
+            "_create_chat_client",
+            return_value=chat_client,
+        ),
+    ):
+        chunks = [
+            chunk
+            async for chunk in strategy.initiate_agent_flow("follow-up")
+        ]
+
+    assert chunks == ["follow-up answer"]
+    assert [
+        (getattr(message.role, "value", message.role), message.text)
+        for message in fake_agent.received_messages
+    ] == [
+        ("user", "first question"),
+        ("assistant", "first answer"),
+        ("user", "follow-up"),
+    ]
+    assert strategy.conversation["messages"] == [
+        {"role": "user", "text": "first question"},
+        {"role": "assistant", "text": "first answer"},
+        {"role": "user", "text": "follow-up"},
+        {"role": "assistant", "text": "follow-up answer"},
+    ]
 
 
 @pytest.mark.asyncio
