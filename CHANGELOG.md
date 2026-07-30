@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v3.9.0] - 2026-07-30
+
 ### Added
 
 - **Foundry Responses API adapter.** Added `api.responses_adapter` which
