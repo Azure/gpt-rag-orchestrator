@@ -5,7 +5,7 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
-from agent_framework import ChatAgent, Role, TextContent, UsageContent
+from agent_framework import ChatAgent, ChatMessage, Role, TextContent, UsageContent
 from agent_framework.azure import AzureOpenAIChatClient
 from azure.identity import get_bearer_token_provider
 from opentelemetry.trace import SpanKind
@@ -15,6 +15,7 @@ from connectors.mcp_client import (
     open_mcp_tool,
     resolve_mcp_endpoint,
 )
+from orchestration.agent_events import AgentEventTranslator
 from telemetry import Telemetry, wrap_ai_functions
 from util.tools import is_azure_environment
 
@@ -101,6 +102,21 @@ class McpStrategy(BaseAgentStrategy):
             completion_tokens += content.details.output_token_count or 0
         return prompt_tokens, completion_tokens
 
+    def _build_agent_input(
+        self,
+        user_message: str,
+    ) -> str | list[ChatMessage]:
+        """Replay managed hosted history while preserving classic input."""
+        if not self.hosted_runtime:
+            return user_message
+
+        messages = [
+            ChatMessage(role=message["role"], text=message["text"])
+            for message in self.conversation.get("messages", [])
+        ]
+        messages.append(ChatMessage(role=Role.USER, text=user_message))
+        return messages
+
     async def initiate_agent_flow(self, user_message: str):
         """Stream assistant text and persist exactly the emitted response."""
 
@@ -116,6 +132,10 @@ class McpStrategy(BaseAgentStrategy):
         tool_count = 0
         mcp_host = urlsplit(self.mcp_server_url).hostname or ""
         chat_client: AzureOpenAIChatClient | None = None
+        prior_messages = [
+            dict(message)
+            for message in conv.get("messages", [])
+        ]
 
         with tracer.start_as_current_span(
             "initiate_agent_flow",
@@ -153,10 +173,11 @@ class McpStrategy(BaseAgentStrategy):
                     ) as agent:
                         conv["agent_id"] = agent.id
                         thread = agent.get_new_thread()
+                        event_translator = AgentEventTranslator()
                         stream_started = time.monotonic()
 
                         async for update in agent.run_stream(
-                            user_message,
+                            self._build_agent_input(user_message),
                             thread=thread,
                         ):
                             update_prompt_tokens, update_completion_tokens = (
@@ -165,6 +186,8 @@ class McpStrategy(BaseAgentStrategy):
                             prompt_tokens += update_prompt_tokens
                             completion_tokens += update_completion_tokens
 
+                            for event in event_translator.translate(update):
+                                yield event
                             text = self._assistant_text(update)
                             if not text:
                                 continue
@@ -176,12 +199,18 @@ class McpStrategy(BaseAgentStrategy):
                         ) * 1000
 
                 full_response = "".join(full_response_parts)
-                conv["messages"] = [
-                    {
-                        "role": "system",
-                        "text": full_response,
-                    }
-                ]
+                if self.hosted_runtime:
+                    conv["messages"] = prior_messages + [
+                        {"role": "user", "text": user_message},
+                        {"role": "assistant", "text": full_response},
+                    ]
+                else:
+                    conv["messages"] = [
+                        {
+                            "role": "system",
+                            "text": full_response,
+                        }
+                    ]
                 conv["completion_tokens"] = completion_tokens
                 conv["prompt_tokens"] = prompt_tokens
                 if self.user_context:

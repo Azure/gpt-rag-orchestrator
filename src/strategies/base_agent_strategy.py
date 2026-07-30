@@ -3,6 +3,8 @@ import os
 import re
 import json
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Dict, Mapping, Optional
 from abc import ABC, abstractmethod
 from azure.ai.projects.aio import AIProjectClient
@@ -13,6 +15,22 @@ from dependencies import get_config
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
 from pathlib import Path
 from .agent_strategies import AgentStrategies
+
+
+_HOSTED_RUNTIME_CONSTRUCTION: ContextVar[bool] = ContextVar(
+    "hosted_runtime_construction",
+    default=False,
+)
+
+
+@contextmanager
+def hosted_runtime_construction():
+    """Construct a strategy without classic Cosmos-backed runtime state."""
+    token = _HOSTED_RUNTIME_CONSTRUCTION.set(True)
+    try:
+        yield
+    finally:
+        _HOSTED_RUNTIME_CONSTRUCTION.reset(token)
 
 class BaseAgentStrategy(ABC):
     """
@@ -33,6 +51,14 @@ class BaseAgentStrategy(ABC):
         self.model_name = self.cfg.get("CHAT_DEPLOYMENT_NAME")
         self.prompt_source = self.cfg.get("PROMPT_SOURCE", "file")
         self.openai_api_version = self.cfg.get("OPENAI_API_VERSION", "2025-04-01-preview")   
+        self.hosted_runtime = _HOSTED_RUNTIME_CONSTRUCTION.get()
+        self.profile_memory_enabled = not self.hosted_runtime
+
+        if self.hosted_runtime and self.prompt_source == "cosmos":
+            raise EnvironmentError(
+                "Hosted runtime requires file-backed prompts; "
+                "PROMPT_SOURCE='cosmos' would reintroduce a Cosmos dependency."
+            )
 
         logging.debug(f"[base_agent_strategy] Project endpoint: {self.project_endpoint}")
         logging.debug(f"[base_agent_strategy] Model name: {self.model_name}")
@@ -52,7 +78,7 @@ class BaseAgentStrategy(ABC):
             credential=self.credential
         )
 
-        self.cosmos = get_cosmosdb_client()
+        self.cosmos = None if self.hosted_runtime else get_cosmosdb_client()
 
         self.user_context = {}
 

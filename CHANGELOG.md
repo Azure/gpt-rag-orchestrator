@@ -1,5 +1,75 @@
 # Changelog
 
+## [v3.9.0] - 2026-07-30
+
+### Added
+
+- **Foundry Responses API adapter.** Added `api.responses_adapter` which
+  translates every typed `TurnOutputEvent` (conversation identity, text delta,
+  citation, tool-call started/completed/failed, error, cancellation) into the
+  Azure AI Foundry Responses API SSE wire format.  `serialize_responses_events`
+  expands each event into one or more SSE frames; `responses_terminal_events`
+  emits the four closing frames (`response.output_text.done`,
+  `response.content_part.done`, `response.output_item.done`,
+  `response.completed`) once all deltas have been streamed.
+
+- **Hosted agent entrypoint with managed Conversations.** Added
+  `api.hosted_entrypoint` — a standalone FastAPI application for running the
+  GPT-RAG orchestration core as an Azure AI Foundry hosted agent.  The
+  `POST /invocations` endpoint accepts the Foundry invocation request format,
+  projects the complete ordered prior request history into every admitted
+  strategy contract (including `mcp`), validates supplied managed Conversation
+  ids for Responses-backed strategies, and creates a real Foundry Conversation
+  through the supported SDK when an id is absent.  Requests with messages after
+  the current user ask are rejected rather than truncated.  The endpoint streams
+  a Responses API SSE response without constructing or accessing a Cosmos
+  client. Caller-provided identity is not trusted: Cosmos-backed profile memory
+  remains disabled until the platform supplies authenticated Foundry identity.
+  The `GET /health` endpoint returns the immutable image version and the set of
+  admitted strategies for container readiness probes.
+
+- **Explicit hosted-runtime strategy guard.** Added `strategies.hosted_strategies`
+  with `HOSTED_ELIGIBLE_STRATEGIES` (``maf_lite``, ``maf_agent_service``,
+  ``single_agent_rag``, ``mcp``) and `guard_hosted_strategy(key)` which raises
+  `ValueError` immediately for any strategy outside that set.  The guard is
+  called in `_hosted_stream` before strategy construction and surfaced as
+  HTTP 422 from `POST /invocations`.  `multimodal` and `nl2sql` are excluded
+  pending ADR approval.
+
+- **Focused hosted adapter tests.** Added coverage for Responses API SSE
+  serialization of every event kind and optional field; terminal closing
+  frames; strategy guard pass/fail; genuine two-turn history and thread
+  continuity; no-Cosmos construction and profile access; caller/conversation
+  isolation; hosted stream errors and cancellation; and `GET /health` plus
+  `POST /invocations` behavior including the `X-Response-ID` response header.
+  See
+  [Azure/GPT-RAG#598](https://github.com/Azure/GPT-RAG/issues/598).
+
+- **Dependency-neutral turn contracts.** Added stdlib dataclasses for
+  `TurnRequest` and typed output events covering conversation identity, streamed
+  text, citations, tool activity, errors, and cancellation. The
+  `orchestration` package now resolves `Orchestrator` lazily, so importing
+  `orchestration.turn` does not load the web framework, Pydantic, or Azure
+  runtime modules.
+
+- **Typed orchestration output boundary with classic SSE compatibility.**
+  Added `Orchestrator.from_turn_request()` and `stream_turn()`, with FastAPI
+  serialization isolated in `api.turn_sse`. The existing `create()` and
+  `stream_response()` APIs remain available, and the `/orchestrator` endpoint
+  retains the classic conversation-prefix, text-chunk, error, and cancellation
+  wire behavior. Eligible Agent Framework strategies translate explicit
+  citation and tool-call signals into the typed event stream without adding
+  bytes to the classic response. In Phase 1, `nl2sql` and `multimodal` remain
+  text-only, and direct-LLM or other non-Agent-Framework paths do not emit typed
+  tool or citation events. See
+  [Azure/GPT-RAG#590](https://github.com/Azure/GPT-RAG/issues/590).
+
+- **Boundary regression evidence.** Added clean-subprocess import isolation,
+  typed-event and terminal-state coverage, byte-for-byte classic SSE parity,
+  request-field propagation, and explicit strategy-selector forwarding tests.
+  The selector tests intentionally do not claim to construct Azure-backed
+  strategies.
+
 ## [v3.8.0] - 2026-07-20
 
 ### Added

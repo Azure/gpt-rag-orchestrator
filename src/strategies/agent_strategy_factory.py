@@ -7,6 +7,7 @@ from .multimodal_strategy import MultimodalStrategy
 from .agent_strategies import AgentStrategies
 from .mcp_strategy import McpStrategy
 from .nl2sql_strategy import NL2SQLStrategy
+from .base_agent_strategy import hosted_runtime_construction
 
 class AgentStrategyFactory:
     _REGISTRY = {
@@ -24,12 +25,19 @@ class AgentStrategyFactory:
         return frozenset(cls._REGISTRY)
 
     @staticmethod
-    async def get_strategy(key: str):
+    async def get_strategy(key: str, *, hosted_runtime: bool = False):
         """
         Return an instance of the strategy class corresponding to the given key.
+
+        Hosted construction disables classic Cosmos-backed state before the
+        strategy constructor runs. The default preserves classic behavior.
         """
         builder = AgentStrategyFactory._REGISTRY.get(key)
         if builder is None:
             raise ValueError(f"Unknown strategy key: {key}")
+        if hosted_runtime:
+            with hosted_runtime_construction():
+                strategy = builder()
+                return await strategy if inspect.isawaitable(strategy) else strategy
         strategy = builder()
         return await strategy if inspect.isawaitable(strategy) else strategy

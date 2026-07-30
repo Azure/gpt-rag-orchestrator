@@ -1,7 +1,7 @@
 """Tests for MafAgentServiceStrategy (src/strategies/maf_agent_service_strategy.py)."""
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
 
 from strategies.agent_strategies import AgentStrategies
 
@@ -27,3 +27,25 @@ class TestMafAgentServiceStrategy:
         from strategies.maf_agent_service_strategy import MafAgentServiceStrategy
         s = MafAgentServiceStrategy()
         assert s.user_profile_container == "conversations"
+
+    @pytest.mark.asyncio
+    async def test_hosted_mode_never_reads_or_writes_user_profiles(self):
+        from strategies.base_agent_strategy import hosted_runtime_construction
+        from strategies.maf_agent_service_strategy import MafAgentServiceStrategy
+
+        with hosted_runtime_construction():
+            strategy = MafAgentServiceStrategy()
+        strategy._load_user_profile = AsyncMock()
+        strategy._save_user_profile = AsyncMock()
+        memory = MagicMock()
+        memory.flush = AsyncMock()
+
+        created = await strategy._create_user_memory("untrusted-caller")
+        await strategy._persist_user_memory("untrusted-caller", memory)
+
+        assert strategy.cosmos is None
+        assert strategy.profile_memory_enabled is False
+        assert created is None
+        strategy._load_user_profile.assert_not_awaited()
+        strategy._save_user_profile.assert_not_awaited()
+        memory.flush.assert_not_awaited()
