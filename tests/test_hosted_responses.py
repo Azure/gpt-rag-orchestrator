@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
@@ -411,6 +412,70 @@ class TestHostedStream:
                 pass  # pragma: no cover
 
     @pytest.mark.asyncio
+    async def test_toolbox_strategy_fails_closed_without_foundry_call_id(self):
+        """ADR-0001: the mcp/Toolbox path must refuse to run without a
+        validated platform call id rather than silently using service
+        identity or a manual metadata filter."""
+        from api.hosted_entrypoint import _hosted_stream
+        from util.foundry_platform import MissingFoundryCallContextError
+
+        turn = TurnRequest(ask="Hi", conversation_id="conv-1")  # no foundry_call_id
+        factory = AsyncMock()
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=factory,
+        ):
+            with pytest.raises(MissingFoundryCallContextError):
+                async for _ in _hosted_stream(turn, "mcp"):
+                    pass  # pragma: no cover
+
+        # No fallback: the strategy must never even be constructed.
+        factory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_toolbox_strategy_propagates_validated_call_id(self):
+        from api.hosted_entrypoint import _hosted_stream
+
+        async def fake_flow(_ask):
+            yield "answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+        turn = TurnRequest(ask="Hi", conversation_id="conv-1", foundry_call_id="call-abc")
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            [e async for e in _hosted_stream(turn, "mcp")]
+
+        assert strategy.foundry_call_id == "call-abc"
+
+    @pytest.mark.asyncio
+    async def test_non_toolbox_strategy_does_not_require_foundry_call_id(self):
+        """Classic hosted-eligible strategies that don't call Toolbox (e.g.
+        maf_lite, which uses the OBO-based Foundry IQ path) are unaffected
+        by the Toolbox call-id guard."""
+        from api.hosted_entrypoint import _hosted_stream
+
+        async def fake_flow(_ask):
+            yield "answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+        turn = TurnRequest(ask="Hi", conversation_id="conv-1")  # no foundry_call_id
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            events = [e async for e in _hosted_stream(turn, "maf_lite")]
+
+        assert any(isinstance(e, TurnTextEvent) for e in events)
+        assert strategy.foundry_call_id is None
+
+    @pytest.mark.asyncio
     async def test_generates_conversation_id_when_none_provided(self):
         from api.hosted_entrypoint import _hosted_stream
 
@@ -444,7 +509,9 @@ class TestHostedStream:
 
         strategy = MagicMock()
         strategy.initiate_agent_flow = flow_with_citation
-        turn = TurnRequest(ask="Hi", conversation_id="conv-1")
+        turn = TurnRequest(
+            ask="Hi", conversation_id="conv-1", foundry_call_id="call-1"
+        )
 
         with patch(
             "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
@@ -495,14 +562,22 @@ class TestHostedStream:
                 new=AsyncMock(return_value="conv-1"),
             ),
         ):
-            first_turn = TurnRequest(ask="first question", conversation_id="conv-1")
+            first_turn = TurnRequest(
+                ask="first question",
+                conversation_id="conv-1",
+                foundry_call_id="call-1",
+            )
             [event async for event in _hosted_stream(first_turn, strategy_key)]
 
             prior_history = [
                 {"role": "user", "text": "first question"},
                 {"role": "assistant", "text": "answer to first question"},
             ]
-            second_turn = TurnRequest(ask="follow-up", conversation_id="conv-1")
+            second_turn = TurnRequest(
+                ask="follow-up",
+                conversation_id="conv-1",
+                foundry_call_id="call-1",
+            )
             [event async for event in _hosted_stream(
                 second_turn,
                 strategy_key,
@@ -1061,6 +1136,208 @@ class TestHostedEntrypointAPI:
             },
             "user_context": {},
         }
+
+    # ── ADR-0001 Foundry Toolbox call-id passthrough (Azure/GPT-RAG#591) ────
+
+    @staticmethod
+    def _use_strategy(mock_config, strategy_key: str) -> None:
+        original = mock_config.get.side_effect
+        mock_config.get.side_effect = (
+            lambda key, default=None, type=str:
+            strategy_key if key == "AGENT_STRATEGY" else original(key, default, type)
+        )
+
+    def test_invocations_rejects_missing_foundry_call_id_for_toolbox_strategy(
+        self, client, mock_config
+    ):
+        """The mcp strategy talks to Toolbox and must fail closed (401) when
+        the platform-injected call id is absent, instead of silently
+        proceeding with service identity or a manual metadata filter."""
+        self._use_strategy(mock_config, "mcp")
+
+        factory = AsyncMock()
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=factory,
+        ):
+            resp = client.post(
+                "/invocations",
+                json={"messages": [{"role": "user", "content": "Hello"}]},
+            )
+
+        assert resp.status_code == 401
+        assert "x-agent-foundry-call-id" in resp.json()["detail"]
+        # No fallback: the strategy must never even be constructed.
+        factory.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "bad_call_id",
+        [
+            "has spaces",
+            "line\nbreak",
+            "carriage\rreturn",
+            "x" * 257,
+        ],
+    )
+    def test_invocations_rejects_malformed_foundry_call_id(
+        self, client, mock_config, bad_call_id
+    ):
+        self._use_strategy(mock_config, "mcp")
+
+        factory = AsyncMock()
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=factory,
+        ):
+            resp = client.post(
+                "/invocations",
+                json={"messages": [{"role": "user", "content": "Hello"}]},
+                headers={"x-agent-foundry-call-id": bad_call_id},
+            )
+
+        assert resp.status_code == 401
+        factory.assert_not_called()
+
+    def test_invocations_accepts_valid_foundry_call_id_for_toolbox_strategy(
+        self, client, mock_config
+    ):
+        self._use_strategy(mock_config, "mcp")
+
+        async def fake_flow(_ask):
+            yield "answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            resp = client.post(
+                "/invocations",
+                json={"messages": [{"role": "user", "content": "Hello"}]},
+                headers={"x-agent-foundry-call-id": "call-abc-123"},
+            )
+
+        assert resp.status_code == 200
+        assert strategy.foundry_call_id == "call-abc-123"
+
+    def test_invocations_non_toolbox_strategy_does_not_require_foundry_call_id(
+        self, client, mock_config
+    ):
+        """Classic behavior unchanged: strategies that don't call Toolbox
+        (e.g. maf_lite) still work with no call-id header at all."""
+        self._use_strategy(mock_config, "maf_lite")
+
+        async def fake_flow(_ask):
+            yield "answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            resp = client.post(
+                "/invocations",
+                json={"messages": [{"role": "user", "content": "Hello"}]},
+            )
+
+        assert resp.status_code == 200
+        assert strategy.foundry_call_id is None
+
+    def test_invocations_never_logs_foundry_call_id_or_authorization(
+        self, client, mock_config, caplog
+    ):
+        """Neither the opaque call id nor a (never-forwarded) Authorization
+        header value may ever appear in application logs."""
+        self._use_strategy(mock_config, "mcp")
+
+        async def fake_flow(_ask):
+            yield "answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+
+        secret_call_id = "super-secret-call-id-000"
+        secret_bearer = "Bearer should-never-be-read-or-forwarded"
+
+        with (
+            patch(
+                "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+                new=AsyncMock(return_value=strategy),
+            ),
+            caplog.at_level(logging.DEBUG),
+        ):
+            resp = client.post(
+                "/invocations",
+                json={"messages": [{"role": "user", "content": "Hello"}]},
+                headers={
+                    "x-agent-foundry-call-id": secret_call_id,
+                    "Authorization": secret_bearer,
+                },
+            )
+
+        assert resp.status_code == 200
+        assert secret_call_id not in caplog.text
+        assert secret_bearer not in caplog.text
+        assert "should-never-be-read-or-forwarded" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_invocations_concurrent_requests_isolate_foundry_call_ids(
+        self, mock_config, mock_cosmos
+    ):
+        """Two concurrent /invocations requests for the mcp strategy must
+        never cross-contaminate each other's Foundry call id."""
+        from httpx import ASGITransport, AsyncClient
+
+        from api.hosted_entrypoint import app
+
+        self._use_strategy(mock_config, "mcp")
+        captured: dict[str, str | None] = {}
+
+        class RecordingStrategy:
+            def __init__(self, delay: float):
+                self._delay = delay
+
+            def set_context(self, _conversation_id):
+                pass
+
+            async def initiate_agent_flow(self, ask):
+                await asyncio.sleep(self._delay)
+                captured[ask] = self.foundry_call_id
+                yield "answer"
+
+        strategies = iter([RecordingStrategy(0.05), RecordingStrategy(0.0)])
+
+        async def fake_get_strategy(_strategy_key, hosted_runtime=False):
+            return next(strategies)
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=fake_get_strategy,
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as async_client:
+                responses = await asyncio.gather(
+                    async_client.post(
+                        "/invocations",
+                        json={"messages": [{"role": "user", "content": "ask-a"}]},
+                        headers={"x-agent-foundry-call-id": "call-a"},
+                    ),
+                    async_client.post(
+                        "/invocations",
+                        json={"messages": [{"role": "user", "content": "ask-b"}]},
+                        headers={"x-agent-foundry-call-id": "call-b"},
+                    ),
+                )
+
+        for resp in responses:
+            assert resp.status_code == 200
+            assert resp.text  # force full body consumption
+
+        assert captured == {"ask-a": "call-a", "ask-b": "call-b"}
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

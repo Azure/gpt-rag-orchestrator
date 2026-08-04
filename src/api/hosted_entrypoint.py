@@ -27,7 +27,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal, Optional, Sequence
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -48,10 +48,12 @@ from strategies.agent_strategy_factory import AgentStrategyFactory
 from strategies.hosted_strategies import (
     HOSTED_ELIGIBLE_STRATEGIES,
     HOSTED_SERVER_THREAD_STRATEGIES,
+    HOSTED_TOOLBOX_STRATEGIES,
     HostedConversationMessage,
     build_hosted_conversation,
     guard_hosted_strategy,
 )
+from util.foundry_platform import MissingFoundryCallContextError, require_foundry_call_id
 
 logger = logging.getLogger(__name__)
 
@@ -129,9 +131,17 @@ async def _hosted_stream(
     invocation contract does not yet expose an authenticated Foundry identity.
 
     Raises :class:`ValueError` for unsupported strategies — never silently
-    falls back.
+    falls back. Raises :class:`~util.foundry_platform.MissingFoundryCallContextError`
+    (a :class:`ValueError` subclass) when *strategy_key* is Toolbox-integrated
+    and the turn carries no validated Foundry call id — hosted retrieval must
+    fail closed rather than fall back to service identity or a manual filter.
     """
     guard_hosted_strategy(strategy_key)
+    if strategy_key in HOSTED_TOOLBOX_STRATEGIES and not turn.foundry_call_id:
+        raise MissingFoundryCallContextError(
+            f"Strategy '{strategy_key}' requires a validated Foundry call id "
+            "to reach Toolbox; refusing to run without one."
+        )
     strategy = await AgentStrategyFactory.get_strategy(
         strategy_key,
         hosted_runtime=True,
@@ -149,6 +159,7 @@ async def _hosted_stream(
         strategy.set_context(conversation_id)
 
     strategy.user_context = {}
+    strategy.foundry_call_id = turn.foundry_call_id
     strategy.conversation = build_hosted_conversation(
         strategy_key,
         conversation_id,
@@ -271,6 +282,23 @@ async def health() -> HealthResponse:
             "description": "OK — Responses API SSE stream",
             "content": {"text/event-stream": {}},
         },
+        401: {
+            "description": (
+                "Missing or malformed platform call context — hosted "
+                "retrieval failed closed rather than falling back to "
+                "service identity or a manual filter."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": (
+                            "Missing or malformed platform call context "
+                            "('x-agent-foundry-call-id')."
+                        )
+                    }
+                }
+            },
+        },
         422: {
             "description": "Unsupported strategy or validation error",
             "content": {
@@ -281,13 +309,23 @@ async def health() -> HealthResponse:
         },
     },
 )
-async def invocations(body: InvocationRequest) -> StreamingResponse:
+async def invocations(request: Request, body: InvocationRequest) -> StreamingResponse:
     """Translate a Foundry invocation into a Responses API SSE stream.
 
     The final message must be the current user ask. Messages after the current
     ask are rejected rather than silently discarded. Responses-backed
     strategies validate a supplied ``conversation_id`` or create a real managed
     Conversation when it is absent.
+
+    Toolbox-integrated strategies additionally require the platform-injected
+    ``x-agent-foundry-call-id`` header (Foundry hosted-agent container
+    protocol 2.0). This container never reads or forwards ``Authorization``,
+    and never trusts caller/model identity fields or ``x-client`` group
+    claims — the opaque call id is the only supported identity-passthrough
+    correlation, echoed to Toolbox so it can resolve the signed-in user and
+    supply per-user credentials. When the header is absent or malformed,
+    hosted retrieval fails closed with HTTP 401 rather than falling back to
+    service identity or a manual ``metadata_security_id`` filter.
     """
     current_message = body.messages[-1]
     if current_message.role != "user":
@@ -314,6 +352,16 @@ async def invocations(body: InvocationRequest) -> StreamingResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # Toolbox-integrated strategies must carry a validated, platform-injected
+    # call id (ADR-0001, Azure/GPT-RAG#591). Never trust Authorization,
+    # caller/model identity fields, or x-client group claims here.
+    foundry_call_id: Optional[str] = None
+    if strategy_key in HOSTED_TOOLBOX_STRATEGIES:
+        try:
+            foundry_call_id = require_foundry_call_id(request.headers)
+        except MissingFoundryCallContextError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+
     # Build the transport-neutral turn request.
     metadata = body.metadata or {}
     history: list[HostedConversationMessage] = [
@@ -326,6 +374,7 @@ async def invocations(body: InvocationRequest) -> StreamingResponse:
         question_id=metadata.get("question_id"),
         user_context={},
         correlation_id=metadata.get("correlation_id"),
+        foundry_call_id=foundry_call_id,
     )
 
     response_id = f"resp_{uuid.uuid4().hex}"

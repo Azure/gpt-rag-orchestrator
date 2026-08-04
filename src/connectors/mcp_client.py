@@ -17,6 +17,8 @@ from opentelemetry.trace.propagation.tracecontext import (
     TraceContextTextMapPropagator,
 )
 
+from util.foundry_platform import FOUNDRY_CALL_ID_HEADER
+
 MCPTransport = Literal["sse", "streamable_http"]
 _SUPPORTED_TRANSPORTS = frozenset({"sse", "streamable_http"})
 _TRANSPORT_PATHS: dict[MCPTransport, str] = {
@@ -109,12 +111,23 @@ def resolve_mcp_endpoint(endpoint: str | None, transport: str | None) -> str:
 def build_mcp_headers(
     user_context: Mapping[str, Any] | None,
     api_key: str | None,
+    foundry_call_id: str | None = None,
 ) -> dict[str, str]:
-    """Create a fresh header mapping for one caller."""
+    """Create a fresh header mapping for one caller.
+
+    ``foundry_call_id`` is echoed outbound only: it is the opaque,
+    per-request call id the Foundry hosted-agent platform injects on the
+    inbound ``/invocations`` request. Toolbox uses it to resolve the
+    signed-in user and apply native document-level security -- this
+    codebase never reads or forwards an ``Authorization`` header, and never
+    sends caller/model identity fields or ``x-client`` group claims.
+    """
 
     headers = {"user-context": json.dumps(dict(user_context or {}))}
     if api_key:
         headers["X-API-KEY"] = api_key
+    if foundry_call_id:
+        headers[FOUNDRY_CALL_ID_HEADER] = foundry_call_id
     return headers
 
 
@@ -163,6 +176,7 @@ async def open_mcp_tool(
     timeout: int,
     user_context: Mapping[str, Any] | None,
     api_key: str | None,
+    foundry_call_id: str | None = None,
     http_client_factory: Callable[..., httpx.AsyncClient] = httpx.AsyncClient,
 ) -> AsyncIterator[MCPTool]:
     """Open one MCP tool and all of its request-scoped transport resources."""
@@ -172,7 +186,7 @@ async def open_mcp_tool(
 
     normalized_transport = normalize_mcp_transport(transport)
     url = resolve_mcp_endpoint(endpoint, normalized_transport)
-    headers = build_mcp_headers(user_context, api_key)
+    headers = build_mcp_headers(user_context, api_key, foundry_call_id)
 
     if normalized_transport == "sse":
         # The legacy SSE client is aiohttp-based and is not covered by the

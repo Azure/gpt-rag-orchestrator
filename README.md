@@ -77,6 +77,50 @@ or connection errors. Because the configuration names and SSE default are
 unchanged, you can roll back to the previous orchestrator image without
 rewriting the existing SSE configuration.
 
+### Foundry hosted-agent Toolbox identity passthrough
+
+When the orchestrator runs as a Microsoft Foundry hosted agent (`api.hosted_entrypoint`,
+`POST /invocations`) with `AGENT_STRATEGY=mcp`, document-security identity is
+established solely through the Foundry hosted-agent protocol 2.0 call context —
+per
+[Azure/GPT-RAG ADR-0001](https://github.com/Azure/GPT-RAG/blob/main/docs/adr/ADR-0001-hosted-agents.md),
+Toolbox OAuth identity passthrough is the required native path and a manual
+group-filter fallback is never the default.
+
+The platform injects two headers on every hosted-agent request:
+
+| Header | Purpose | Forwarded to Toolbox? |
+| --- | --- | --- |
+| `x-agent-user-id` | Per-user container partition key. | No — container-side only. |
+| `x-agent-foundry-call-id` | Opaque per-request call identifier. | Yes — the only supported identity passthrough correlation token. |
+
+`POST /invocations` captures and strictly validates `x-agent-foundry-call-id`
+(printable ASCII, no spaces or control characters, 256 characters max)
+whenever the resolved strategy is Toolbox-backed (currently only `mcp`). A
+missing or malformed value is rejected with **HTTP 401** before any strategy
+or Toolbox client is constructed — there is no fallback to service identity or
+to the legacy `metadata_security_id` manual filter. The validated call id
+then flows unchanged through the runtime-neutral `TurnRequest` into the
+strategy and is echoed as the sole outbound identity header on every Toolbox
+MCP HTTP call, so Toolbox can resolve the signed-in user and mint per-user
+credentials server side.
+
+The container never reads, stores, or forwards the `Authorization` header
+(the platform gateway strips it before the request reaches the container),
+and it never trusts caller- or model-supplied identity fields or `x-client`
+group claims for retrieval security decisions. Neither the call id nor any
+authorization material is ever written to application logs. Non-Toolbox
+hosted strategies (`maf_lite`, `maf_agent_service`, `single_agent_rag`) are
+unaffected and continue to run without a call id.
+
+> [!IMPORTANT]
+> Toolbox-side OAuth consent and RBAC grants for the signed-in user are an
+> external, platform-managed prerequisite. This orchestrator-side change
+> propagates the correlation identity Toolbox needs to resolve per-user
+> credentials; it does not itself grant, request, or manage that consent —
+> the Toolbox/ingestion service and the Foundry hosted-agent platform must be
+> configured and consented for the target user independently.
+
 ### Audit event configuration
 
 The orchestrator can emit a versioned, metadata-only-by-default activity trail through its

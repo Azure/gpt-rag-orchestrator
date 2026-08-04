@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Foundry Toolbox OAuth identity passthrough for hosted `mcp` retrieval.**
+  Added `util.foundry_platform` with the platform-injected header contract
+  for Microsoft Foundry hosted-agent protocol 2.0: `x-agent-user-id` (container
+  partition key, never forwarded) and `x-agent-foundry-call-id` (opaque
+  per-request call identifier — the only supported identity passthrough
+  correlation token). `POST /invocations` now captures and strictly validates
+  `x-agent-foundry-call-id` (printable ASCII, no whitespace/control
+  characters, 256-char max) whenever the resolved strategy is in the new
+  `strategies.hosted_strategies.HOSTED_TOOLBOX_STRATEGIES` set (currently
+  ``mcp``, the only strategy that calls Toolbox). Requests for a Toolbox
+  strategy with a missing or malformed call id are rejected with HTTP 401
+  before strategy construction — there is no service-identity or manual
+  group-filter fallback. The validated call id flows through the
+  runtime-neutral `TurnRequest.foundry_call_id` field into
+  `BaseAgentStrategy.foundry_call_id` and is echoed as the sole outbound
+  identity header by `connectors.mcp_client.open_mcp_tool` /
+  `build_mcp_headers` on every Toolbox MCP HTTP call, so Toolbox can resolve
+  the signed-in user and mint per-user credentials server-side. The
+  container never reads, stores, or forwards the `Authorization` header
+  (already stripped by the platform gateway) and never trusts caller/model
+  identity fields or `x-client` group claims for document-security decisions,
+  per
+  [ADR-0001](https://github.com/Azure/GPT-RAG/blob/main/docs/adr/ADR-0001-hosted-agents.md).
+  Non-Toolbox hosted strategies (`maf_lite`, `maf_agent_service`,
+  `single_agent_rag`) are unaffected and continue to run with
+  `foundry_call_id=None`. See
+  [Azure/GPT-RAG#591](https://github.com/Azure/GPT-RAG/issues/591).
+
+- **Focused Toolbox identity passthrough tests.** Added coverage proving:
+  outbound header propagation to the MCP client (present, absent, and
+  concurrent-call isolation); `/invocations` and `_hosted_stream` fail-closed
+  behavior for the `mcp` strategy when the call id is missing or malformed,
+  with the strategy factory never invoked; correct propagation of a valid
+  call id into the constructed strategy; classic (non-Toolbox) hosted
+  strategies remain unaffected; genuine concurrent-request isolation of call
+  ids at the HTTP boundary (`httpx.AsyncClient` + `ASGITransport`); and that
+  neither the call id nor the `Authorization` header value is ever emitted
+  to application logs.
+
 ## [v3.9.0] - 2026-07-30
 
 ### Added
