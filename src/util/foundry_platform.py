@@ -74,7 +74,14 @@ def require_foundry_call_id(headers: Mapping[str, str]) -> str:
     if (
         not call_id
         or len(call_id) > _MAX_CALL_ID_LENGTH
-        or not _VALID_CALL_ID.match(call_id)
+        # ``fullmatch`` (not ``match``) is required here: with ``^...$`` and
+        # no ``re.MULTILINE``, Python's ``$`` matches just before a single
+        # trailing "\n", so ``.match()`` would wrongly accept a value like
+        # "call-id\n". ``extract_foundry_call_id`` already strips such
+        # values, but validation must not rely on that as its only defense
+        # -- ``fullmatch`` anchors to the true end of the string so this
+        # check is safe even if called directly with an unstripped value.
+        or not _VALID_CALL_ID.fullmatch(call_id)
     ):
         raise MissingFoundryCallContextError(
             "Missing or malformed platform call context "

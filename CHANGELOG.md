@@ -43,6 +43,26 @@
   neither the call id nor the `Authorization` header value is ever emitted
   to application logs.
 
+### Fixed
+
+- **Hardened `x-agent-foundry-call-id` validation against trailing-newline
+  bypass.** `util.foundry_platform.require_foundry_call_id` validated the
+  call id with `re.match()` against an anchored `^[\x21-\x7e]+$` pattern.
+  Without `re.MULTILINE`, Python's `$` matches immediately before a single
+  trailing `\n`, so `.match()` would incorrectly accept a raw value like
+  `"call-id\n"`. `extract_foundry_call_id`'s `.strip()` happened to remove
+  such trailing whitespace before validation today, masking the defect
+  end-to-end, but the validation itself must not depend on that as its only
+  safeguard — a future direct call to `require_foundry_call_id`, or a
+  refactor of extraction, could bypass the strip and forward an
+  injection-bearing value to Toolbox. Switched to `.fullmatch()`, which
+  anchors to the true end of the string regardless of trailing newlines.
+  Added direct unit tests in `tests/test_foundry_platform.py` (bypassing the
+  strip via monkeypatching) proving the regex rejects a trailing `\n`/`\r`
+  even when extraction does not strip it, plus general direct-call
+  coverage for `require_foundry_call_id`/`extract_foundry_call_id` (valid,
+  missing, empty, too-long, and embedded-whitespace call ids).
+
 ## [v3.9.0] - 2026-07-30
 
 ### Added
