@@ -63,6 +63,30 @@
   coverage for `require_foundry_call_id`/`extract_foundry_call_id` (valid,
   missing, empty, too-long, and embedded-whitespace call ids).
 
+- **`MissingFoundryCallContextError` could be silently downgraded to a
+  generic SSE `internal_error` frame.** `_hosted_stream`'s defense-in-depth
+  check (the fail-closed guard that exists in case a future/internal caller
+  invokes it directly, bypassing the `/invocations` HTTP handler's 401
+  precheck) raises `MissingFoundryCallContextError`, a `ValueError`
+  subclass. `_sse_generator`'s inner generator caught it only via its broad
+  `except Exception` clause, so it was indistinguishable from any other
+  internal failure and reported to the client as `{"code":
+  "internal_error"}`, losing its security-relevant classification. Added an
+  explicit `except MissingFoundryCallContextError` clause in `_sse_generator`,
+  ordered before the broad `except Exception`, that emits a distinctly coded
+  `{"code": "missing_call_context"}` SSE error frame instead. The primary
+  pre-`StreamingResponse` HTTP 401 guard in `/invocations` is unchanged and
+  remains the only path that can return a 401 — this fix only prevents a
+  hypothetical bypass of that guard from being misreported once the SSE
+  stream (HTTP 200) is already open; it does not claim a post-header 401 is
+  possible. Also unified the exception message text used at both raise sites
+  into a single `util.foundry_platform.MISSING_CALL_CONTEXT_MESSAGE`
+  constant, so the HTTP-level and defense-in-depth paths report identical,
+  already-vetted-safe text. Added a direct-generator regression test that
+  calls `_sse_generator` without going through `/invocations`, asserting the
+  distinct error code, the canonical message, and that
+  `AgentStrategyFactory.get_strategy` is never invoked.
+
 ## [v3.9.0] - 2026-07-30
 
 ### Added

@@ -45,6 +45,22 @@ _MAX_CALL_ID_LENGTH = 256
 # token, etc.).
 _VALID_CALL_ID = re.compile(r"^[\x21-\x7e]+$")
 
+# Canonical, safe-to-expose message reused at every point that fails closed
+# on a missing/malformed Foundry call context: the pre-``StreamingResponse``
+# HTTP 401 guard in ``api.hosted_entrypoint.invocations`` and the
+# defense-in-depth check inside ``api.hosted_entrypoint._hosted_stream``
+# (which guards direct/internal callers that might bypass that HTTP
+# precheck). Keeping one shared string means every fail-closed path reports
+# identical, reviewable text -- never the call id value, never strategy
+# internals, never auth header content.
+MISSING_CALL_CONTEXT_MESSAGE = (
+    "Missing or malformed platform call context "
+    f"('{FOUNDRY_CALL_ID_HEADER}'). Hosted retrieval requires the "
+    "Foundry-injected call id to resolve per-user document security "
+    "through Toolbox; refusing to fall back to service identity or "
+    "a manual metadata filter."
+)
+
 
 class MissingFoundryCallContextError(ValueError):
     """The platform-injected Foundry call context is absent or malformed.
@@ -83,11 +99,5 @@ def require_foundry_call_id(headers: Mapping[str, str]) -> str:
         # check is safe even if called directly with an unstripped value.
         or not _VALID_CALL_ID.fullmatch(call_id)
     ):
-        raise MissingFoundryCallContextError(
-            "Missing or malformed platform call context "
-            f"('{FOUNDRY_CALL_ID_HEADER}'). Hosted retrieval requires the "
-            "Foundry-injected call id to resolve per-user document security "
-            "through Toolbox; refusing to fall back to service identity or "
-            "a manual metadata filter."
-        )
+        raise MissingFoundryCallContextError(MISSING_CALL_CONTEXT_MESSAGE)
     return call_id

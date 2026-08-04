@@ -836,6 +836,51 @@ class TestHostedStream:
         ]
 
 
+class TestSseGeneratorErrorClassification:
+    """Regression coverage for the SSE error-classification gap: a
+    ``MissingFoundryCallContextError`` raised inside ``_hosted_stream`` must
+    be reported with a distinct, non-generic SSE error code -- it must never
+    be silently downgraded to ``internal_error`` by ``_sse_generator``'s
+    broad ``except Exception`` clause.
+
+    Exercises ``_sse_generator`` directly (not just ``_hosted_stream``),
+    bypassing the ``/invocations`` HTTP handler's precheck entirely, to
+    simulate a hypothetical future/internal caller that reaches the
+    generator without that HTTP-level 401 guard ever running."""
+
+    @pytest.mark.asyncio
+    async def test_missing_call_context_is_not_downgraded_to_internal_error(self):
+        from api.hosted_entrypoint import _sse_generator
+        from util.foundry_platform import MISSING_CALL_CONTEXT_MESSAGE
+
+        turn = TurnRequest(ask="Hi", conversation_id="conv-1")  # no foundry_call_id
+        factory = AsyncMock()
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=factory,
+        ):
+            frames = [
+                frame
+                async for frame in _sse_generator(turn, "mcp", _RESP_ID, _ITEM_ID)
+            ]
+
+        # Fail closed before any strategy/Toolbox call is even attempted.
+        factory.assert_not_called()
+
+        parsed = _parse_frames(frames)
+        error_frames = [frame for frame in parsed if frame["event"] == "error"]
+        assert len(error_frames) == 1
+        error_data = error_frames[0]["data"]
+        assert error_data["code"] == "missing_call_context"
+        assert error_data["code"] != "internal_error"
+        assert error_data["message"] == MISSING_CALL_CONTEXT_MESSAGE
+
+        # Nothing else was emitted: no partial content, no terminal/closing
+        # frames after the error (consistent with error_emitted semantics).
+        assert parsed == error_frames
+
+
 class TestHostedConstruction:
     @pytest.mark.parametrize("strategy_key", sorted(HOSTED_ELIGIBLE_STRATEGIES))
     @pytest.mark.asyncio

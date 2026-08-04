@@ -53,7 +53,11 @@ from strategies.hosted_strategies import (
     build_hosted_conversation,
     guard_hosted_strategy,
 )
-from util.foundry_platform import MissingFoundryCallContextError, require_foundry_call_id
+from util.foundry_platform import (
+    MISSING_CALL_CONTEXT_MESSAGE,
+    MissingFoundryCallContextError,
+    require_foundry_call_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -138,10 +142,7 @@ async def _hosted_stream(
     """
     guard_hosted_strategy(strategy_key)
     if strategy_key in HOSTED_TOOLBOX_STRATEGIES and not turn.foundry_call_id:
-        raise MissingFoundryCallContextError(
-            f"Strategy '{strategy_key}' requires a validated Foundry call id "
-            "to reach Toolbox; refusing to run without one."
-        )
+        raise MissingFoundryCallContextError(MISSING_CALL_CONTEXT_MESSAGE)
     strategy = await AgentStrategyFactory.get_strategy(
         strategy_key,
         hosted_runtime=True,
@@ -221,6 +222,37 @@ def _sse_generator(
                     full_text="".join(full_text),
                 ):
                     yield frame
+
+        except MissingFoundryCallContextError as exc:
+            # Defense-in-depth only: the normal ``/invocations`` path already
+            # rejects a missing/malformed call id with an HTTP 401 *before*
+            # ``StreamingResponse`` is constructed, so this branch cannot be
+            # reached from a real HTTP request today. It exists solely to
+            # correctly classify the error if some future/internal caller
+            # ever invokes ``_hosted_stream``/``_sse_generator`` directly and
+            # bypasses that precheck. By the time this generator body is
+            # running, SSE response headers (HTTP 200) are already committed
+            # to the client -- there is no way to retroactively send a 401
+            # here. We can only emit a distinctly-coded SSE error frame
+            # instead of silently downgrading it to a generic
+            # ``internal_error`` frame via the broad ``except Exception``
+            # below.
+            logger.warning(
+                "[hosted] Missing Foundry call context reached SSE generator "
+                "directly (bypassed /invocations precheck) for strategy=%s",
+                strategy_key,
+            )
+            if not error_emitted:
+                from api.responses_adapter import _sse
+                yield _sse(
+                    "error",
+                    {
+                        "type": "error",
+                        "code": "missing_call_context",
+                        "message": str(exc),
+                        "retryable": False,
+                    },
+                )
 
         except Exception:
             logger.exception("[hosted] Unhandled error in SSE generator")
