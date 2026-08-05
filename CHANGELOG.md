@@ -4,6 +4,12 @@
 
 ### Added
 
+- **Repository-local release agent.** Added `.github/agents/release.agent.md`
+  with a self-contained component release contract covering version discovery,
+  `release/X.Y.Z` branch and `main` pull-request rules, synchronized release
+  metadata, sanitized notes, validation evidence, rollback planning, and an
+  explicit human approval gate before any publication action.
+
 - **Foundry Toolbox OAuth identity passthrough for hosted `mcp` retrieval.**
   Added `util.foundry_platform` with the platform-injected header contract
   for Microsoft Foundry hosted-agent protocol 2.0: `x-agent-user-id` (container
