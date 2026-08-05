@@ -187,6 +187,87 @@ async def test_mcp_strategy_streams_assistant_text_and_sums_usage(
 
 
 @pytest.mark.asyncio
+async def test_mcp_strategy_propagates_foundry_call_id_to_open_mcp_tool(
+    patch_dependencies,
+    mock_config,
+):
+    """The strategy must echo the validated Foundry call id outbound to
+    Toolbox via ``open_mcp_tool`` (ADR-0001 / Azure/GPT-RAG#591)."""
+
+    strategy = await _create_strategy(mock_config)
+    strategy.conversation = {"id": "conversation"}
+    strategy.user_context = {}
+    strategy.foundry_call_id = "call-xyz-789"
+    state = {}
+    chat_client = _FakeChatClient()
+    fake_agent = _FakeAgent(
+        [AgentResponseUpdate(role="assistant", text="answer")]
+    )
+
+    with (
+        patch(
+            "strategies.mcp_strategy.open_mcp_tool",
+            _fake_mcp_context(state),
+        ),
+        patch(
+            "strategies.mcp_strategy.ChatAgent",
+            return_value=fake_agent,
+        ),
+        patch.object(
+            strategy,
+            "_create_chat_client",
+            return_value=chat_client,
+        ),
+    ):
+        _ = [
+            chunk
+            async for chunk in strategy.initiate_agent_flow("prompt")
+        ]
+
+    assert state["open_kwargs"]["foundry_call_id"] == "call-xyz-789"
+
+
+@pytest.mark.asyncio
+async def test_mcp_strategy_defaults_foundry_call_id_to_none(
+    patch_dependencies,
+    mock_config,
+):
+    """Classic (non-hosted) invocations never set ``foundry_call_id``; the
+    strategy must still function and pass ``None`` through unchanged."""
+
+    strategy = await _create_strategy(mock_config)
+    strategy.conversation = {"id": "conversation"}
+    strategy.user_context = {}
+    state = {}
+    chat_client = _FakeChatClient()
+    fake_agent = _FakeAgent(
+        [AgentResponseUpdate(role="assistant", text="answer")]
+    )
+
+    with (
+        patch(
+            "strategies.mcp_strategy.open_mcp_tool",
+            _fake_mcp_context(state),
+        ),
+        patch(
+            "strategies.mcp_strategy.ChatAgent",
+            return_value=fake_agent,
+        ),
+        patch.object(
+            strategy,
+            "_create_chat_client",
+            return_value=chat_client,
+        ),
+    ):
+        _ = [
+            chunk
+            async for chunk in strategy.initiate_agent_flow("prompt")
+        ]
+
+    assert state["open_kwargs"]["foundry_call_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_mcp_strategy_replays_ordered_hosted_history(
     patch_dependencies,
     mock_config,

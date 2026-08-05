@@ -17,6 +17,12 @@ class TurnRequest:
     user_context: dict[str, Any] = field(default_factory=dict)
     request_access_token: str | None = None
     correlation_id: str | None = None
+    # Opaque, per-request Foundry hosted-agent call id
+    # ("x-agent-foundry-call-id"), validated at the HTTP boundary.
+    # Toolbox-integrated hosted strategies echo this outbound so Toolbox can
+    # resolve the signed-in user and apply native document-level security.
+    # Never log this value.
+    foundry_call_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

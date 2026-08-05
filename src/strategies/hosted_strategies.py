@@ -26,6 +26,14 @@ HOSTED_SERVER_THREAD_STRATEGIES: frozenset[str] = frozenset({
     "single_agent_rag",
 })
 
+# Strategies that call out to the Toolbox MCP server for retrieval and must
+# therefore carry a validated Foundry call id (ADR-0001, Azure/GPT-RAG#591).
+# Other hosted-eligible strategies use the classic Foundry IQ / OBO retrieval
+# path and are out of scope for this passthrough.
+HOSTED_TOOLBOX_STRATEGIES: frozenset[str] = frozenset({
+    "mcp",
+})
+
 
 class HostedConversationMessage(TypedDict):
     role: str

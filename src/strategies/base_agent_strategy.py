@@ -39,6 +39,7 @@ class BaseAgentStrategy(ABC):
     strategy_type : AgentStrategies
     conversation : Dict
     user_context : Dict
+    foundry_call_id : Optional[str]
 
     def __init__(self):
         """
@@ -81,6 +82,10 @@ class BaseAgentStrategy(ABC):
         self.cosmos = None if self.hosted_runtime else get_cosmosdb_client()
 
         self.user_context = {}
+        # Opaque Foundry hosted-agent call id (x-agent-foundry-call-id),
+        # set only for Toolbox-integrated hosted strategies after HTTP-layer
+        # validation. See util.foundry_platform for the security rationale.
+        self.foundry_call_id: Optional[str] = None
 
     @classmethod
     async def create(cls):

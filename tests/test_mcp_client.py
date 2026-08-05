@@ -97,6 +97,32 @@ def test_build_mcp_headers_only_sets_request_identity_and_optional_key():
     assert build_mcp_headers(None, None) == {"user-context": "{}"}
 
 
+def test_build_mcp_headers_echoes_foundry_call_id_when_present():
+    """The opaque Foundry call id is echoed outbound so Toolbox can resolve
+    the signed-in user's identity (ADR-0001 / Azure/GPT-RAG#591)."""
+
+    headers = build_mcp_headers(
+        {"principal_id": "user-1"},
+        "secret",
+        foundry_call_id="call-abc-123",
+    )
+
+    assert headers["x-agent-foundry-call-id"] == "call-abc-123"
+    # No caller/model identity or Authorization ever gets echoed outbound.
+    assert "Authorization" not in headers
+    assert "x-agent-user-id" not in headers
+    assert "x-client" not in headers
+
+
+@pytest.mark.parametrize("foundry_call_id", [None, ""])
+def test_build_mcp_headers_omits_foundry_call_id_when_absent(foundry_call_id):
+    headers = build_mcp_headers(
+        {"principal_id": "user-1"}, "secret", foundry_call_id=foundry_call_id
+    )
+
+    assert "x-agent-foundry-call-id" not in headers
+
+
 def test_legacy_sse_adapter_uses_request_scoped_headers(monkeypatch):
     captured = {}
 
@@ -194,6 +220,61 @@ async def test_streamable_http_clients_isolate_concurrent_users(monkeypatch):
     }
     assert all(client.closed for client in clients)
     assert all(tool.closed for tool in tools)
+
+
+@pytest.mark.asyncio
+async def test_streamable_http_clients_isolate_concurrent_foundry_call_ids(
+    monkeypatch,
+):
+    """Two concurrent Toolbox-bound requests must never cross-contaminate
+    each other's per-request call id (ADR-0001 / Azure/GPT-RAG#591)."""
+
+    clients = []
+
+    class FakeHTTPClient:
+        def __init__(self, **kwargs):
+            self.headers = kwargs["headers"]
+
+        async def __aenter__(self):
+            clients.append(self)
+            return self
+
+        async def __aexit__(self, exc_type, exc_value, traceback):
+            return None
+
+    class FakeMCPTool:
+        def __init__(self, **kwargs):
+            self.functions = []
+
+        async def __aenter__(self):
+            await asyncio.sleep(0)
+            return self
+
+        async def __aexit__(self, exc_type, exc_value, traceback):
+            return None
+
+    monkeypatch.setattr(mcp_client, "MCPStreamableHTTPTool", FakeMCPTool)
+
+    async def connect(call_id):
+        async with open_mcp_tool(
+            endpoint="https://example.test",
+            transport="streamable_http",
+            timeout=30,
+            user_context={"principal_id": call_id},
+            api_key=None,
+            foundry_call_id=call_id,
+            http_client_factory=FakeHTTPClient,
+        ):
+            await asyncio.sleep(0)
+
+    await asyncio.gather(connect("call-one"), connect("call-two"))
+
+    assert len(clients) == 2
+    observed = {
+        client.headers["x-agent-foundry-call-id"] for client in clients
+    }
+    assert observed == {"call-one", "call-two"}
+    assert clients[0].headers is not clients[1].headers
 
 
 @pytest.mark.asyncio
