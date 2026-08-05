@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import yaml
-
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_PATH = ROOT / ".github" / "skills" / "release" / "SKILL.md"
@@ -12,7 +10,12 @@ def _skill_parts() -> tuple[dict[str, str], str]:
     content = SKILL_PATH.read_text(encoding="utf-8")
     assert content.startswith("---\n")
     _, frontmatter, body = content.split("---\n", maxsplit=2)
-    return yaml.safe_load(frontmatter), body
+    metadata = {}
+    for line in frontmatter.splitlines():
+        key, separator, value = line.partition(":")
+        assert separator
+        metadata[key.strip()] = value.strip()
+    return metadata, body
 
 
 def test_release_skill_has_discoverable_frontmatter() -> None:
