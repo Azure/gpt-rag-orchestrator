@@ -15,6 +15,10 @@
   Added focused asset tests for skill discovery, required release contracts,
   and continued absence of the abandoned release custom agent.
 
+## [v3.10.0] - 2026-08-05
+
+### Added
+
 - **Foundry Toolbox OAuth identity passthrough for hosted `mcp` retrieval.**
   Added `util.foundry_platform` with the platform-injected header contract
   for Microsoft Foundry hosted-agent protocol 2.0: `x-agent-user-id` (container
