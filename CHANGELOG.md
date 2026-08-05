@@ -4,6 +4,17 @@
 
 ### Added
 
+- **Repository-local release skill with publication safety gates.**
+  Added `.github/skills/release/SKILL.md` as the reusable Copilot workflow for
+  release preparation, versioning, tagging, and release notes. The skill
+  reconciles tags, GitHub Releases, `VERSION`, and `CHANGELOG.md`; enforces
+  `release/X.Y.Z` branches from `develop` with pull requests to `main`; requires
+  exact SemVer metadata and sanitized public notes; documents rollback and
+  reconciliation; and blocks every tag, release, package, image, or deployment
+  publication until a human explicitly approves the exact publication plan.
+  Added focused asset tests for skill discovery, required release contracts,
+  and continued absence of the abandoned release custom agent.
+
 - **Foundry Toolbox OAuth identity passthrough for hosted `mcp` retrieval.**
   Added `util.foundry_platform` with the platform-injected header contract
   for Microsoft Foundry hosted-agent protocol 2.0: `x-agent-user-id` (container
