@@ -1,5 +1,92 @@
 # Changelog
 
+## [v3.10.0] - 2026-08-05
+
+### Added
+
+- **Foundry Toolbox OAuth identity passthrough for hosted `mcp` retrieval.**
+  Added `util.foundry_platform` with the platform-injected header contract
+  for Microsoft Foundry hosted-agent protocol 2.0: `x-agent-user-id` (container
+  partition key, never forwarded) and `x-agent-foundry-call-id` (opaque
+  per-request call identifier — the only supported identity passthrough
+  correlation token). `POST /invocations` now captures and strictly validates
+  `x-agent-foundry-call-id` (printable ASCII, no whitespace/control
+  characters, 256-char max) whenever the resolved strategy is in the new
+  `strategies.hosted_strategies.HOSTED_TOOLBOX_STRATEGIES` set (currently
+  ``mcp``, the only strategy that calls Toolbox). Requests for a Toolbox
+  strategy with a missing or malformed call id are rejected with HTTP 401
+  before strategy construction — there is no service-identity or manual
+  group-filter fallback. The validated call id flows through the
+  runtime-neutral `TurnRequest.foundry_call_id` field into
+  `BaseAgentStrategy.foundry_call_id` and is echoed as the sole outbound
+  identity header by `connectors.mcp_client.open_mcp_tool` /
+  `build_mcp_headers` on every Toolbox MCP HTTP call, so Toolbox can resolve
+  the signed-in user and mint per-user credentials server-side. The
+  container never reads, stores, or forwards the `Authorization` header
+  (already stripped by the platform gateway) and never trusts caller/model
+  identity fields or `x-client` group claims for document-security decisions,
+  per
+  [ADR-0001](https://github.com/Azure/GPT-RAG/blob/main/docs/adr/ADR-0001-hosted-agents.md).
+  Non-Toolbox hosted strategies (`maf_lite`, `maf_agent_service`,
+  `single_agent_rag`) are unaffected and continue to run with
+  `foundry_call_id=None`. See
+  [Azure/GPT-RAG#591](https://github.com/Azure/GPT-RAG/issues/591).
+
+- **Focused Toolbox identity passthrough tests.** Added coverage proving:
+  outbound header propagation to the MCP client (present, absent, and
+  concurrent-call isolation); `/invocations` and `_hosted_stream` fail-closed
+  behavior for the `mcp` strategy when the call id is missing or malformed,
+  with the strategy factory never invoked; correct propagation of a valid
+  call id into the constructed strategy; classic (non-Toolbox) hosted
+  strategies remain unaffected; genuine concurrent-request isolation of call
+  ids at the HTTP boundary (`httpx.AsyncClient` + `ASGITransport`); and that
+  neither the call id nor the `Authorization` header value is ever emitted
+  to application logs.
+
+### Fixed
+
+- **Hardened `x-agent-foundry-call-id` validation against trailing-newline
+  bypass.** `util.foundry_platform.require_foundry_call_id` validated the
+  call id with `re.match()` against an anchored `^[\x21-\x7e]+$` pattern.
+  Without `re.MULTILINE`, Python's `$` matches immediately before a single
+  trailing `\n`, so `.match()` would incorrectly accept a raw value like
+  `"call-id\n"`. `extract_foundry_call_id`'s `.strip()` happened to remove
+  such trailing whitespace before validation today, masking the defect
+  end-to-end, but the validation itself must not depend on that as its only
+  safeguard — a future direct call to `require_foundry_call_id`, or a
+  refactor of extraction, could bypass the strip and forward an
+  injection-bearing value to Toolbox. Switched to `.fullmatch()`, which
+  anchors to the true end of the string regardless of trailing newlines.
+  Added direct unit tests in `tests/test_foundry_platform.py` (bypassing the
+  strip via monkeypatching) proving the regex rejects a trailing `\n`/`\r`
+  even when extraction does not strip it, plus general direct-call
+  coverage for `require_foundry_call_id`/`extract_foundry_call_id` (valid,
+  missing, empty, too-long, and embedded-whitespace call ids).
+
+- **`MissingFoundryCallContextError` could be silently downgraded to a
+  generic SSE `internal_error` frame.** `_hosted_stream`'s defense-in-depth
+  check (the fail-closed guard that exists in case a future/internal caller
+  invokes it directly, bypassing the `/invocations` HTTP handler's 401
+  precheck) raises `MissingFoundryCallContextError`, a `ValueError`
+  subclass. `_sse_generator`'s inner generator caught it only via its broad
+  `except Exception` clause, so it was indistinguishable from any other
+  internal failure and reported to the client as `{"code":
+  "internal_error"}`, losing its security-relevant classification. Added an
+  explicit `except MissingFoundryCallContextError` clause in `_sse_generator`,
+  ordered before the broad `except Exception`, that emits a distinctly coded
+  `{"code": "missing_call_context"}` SSE error frame instead. The primary
+  pre-`StreamingResponse` HTTP 401 guard in `/invocations` is unchanged and
+  remains the only path that can return a 401 — this fix only prevents a
+  hypothetical bypass of that guard from being misreported once the SSE
+  stream (HTTP 200) is already open; it does not claim a post-header 401 is
+  possible. Also unified the exception message text used at both raise sites
+  into a single `util.foundry_platform.MISSING_CALL_CONTEXT_MESSAGE`
+  constant, so the HTTP-level and defense-in-depth paths report identical,
+  already-vetted-safe text. Added a direct-generator regression test that
+  calls `_sse_generator` without going through `/invocations`, asserting the
+  distinct error code, the canonical message, and that
+  `AgentStrategyFactory.get_strategy` is never invoked.
+
 ## [v3.9.0] - 2026-07-30
 
 ### Added

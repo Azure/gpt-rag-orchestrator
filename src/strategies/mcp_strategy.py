@@ -153,6 +153,7 @@ class McpStrategy(BaseAgentStrategy):
                     timeout=self.mcp_server_timeout,
                     user_context=self.user_context,
                     api_key=self.mcp_server_api_key,
+                    foundry_call_id=self.foundry_call_id,
                 ) as mcp_tool:
                     connection_latency_ms = (
                         time.monotonic() - connection_started
