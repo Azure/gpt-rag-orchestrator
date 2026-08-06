@@ -91,7 +91,8 @@ The routes use distinct Microsoft Foundry request contracts:
 
 - Canonical `POST /responses` accepts a string `input`, `stream: true`,
   `store: true`, optional `conversation` as either an id string or
-  `{"id": "..."}`, and optional `metadata`. Array/multimodal input,
+  `{"id": "..."}`, optional `metadata`, and the platform-injected
+  `agent_reference` routing object. Array/multimodal input,
   non-streaming requests, non-storing managed requests, and unsupported
   Responses fields such as `previous_response_id`, `instructions`, or `tools`
   return HTTP 422 rather than being ignored.

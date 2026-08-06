@@ -10,7 +10,9 @@
   Foundry Responses requests no longer fail against the invocation-only
   schema. Unsupported array/multimodal input, non-streaming requests, and
   non-storing managed requests fail explicitly with HTTP 422. Unsupported
-  Responses fields are also rejected instead of being ignored. Streaming
+  Responses fields are also rejected instead of being ignored, while the
+  platform-injected `agent_reference` routing object is accepted without
+  projecting it into execution state. Streaming
   events now match the pinned OpenAI SDK models, carry stream-wide sequence
   numbers, and return the managed Conversation in standard response objects.
   The existing `POST /invocations` message-history contract remains
