@@ -88,6 +88,37 @@ class TestEnsureConversationId:
             conv = {"thread_id": "conv_existing"}
             assert await agent_provider_v2.ensure_conversation_id(conv) == "conv_existing"
 
+
+class TestStreamAgentRunFallback:
+    @pytest.mark.asyncio
+    async def test_preserves_store_when_optional_token_limit_is_rejected(self):
+        class FakeAgent:
+            def __init__(self):
+                self.options = []
+
+            async def run_stream(self, _message, *, thread, options):
+                self.options.append(options)
+                if len(self.options) == 1:
+                    raise RuntimeError("invalid_payload")
+                yield types.SimpleNamespace(text="persisted")
+
+        agent = FakeAgent()
+        output = [
+            chunk.text
+            async for chunk in agent_provider_v2.stream_agent_run(
+                agent,
+                "hello",
+                thread=MagicMock(),
+                options={"max_tokens": 100, "store": True},
+            )
+        ]
+
+        assert output == ["persisted"]
+        assert agent.options == [
+            {"max_tokens": 100, "store": True},
+            {"store": True},
+        ]
+
     @pytest.mark.asyncio
     async def test_raises_when_provider_not_initialized(self):
         agent_provider_v2._project_client = None
@@ -133,6 +164,7 @@ class TestStreamAgentThreadResume:
         # A fake agent: async context manager whose get_new_thread records the
         # service_thread_id it was resumed from.
         resume_ids = []
+        run_options = []
 
         def _get_new_thread(*, service_thread_id=None):
             resume_ids.append(service_thread_id)
@@ -147,6 +179,7 @@ class TestStreamAgentThreadResume:
         provider.as_agent = MagicMock(return_value=agent)
 
         async def _fake_stream(*args, **kwargs):
+            run_options.append(kwargs["options"])
             yield types.SimpleNamespace(text="hello")
 
         # One shared conversation object id handed out on first creation.
@@ -176,3 +209,9 @@ class TestStreamAgentThreadResume:
         assert resume_ids == ["conv_stable", "conv_stable"]
         # The stored thread id is the conversation object, never a per-turn resp id.
         assert conv["thread_id"] == "conv_stable"
+        # Foundry only persists Responses input/output on the managed Conversation
+        # when storage is explicitly enabled.
+        assert run_options == [
+            {"max_tokens": s.max_completion_tokens, "store": True},
+            {"max_tokens": s.max_completion_tokens, "store": True},
+        ]

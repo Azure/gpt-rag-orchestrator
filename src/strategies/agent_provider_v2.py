@@ -263,7 +263,7 @@ async def stream_agent_run(
 ) -> AsyncIterator[Any]:
     """Stream ``agent.run_stream`` and, if the service rejects the run-time
     ``options`` as an invalid payload *before any output is produced*, retry once
-    with no run-time options.
+    without the optional token limit while preserving required persistence.
 
     This guards against deployments/models where even ``max_tokens``
     (``max_output_tokens``) is not permitted alongside an agent reference. The
@@ -285,10 +285,19 @@ async def stream_agent_run(
             raise
         logging.warning(
             "[AgentProviderV2] Run rejected run-time options %s as invalid payload; "
-            "retrying without run-time options: %s",
+            "retrying without the optional token limit: %s",
             sorted(options.keys()), exc,
         )
-        async for chunk in agent.run_stream(user_message, thread=thread, options={}):
+        retry_options = (
+            {"store": options["store"]}
+            if "store" in options
+            else {}
+        )
+        async for chunk in agent.run_stream(
+            user_message,
+            thread=thread,
+            options=retry_options,
+        ):
             yield chunk
 
 
