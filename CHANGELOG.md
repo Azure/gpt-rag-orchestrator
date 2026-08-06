@@ -6,13 +6,17 @@
 
 - **Microsoft Foundry hosted-agent Responses route contract.** Added canonical
   `POST /responses` handling for string `input`, `stream: true`, `store: true`,
-  optional string/object `conversation`, and optional `metadata`, so live
+  optional string/object `conversation`, and optional string-valued `metadata`,
+  so live
   Foundry Responses requests no longer fail against the invocation-only
   schema. Unsupported array/multimodal input, non-streaming requests, and
   non-storing managed requests fail explicitly with HTTP 422. Unsupported
   Responses fields are also rejected instead of being ignored. Streaming
-  events now match the pinned OpenAI SDK models, carry stream-wide sequence
-  numbers, and return the managed Conversation in standard response objects.
+  events now match pinned `openai==2.41.1` SDK models, carry stream-wide
+  sequence numbers, echo canonical metadata, and return the managed
+  Conversation in standard response objects. Internal orchestration citations
+  and tool progress are withheld from the public stream rather than emitting
+  incomplete or uncorrelatable Responses item lifecycles.
   The existing `POST /invocations` message-history contract remains
   compatible; both routes share the strategy and call-id security guards,
   managed Conversation handling, transport-neutral turn construction, and
