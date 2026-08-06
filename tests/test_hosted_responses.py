@@ -5,7 +5,7 @@ Covers:
 - Terminal closing frames after the text stream
 - Hosted strategy guard (explicit failure for unsupported strategies)
 - Hosted stream execution without Cosmos dependency
-- Hosted FastAPI endpoints (health, readiness, responses, and invocations)
+- Hosted ASGI endpoints (health, readiness, responses, and invocations)
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
@@ -69,11 +70,15 @@ def _parse_frames(frames: list[str]) -> list[dict[str, Any]]:
     return result
 
 
-def _parse_sse_stream(body: str) -> list[dict[str, Any]]:
-    """Parse a complete SSE response body into typed frame dictionaries."""
+def _parse_sse_body(body: str) -> list[dict[str, Any]]:
     return _parse_frames(
         [f"{frame}\n\n" for frame in body.strip().split("\n\n") if frame]
     )
+
+
+def _parse_sse_stream(body: str) -> list[dict[str, Any]]:
+    """Parse a complete SSE response body into typed frame dictionaries."""
+    return _parse_sse_body(body)
 
 
 def _serialize(event, **kwargs):
@@ -87,6 +92,19 @@ def _serialize(event, **kwargs):
             **kwargs,
         )
     )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _disable_test_otel_exporters():
+    previous = os.environ.get("OTEL_SDK_DISABLED")
+    os.environ["OTEL_SDK_DISABLED"] = "true"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("OTEL_SDK_DISABLED", None)
+        else:
+            os.environ["OTEL_SDK_DISABLED"] = previous
 
 
 # ── ResponsesAdapter serialization ───────────────────────────────────────────
@@ -969,6 +987,70 @@ class TestSseGeneratorErrorClassification:
         assert parsed == error_frames
 
 
+class TestCancelAwareEvents:
+    @pytest.mark.asyncio
+    async def test_shutdown_stops_and_closes_blocked_strategy_iterator(self):
+        from api.hosted_entrypoint import _cancel_aware_events
+
+        started = asyncio.Event()
+        closed = asyncio.Event()
+        release = asyncio.Event()
+
+        async def source():
+            try:
+                started.set()
+                await release.wait()
+                yield TurnTextEvent("late")
+            finally:
+                closed.set()
+
+        cancellation = asyncio.Event()
+        shutdown = asyncio.Event()
+        consumer = asyncio.create_task(
+            anext(_cancel_aware_events(source(), cancellation, shutdown))
+        )
+        await started.wait()
+
+        shutdown.set()
+
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(consumer, timeout=1)
+        await asyncio.wait_for(closed.wait(), timeout=1)
+
+    @pytest.mark.asyncio
+    async def test_outer_cancellation_closes_blocked_strategy_iterator(self):
+        from api.hosted_entrypoint import _cancel_aware_events
+
+        started = asyncio.Event()
+        closed = asyncio.Event()
+        release = asyncio.Event()
+
+        async def source():
+            try:
+                started.set()
+                await release.wait()
+                yield TurnTextEvent("late")
+            finally:
+                closed.set()
+
+        consumer = asyncio.create_task(
+            anext(
+                _cancel_aware_events(
+                    source(),
+                    asyncio.Event(),
+                    asyncio.Event(),
+                )
+            )
+        )
+        await started.wait()
+
+        consumer.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await consumer
+        await asyncio.wait_for(closed.wait(), timeout=1)
+
+
 class TestSseGeneratorLifecycle:
     @pytest.mark.asyncio
     async def test_sequence_numbers_increase_across_complete_stream(self):
@@ -1168,7 +1250,7 @@ class TestHostedConstruction:
 # ── Hosted FastAPI endpoints ─────────────────────────────────────────────────
 
 class TestHostedEntrypointAPI:
-    """Integration-style tests for the FastAPI app in hosted_entrypoint."""
+    """Integration-style tests for the hosted multi-protocol app."""
 
     @pytest.fixture(autouse=True)
     def _patch_deps(self, mock_config, mock_cosmos):
@@ -1186,10 +1268,16 @@ class TestHostedEntrypointAPI:
 
     @pytest.fixture()
     def client(self):
+        from azure.ai.agentserver.responses import InMemoryResponseProvider
         from fastapi.testclient import TestClient
-        from api.hosted_entrypoint import app
+        from api.hosted_entrypoint import create_app
 
-        return TestClient(app, raise_server_exceptions=False)
+        app = create_app(
+            store=InMemoryResponseProvider(),
+            configure_observability=None,
+        )
+        with TestClient(app, raise_server_exceptions=False) as client:
+            yield client
 
     def test_health_and_readiness_return_same_health_response(self, client):
         from api.hosted_entrypoint import HealthResponse, _APP_VERSION
@@ -1216,21 +1304,80 @@ class TestHostedEntrypointAPI:
         assert resp.status_code == 200
         assert set(resp.json()["eligible_strategies"]) == HOSTED_ELIGIBLE_STRATEGIES
 
-    def test_responses_and_invocations_expose_distinct_request_contracts(self, client):
-        paths = client.get("/openapi.json").json()["paths"]
-        responses_contract = paths["/responses"]["post"]
-        invocations_contract = paths["/invocations"]["post"]
+    def test_responses_and_invocations_publish_distinct_route_contracts(self, client):
+        routes = {
+            (route.path, method)
+            for route in client.app.routes
+            for method in (route.methods or set())
+        }
 
-        assert responses_contract["requestBody"] != invocations_contract["requestBody"]
-        assert (
-            responses_contract["requestBody"]["content"]["application/json"]["schema"]["$ref"]
-            .endswith("/ResponsesRequest")
+        assert ("/responses", "POST") in routes
+        assert ("/responses/{response_id}", "GET") in routes
+        assert ("/responses/{response_id}", "DELETE") in routes
+        assert ("/responses/{response_id}/cancel", "POST") in routes
+        assert ("/responses/{response_id}/input_items", "GET") in routes
+        assert ("/invocations", "POST") in routes
+
+    def test_responses_rejects_invocations_payload(self, client):
+        resp = client.post(
+            "/responses",
+            json={"messages": [{"role": "user", "content": "Hi"}]},
         )
-        assert (
-            invocations_contract["requestBody"]["content"]["application/json"]["schema"]["$ref"]
-            .endswith("/InvocationRequest")
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == (
+            "The Responses request requires an input field."
         )
-        assert responses_contract["responses"] == invocations_contract["responses"]
+
+    def test_responses_rejects_malformed_json(self, client):
+        response = client.post(
+            "/responses",
+            content="{",
+            headers={"content-type": "application/json"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == (
+            "The Responses request body must be valid JSON."
+        )
+
+    def test_responses_accepts_live_standard_payload(self, client, mock_config):
+        original = mock_config.get.side_effect
+        mock_config.get.side_effect = (
+            lambda key, default=None, type=str:
+            "maf_lite" if key == "AGENT_STRATEGY" else original(key, default, type)
+        )
+
+        async def fake_flow(_ask):
+            yield "answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            resp = client.post(
+                "/responses",
+                json={"input": "Hello", "stream": True, "store": True},
+            )
+
+        assert resp.status_code == 200
+        events = _parse_sse_body(resp.text)
+        event_types = [event["event"] for event in events]
+        sequence_numbers = [event["data"]["sequence_number"] for event in events]
+        response_ids = {
+            event["data"]["response"]["id"]
+            for event in events
+            if isinstance(event["data"].get("response"), dict)
+        }
+
+        assert event_types[:2] == ["response.created", "response.in_progress"]
+        assert "response.output_text.delta" in event_types
+        assert event_types[-1] == "response.completed"
+        assert sequence_numbers == list(range(len(events)))
+        assert len(response_ids) == 1
 
     def test_responses_accepts_live_payload_and_streams_full_lifecycle(
         self, client, mock_config
@@ -1259,7 +1406,6 @@ class TestHostedEntrypointAPI:
 
         strategy = MagicMock()
         strategy.initiate_agent_flow = fake_flow
-
         with patch(
             "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
             new=AsyncMock(return_value=strategy),
@@ -1360,11 +1506,63 @@ class TestHostedEntrypointAPI:
         )
 
         assert response.status_code == 422
-        detail = response.json()["detail"]
-        assert any(
-            error["type"] == "extra_forbidden"
-            and error["loc"][-2:] == ["ResponseConversation", "unexpected"]
-            for error in detail
+        assert response.json()["detail"] == (
+            "Responses conversation must be a non-empty id string "
+            "or an object containing only a non-empty string id."
+        )
+
+    @pytest.mark.parametrize(
+        "conversation",
+        [
+            "",
+            "   ",
+            123,
+            [],
+            {"id": None},
+            {"id": 123},
+            {"id": ""},
+        ],
+    )
+    def test_responses_rejects_invalid_conversation_ids(
+        self,
+        client,
+        conversation,
+    ):
+        response = client.post(
+            "/responses",
+            json={
+                "input": "Continue",
+                "stream": True,
+                "store": True,
+                "conversation": conversation,
+            },
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == (
+            "Responses conversation must be a non-empty id string "
+            "or an object containing only a non-empty string id."
+        )
+
+    def test_responses_rejects_conversation_with_previous_response_id(
+        self,
+        client,
+    ):
+        response = client.post(
+            "/responses",
+            json={
+                "input": "Continue",
+                "stream": True,
+                "store": True,
+                "conversation": "conv-explicit",
+                "previous_response_id": "resp_previous",
+            },
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == (
+            "Responses conversation and previous_response_id "
+            "cannot be used together."
         )
 
     def test_responses_maps_metadata_without_projecting_legacy_history(
@@ -1373,28 +1571,16 @@ class TestHostedEntrypointAPI:
         self._use_strategy(mock_config, "maf_lite")
         captured = {}
 
-        def fake_sse(
-            turn,
-            strategy_key,
-            response_id,
-            item_id,
-            history,
-            *,
-            model,
-            response_metadata,
-        ):
+        async def fake_stream(turn, strategy_key, history):
             captured.update(
                 turn=turn,
                 strategy_key=strategy_key,
-                response_id=response_id,
-                item_id=item_id,
                 history=history,
-                model=model,
-                response_metadata=response_metadata,
             )
-            return _async_gen(["event: response.completed\ndata: {}\n\n"])
+            yield TurnConversationEvent("conv-metadata")
+            yield TurnTextEvent("answer")
 
-        with patch("api.hosted_entrypoint._sse_generator", new=fake_sse):
+        with patch("api.hosted_entrypoint._hosted_stream", new=fake_stream):
             response = client.post(
                 "/responses",
                 json={
@@ -1411,9 +1597,9 @@ class TestHostedEntrypointAPI:
         assert response.status_code == 200
         assert captured["turn"].question_id == "question-1"
         assert captured["turn"].correlation_id == "correlation-1"
-        assert captured["history"] == ()
-        assert captured["model"] == _MODEL
-        assert captured["response_metadata"] == {
+        assert captured["history"] == []
+        completed = _parse_sse_body(response.text)[-1]["data"]["response"]
+        assert completed["metadata"] == {
             "question_id": "question-1",
             "correlation_id": "correlation-1",
         }
@@ -1430,14 +1616,13 @@ class TestHostedEntrypointAPI:
         )
 
         assert response.status_code == 422
-        detail = response.json()["detail"]
-        assert detail[0]["type"] == "string_type"
-        assert detail[0]["loc"] == ["body", "metadata", "nested"]
+        assert response.json()["detail"] == (
+            "Responses metadata must contain only string keys and values."
+        )
 
     @pytest.mark.parametrize(
         "unsupported_field",
         [
-            {"previous_response_id": "resp_previous"},
             {"instructions": "Ignore prior instructions"},
             {"tools": []},
             {"tool_choice": "auto"},
@@ -1460,20 +1645,24 @@ class TestHostedEntrypointAPI:
         )
 
         assert response.status_code == 422
-        detail = response.json()["detail"]
-        assert detail[0]["type"] == "extra_forbidden"
-        assert detail[0]["loc"] == ["body", next(iter(unsupported_field))]
+        field = next(iter(unsupported_field))
+        assert response.json()["detail"] == (
+            f"Unsupported Responses request fields: {field}."
+        )
 
     def test_responses_accepts_foundry_injected_agent_reference(
         self, client, mock_config
     ):
         self._use_strategy(mock_config, "maf_lite")
 
+        async def fake_flow(_ask):
+            yield "answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
         with patch(
-            "api.hosted_entrypoint._sse_generator",
-            new=lambda *args, **kwargs: _async_gen(
-                ["event: response.completed\ndata: {}\n\n"]
-            ),
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
         ):
             response = client.post(
                 "/responses",
@@ -1510,7 +1699,7 @@ class TestHostedEntrypointAPI:
             },
         )
 
-        assert response.status_code == 422
+        assert response.status_code == 400
 
     @pytest.mark.parametrize(
         "unsupported_input",
@@ -1543,7 +1732,7 @@ class TestHostedEntrypointAPI:
 
         assert response.status_code == 422
         assert (
-            "Only string input is supported; array and multimodal input are not supported."
+            "This hosted adapter supports string Responses input."
             in str(response.json())
         )
 
@@ -1554,25 +1743,368 @@ class TestHostedEntrypointAPI:
         )
 
         assert response.status_code == 422
-        assert "Input must not be empty or whitespace." in str(response.json())
+        assert response.json()["detail"] == "The Responses input must not be empty."
 
-    def test_responses_rejects_non_streaming_request(self, client):
+    @pytest.mark.parametrize(
+        ("setting", "expected"),
+        [
+            (None, False),
+            ("false", False),
+            ("0", False),
+            ("unexpected", False),
+            ("true", True),
+            (" 1 ", True),
+        ],
+    )
+    def test_host_observability_disables_content_capture_by_default(
+        self,
+        monkeypatch,
+        setting,
+        expected,
+    ):
+        from api.hosted_entrypoint import _configure_host_observability
+
+        if setting is None:
+            monkeypatch.delenv(
+                "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT",
+                raising=False,
+            )
+        else:
+            monkeypatch.setenv(
+                "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT",
+                setting,
+            )
+
+        configure = MagicMock()
+        with patch(
+            "api.hosted_entrypoint.configure_agentserver_observability",
+            new=configure,
+        ):
+            _configure_host_observability(
+                connection_string="InstrumentationKey=test",
+                log_level="INFO",
+                enable_sensitive_data=True,
+            )
+
+        configure.assert_called_once_with(
+            connection_string="InstrumentationKey=test",
+            log_level="INFO",
+            enable_sensitive_data=expected,
+        )
+
+    def test_responses_accepts_non_streaming_request(self, client, mock_config):
+        self._use_strategy(mock_config, "maf_lite")
+
+        async def fake_flow(_ask):
+            yield "answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            resp = client.post(
+                "/responses",
+                json={"input": "Hello", "stream": False, "store": True},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "completed"
+        assert resp.json()["output"][0]["content"][0]["text"] == "answer"
+
+    def test_responses_persists_retrieves_and_deletes_response(
+        self,
+        client,
+        mock_config,
+    ):
+        self._use_strategy(mock_config, "maf_lite")
+
+        async def fake_flow(_ask):
+            yield "stored answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            created = client.post(
+                "/responses",
+                json={"input": "Stored question", "store": True},
+            )
+
+        response_id = created.json()["id"]
+        retrieved = client.get(f"/responses/{response_id}")
+        input_items = client.get(f"/responses/{response_id}/input_items")
+        deleted = client.delete(f"/responses/{response_id}")
+        missing = client.get(f"/responses/{response_id}")
+
+        assert created.status_code == 200
+        assert retrieved.status_code == 200
+        assert retrieved.json()["id"] == response_id
+        assert retrieved.json()["status"] == "completed"
+        assert input_items.status_code == 200
+        assert input_items.json()["object"] == "list"
+        assert input_items.json()["data"][0]["role"] == "user"
+        assert deleted.status_code == 200
+        assert deleted.json() == {
+            "id": response_id,
+            "object": "response",
+            "deleted": True,
+        }
+        assert missing.status_code == 404
+
+    def test_responses_store_false_is_not_retrievable(
+        self,
+        client,
+        mock_config,
+    ):
+        self._use_strategy(mock_config, "maf_lite")
+
+        async def fake_flow(_ask):
+            yield "ephemeral answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            created = client.post(
+                "/responses",
+                json={"input": "Ephemeral question", "store": False},
+            )
+
+        assert created.status_code == 200
+        assert client.get(f"/responses/{created.json()['id']}").status_code == 404
+
+    def test_responses_honors_platform_response_id_header(
+        self,
+        client,
+        mock_config,
+    ):
+        from azure.ai.agentserver.responses._id_generator import IdGenerator
+
+        self._use_strategy(mock_config, "maf_lite")
+
+        async def fake_flow(_ask):
+            yield "answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+        response_id = IdGenerator.new_response_id()
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            response = client.post(
+                "/responses",
+                headers={"x-agent-response-id": response_id},
+                json={"input": "Question", "stream": True, "store": True},
+            )
+
+        events = _parse_sse_body(response.text)
+        assert response.status_code == 200
+        assert events[0]["data"]["response"]["id"] == response_id
+        assert events[-1]["data"]["response"]["id"] == response_id
+
+    def test_responses_projects_previous_response_history(
+        self,
+        client,
+        mock_config,
+    ):
+        self._use_strategy(mock_config, "maf_agent_service")
+        received = {}
+
+        async def first_flow(_ask):
+            yield "first answer"
+
+        async def second_flow(ask):
+            received["ask"] = ask
+            received["conversation"] = deepcopy(second_strategy.conversation)
+            yield "second answer"
+
+        first_strategy = MagicMock()
+        first_strategy.initiate_agent_flow = first_flow
+        second_strategy = MagicMock()
+        second_strategy.initiate_agent_flow = second_flow
+
+        conversation_resolver = AsyncMock(return_value="conv-managed-chain")
+        with (
+            patch(
+                "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+                new=AsyncMock(side_effect=[first_strategy, second_strategy]),
+            ),
+            patch(
+                "api.hosted_entrypoint.resolve_managed_conversation_id",
+                new=conversation_resolver,
+            ),
+        ):
+            first = client.post(
+                "/responses",
+                json={"input": "first question", "store": True},
+            )
+            second = client.post(
+                "/responses",
+                json={
+                    "input": "follow-up question",
+                    "previous_response_id": first.json()["id"],
+                    "store": True,
+                },
+            )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert received["ask"] == "follow-up question"
+        assert received["conversation"]["thread_id"] == "conv-managed-chain"
+        assert received["conversation"]["messages"] == [
+            {"role": "user", "text": "first question"},
+            {"role": "assistant", "text": "first answer"},
+        ]
+        assert conversation_resolver.await_args_list[0].args == (
+            first_strategy.project_client,
+            None,
+        )
+        assert conversation_resolver.await_args_list[1].args == (
+            second_strategy.project_client,
+            "conv-managed-chain",
+        )
+
+    def test_responses_rejects_unsupported_list_input(self, client):
         response = client.post(
             "/responses",
-            json={"input": "Hello", "stream": False, "store": True},
+            json={
+                "input": [
+                    {"role": "user", "content": "first question"},
+                    {"role": "user", "content": "follow-up question"},
+                ],
+                "store": True,
+            },
         )
 
         assert response.status_code == 422
-        assert "Only stream=true is supported" in str(response.json())
-
-    def test_responses_rejects_non_storing_managed_request(self, client):
-        response = client.post(
-            "/responses",
-            json={"input": "Hello", "stream": True, "store": False},
+        assert response.json()["detail"] == (
+            "This hosted adapter supports string Responses input."
         )
 
-        assert response.status_code == 422
-        assert "Only store=true is supported" in str(response.json())
+    def test_responses_cancel_route_terminates_background_response(
+        self,
+        client,
+        mock_config,
+    ):
+        self._use_strategy(mock_config, "maf_lite")
+
+        async def fake_flow(_ask):
+            while True:
+                await asyncio.sleep(0.01)
+                yield "working"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            created = client.post(
+                "/responses",
+                json={
+                    "input": "Long-running question",
+                    "background": True,
+                    "store": True,
+                },
+            )
+            cancelled = client.post(f"/responses/{created.json()['id']}/cancel")
+
+        assert created.status_code == 200
+        assert created.json()["status"] in {"queued", "in_progress"}
+        assert cancelled.status_code == 200
+        assert cancelled.json()["status"] == "cancelled"
+
+    def test_responses_rejects_missing_foundry_call_id_for_toolbox_strategy(
+        self,
+        client,
+        mock_config,
+    ):
+        self._use_strategy(mock_config, "mcp")
+
+        factory = AsyncMock()
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=factory,
+        ):
+            resp = client.post(
+                "/responses",
+                json={"input": "Hello", "stream": True, "store": True},
+            )
+
+        assert resp.status_code == 401
+        assert "x-agent-foundry-call-id" in resp.json()["detail"]
+        factory.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("get", "/responses/{response_id}"),
+            ("delete", "/responses/{response_id}"),
+            ("post", "/responses/{response_id}/cancel"),
+            ("get", "/responses/{response_id}/input_items"),
+        ],
+    )
+    def test_responses_storage_routes_require_toolbox_call_id(
+        self,
+        client,
+        mock_config,
+        method,
+        path,
+    ):
+        from azure.ai.agentserver.responses._id_generator import IdGenerator
+
+        self._use_strategy(mock_config, "mcp")
+        response_id = IdGenerator.new_response_id()
+
+        response = getattr(client, method)(path.format(response_id=response_id))
+
+        assert response.status_code == 401
+        assert "x-agent-foundry-call-id" in response.json()["detail"]
+
+    def test_responses_propagates_platform_call_id_for_toolbox_strategy(
+        self,
+        client,
+        mock_config,
+    ):
+        self._use_strategy(mock_config, "mcp")
+
+        async def fake_flow(_ask):
+            yield "answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+
+        with (
+            patch(
+                "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+                new=AsyncMock(return_value=strategy),
+            ),
+            patch(
+                "api.hosted_entrypoint.resolve_managed_conversation_id",
+                new=AsyncMock(return_value="conv-toolbox"),
+            ),
+        ):
+            response = client.post(
+                "/responses",
+                headers={"x-agent-foundry-call-id": "call-toolbox-123"},
+                json={"input": "Question", "stream": True, "store": True},
+            )
+
+        assert response.status_code == 200
+        assert "response.completed" in response.text
+        assert strategy.foundry_call_id == "call-toolbox-123"
 
     def test_invocations_rejects_unsupported_strategy(self, client, mock_config):
         original = mock_config.get.side_effect
@@ -1596,6 +2128,18 @@ class TestHostedEntrypointAPI:
         )
 
         assert resp.status_code == 422
+
+    def test_invocations_rejects_malformed_json(self, client):
+        resp = client.post(
+            "/invocations",
+            content="{",
+            headers={"content-type": "application/json"},
+        )
+
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == (
+            "The Invocations request body must be valid JSON."
+        )
 
     def test_invocations_rejects_empty_user_message(self, client):
         resp = client.post(
@@ -1785,6 +2329,7 @@ class TestHostedEntrypointAPI:
         "bad_call_id",
         [
             "has spaces",
+            " call-id ",
             "line\nbreak",
             "carriage\rreturn",
             "x" * 257,
