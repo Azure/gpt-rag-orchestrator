@@ -10,24 +10,25 @@
   Storage egress in private-only deployments.
 
 - **Microsoft Foundry hosted-agent Responses route contract.** Added canonical
-  `POST /responses` handling for string `input`, `stream: true`, `store: true`,
-  optional string/object `conversation`, and optional string-valued `metadata`,
-  so live
-  Foundry Responses requests no longer fail against the invocation-only
-  schema. Unsupported array/multimodal input, non-streaming requests, and
-  non-storing managed requests fail explicitly with HTTP 422. Unsupported
-  Responses fields are also rejected instead of being ignored, while the
-  platform-injected `agent_reference` routing object is accepted without
-  projecting it into execution state. Streaming
-  events now match pinned `openai==2.41.1` SDK models, carry stream-wide
-  sequence numbers, echo canonical metadata, and return the managed
-  Conversation in standard response objects. Internal orchestration citations
-  and tool progress are withheld from the public stream rather than emitting
-  incomplete or uncorrelatable Responses item lifecycles.
-  The existing `POST /invocations` message-history contract remains
-  compatible; both routes share the strategy and call-id security guards,
-  managed Conversation handling, transport-neutral turn construction, and
-  Responses API SSE lifecycle.
+  Responses v2 hosting through `azure-ai-agentserver-responses`, so real
+  Foundry requests to `POST /responses` no longer receive HTTP 404 or require
+  the separate Invocations schema. The adapter accepts standard string `input`,
+  streaming and synchronous execution, storage controls, managed
+  `conversation` identity, `previous_response_id`, metadata, and the
+  platform-injected `agent_reference`, and supplies protocol retrieval,
+  input-items, cancellation, and deletion routes. List input and unsupported
+  request fields are rejected instead of silently dropping semantics, and
+  mutually exclusive `conversation` and `previous_response_id` inputs cannot
+  contaminate each other's history. The
+  existing `POST /invocations` route retains its distinct message-list schema
+  and compatibility behavior. Toolbox-backed deployments validate the Foundry
+  call context before any create or stored-response route can reach the
+  platform storage provider. Invalid managed-conversation identifiers are
+  rejected instead of creating a new thread, and generative-AI content capture
+  is disabled by default unless explicitly enabled by the operator. Shutdown,
+  client cancellation, and malformed call-id boundaries now stop upstream
+  strategy work without leaking tasks or forwarding a different value than the
+  one validated.
 
 - **Microsoft Foundry hosted-agent readiness probe contract.** Added
   `GET /readiness` to `api.hosted_entrypoint` so the platform readiness probe no

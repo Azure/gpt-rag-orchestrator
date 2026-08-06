@@ -83,12 +83,14 @@ def require_foundry_call_id(headers: Mapping[str, str]) -> str:
     """Return the validated opaque Foundry call id, or fail closed.
 
     Raises :class:`MissingFoundryCallContextError` when the header is
-    missing, empty, too long, or contains characters that would allow
-    outbound header injection when echoed to Toolbox.
+    missing, empty, surrounded by whitespace, too long, or contains characters
+    that would allow outbound header injection when echoed to Toolbox.
     """
+    raw_call_id = headers.get(FOUNDRY_CALL_ID_HEADER)
     call_id = extract_foundry_call_id(headers)
     if (
         not call_id
+        or raw_call_id != call_id
         or len(call_id) > _MAX_CALL_ID_LENGTH
         # ``fullmatch`` (not ``match``) is required here: with ``^...$`` and
         # no ``re.MULTILINE``, Python's ``$`` matches just before a single

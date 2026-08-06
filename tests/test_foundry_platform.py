@@ -46,6 +46,12 @@ class TestRequireFoundryCallId:
         with pytest.raises(MissingFoundryCallContextError):
             require_foundry_call_id({FOUNDRY_CALL_ID_HEADER: "   "})
 
+    def test_raises_for_surrounding_whitespace(self):
+        with pytest.raises(MissingFoundryCallContextError):
+            require_foundry_call_id(
+                {FOUNDRY_CALL_ID_HEADER: "  call-abc-123  "}
+            )
+
     def test_raises_when_too_long(self):
         headers = {FOUNDRY_CALL_ID_HEADER: "x" * 257}
         with pytest.raises(MissingFoundryCallContextError):
