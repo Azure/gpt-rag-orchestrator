@@ -19,6 +19,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from openai.types.responses import ResponseStreamEvent
+from pydantic import TypeAdapter
 
 from api.responses_adapter import responses_terminal_events, serialize_responses_events
 from orchestration.turn import (
@@ -43,6 +45,10 @@ from strategies.hosted_strategies import (
 
 _RESP_ID = "resp_testresponse"
 _ITEM_ID = "item_testitem"
+_CONVERSATION_ID = "conv-testconversation"
+_CREATED_AT = 1_786_012_345.0
+_MODEL = "gpt-4o"
+_RESPONSE_EVENT_ADAPTER = TypeAdapter(ResponseStreamEvent)
 
 
 def _parse_frames(frames: list[str]) -> list[dict[str, Any]]:
@@ -67,6 +73,8 @@ def _serialize(event, **kwargs):
             event,
             response_id=_RESP_ID,
             item_id=_ITEM_ID,
+            created_at=_CREATED_AT,
+            model=_MODEL,
             **kwargs,
         )
     )
@@ -80,14 +88,21 @@ class TestResponsesAdapterConversationEvent:
 
         assert len(frames) == 3
 
-    def test_response_created_has_conversation_id(self):
+    def test_response_created_has_standard_required_response_fields(self):
         frames = _serialize(TurnConversationEvent("conv-abc"))
 
         created = frames[0]
+        response = created["data"]["response"]
         assert created["event"] == "response.created"
-        assert created["data"]["response"]["conversation_id"] == "conv-abc"
-        assert created["data"]["response"]["id"] == _RESP_ID
-        assert created["data"]["response"]["status"] == "in_progress"
+        assert response["conversation"] == {"id": "conv-abc"}
+        assert "conversation_id" not in response
+        assert response["id"] == _RESP_ID
+        assert response["status"] == "in_progress"
+        assert response["created_at"] == _CREATED_AT
+        assert response["model"] == _MODEL
+        assert response["tools"] == []
+        assert response["tool_choice"] == "none"
+        assert response["parallel_tool_calls"] is False
 
     def test_output_item_added_follows_response_created(self):
         frames = _serialize(TurnConversationEvent("conv-abc"))
@@ -103,6 +118,7 @@ class TestResponsesAdapterConversationEvent:
         part = frames[2]
         assert part["event"] == "response.content_part.added"
         assert part["data"]["part"]["type"] == "output_text"
+        assert part["data"]["part"]["logprobs"] == []
 
 
 class TestResponsesAdapterTextEvent:
@@ -113,6 +129,7 @@ class TestResponsesAdapterTextEvent:
         assert frames[0]["event"] == "response.output_text.delta"
         assert frames[0]["data"]["delta"] == "Hello"
         assert frames[0]["data"]["item_id"] == _ITEM_ID
+        assert frames[0]["data"]["logprobs"] == []
 
     def test_empty_text_is_allowed(self):
         frames = _serialize(TurnTextEvent(""))
@@ -196,12 +213,73 @@ class TestResponsesAdapterErrorEvent:
 
 
 class TestResponsesAdapterCancelledEvent:
-    def test_emits_response_cancelled(self):
+    def test_emits_standard_error_event(self):
         frames = _serialize(TurnCancelledEvent(reason="cancelled"))
 
         assert len(frames) == 1
-        assert frames[0]["event"] == "response.cancelled"
-        assert frames[0]["data"]["reason"] == "cancelled"
+        assert frames[0]["event"] == "error"
+        assert frames[0]["data"]["code"] == "cancelled"
+        assert frames[0]["data"]["message"] == "cancelled"
+
+
+class TestResponsesAdapterSDKModels:
+    def test_every_emitted_event_validates_against_pinned_sdk_models(self):
+        events = [
+            TurnConversationEvent(_CONVERSATION_ID),
+            TurnTextEvent("Hello"),
+            TurnCitationEvent(
+                TurnCitation(
+                    "src-1",
+                    title="Policy",
+                    url="https://example.com/policy",
+                )
+            ),
+            TurnToolActivityEvent(
+                TurnToolActivity(
+                    "search_kb",
+                    TurnToolStatus.STARTED,
+                    call_id="call-1",
+                )
+            ),
+            TurnToolActivityEvent(
+                TurnToolActivity(
+                    "search_kb",
+                    TurnToolStatus.COMPLETED,
+                    call_id="call-1",
+                )
+            ),
+            TurnToolActivityEvent(
+                TurnToolActivity(
+                    "search_kb",
+                    TurnToolStatus.FAILED,
+                    call_id="call-1",
+                    message="Tool execution failed",
+                )
+            ),
+            TurnErrorEvent(),
+            TurnCancelledEvent(),
+        ]
+        frames = [
+            frame
+            for event in events
+            for frame in _serialize(event)
+        ]
+        frames.extend(
+            _parse_frames(
+                responses_terminal_events(
+                    response_id=_RESP_ID,
+                    item_id=_ITEM_ID,
+                    conversation_id=_CONVERSATION_ID,
+                    full_text="Hello",
+                    created_at=_CREATED_AT,
+                    model=_MODEL,
+                )
+            )
+        )
+
+        for frame in frames:
+            validated = _RESPONSE_EVENT_ADAPTER.validate_python(frame["data"])
+            assert validated.type == frame["event"]
 
 
 class TestResponsesTerminalEvents:
@@ -210,6 +288,7 @@ class TestResponsesTerminalEvents:
             responses_terminal_events(
                 response_id=_RESP_ID,
                 item_id=_ITEM_ID,
+                conversation_id=_CONVERSATION_ID,
                 full_text="Hello world",
             )
         )
@@ -225,6 +304,7 @@ class TestResponsesTerminalEvents:
             responses_terminal_events(
                 response_id=_RESP_ID,
                 item_id=_ITEM_ID,
+                conversation_id=_CONVERSATION_ID,
                 full_text="Final answer.",
             )
         )
@@ -232,18 +312,31 @@ class TestResponsesTerminalEvents:
         assert frames[0]["data"]["text"] == "Final answer."
         assert frames[1]["data"]["part"]["text"] == "Final answer."
         assert frames[2]["data"]["item"]["content"][0]["text"] == "Final answer."
+        assert frames[0]["data"]["logprobs"] == []
+        assert frames[1]["data"]["part"]["logprobs"] == []
+        assert frames[2]["data"]["item"]["content"][0]["logprobs"] == []
 
     def test_response_completed_carries_response_id(self):
         frames = _parse_frames(
             responses_terminal_events(
                 response_id=_RESP_ID,
                 item_id=_ITEM_ID,
+                conversation_id=_CONVERSATION_ID,
                 full_text="",
+                created_at=_CREATED_AT,
+                model=_MODEL,
             )
         )
 
-        assert frames[3]["data"]["response"]["id"] == _RESP_ID
-        assert frames[3]["data"]["response"]["status"] == "completed"
+        response = frames[3]["data"]["response"]
+        assert response["id"] == _RESP_ID
+        assert response["status"] == "completed"
+        assert response["conversation"] == {"id": _CONVERSATION_ID}
+        assert response["created_at"] == _CREATED_AT
+        assert response["model"] == _MODEL
+        assert response["tools"] == []
+        assert response["tool_choice"] == "none"
+        assert response["parallel_tool_calls"] is False
 
 
 # ── Strategy guard ───────────────────────────────────────────────────────────
@@ -881,6 +974,62 @@ class TestSseGeneratorErrorClassification:
         assert parsed == error_frames
 
 
+class TestSseGeneratorLifecycle:
+    @pytest.mark.asyncio
+    async def test_sequence_numbers_increase_across_complete_stream(self):
+        from api.hosted_entrypoint import _sse_generator
+
+        async def fake_stream(*_args):
+            yield TurnConversationEvent("conv-managed")
+            yield TurnTextEvent("Hello ")
+            yield TurnCitationEvent(TurnCitation("src-1"))
+            yield TurnTextEvent("world")
+
+        with patch("api.hosted_entrypoint._hosted_stream", new=fake_stream):
+            frames = [
+                frame
+                async for frame in _sse_generator(
+                    TurnRequest(ask="Hi"),
+                    "maf_lite",
+                    _RESP_ID,
+                    _ITEM_ID,
+                    model=_MODEL,
+                )
+            ]
+
+        parsed = _parse_frames(frames)
+        assert [frame["data"]["sequence_number"] for frame in parsed] == list(
+            range(len(parsed))
+        )
+
+    @pytest.mark.asyncio
+    async def test_completed_response_recovers_managed_conversation_from_stream(self):
+        from api.hosted_entrypoint import _sse_generator
+
+        async def fake_stream(*_args):
+            yield TurnConversationEvent("conv-created-by-foundry")
+            yield TurnTextEvent("answer")
+
+        with patch("api.hosted_entrypoint._hosted_stream", new=fake_stream):
+            frames = [
+                frame
+                async for frame in _sse_generator(
+                    TurnRequest(ask="Hi", conversation_id=None),
+                    "maf_agent_service",
+                    _RESP_ID,
+                    _ITEM_ID,
+                    model=_MODEL,
+                )
+            ]
+
+        parsed = _parse_frames(frames)
+        created = parsed[0]["data"]["response"]
+        completed = parsed[-1]["data"]["response"]
+        assert created["conversation"] == {"id": "conv-created-by-foundry"}
+        assert completed["conversation"] == created["conversation"]
+        assert completed["created_at"] == created["created_at"]
+
+
 class TestHostedConstruction:
     @pytest.mark.parametrize("strategy_key", sorted(HOSTED_ELIGIBLE_STRATEGIES))
     @pytest.mark.asyncio
@@ -1132,13 +1281,22 @@ class TestHostedEntrypointAPI:
         self._use_strategy(mock_config, "maf_lite")
         captured = {}
 
-        def fake_sse(turn, strategy_key, response_id, item_id, history):
+        def fake_sse(
+            turn,
+            strategy_key,
+            response_id,
+            item_id,
+            history,
+            *,
+            model,
+        ):
             captured.update(
                 turn=turn,
                 strategy_key=strategy_key,
                 response_id=response_id,
                 item_id=item_id,
                 history=history,
+                model=model,
             )
             return _async_gen(["event: response.completed\ndata: {}\n\n"])
 
@@ -1153,7 +1311,6 @@ class TestHostedEntrypointAPI:
                         "question_id": "question-1",
                         "correlation_id": "correlation-1",
                     },
-                    "model": "ignored-standard-field",
                 },
             )
 
@@ -1161,6 +1318,37 @@ class TestHostedEntrypointAPI:
         assert captured["turn"].question_id == "question-1"
         assert captured["turn"].correlation_id == "correlation-1"
         assert captured["history"] == ()
+        assert captured["model"] == _MODEL
+
+    @pytest.mark.parametrize(
+        "unsupported_field",
+        [
+            {"previous_response_id": "resp_previous"},
+            {"instructions": "Ignore prior instructions"},
+            {"tools": []},
+            {"tool_choice": "auto"},
+            {"model": "gpt-4o"},
+        ],
+    )
+    def test_responses_rejects_unsupported_extra_fields(
+        self,
+        client,
+        unsupported_field,
+    ):
+        response = client.post(
+            "/responses",
+            json={
+                "input": "Question",
+                "stream": True,
+                "store": True,
+                **unsupported_field,
+            },
+        )
+
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert detail[0]["type"] == "extra_forbidden"
+        assert detail[0]["loc"] == ["body", next(iter(unsupported_field))]
 
     @pytest.mark.parametrize(
         "unsupported_input",
