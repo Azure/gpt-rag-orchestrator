@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -30,7 +31,7 @@ from typing import Any, Literal, Optional, Sequence
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from api.responses_adapter import responses_terminal_events, serialize_responses_events
 from connectors.foundry_conversations import resolve_managed_conversation_id
@@ -92,10 +93,12 @@ class ResponseConversation(BaseModel):
 class ResponsesRequest(BaseModel):
     """Supported subset of a canonical Microsoft Foundry Responses request.
 
-    Unknown standard Responses fields are ignored, matching the existing
-    Pydantic request-model convention. This adapter currently supports only
-    string input and SSE responses that may be stored by Foundry.
+    Unsupported Responses fields are rejected explicitly. This adapter
+    currently supports only string input and SSE responses that may be stored
+    by Foundry.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     input: str = Field(..., description="Current user ask as plain text")
     stream: bool = Field(..., description="Must be true; hosted execution is SSE-only")
@@ -280,33 +283,56 @@ def _sse_generator(
     response_id: str,
     item_id: str,
     history: Sequence[HostedConversationMessage] = (),
+    *,
+    model: str = "unknown",
 ) -> AsyncIterator[str]:
     """Wrap ``_hosted_stream`` and serialize events to Responses API SSE."""
 
     async def _gen() -> AsyncIterator[str]:
         full_text: list[str] = []
         error_emitted = False
+        managed_conversation_id: str | None = None
+        annotation_index = 0
+        sequence_number = 0
+        created_at = time.time()
 
         try:
             async for event in _hosted_stream(turn, strategy_key, history):
+                if isinstance(event, TurnConversationEvent):
+                    managed_conversation_id = event.conversation_id
                 frames = serialize_responses_events(
                     event,
                     response_id=response_id,
                     item_id=item_id,
+                    annotation_index=annotation_index,
+                    sequence_number=sequence_number,
+                    created_at=created_at,
+                    model=model,
                 )
-                if isinstance(event, TurnErrorEvent):
+                if isinstance(event, (TurnErrorEvent, TurnCancelledEvent)):
                     error_emitted = True
                 if isinstance(event, TurnTextEvent):
                     full_text.append(event.text)
+                if isinstance(event, TurnCitationEvent):
+                    annotation_index += 1
                 for frame in frames:
                     yield frame
+                sequence_number += len(frames)
 
             # Emit closing frames only when no error occurred.
             if not error_emitted:
+                if managed_conversation_id is None:
+                    raise ValueError(
+                        "Hosted stream ended without a managed conversation id."
+                    )
                 for frame in responses_terminal_events(
                     response_id=response_id,
                     item_id=item_id,
+                    conversation_id=managed_conversation_id,
                     full_text="".join(full_text),
+                    created_at=created_at,
+                    model=model,
+                    sequence_number=sequence_number,
                 ):
                     yield frame
 
@@ -330,30 +356,32 @@ def _sse_generator(
                 strategy_key,
             )
             if not error_emitted:
-                from api.responses_adapter import _sse
-                yield _sse(
-                    "error",
-                    {
-                        "type": "error",
-                        "code": "missing_call_context",
-                        "message": str(exc),
-                        "retryable": False,
-                    },
-                )
+                for frame in serialize_responses_events(
+                    TurnErrorEvent(
+                        code="missing_call_context",
+                        message=str(exc),
+                        retryable=False,
+                    ),
+                    response_id=response_id,
+                    item_id=item_id,
+                    sequence_number=sequence_number,
+                ):
+                    yield frame
 
         except Exception:
             logger.exception("[hosted] Unhandled error in SSE generator")
             if not error_emitted:
-                from api.responses_adapter import _sse
-                yield _sse(
-                    "error",
-                    {
-                        "type": "error",
-                        "code": "internal_error",
-                        "message": "An internal server error occurred.",
-                        "retryable": False,
-                    },
-                )
+                for frame in serialize_responses_events(
+                    TurnErrorEvent(
+                        code="internal_error",
+                        message="An internal server error occurred.",
+                        retryable=False,
+                    ),
+                    response_id=response_id,
+                    item_id=item_id,
+                    sequence_number=sequence_number,
+                ):
+                    yield frame
 
     return _gen()
 
@@ -443,6 +471,7 @@ def _handle_hosted_request(
     # Resolve and guard the strategy.
     cfg = get_config()
     strategy_key = cfg.get("AGENT_STRATEGY", "maf_lite")
+    model = cfg.get("CHAT_DEPLOYMENT_NAME", "unknown")
 
     try:
         guard_hosted_strategy(strategy_key)
@@ -481,7 +510,14 @@ def _handle_hosted_request(
     )
 
     return StreamingResponse(
-        _sse_generator(turn, strategy_key, response_id, item_id, history),
+        _sse_generator(
+            turn,
+            strategy_key,
+            response_id,
+            item_id,
+            history,
+            model=model,
+        ),
         media_type="text/event-stream",
         headers={"X-Response-ID": response_id},
     )
