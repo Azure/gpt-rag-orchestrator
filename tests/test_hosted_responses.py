@@ -997,21 +997,30 @@ class TestHostedEntrypointAPI:
 
         return TestClient(app, raise_server_exceptions=False)
 
-    def test_health_returns_ok(self, client):
-        resp = client.get("/health")
+    def test_health_and_readiness_return_same_health_response(self, client):
+        from api.hosted_entrypoint import HealthResponse, _APP_VERSION
+
+        expected = HealthResponse(
+            status="ok",
+            version=_APP_VERSION,
+            eligible_strategies=sorted(HOSTED_ELIGIBLE_STRATEGIES),
+        ).model_dump()
+
+        health = client.get("/health")
+        readiness = client.get("/readiness")
+
+        assert health.status_code == 200
+        assert readiness.status_code == 200
+        assert health.json() == expected
+        assert readiness.json() == expected
+        assert readiness.json() == health.json()
+
+    @pytest.mark.parametrize("route", ["/health", "/readiness"])
+    def test_readiness_routes_match_hosted_eligible_strategies(self, client, route):
+        resp = client.get(route)
 
         assert resp.status_code == 200
-        body = resp.json()
-        assert body["status"] == "ok"
-        assert "version" in body
-        assert isinstance(body["eligible_strategies"], list)
-        assert "maf_lite" in body["eligible_strategies"]
-
-    def test_health_eligible_strategies_matches_guard_set(self, client):
-        resp = client.get("/health")
-        body = resp.json()
-
-        assert set(body["eligible_strategies"]) == HOSTED_ELIGIBLE_STRATEGIES
+        assert set(resp.json()["eligible_strategies"]) == HOSTED_ELIGIBLE_STRATEGIES
 
     def test_invocations_rejects_unsupported_strategy(self, client, mock_config):
         original = mock_config.get.side_effect

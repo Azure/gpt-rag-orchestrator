@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Microsoft Foundry hosted-agent readiness probe contract.** Added
+  `GET /readiness` to `api.hosted_entrypoint` so the platform readiness probe no
+  longer receives HTTP 404 after Uvicorn starts. The existing `GET /health`
+  compatibility route remains available, and both endpoints return the same
+  immutable image version and hosted-eligible strategy set.
+
 ### Added
 
 - **Repository-local release skill with publication safety gates.**

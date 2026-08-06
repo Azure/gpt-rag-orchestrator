@@ -87,6 +87,10 @@ per
 Toolbox OAuth identity passthrough is the required native path and a manual
 group-filter fallback is never the default.
 
+The hosted entrypoint exposes `GET /readiness` for Microsoft Foundry readiness
+probes. The compatibility `GET /health` route returns the same immutable image
+version and hosted-eligible strategy set.
+
 The platform injects two headers on every hosted-agent request:
 
 | Header | Purpose | Forwarded to Toolbox? |
