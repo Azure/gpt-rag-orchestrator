@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- **Managed Conversation persistence for hosted Responses.** Completed
+  user/assistant turns are now appended through the Foundry Conversations Items
+  API because the pinned Agent Framework client does not support the Responses
+  `store` option. Both agent and empty-index direct-LLM routes persist history,
+  reject legacy thread IDs, initialize correctly on fresh workers, and
+  reconcile ambiguous write failures without duplicating a committed turn.
+
 - **Offline tokenizer initialization for network-isolated hosted agents.**
   Runtime images now pre-cache the `o200k_base` tokenizer during the image
   build, preventing the first hosted request from attempting public Blob

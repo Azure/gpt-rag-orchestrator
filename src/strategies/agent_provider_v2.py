@@ -19,6 +19,7 @@ resolved agent definitions) lives at module scope here.
 import asyncio
 import hashlib
 import logging
+import uuid
 from typing import Any, AsyncIterator, Optional, Sequence
 
 from azure.core.exceptions import HttpResponseError, ResourceExistsError, ResourceNotFoundError
@@ -263,7 +264,7 @@ async def stream_agent_run(
 ) -> AsyncIterator[Any]:
     """Stream ``agent.run_stream`` and, if the service rejects the run-time
     ``options`` as an invalid payload *before any output is produced*, retry once
-    without the optional token limit while preserving required persistence.
+    without the optional token limit.
 
     This guards against deployments/models where even ``max_tokens``
     (``max_output_tokens``) is not permitted alongside an agent reference. The
@@ -288,11 +289,8 @@ async def stream_agent_run(
             "retrying without the optional token limit: %s",
             sorted(options.keys()), exc,
         )
-        retry_options = (
-            {"store": options["store"]}
-            if "store" in options
-            else {}
-        )
+        retry_options = dict(options)
+        retry_options.pop("max_tokens", None)
         async for chunk in agent.run_stream(
             user_message,
             thread=thread,
@@ -352,6 +350,116 @@ async def ensure_conversation_id(conv: dict) -> str:
         conversation.id,
     )
     return conversation.id
+
+
+async def persist_conversation_turn(
+    conversation_id: str,
+    user_message: str,
+    assistant_message: str,
+) -> None:
+    """Append a completed user/assistant turn to a managed Conversation.
+
+    The pinned Azure Agent Framework chat client explicitly drops the Responses
+    ``store`` option as unsupported. Persist the completed turn through the
+    Conversations API instead so hosted compute replacements can resume the
+    full managed history.
+    """
+    client = await _get_openai_client()
+    items = [
+        {
+            "type": "message",
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": user_message,
+                }
+            ],
+        },
+        {
+            "type": "message",
+            "id": f"msg_{uuid.uuid4().hex}",
+            "role": "assistant",
+            "status": "completed",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": assistant_message,
+                    "annotations": [],
+                }
+            ],
+        },
+    ]
+    try:
+        await client.conversations.items.create(
+            conversation_id,
+            items=items,
+        )
+    except Exception:
+        if await _conversation_tail_matches(
+            client,
+            conversation_id,
+            user_message,
+            assistant_message,
+        ):
+            logging.warning(
+                "[AgentProviderV2] Conversation turn create returned an error "
+                "after the turn was committed; treating it as persisted (%s)",
+                conversation_id,
+            )
+            return
+        raise
+    logging.info(
+        "[AgentProviderV2] Persisted completed turn to conversation %s",
+        conversation_id,
+    )
+
+
+def _conversation_item_text(item: Any) -> tuple[str | None, str]:
+    """Return the role and concatenated text from a Conversation message."""
+    role = getattr(item, "role", None)
+    content = getattr(item, "content", None) or []
+    text = "".join(
+        part_text
+        for part in content
+        if isinstance((part_text := getattr(part, "text", None)), str)
+    )
+    return role, text
+
+
+async def _conversation_tail_matches(
+    client: Any,
+    conversation_id: str,
+    user_message: str,
+    assistant_message: str,
+) -> bool:
+    """Reconcile an ambiguous create failure against the persisted tail."""
+    try:
+        page = await client.conversations.items.list(
+            conversation_id,
+            limit=2,
+            order="desc",
+        )
+    except Exception:
+        logging.error(
+            "[AgentProviderV2] Failed to reconcile ambiguous Conversation "
+            "persistence for %s",
+            conversation_id,
+            exc_info=True,
+        )
+        return False
+
+    data = list(getattr(page, "data", None) or [])
+    if len(data) < 2:
+        return False
+    newest_role, newest_text = _conversation_item_text(data[0])
+    previous_role, previous_text = _conversation_item_text(data[1])
+    return (
+        newest_role == "assistant"
+        and newest_text == assistant_message
+        and previous_role == "user"
+        and previous_text == user_message
+    )
 
 
 def reset_legacy_thread(conv: dict) -> None:
