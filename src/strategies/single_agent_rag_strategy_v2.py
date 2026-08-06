@@ -524,7 +524,10 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                     agent,
                     user_message,
                     thread=thread,
-                    options={"max_tokens": self.max_completion_tokens},
+                    options={
+                        "max_tokens": self.max_completion_tokens,
+                        "store": True,
+                    },
                 ):
                     for event in event_translator.translate(chunk):
                         yield event
