@@ -77,6 +77,8 @@ except FileNotFoundError:
 class ResponseConversation(BaseModel):
     """Conversation reference accepted by the Responses API."""
 
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(..., description="Foundry-managed Conversation id")
 
     @field_validator("id", mode="before")
@@ -120,9 +122,9 @@ class ResponsesRequest(BaseModel):
         None,
         description="Foundry-managed Conversation id or an object containing its id",
     )
-    metadata: Optional[dict[str, Any]] = Field(
+    metadata: Optional[dict[str, str]] = Field(
         default_factory=dict,
-        description="Request metadata such as correlation_id and question_id",
+        description="String-valued request metadata",
     )
     agent_reference: ResponseAgentReference | None = Field(
         None,
@@ -299,6 +301,7 @@ def _sse_generator(
     history: Sequence[HostedConversationMessage] = (),
     *,
     model: str = "unknown",
+    response_metadata: dict[str, str] | None = None,
 ) -> AsyncIterator[str]:
     """Wrap ``_hosted_stream`` and serialize events to Responses API SSE."""
 
@@ -306,7 +309,6 @@ def _sse_generator(
         full_text: list[str] = []
         error_emitted = False
         managed_conversation_id: str | None = None
-        annotation_index = 0
         sequence_number = 0
         created_at = time.time()
 
@@ -318,17 +320,15 @@ def _sse_generator(
                     event,
                     response_id=response_id,
                     item_id=item_id,
-                    annotation_index=annotation_index,
                     sequence_number=sequence_number,
                     created_at=created_at,
                     model=model,
+                    response_metadata=response_metadata,
                 )
                 if isinstance(event, (TurnErrorEvent, TurnCancelledEvent)):
                     error_emitted = True
                 if isinstance(event, TurnTextEvent):
                     full_text.append(event.text)
-                if isinstance(event, TurnCitationEvent):
-                    annotation_index += 1
                 for frame in frames:
                     yield frame
                 sequence_number += len(frames)
@@ -347,6 +347,7 @@ def _sse_generator(
                     created_at=created_at,
                     model=model,
                     sequence_number=sequence_number,
+                    response_metadata=response_metadata,
                 ):
                     yield frame
 
@@ -480,6 +481,7 @@ def _handle_hosted_request(
     conversation_id: str | None,
     metadata: dict[str, Any] | None,
     history: Sequence[HostedConversationMessage] = (),
+    response_metadata: dict[str, str] | None = None,
 ) -> StreamingResponse:
     """Apply shared hosted execution and security behavior to one turn."""
     # Resolve and guard the strategy.
@@ -531,6 +533,7 @@ def _handle_hosted_request(
             item_id,
             history,
             model=model,
+            response_metadata=response_metadata,
         ),
         media_type="text/event-stream",
         headers={"X-Response-ID": response_id},
@@ -559,6 +562,7 @@ async def responses(request: Request, body: ResponsesRequest) -> StreamingRespon
         ask=body.input,
         conversation_id=conversation_id,
         metadata=body.metadata,
+        response_metadata=body.metadata,
     )
 
 

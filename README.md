@@ -91,7 +91,7 @@ The routes use distinct Microsoft Foundry request contracts:
 
 - Canonical `POST /responses` accepts a string `input`, `stream: true`,
   `store: true`, optional `conversation` as either an id string or
-  `{"id": "..."}`, optional `metadata`, and the platform-injected
+  `{"id": "..."}`, optional string-valued `metadata`, and the platform-injected
   `agent_reference` routing object. Array/multimodal input,
   non-streaming requests, non-storing managed requests, and unsupported
   Responses fields such as `previous_response_id`, `instructions`, or `tools`
@@ -102,7 +102,12 @@ The routes use distinct Microsoft Foundry request contracts:
 
 Both routes map to the same transport-neutral hosted turn execution, strategy
 guard, call-id security validation, managed Conversation handling, response
-identifiers, and Responses API SSE lifecycle.
+identifiers, and Responses API SSE lifecycle. The lifecycle uses contiguous
+sequence numbers and returns the same managed Conversation as
+`{"conversation": {"id": "..."}}` in its opening and completed Response
+objects. Internal orchestration tool progress and citations remain internal
+until they can be represented with complete standards-compliant public item
+lifecycles.
 
 The hosted entrypoint exposes `GET /readiness` for Microsoft Foundry readiness
 probes. The compatibility `GET /health` route returns the same immutable image
