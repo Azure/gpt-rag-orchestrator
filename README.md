@@ -87,8 +87,19 @@ the Foundry hosted-agent protocol 2.0 call context — per
 Toolbox OAuth identity passthrough is the required native path and a manual
 group-filter fallback is never the default.
 
-The compatibility `POST /invocations` route uses the same request validation,
-identity guard, and Responses API SSE handler as `POST /responses`.
+The routes use distinct Microsoft Foundry request contracts:
+
+- Canonical `POST /responses` accepts a string `input`, `stream: true`,
+  `store: true`, optional `conversation` as either an id string or
+  `{"id": "..."}`, and optional `metadata`. Array/multimodal input,
+  non-streaming requests, and non-storing managed requests return HTTP 422.
+- Compatibility `POST /invocations` retains ordered
+  `messages`, optional `conversation_id`, and optional `metadata`, including
+  projection of prior message history.
+
+Both routes map to the same transport-neutral hosted turn execution, strategy
+guard, call-id security validation, managed Conversation handling, response
+identifiers, and Responses API SSE lifecycle.
 
 The hosted entrypoint exposes `GET /readiness` for Microsoft Foundry readiness
 probes. The compatibility `GET /health` route returns the same immutable image
@@ -101,8 +112,8 @@ The platform injects two headers on every hosted-agent request:
 | `x-agent-user-id` | Per-user container partition key. | No — container-side only. |
 | `x-agent-foundry-call-id` | Opaque per-request call identifier. | Yes — the only supported identity passthrough correlation token. |
 
-`POST /responses` and its `POST /invocations` compatibility alias capture and
-strictly validate `x-agent-foundry-call-id`
+`POST /responses` and compatibility `POST /invocations` capture and strictly
+validate `x-agent-foundry-call-id`
 (printable ASCII, no spaces or control characters, 256 characters max)
 whenever the resolved strategy is Toolbox-backed (currently only `mcp`). A
 missing or malformed value is rejected with **HTTP 401** before any strategy
