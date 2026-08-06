@@ -103,6 +103,9 @@ The routes use distinct Microsoft Foundry request contracts:
 Both routes map to the same transport-neutral hosted turn execution, strategy
 guard, call-id security validation, managed Conversation handling, response
 identifiers, and Responses API SSE lifecycle. The lifecycle uses contiguous
+
+The runtime image pre-caches its tokenizer during the build so hosted requests
+do not require public Blob Storage egress in network-isolated environments. The lifecycle uses contiguous
 sequence numbers and returns the same managed Conversation as
 `{"conversation": {"id": "..."}}` in its opening and completed Response
 objects. Internal orchestration tool progress and citations remain internal

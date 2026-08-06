@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- **Offline tokenizer initialization for network-isolated hosted agents.**
+  Runtime images now pre-cache the `o200k_base` tokenizer during the image
+  build, preventing the first hosted request from attempting public Blob
+  Storage egress in private-only deployments.
+
 - **Microsoft Foundry hosted-agent Responses route contract.** Added canonical
   `POST /responses` handling for string `input`, `stream: true`, `store: true`,
   optional string/object `conversation`, and optional string-valued `metadata`,

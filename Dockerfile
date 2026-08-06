@@ -53,6 +53,13 @@ COPY requirements.txt .
 RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
+# Hosted runtimes may not have public egress. Cache the tokenizer needed by
+# current chat models while the image is built so requests never download it.
+ENV TIKTOKEN_CACHE_DIR="/app/.cache/tiktoken"
+RUN mkdir -p "$TIKTOKEN_CACHE_DIR" \
+    && python -c "import tiktoken; tiktoken.get_encoding('o200k_base')" \
+    && chmod -R a+rX "$TIKTOKEN_CACHE_DIR"
+
 # 7. Copy app code, expose port, and launch
 COPY . .
 # Copy the pre-built dashboard bundle from the frontend stage. When
