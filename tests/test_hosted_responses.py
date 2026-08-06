@@ -5,7 +5,7 @@ Covers:
 - Terminal closing frames after the text stream
 - Hosted strategy guard (explicit failure for unsupported strategies)
 - Hosted stream execution without Cosmos dependency
-- Hosted FastAPI endpoints (health and invocations)
+- Hosted FastAPI endpoints (health, readiness, responses, and invocations)
 """
 
 from __future__ import annotations
@@ -1021,6 +1021,59 @@ class TestHostedEntrypointAPI:
 
         assert resp.status_code == 200
         assert set(resp.json()["eligible_strategies"]) == HOSTED_ELIGIBLE_STRATEGIES
+
+    def test_responses_and_invocations_share_route_contract(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        responses_contract = paths["/responses"]["post"]
+        invocations_contract = paths["/invocations"]["post"]
+
+        assert responses_contract["requestBody"] == invocations_contract["requestBody"]
+        assert responses_contract["responses"] == invocations_contract["responses"]
+
+    def test_responses_and_invocations_reject_same_invalid_request(self, client):
+        payload = {"messages": [{"role": "assistant", "content": "Hi"}]}
+
+        responses = client.post("/responses", json=payload)
+        invocations = client.post("/invocations", json=payload)
+
+        assert responses.status_code == 422
+        assert responses.json() == invocations.json()
+
+    def test_responses_and_invocations_stream_identical_sse(self, client, mock_config):
+        original = mock_config.get.side_effect
+        mock_config.get.side_effect = (
+            lambda key, default=None, type=str:
+            "maf_lite" if key == "AGENT_STRATEGY" else original(key, default, type)
+        )
+
+        async def fake_flow(_ask):
+            yield "Hello "
+            yield "world"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+        payload = {
+            "messages": [{"role": "user", "content": "What is the policy?"}],
+            "conversation_id": "conv-route-parity",
+        }
+
+        with (
+            patch(
+                "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+                new=AsyncMock(return_value=strategy),
+            ),
+            patch(
+                "api.hosted_entrypoint.uuid.uuid4",
+                return_value=SimpleNamespace(hex="fixed-response-id"),
+            ),
+        ):
+            responses = client.post("/responses", json=payload)
+            invocations = client.post("/invocations", json=payload)
+
+        assert responses.status_code == 200
+        assert responses.headers["content-type"] == invocations.headers["content-type"]
+        assert responses.headers["X-Response-ID"] == invocations.headers["X-Response-ID"]
+        assert responses.text == invocations.text
 
     def test_invocations_rejects_unsupported_strategy(self, client, mock_config):
         original = mock_config.get.side_effect
