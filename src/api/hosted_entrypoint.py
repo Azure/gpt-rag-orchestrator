@@ -310,16 +310,15 @@ async def health() -> HealthResponse:
     )
 
 
-@app.post(
-    "/invocations",
-    summary="Handle a Foundry invocation",
-    description=(
+_HOSTED_RESPONSES_ROUTE_OPTIONS: dict[str, Any] = {
+    "summary": "Handle a Foundry response",
+    "description": (
         "Accepts one conversation turn from the Foundry runtime and streams "
         "a response in the Azure AI Foundry Responses API SSE format.  "
         "Only hosted-eligible strategies are admitted; unsupported strategies "
         "return HTTP 422."
     ),
-    responses={
+    "responses": {
         200: {
             "description": "OK — Responses API SSE stream",
             "content": {"text/event-stream": {}},
@@ -350,9 +349,22 @@ async def health() -> HealthResponse:
             },
         },
     },
+}
+
+
+@app.post(
+    "/invocations",
+    **_HOSTED_RESPONSES_ROUTE_OPTIONS,
+)
+@app.post(
+    "/responses",
+    **_HOSTED_RESPONSES_ROUTE_OPTIONS,
 )
 async def invocations(request: Request, body: InvocationRequest) -> StreamingResponse:
-    """Translate a Foundry invocation into a Responses API SSE stream.
+    """Translate a Foundry Responses request into a Responses API SSE stream.
+
+    ``POST /responses`` is the canonical Microsoft Foundry route.
+    ``POST /invocations`` remains as a compatibility alias.
 
     The final message must be the current user ask. Messages after the current
     ask are rejected rather than silently discarded. Responses-backed

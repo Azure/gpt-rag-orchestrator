@@ -79,13 +79,16 @@ rewriting the existing SSE configuration.
 
 ### Foundry hosted-agent Toolbox identity passthrough
 
-When the orchestrator runs as a Microsoft Foundry hosted agent (`api.hosted_entrypoint`,
-`POST /invocations`) with `AGENT_STRATEGY=mcp`, document-security identity is
-established solely through the Foundry hosted-agent protocol 2.0 call context —
-per
+When the orchestrator runs as a Microsoft Foundry hosted agent
+(`api.hosted_entrypoint`, canonical `POST /responses`) with
+`AGENT_STRATEGY=mcp`, document-security identity is established solely through
+the Foundry hosted-agent protocol 2.0 call context — per
 [Azure/GPT-RAG ADR-0001](https://github.com/Azure/GPT-RAG/blob/main/docs/adr/ADR-0001-hosted-agents.md),
 Toolbox OAuth identity passthrough is the required native path and a manual
 group-filter fallback is never the default.
+
+The compatibility `POST /invocations` route uses the same request validation,
+identity guard, and Responses API SSE handler as `POST /responses`.
 
 The hosted entrypoint exposes `GET /readiness` for Microsoft Foundry readiness
 probes. The compatibility `GET /health` route returns the same immutable image
@@ -98,7 +101,8 @@ The platform injects two headers on every hosted-agent request:
 | `x-agent-user-id` | Per-user container partition key. | No — container-side only. |
 | `x-agent-foundry-call-id` | Opaque per-request call identifier. | Yes — the only supported identity passthrough correlation token. |
 
-`POST /invocations` captures and strictly validates `x-agent-foundry-call-id`
+`POST /responses` and its `POST /invocations` compatibility alias capture and
+strictly validate `x-agent-foundry-call-id`
 (printable ASCII, no spaces or control characters, 256 characters max)
 whenever the resolved strategy is Toolbox-backed (currently only `mcp`). A
 missing or malformed value is rejected with **HTTP 401** before any strategy

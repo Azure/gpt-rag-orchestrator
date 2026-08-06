@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Microsoft Foundry hosted-agent Responses route contract.** Added canonical
+  `POST /responses` routing to `api.hosted_entrypoint` so real Foundry Responses
+  requests no longer receive HTTP 404. The existing `POST /invocations` route
+  remains as a compatibility alias over the same request validation, identity
+  guard, and Responses API SSE handler.
+
 - **Microsoft Foundry hosted-agent readiness probe contract.** Added
   `GET /readiness` to `api.hosted_entrypoint` so the platform readiness probe no
   longer receives HTTP 404 after Uvicorn starts. The existing `GET /health`
