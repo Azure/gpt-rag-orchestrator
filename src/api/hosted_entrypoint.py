@@ -9,7 +9,8 @@ classic ``main.py`` so that:
 - Only ADR-eligible strategies are admitted; unsupported strategies fail
   explicitly rather than silently falling back.
 - The hosted image is immutable: the ``VERSION`` file is read once at startup
-  and served on the ``GET /health`` endpoint.
+  and served on the ``GET /readiness`` and compatibility ``GET /health``
+  endpoints.
 
 Usage::
 
@@ -290,6 +291,15 @@ app = FastAPI(
     description=(
         "Returns the immutable image version and the set of strategies "
         "eligible for this hosted runtime.  Use for container readiness probes."
+    ),
+)
+@app.get(
+    "/readiness",
+    response_model=HealthResponse,
+    summary="Readiness check",
+    description=(
+        "Returns the immutable image version and the set of strategies "
+        "eligible for this hosted runtime."
     ),
 )
 async def health() -> HealthResponse:
