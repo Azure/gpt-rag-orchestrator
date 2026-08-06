@@ -1464,6 +1464,54 @@ class TestHostedEntrypointAPI:
         assert detail[0]["type"] == "extra_forbidden"
         assert detail[0]["loc"] == ["body", next(iter(unsupported_field))]
 
+    def test_responses_accepts_foundry_injected_agent_reference(
+        self, client, mock_config
+    ):
+        self._use_strategy(mock_config, "maf_lite")
+
+        with patch(
+            "api.hosted_entrypoint._sse_generator",
+            new=lambda *args, **kwargs: _async_gen(
+                ["event: response.completed\ndata: {}\n\n"]
+            ),
+        ):
+            response = client.post(
+                "/responses",
+                json={
+                    "input": "Question",
+                    "stream": True,
+                    "store": True,
+                    "agent_reference": {
+                        "type": "agent_reference",
+                        "name": "gpt-rag-orchestrator",
+                        "version": "3",
+                    },
+                },
+            )
+
+        assert response.status_code == 200
+
+    def test_responses_rejects_malformed_agent_reference(
+        self, client, mock_config
+    ):
+        self._use_strategy(mock_config, "maf_lite")
+
+        response = client.post(
+            "/responses",
+            json={
+                "input": "Question",
+                "stream": True,
+                "store": True,
+                "agent_reference": {
+                    "type": "unexpected",
+                    "name": "gpt-rag-orchestrator",
+                    "version": "3",
+                },
+            },
+        )
+
+        assert response.status_code == 422
+
     @pytest.mark.parametrize(
         "unsupported_input",
         [

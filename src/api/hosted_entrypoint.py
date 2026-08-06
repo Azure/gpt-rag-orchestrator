@@ -92,6 +92,16 @@ class ResponseConversation(BaseModel):
         return value
 
 
+class ResponseAgentReference(BaseModel):
+    """Foundry routing metadata injected into hosted Responses requests."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["agent_reference"]
+    name: str
+    version: str
+
+
 class ResponsesRequest(BaseModel):
     """Supported subset of a canonical Microsoft Foundry Responses request.
 
@@ -115,6 +125,10 @@ class ResponsesRequest(BaseModel):
     metadata: Optional[dict[str, str]] = Field(
         default_factory=dict,
         description="String-valued request metadata",
+    )
+    agent_reference: ResponseAgentReference | None = Field(
+        None,
+        description="Foundry-injected routing metadata; not projected into execution state",
     )
 
     @field_validator("input", mode="before")
