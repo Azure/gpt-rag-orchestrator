@@ -69,6 +69,13 @@ def _parse_frames(frames: list[str]) -> list[dict[str, Any]]:
     return result
 
 
+def _parse_sse_stream(body: str) -> list[dict[str, Any]]:
+    """Parse a complete SSE response body into typed frame dictionaries."""
+    return _parse_frames(
+        [f"{frame}\n\n" for frame in body.strip().split("\n\n") if frame]
+    )
+
+
 def _serialize(event, **kwargs):
     return _parse_frames(
         serialize_responses_events(
@@ -140,28 +147,20 @@ class TestResponsesAdapterTextEvent:
 
 
 class TestResponsesAdapterCitationEvent:
-    def test_emits_annotation_added(self):
-        citation = TurnCitation(
-            "src-1", title="Policy Doc", url="https://example.com/policy", snippet="Relevant excerpt"
-        )
-        frames = _serialize(TurnCitationEvent(citation=citation))
-
-        assert len(frames) == 1
-        assert frames[0]["event"] == "response.output_text.annotation.added"
-        ann = frames[0]["data"]["annotation"]
-        assert ann["citation_id"] == "src-1"
-        assert ann["title"] == "Policy Doc"
-        assert ann["url"] == "https://example.com/policy"
-        assert ann["snippet"] == "Relevant excerpt"
-
-    def test_omits_none_optional_fields(self):
-        citation = TurnCitation("src-2")
-        frames = _serialize(TurnCitationEvent(citation=citation))
-
-        ann = frames[0]["data"]["annotation"]
-        assert "title" not in ann
-        assert "url" not in ann
-        assert "snippet" not in ann
+    @pytest.mark.parametrize(
+        "citation",
+        [
+            TurnCitation(
+                "src-1",
+                title="Policy Doc",
+                url="https://example.com/policy",
+                snippet="Relevant excerpt",
+            ),
+            TurnCitation("src-2"),
+        ],
+    )
+    def test_internal_citation_without_text_offsets_is_not_emitted(self, citation):
+        assert _serialize(TurnCitationEvent(citation=citation)) == []
 
 
 class TestResponsesAdapterToolActivityEvent:
@@ -183,12 +182,13 @@ class TestResponsesAdapterErrorEvent:
         assert frames[0]["event"] == "error"
         assert frames[0]["data"]["code"] == "internal_error"
         assert frames[0]["data"]["message"] == "Something broke"
-        assert frames[0]["data"]["retryable"] is False
+        assert frames[0]["data"]["param"] is None
+        assert "retryable" not in frames[0]["data"]
 
-    def test_retryable_flag_is_preserved(self):
+    def test_internal_retryable_flag_is_not_added_to_standard_error(self):
         frames = _serialize(TurnErrorEvent(retryable=True))
 
-        assert frames[0]["data"]["retryable"] is True
+        assert "retryable" not in frames[0]["data"]
 
 
 class TestResponsesAdapterCancelledEvent:
@@ -199,6 +199,7 @@ class TestResponsesAdapterCancelledEvent:
         assert frames[0]["event"] == "error"
         assert frames[0]["data"]["code"] == "cancelled"
         assert frames[0]["data"]["message"] == "cancelled"
+        assert frames[0]["data"]["param"] is None
 
 
 class TestResponsesAdapterSDKModels:
@@ -316,6 +317,21 @@ class TestResponsesTerminalEvents:
         assert response["tools"] == []
         assert response["tool_choice"] == "none"
         assert response["parallel_tool_calls"] is False
+
+    def test_response_completed_echoes_canonical_metadata(self):
+        frames = _parse_frames(
+            responses_terminal_events(
+                response_id=_RESP_ID,
+                item_id=_ITEM_ID,
+                conversation_id=_CONVERSATION_ID,
+                full_text="",
+                response_metadata={"question_id": "question-1"},
+            )
+        )
+
+        assert frames[-1]["data"]["response"]["metadata"] == {
+            "question_id": "question-1"
+        }
 
 
 # ── Strategy guard ───────────────────────────────────────────────────────────
@@ -980,6 +996,10 @@ class TestSseGeneratorLifecycle:
         assert [frame["data"]["sequence_number"] for frame in parsed] == list(
             range(len(parsed))
         )
+        assert not any(
+            frame["event"] == "response.output_text.annotation.added"
+            for frame in parsed
+        )
 
     @pytest.mark.asyncio
     async def test_completed_response_recovers_managed_conversation_from_stream(self):
@@ -1019,6 +1039,13 @@ class TestSseGeneratorLifecycle:
                     "search_kb",
                     TurnToolStatus.STARTED,
                     call_id="call-1",
+                )
+            )
+            yield TurnCitationEvent(
+                TurnCitation(
+                    "src-internal",
+                    title="Internal source",
+                    url="https://example.invalid/source",
                 )
             )
             yield TurnTextEvent("answer")
@@ -1214,6 +1241,20 @@ class TestHostedEntrypointAPI:
         async def fake_flow(ask):
             received["ask"] = ask
             yield "Hello "
+            yield TurnCitationEvent(
+                TurnCitation(
+                    "src-internal",
+                    title="Internal source",
+                    url="https://example.invalid/source",
+                )
+            )
+            yield TurnToolActivityEvent(
+                TurnToolActivity(
+                    "search_kb",
+                    TurnToolStatus.STARTED,
+                    call_id="call-internal",
+                )
+            )
             yield "world"
 
         strategy = MagicMock()
@@ -1239,6 +1280,20 @@ class TestHostedEntrypointAPI:
         delta = response.text.index("event: response.output_text.delta")
         completed = response.text.index("event: response.completed")
         assert created < delta < completed
+        frames = _parse_sse_stream(response.text)
+        assert [frame["data"]["sequence_number"] for frame in frames] == list(
+            range(len(frames))
+        )
+        assert not any(
+            frame["event"] in {
+                "response.output_text.annotation.added",
+                "response.function_call_arguments.delta",
+                "response.function_call_arguments.done",
+            }
+            for frame in frames
+        )
+        for frame in frames:
+            _RESPONSE_EVENT_ADAPTER.validate_python(frame["data"])
 
     @pytest.mark.parametrize(
         ("conversation", "expected_id"),
@@ -1293,6 +1348,25 @@ class TestHostedEntrypointAPI:
         assert "event: response.output_text.delta" in response.text
         assert "event: response.completed" in response.text
 
+    def test_responses_rejects_extra_conversation_object_fields(self, client):
+        response = client.post(
+            "/responses",
+            json={
+                "input": "Continue",
+                "stream": True,
+                "store": True,
+                "conversation": {"id": "conv-object", "unexpected": "value"},
+            },
+        )
+
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert any(
+            error["type"] == "extra_forbidden"
+            and error["loc"][-2:] == ["ResponseConversation", "unexpected"]
+            for error in detail
+        )
+
     def test_responses_maps_metadata_without_projecting_legacy_history(
         self, client, mock_config
     ):
@@ -1307,6 +1381,7 @@ class TestHostedEntrypointAPI:
             history,
             *,
             model,
+            response_metadata,
         ):
             captured.update(
                 turn=turn,
@@ -1315,6 +1390,7 @@ class TestHostedEntrypointAPI:
                 item_id=item_id,
                 history=history,
                 model=model,
+                response_metadata=response_metadata,
             )
             return _async_gen(["event: response.completed\ndata: {}\n\n"])
 
@@ -1337,6 +1413,26 @@ class TestHostedEntrypointAPI:
         assert captured["turn"].correlation_id == "correlation-1"
         assert captured["history"] == ()
         assert captured["model"] == _MODEL
+        assert captured["response_metadata"] == {
+            "question_id": "question-1",
+            "correlation_id": "correlation-1",
+        }
+
+    def test_responses_rejects_non_string_metadata_values(self, client):
+        response = client.post(
+            "/responses",
+            json={
+                "input": "Question",
+                "stream": True,
+                "store": True,
+                "metadata": {"nested": {"unsupported": True}},
+            },
+        )
+
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert detail[0]["type"] == "string_type"
+        assert detail[0]["loc"] == ["body", "metadata", "nested"]
 
     @pytest.mark.parametrize(
         "unsupported_field",
@@ -1598,6 +1694,11 @@ class TestHostedEntrypointAPI:
             },
             "user_context": {},
         }
+        frames = _parse_sse_stream(resp.text)
+        for frame in frames:
+            _RESPONSE_EVENT_ADAPTER.validate_python(frame["data"])
+        assert frames[0]["data"]["response"].get("metadata") is None
+        assert frames[-1]["data"]["response"].get("metadata") is None
 
     # ── ADR-0001 Foundry Toolbox call-id passthrough (Azure/GPT-RAG#591) ────
 

@@ -59,9 +59,10 @@ def _response(
     model: str,
     status: str,
     output: list[dict],
+    metadata: dict[str, str] | None = None,
 ) -> dict:
     """Build the required common fields of an SDK Responses object."""
-    return {
+    response = {
         "id": response_id,
         "created_at": created_at,
         "model": model,
@@ -73,6 +74,9 @@ def _response(
         "tool_choice": "none",
         "parallel_tool_calls": False,
     }
+    if metadata is not None:
+        response["metadata"] = metadata
+    return response
 
 
 def serialize_responses_events(
@@ -82,10 +86,10 @@ def serialize_responses_events(
     item_id: str,
     output_index: int = 0,
     content_index: int = 0,
-    annotation_index: int = 0,
     sequence_number: int = 0,
     created_at: float = 0.0,
     model: str = "unknown",
+    response_metadata: dict[str, str] | None = None,
 ) -> list[str]:
     """Translate one typed turn event into Foundry Responses API SSE frames.
 
@@ -110,6 +114,7 @@ def serialize_responses_events(
                         model=model,
                         status="in_progress",
                         output=[],
+                        metadata=response_metadata,
                     ),
                 },
             ),
@@ -152,31 +157,10 @@ def serialize_responses_events(
         ]
 
     if isinstance(event, TurnCitationEvent):
-        c = event.citation
-        annotation: dict = {
-            "type": "url_citation",
-            "citation_id": c.citation_id,
-        }
-        if c.title is not None:
-            annotation["title"] = c.title
-        if c.url is not None:
-            annotation["url"] = c.url
-        if c.snippet is not None:
-            annotation["snippet"] = c.snippet
-        return [
-            _sse(
-                "response.output_text.annotation.added",
-                {
-                    "type": "response.output_text.annotation.added",
-                    "sequence_number": sequence_number,
-                    "item_id": item_id,
-                    "output_index": output_index,
-                    "content_index": content_index,
-                    "annotation_index": annotation_index,
-                    "annotation": annotation,
-                },
-            )
-        ]
+        # Turn citations do not carry the character offsets required by public
+        # Responses annotations. Keep them internal rather than emitting an
+        # annotation that cannot be reconciled with the terminal output text.
+        return []
 
     if isinstance(event, TurnToolActivityEvent):
         # Tool activity is internal progress telemetry, not a model-authored
@@ -194,7 +178,7 @@ def serialize_responses_events(
                     "sequence_number": sequence_number,
                     "code": event.code,
                     "message": event.message,
-                    "retryable": event.retryable,
+                    "param": None,
                 },
             )
         ]
@@ -208,6 +192,7 @@ def serialize_responses_events(
                     "sequence_number": sequence_number,
                     "code": "cancelled",
                     "message": event.reason,
+                    "param": None,
                 },
             )
         ]
@@ -226,6 +211,7 @@ def responses_terminal_events(
     output_index: int = 0,
     content_index: int = 0,
     sequence_number: int = 0,
+    response_metadata: dict[str, str] | None = None,
 ) -> list[str]:
     """Return the closing SSE frames emitted after all deltas have been sent.
 
@@ -278,6 +264,7 @@ def responses_terminal_events(
                     model=model,
                     status="completed",
                     output=[_output_message(item_id, full_text, "completed")],
+                    metadata=response_metadata,
                 ),
             },
         ),
