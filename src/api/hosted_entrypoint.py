@@ -30,7 +30,7 @@ from typing import Any, Literal, Optional, Sequence
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.responses_adapter import responses_terminal_events, serialize_responses_events
 from connectors.foundry_conversations import resolve_managed_conversation_id
@@ -70,7 +70,93 @@ except FileNotFoundError:
     _APP_VERSION = "0.0.0"
 
 
-# ── Pydantic schemas for the Foundry invocation contract ────────────────────
+# ── Pydantic schemas for the Foundry hosted-agent contracts ─────────────────
+
+
+class ResponseConversation(BaseModel):
+    """Conversation reference accepted by the Responses API."""
+
+    id: str = Field(..., description="Foundry-managed Conversation id")
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def validate_id(cls, value: Any) -> str:
+        if not isinstance(value, str):
+            raise ValueError("Conversation id must be a string.")
+        value = value.strip()
+        if not value:
+            raise ValueError("Conversation id must not be empty.")
+        return value
+
+
+class ResponsesRequest(BaseModel):
+    """Supported subset of a canonical Microsoft Foundry Responses request.
+
+    Unknown standard Responses fields are ignored, matching the existing
+    Pydantic request-model convention. This adapter currently supports only
+    string input and SSE responses that may be stored by Foundry.
+    """
+
+    input: str = Field(..., description="Current user ask as plain text")
+    stream: bool = Field(..., description="Must be true; hosted execution is SSE-only")
+    store: bool = Field(
+        True,
+        description="Must be true; non-storing managed execution is not supported",
+    )
+    conversation: str | ResponseConversation | None = Field(
+        None,
+        description="Foundry-managed Conversation id or an object containing its id",
+    )
+    metadata: Optional[dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Request metadata such as correlation_id and question_id",
+    )
+
+    @field_validator("input", mode="before")
+    @classmethod
+    def validate_input(cls, value: Any) -> str:
+        if not isinstance(value, str):
+            raise ValueError(
+                "Only string input is supported; array and multimodal input are not supported."
+            )
+        value = value.strip()
+        if not value:
+            raise ValueError("Input must not be empty or whitespace.")
+        return value
+
+    @field_validator("stream", mode="before")
+    @classmethod
+    def validate_stream(cls, value: Any) -> bool:
+        if value is not True:
+            raise ValueError(
+                "Only stream=true is supported; this hosted endpoint returns "
+                "an SSE stream."
+            )
+        return True
+
+    @field_validator("store", mode="before")
+    @classmethod
+    def validate_store(cls, value: Any) -> bool:
+        if value is not True:
+            raise ValueError(
+                "Only store=true is supported; non-storing managed execution is not supported."
+            )
+        return True
+
+    @field_validator("conversation", mode="before")
+    @classmethod
+    def validate_conversation(cls, value: Any) -> Any:
+        if value is None or isinstance(value, dict):
+            return value
+        if not isinstance(value, str):
+            raise ValueError(
+                "Conversation must be a string id or an object containing an id."
+            )
+        value = value.strip()
+        if not value:
+            raise ValueError("Conversation id must not be empty.")
+        return value
+
 
 class InvocationMessage(BaseModel):
     """One message turn in the inbound invocation request."""
@@ -225,8 +311,8 @@ def _sse_generator(
                     yield frame
 
         except MissingFoundryCallContextError as exc:
-            # Defense-in-depth only: the normal ``/invocations`` path already
-            # rejects a missing/malformed call id with an HTTP 401 *before*
+            # Defense-in-depth only: the normal hosted HTTP paths already
+            # reject a missing/malformed call id with an HTTP 401 *before*
             # ``StreamingResponse`` is constructed, so this branch cannot be
             # reached from a real HTTP request today. It exists solely to
             # correctly classify the error if some future/internal caller
@@ -240,7 +326,7 @@ def _sse_generator(
             # below.
             logger.warning(
                 "[hosted] Missing Foundry call context reached SSE generator "
-                "directly (bypassed /invocations precheck) for strategy=%s",
+                "directly (bypassed hosted route precheck) for strategy=%s",
                 strategy_key,
             )
             if not error_emitted:
@@ -310,93 +396,50 @@ async def health() -> HealthResponse:
     )
 
 
-_HOSTED_RESPONSES_ROUTE_OPTIONS: dict[str, Any] = {
-    "summary": "Handle a Foundry response",
-    "description": (
-        "Accepts one conversation turn from the Foundry runtime and streams "
-        "a response in the Azure AI Foundry Responses API SSE format.  "
-        "Only hosted-eligible strategies are admitted; unsupported strategies "
-        "return HTTP 422."
-    ),
-    "responses": {
-        200: {
-            "description": "OK — Responses API SSE stream",
-            "content": {"text/event-stream": {}},
-        },
-        401: {
-            "description": (
-                "Missing or malformed platform call context — hosted "
-                "retrieval failed closed rather than falling back to "
-                "service identity or a manual filter."
-            ),
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": (
-                            "Missing or malformed platform call context "
-                            "('x-agent-foundry-call-id')."
-                        )
-                    }
+_HOSTED_STREAM_RESPONSES: dict[int | str, dict[str, Any]] = {
+    200: {
+        "description": "OK — Responses API SSE stream",
+        "content": {"text/event-stream": {}},
+    },
+    401: {
+        "description": (
+            "Missing or malformed platform call context — hosted retrieval "
+            "failed closed rather than falling back to service identity or a "
+            "manual filter."
+        ),
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": (
+                        "Missing or malformed platform call context "
+                        "('x-agent-foundry-call-id')."
+                    )
                 }
-            },
+            }
         },
-        422: {
-            "description": "Unsupported strategy or validation error",
-            "content": {
-                "application/json": {
-                    "example": {"detail": "Strategy 'multimodal' is not supported in the hosted runtime."}
+    },
+    422: {
+        "description": "Unsupported request value, strategy, or validation error",
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": "Strategy 'multimodal' is not supported in the hosted runtime."
                 }
-            },
+            }
         },
     },
 }
 
 
-@app.post(
-    "/invocations",
-    **_HOSTED_RESPONSES_ROUTE_OPTIONS,
-)
-@app.post(
-    "/responses",
-    **_HOSTED_RESPONSES_ROUTE_OPTIONS,
-)
-async def invocations(request: Request, body: InvocationRequest) -> StreamingResponse:
-    """Translate a Foundry Responses request into a Responses API SSE stream.
-
-    ``POST /responses`` is the canonical Microsoft Foundry route.
-    ``POST /invocations`` remains as a compatibility alias.
-
-    The final message must be the current user ask. Messages after the current
-    ask are rejected rather than silently discarded. Responses-backed
-    strategies validate a supplied ``conversation_id`` or create a real managed
-    Conversation when it is absent.
-
-    Toolbox-integrated strategies additionally require the platform-injected
-    ``x-agent-foundry-call-id`` header (Foundry hosted-agent container
-    protocol 2.0). This container never reads or forwards ``Authorization``,
-    and never trusts caller/model identity fields or ``x-client`` group
-    claims — the opaque call id is the only supported identity-passthrough
-    correlation, echoed to Toolbox so it can resolve the signed-in user and
-    supply per-user credentials. When the header is absent or malformed,
-    hosted retrieval fails closed with HTTP 401 rather than falling back to
-    service identity or a manual ``metadata_security_id`` filter.
-    """
-    current_message = body.messages[-1]
-    if current_message.role != "user":
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "The final message must have role='user'; messages after the "
-                "current ask are not allowed."
-            ),
-        )
-    ask = current_message.content.strip()
-    if not ask:
-        raise HTTPException(
-            status_code=422,
-            detail="The last user message must not be empty.",
-        )
-
+def _handle_hosted_request(
+    request: Request,
+    *,
+    ask: str,
+    conversation_id: str | None,
+    metadata: dict[str, Any] | None,
+    history: Sequence[HostedConversationMessage] = (),
+) -> StreamingResponse:
+    """Apply shared hosted execution and security behavior to one turn."""
     # Resolve and guard the strategy.
     cfg = get_config()
     strategy_key = cfg.get("AGENT_STRATEGY", "maf_lite")
@@ -417,14 +460,10 @@ async def invocations(request: Request, body: InvocationRequest) -> StreamingRes
             raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     # Build the transport-neutral turn request.
-    metadata = body.metadata or {}
-    history: list[HostedConversationMessage] = [
-        {"role": message.role, "text": message.content}
-        for message in body.messages[:-1]
-    ]
+    metadata = metadata or {}
     turn = TurnRequest(
         ask=ask,
-        conversation_id=body.conversation_id,
+        conversation_id=conversation_id,
         question_id=metadata.get("question_id"),
         user_context={},
         correlation_id=metadata.get("correlation_id"),
@@ -437,7 +476,7 @@ async def invocations(request: Request, body: InvocationRequest) -> StreamingRes
     logger.info(
         "[hosted] invocation: strategy=%s conversation_id=%s response_id=%s",
         strategy_key,
-        body.conversation_id or "∅",
+        conversation_id or "∅",
         response_id,
     )
 
@@ -445,4 +484,75 @@ async def invocations(request: Request, body: InvocationRequest) -> StreamingRes
         _sse_generator(turn, strategy_key, response_id, item_id, history),
         media_type="text/event-stream",
         headers={"X-Response-ID": response_id},
+    )
+
+
+@app.post(
+    "/responses",
+    summary="Handle a canonical Foundry Responses request",
+    description=(
+        "Accepts canonical string input with stream=true and store=true, then "
+        "streams Azure AI Foundry Responses API SSE events. Conversation may "
+        "be a string id or an object containing id."
+    ),
+    responses=_HOSTED_STREAM_RESPONSES,
+)
+async def responses(request: Request, body: ResponsesRequest) -> StreamingResponse:
+    """Map a canonical Microsoft Foundry Responses request to hosted execution."""
+    conversation_id = (
+        body.conversation.id
+        if isinstance(body.conversation, ResponseConversation)
+        else body.conversation
+    )
+    return _handle_hosted_request(
+        request,
+        ask=body.input,
+        conversation_id=conversation_id,
+        metadata=body.metadata,
+    )
+
+
+@app.post(
+    "/invocations",
+    summary="Handle a compatible Foundry invocation",
+    description=(
+        "Accepts ordered invocation message history, projects prior messages "
+        "into hosted execution, and streams Responses API SSE events."
+    ),
+    responses=_HOSTED_STREAM_RESPONSES,
+)
+async def invocations(request: Request, body: InvocationRequest) -> StreamingResponse:
+    """Translate the compatibility invocation contract to hosted execution.
+
+    The final message must be the current user ask. Messages after the current
+    ask are rejected rather than silently discarded. Toolbox-integrated
+    strategies require the validated platform ``x-agent-foundry-call-id`` in
+    the shared handler; neither route reads or forwards ``Authorization``.
+    """
+    current_message = body.messages[-1]
+    if current_message.role != "user":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "The final message must have role='user'; messages after the "
+                "current ask are not allowed."
+            ),
+        )
+    ask = current_message.content.strip()
+    if not ask:
+        raise HTTPException(
+            status_code=422,
+            detail="The last user message must not be empty.",
+        )
+
+    history: list[HostedConversationMessage] = [
+        {"role": message.role, "text": message.content}
+        for message in body.messages[:-1]
+    ]
+    return _handle_hosted_request(
+        request,
+        ask=ask,
+        conversation_id=body.conversation_id,
+        metadata=body.metadata,
+        history=history,
     )
