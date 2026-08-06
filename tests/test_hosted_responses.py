@@ -19,6 +19,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from openai import omit
+from openai.lib.streaming.responses import ResponseStreamState
 from openai.types.responses import ResponseStreamEvent
 from pydantic import TypeAdapter
 
@@ -163,37 +165,14 @@ class TestResponsesAdapterCitationEvent:
 
 
 class TestResponsesAdapterToolActivityEvent:
-    def test_started_emits_arguments_delta(self):
-        activity = TurnToolActivity("search_kb", TurnToolStatus.STARTED, call_id="call-1")
-        frames = _serialize(TurnToolActivityEvent(activity=activity))
+    @pytest.mark.parametrize("status", list(TurnToolStatus))
+    def test_internal_tool_progress_is_not_emitted_as_function_call_output(
+        self,
+        status: TurnToolStatus,
+    ):
+        activity = TurnToolActivity("search_kb", status, call_id="call-1")
 
-        assert frames[0]["event"] == "response.function_call_arguments.delta"
-        assert frames[0]["data"]["name"] == "search_kb"
-        assert frames[0]["data"]["call_id"] == "call-1"
-        assert frames[0]["data"]["status"] == "started"
-
-    def test_completed_emits_arguments_done(self):
-        activity = TurnToolActivity("search_kb", TurnToolStatus.COMPLETED, call_id="call-1")
-        frames = _serialize(TurnToolActivityEvent(activity=activity))
-
-        assert frames[0]["event"] == "response.function_call_arguments.done"
-        assert frames[0]["data"]["status"] == "completed"
-
-    def test_failed_emits_arguments_done_with_message(self):
-        activity = TurnToolActivity(
-            "search_kb", TurnToolStatus.FAILED, call_id="call-1", message="Tool execution failed"
-        )
-        frames = _serialize(TurnToolActivityEvent(activity=activity))
-
-        assert frames[0]["event"] == "response.function_call_arguments.done"
-        assert frames[0]["data"]["status"] == "failed"
-        assert frames[0]["data"]["message"] == "Tool execution failed"
-
-    def test_completed_without_message_omits_message_key(self):
-        activity = TurnToolActivity("search_kb", TurnToolStatus.COMPLETED)
-        frames = _serialize(TurnToolActivityEvent(activity=activity))
-
-        assert "message" not in frames[0]["data"]
+        assert _serialize(TurnToolActivityEvent(activity=activity)) == []
 
 
 class TestResponsesAdapterErrorEvent:
@@ -1028,6 +1007,45 @@ class TestSseGeneratorLifecycle:
         assert created["conversation"] == {"id": "conv-created-by-foundry"}
         assert completed["conversation"] == created["conversation"]
         assert completed["created_at"] == created["created_at"]
+
+    @pytest.mark.asyncio
+    async def test_complete_stream_is_accepted_by_pinned_sdk_state(self):
+        from api.hosted_entrypoint import _sse_generator
+
+        async def fake_stream(*_args):
+            yield TurnConversationEvent("conv-managed")
+            yield TurnToolActivityEvent(
+                TurnToolActivity(
+                    "search_kb",
+                    TurnToolStatus.STARTED,
+                    call_id="call-1",
+                )
+            )
+            yield TurnTextEvent("answer")
+            yield TurnToolActivityEvent(
+                TurnToolActivity(
+                    "search_kb",
+                    TurnToolStatus.COMPLETED,
+                    call_id="call-1",
+                )
+            )
+
+        with patch("api.hosted_entrypoint._hosted_stream", new=fake_stream):
+            frames = [
+                frame
+                async for frame in _sse_generator(
+                    TurnRequest(ask="Hi"),
+                    "maf_lite",
+                    _RESP_ID,
+                    _ITEM_ID,
+                    model=_MODEL,
+                )
+            ]
+
+        state = ResponseStreamState(input_tools=omit, text_format=omit)
+        for frame in _parse_frames(frames):
+            event = _RESPONSE_EVENT_ADAPTER.validate_python(frame["data"])
+            state.handle_event(event)
 
 
 class TestHostedConstruction:

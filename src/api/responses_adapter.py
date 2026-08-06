@@ -22,7 +22,6 @@ from orchestration.turn import (
     TurnOutputEvent,
     TurnTextEvent,
     TurnToolActivityEvent,
-    TurnToolStatus,
 )
 
 
@@ -180,40 +179,11 @@ def serialize_responses_events(
         ]
 
     if isinstance(event, TurnToolActivityEvent):
-        a = event.activity
-        status = a.status.value  # "started" | "completed" | "failed"
-        if a.status == TurnToolStatus.STARTED:
-            return [
-                _sse(
-                    "response.function_call_arguments.delta",
-                    {
-                        "type": "response.function_call_arguments.delta",
-                        "sequence_number": sequence_number,
-                        "item_id": item_id,
-                        "output_index": output_index,
-                        "call_id": a.call_id or "",
-                        "name": a.tool_name,
-                        "delta": "",
-                        "status": status,
-                    },
-                )
-            ]
-        return [
-            _sse(
-                "response.function_call_arguments.done",
-                {
-                    "type": "response.function_call_arguments.done",
-                    "sequence_number": sequence_number,
-                    "item_id": item_id,
-                    "output_index": output_index,
-                    "call_id": a.call_id or "",
-                    "name": a.tool_name,
-                    "arguments": "",
-                    "status": status,
-                    **({"message": a.message} if a.message else {}),
-                },
-            )
-        ]
+        # Tool activity is internal progress telemetry, not a model-authored
+        # function-call output item. Emitting function-call argument events
+        # without the corresponding item lifecycle makes SDK stream state
+        # invalid, so keep these events out of the Responses wire contract.
+        return []
 
     if isinstance(event, TurnErrorEvent):
         return [
