@@ -5,7 +5,11 @@ Foundry Responses protocol.  It is intentionally separate from the
 classic ``main.py`` so that:
 
 - No Cosmos DB or orchestrator Container Apps dependency exists in the hosted
-  execution path (conversation history is managed by Foundry Conversations).
+  execution path. The hosted runtime is history-blind and stateless: it
+  performs zero managed Foundry Conversations data-plane operations (no
+  create/read/append/delete, no Conversations client construction). The
+  authenticated UI BFF owns managed Conversation lifecycle exclusively and
+  sends the complete, bounded, ordered history on every request.
 - Only ADR-eligible strategies are admitted; unsupported strategies fail
   explicitly rather than silently falling back.
 - The hosted image is immutable: the ``VERSION`` file is read once at startup
@@ -50,7 +54,6 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from api.responses_adapter import responses_terminal_events, serialize_responses_events
-from connectors.foundry_conversations import resolve_managed_conversation_id
 from dependencies import get_config
 from orchestration.turn import (
     TurnCancelledEvent,
@@ -65,7 +68,6 @@ from orchestration.turn import (
 from strategies.agent_strategy_factory import AgentStrategyFactory
 from strategies.hosted_strategies import (
     HOSTED_ELIGIBLE_STRATEGIES,
-    HOSTED_SERVER_THREAD_STRATEGIES,
     HOSTED_TOOLBOX_STRATEGIES,
     HostedConversationMessage,
     build_hosted_conversation,
@@ -103,9 +105,10 @@ class InvocationRequest(BaseModel):
     """Inbound invocation from the Foundry runtime to the hosted agent.
 
     The final message is the current user ask. An optional ``conversation_id``
-    identifies the Foundry-managed Conversation. Responses-backed strategies
-    validate a supplied id or create a real managed Conversation when it is
-    absent.
+    is an opaque caller-supplied label echoed back for response tagging and
+    conversation-scoped retrieval; it never selects, creates, or reads a
+    managed Foundry Conversation (the hosted runtime is stateless and
+    performs zero Conversations data-plane operations).
     """
 
     messages: list[InvocationMessage] = Field(
@@ -116,8 +119,8 @@ class InvocationRequest(BaseModel):
     conversation_id: Optional[str] = Field(
         None,
         description=(
-            "Foundry-managed Conversation id. Responses-backed strategies create "
-            "one through the Foundry SDK when it is omitted."
+            "Opaque caller-supplied conversation label, echoed back and used "
+            "only for conversation-scoped retrieval. Generated when omitted."
         ),
     )
     metadata: Optional[dict[str, Any]] = Field(
@@ -144,13 +147,18 @@ async def _hosted_stream(
     strategy_key: str,
     history: Sequence[HostedConversationMessage] = (),
 ) -> AsyncIterator[TurnOutputEvent]:
-    """Run one turn with managed history and no Cosmos-backed runtime state.
+    """Run one turn with caller-supplied history and no Cosmos-backed runtime
+    state.
 
-    The caller supplies the complete ordered prior history from Foundry managed
-    Conversations. Responses-backed strategies validate or create the backing
-    managed Conversation through the Foundry SDK before using its id as a
-    service thread. Per-user profile memory remains disabled because the hosted
-    invocation contract does not yet expose an authenticated Foundry identity.
+    The caller supplies the complete ordered prior history. The hosted runtime
+    performs zero managed Foundry Conversations data-plane operations: it never
+    constructs a Conversations client and never creates, reads, appends to, or
+    deletes a managed Conversation. The turn's conversation id is either the
+    caller-supplied opaque label (used only for response tagging and
+    conversation-scoped retrieval) or a freshly generated one; it never selects
+    or recreates access to any service-managed identity. Per-user profile
+    memory remains disabled because the hosted invocation contract does not yet
+    expose an authenticated Foundry identity.
 
     Raises :class:`ValueError` for unsupported strategies — never silently
     falls back. Raises :class:`~util.foundry_platform.MissingFoundryCallContextError`
@@ -166,13 +174,7 @@ async def _hosted_stream(
         hosted_runtime=True,
     )
 
-    if strategy_key in HOSTED_SERVER_THREAD_STRATEGIES:
-        conversation_id = await resolve_managed_conversation_id(
-            strategy.project_client,
-            turn.conversation_id,
-        )
-    else:
-        conversation_id = turn.conversation_id or str(uuid.uuid4())
+    conversation_id = turn.conversation_id or str(uuid.uuid4())
 
     if hasattr(strategy, "set_context"):
         strategy.set_context(conversation_id)
@@ -449,10 +451,16 @@ async def _invocations_endpoint(request: Request) -> JSONResponse | StreamingRes
 def _responses_history(
     items: Sequence[dict[str, Any]],
 ) -> list[HostedConversationMessage]:
-    """Project platform-managed Responses history into strategy chat history."""
+    """Project an ordered Responses message array into strategy chat history.
+
+    Used both for the caller-supplied ``input`` array (canonical hosted path)
+    and, historically, for platform-tracked history; items may omit ``type``
+    entirely (bare ``{"role", "content"}`` input messages), so a missing
+    ``type`` defaults to ``"message"``.
+    """
     messages: list[HostedConversationMessage] = []
     for item in items:
-        if item.get("type") not in {"message", "output_message"}:
+        if item.get("type", "message") not in {"message", "output_message"}:
             continue
         role = item.get("role")
         if role == "developer":
@@ -460,43 +468,88 @@ def _responses_history(
         if role not in {"user", "assistant", "system"}:
             continue
         content = item.get("content")
-        if not isinstance(content, list):
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            text = "".join(
+                part["text"]
+                for part in content
+                if isinstance(part, dict)
+                and part.get("type") in {"input_text", "output_text"}
+                and isinstance(part.get("text"), str)
+            )
+        else:
             continue
-        text = "".join(
+        if text:
+            messages.append({"role": role, "text": text})
+    return messages
+
+
+_RESPONSES_MESSAGE_ROLES = {"user", "assistant", "system", "developer"}
+
+
+def _extract_message_text(item: dict[str, Any]) -> str:
+    """Concatenate the text content of one Responses input message item."""
+    content = item.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
             part["text"]
             for part in content
             if isinstance(part, dict)
             and part.get("type") in {"input_text", "output_text"}
             and isinstance(part.get("text"), str)
         )
-        if text:
-            messages.append({"role": role, "text": text})
-    return messages
+    return ""
 
 
-async def _responses_conversation_id(
-    context: ResponseContext,
-    provider: ResponseProviderProtocol,
-) -> str | None:
-    """Recover the managed conversation attached to a chained response."""
-    if context.conversation_id:
-        return context.conversation_id
+def _validate_responses_input_items(items: list[Any]) -> str | None:
+    """Return a 422 detail string when *items* is not a well-formed ordered
+    Responses input array, or ``None`` when it is valid.
 
-    previous_response_id = (context.request or {}).get("previous_response_id")
-    if not isinstance(previous_response_id, str):
-        return None
+    The canonical hosted path carries no separate conversation or
+    previous-response state: the caller supplies the complete, bounded,
+    ordered history explicitly as this array on every request. Each item must
+    be a ``{"role", "content"}`` message object with a supported role and
+    text-only content (a plain string, or a list of ``input_text``/
+    ``output_text`` content parts); the final item must be the current user
+    ask.
+    """
+    if not items:
+        return "The Responses input array must not be empty."
 
-    previous_response = await provider.get_response(
-        previous_response_id,
-        context=context.platform_context,
-    )
-    conversation = previous_response.get("conversation")
-    if isinstance(conversation, str):
-        return conversation
-    if isinstance(conversation, dict):
-        conversation_id = conversation.get("id")
-        if isinstance(conversation_id, str):
-            return conversation_id
+    for item in items:
+        if not isinstance(item, dict):
+            return (
+                "Each Responses input array item must be a role/content "
+                "message object."
+            )
+        if item.get("role") not in _RESPONSES_MESSAGE_ROLES:
+            return f"Unsupported Responses input role: {item.get('role')!r}."
+        content = item.get("content")
+        if isinstance(content, str):
+            continue
+        if isinstance(content, list):
+            for part in content:
+                if (
+                    not isinstance(part, dict)
+                    or part.get("type") not in {"input_text", "output_text"}
+                    or not isinstance(part.get("text"), str)
+                ):
+                    return (
+                        "This hosted adapter supports text-only Responses "
+                        "input content."
+                    )
+            continue
+        return "This hosted adapter supports text-only Responses input content."
+
+    last = items[-1]
+    if last.get("role") != "user":
+        return "The final Responses input item must have role='user'."
+    if not _extract_message_text(last).strip():
+        return "The Responses input must not be empty."
+
     return None
 
 
@@ -549,8 +602,32 @@ async def _responses_events(
     cancellation_signal: asyncio.Event,
     provider: ResponseProviderProtocol,
 ) -> AsyncIterator[Any]:
-    """Adapt one strategy turn to the official Responses event lifecycle."""
-    ask = (await context.get_input_text()).strip()
+    """Adapt one strategy turn to the official Responses event lifecycle.
+
+    The canonical hosted path is history-blind: it never resolves a top-level
+    ``conversation``/``previous_response_id`` state selector (both are
+    rejected before this handler ever runs — see ``_create_endpoint``). The
+    caller supplies the complete, bounded, ordered input on every request; a
+    string ``input`` is the current ask with no prior turns, and an ordered
+    message-array ``input`` carries the prior turns plus the current ask as
+    its final ``user`` item.
+    """
+    del provider  # no longer used: no server-side state selector to resolve
+    response_input = request.get("input")
+    if isinstance(response_input, str):
+        ask = response_input.strip()
+        history: list[HostedConversationMessage] = []
+    else:
+        projected = _responses_history(
+            cast(Sequence[dict[str, Any]], response_input)
+        )
+        if not projected or projected[-1]["role"] != "user":
+            raise ValueError(
+                "The final Responses input item must have role='user'."
+            )
+        ask = projected[-1]["text"].strip()
+        history = projected[:-1]
+
     if not ask:
         raise ValueError("The Responses input must not be empty.")
 
@@ -569,17 +646,13 @@ async def _responses_events(
         foundry_call_id = require_foundry_call_id(headers)
 
     metadata = request.get("metadata")
-    conversation_id = await _responses_conversation_id(context, provider)
     turn = TurnRequest(
         ask=ask,
-        conversation_id=conversation_id,
+        conversation_id=None,
         question_id=metadata.get("question_id") if metadata else None,
         user_context={},
         correlation_id=metadata.get("correlation_id") if metadata else None,
         foundry_call_id=foundry_call_id,
-    )
-    history = _responses_history(
-        cast(Sequence[dict[str, Any]], await context.get_history())
     )
 
     response_stream: ResponseEventStream | None = None
@@ -717,10 +790,8 @@ class HostedResponsesAgentServerHost(ResponsesAgentServerHost):
             supported_fields = {
                 "agent_reference",
                 "background",
-                "conversation",
                 "input",
                 "metadata",
-                "previous_response_id",
                 "store",
                 "stream",
             }
@@ -738,49 +809,22 @@ class HostedResponsesAgentServerHost(ResponsesAgentServerHost):
                 )
 
             response_input = payload["input"]
-            if not isinstance(response_input, str):
+            if isinstance(response_input, str):
+                if not response_input.strip():
+                    return JSONResponse(
+                        {"detail": "The Responses input must not be empty."},
+                        status_code=422,
+                    )
+            elif isinstance(response_input, list):
+                input_error = _validate_responses_input_items(response_input)
+                if input_error is not None:
+                    return JSONResponse({"detail": input_error}, status_code=422)
+            else:
                 return JSONResponse(
                     {
                         "detail": (
-                            "This hosted adapter supports string Responses input."
-                        )
-                    },
-                    status_code=422,
-                )
-            if not response_input.strip():
-                return JSONResponse(
-                    {"detail": "The Responses input must not be empty."},
-                    status_code=422,
-                )
-
-            conversation = payload.get("conversation")
-            valid_conversation = (
-                conversation is None
-                or (isinstance(conversation, str) and bool(conversation.strip()))
-                or (
-                    isinstance(conversation, dict)
-                    and set(conversation) == {"id"}
-                    and isinstance(conversation["id"], str)
-                    and bool(conversation["id"].strip())
-                )
-            )
-            if not valid_conversation:
-                return JSONResponse(
-                    {
-                        "detail": (
-                            "Responses conversation must be a non-empty id string "
-                            "or an object containing only a non-empty string id."
-                        )
-                    },
-                    status_code=422,
-                )
-
-            if conversation is not None and payload.get("previous_response_id") is not None:
-                return JSONResponse(
-                    {
-                        "detail": (
-                            "Responses conversation and previous_response_id "
-                            "cannot be used together."
+                            "This hosted adapter supports string or ordered "
+                            "message-array Responses input."
                         )
                     },
                     status_code=422,

@@ -15,7 +15,6 @@ import json
 import logging
 import os
 from copy import deepcopy
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -445,15 +444,9 @@ class TestHostedStream:
         strategy.initiate_agent_flow = fake_flow
         turn = TurnRequest(ask="Hi", conversation_id="conv-1")
 
-        with (
-            patch(
-                "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
-                new=AsyncMock(return_value=strategy),
-            ),
-            patch(
-                "api.hosted_entrypoint.resolve_managed_conversation_id",
-                new=AsyncMock(return_value="conv-1"),
-            ),
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
         ):
             events = [e async for e in _hosted_stream(turn, "single_agent_rag")]
 
@@ -642,8 +635,6 @@ class TestHostedStream:
         received_conversations = []
 
         class RecordingStrategy:
-            project_client = MagicMock()
-
             def set_context(self, _conversation_id):
                 pass
 
@@ -658,15 +649,9 @@ class TestHostedStream:
         strategies = [RecordingStrategy(), RecordingStrategy()]
         factory = AsyncMock(side_effect=strategies)
 
-        with (
-            patch(
-                "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
-                new=factory,
-            ),
-            patch(
-                "api.hosted_entrypoint.resolve_managed_conversation_id",
-                new=AsyncMock(return_value="conv-1"),
-            ),
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=factory,
         ):
             first_turn = TurnRequest(
                 ask="first question",
@@ -690,188 +675,59 @@ class TestHostedStream:
                 prior_history,
             )]
 
-        assert [
-            {
-                "id": conversation["id"],
-                "messages": conversation["messages"],
-            }
-            for conversation in received_conversations
-        ] == [
+        assert received_conversations == [
             {"id": "conv-1", "messages": []},
             {"id": "conv-1", "messages": prior_history},
         ]
-        if strategy_key == "single_agent_rag":
-            assert [
-                conversation["thread_id"]
-                for conversation in received_conversations
-            ] == ["conv-1", "conv-1"]
         assert factory.await_args_list[0].kwargs == {"hosted_runtime": True}
         assert factory.await_args_list[1].kwargs == {"hosted_runtime": True}
 
+    @pytest.mark.parametrize(
+        "strategy_key",
+        sorted(HOSTED_ELIGIBLE_STRATEGIES),
+    )
     @pytest.mark.asyncio
-    async def test_two_turn_agent_service_reuses_managed_conversation_thread(self):
+    async def test_hosted_stream_performs_zero_conversations_data_plane_operations(
+        self,
+        strategy_key: str,
+    ):
+        """Security regression: the hosted runtime must never construct a
+        Conversations client or call create/read/append/delete on a managed
+        Conversation, regardless of whether the caller supplies a
+        conversation id, and regardless of strategy. The turn's conversation
+        id is only ever an opaque echoed/generated label -- it can never
+        select or recreate access to a service-managed identity."""
         from api.hosted_entrypoint import _hosted_stream
-        from strategies.agent_provider_v2 import AGENT_BACKEND_TAG
-
-        received_conversations = []
 
         class RecordingStrategy:
-            project_client = MagicMock()
+            def __init__(self):
+                self.project_client = MagicMock()
 
             def set_context(self, _conversation_id):
                 pass
 
             async def initiate_agent_flow(self, _ask):
-                received_conversations.append(deepcopy(self.conversation))
                 yield "answer"
 
-        factory = AsyncMock(
-            side_effect=[RecordingStrategy(), RecordingStrategy()],
-        )
-        with (
-            patch(
-                "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
-                new=factory,
-            ),
-            patch(
-                "api.hosted_entrypoint.resolve_managed_conversation_id",
-                new=AsyncMock(return_value="conv-thread"),
-            ),
-        ):
-            first_turn = TurnRequest(ask="first", conversation_id="conv-thread")
-            [event async for event in _hosted_stream(
-                first_turn,
-                "maf_agent_service",
-            )]
-            second_turn = TurnRequest(ask="second", conversation_id="conv-thread")
-            [event async for event in _hosted_stream(
-                second_turn,
-                "maf_agent_service",
-                [
-                    {"role": "user", "text": "first"},
-                    {"role": "assistant", "text": "answer"},
-                ],
-            )]
-
-        assert [conversation["thread_id"] for conversation in received_conversations] == [
-            "conv-thread",
-            "conv-thread",
-        ]
-        assert all(
-            conversation["agent_backend"] == AGENT_BACKEND_TAG
-            for conversation in received_conversations
-        )
-
-    @pytest.mark.asyncio
-    async def test_agent_service_validates_supplied_managed_conversation(self):
-        from api.hosted_entrypoint import _hosted_stream
-
-        openai_client = MagicMock()
-        openai_client.__aenter__ = AsyncMock(return_value=openai_client)
-        openai_client.__aexit__ = AsyncMock(return_value=False)
-        openai_client.conversations.retrieve = AsyncMock(
-            return_value=SimpleNamespace(id="conv_existing"),
-        )
-        openai_client.conversations.create = AsyncMock()
-
-        strategy = MagicMock()
-        strategy.project_client.get_openai_client.return_value = openai_client
-        received = []
-
-        async def fake_flow(_ask):
-            received.append(deepcopy(strategy.conversation))
-            yield "answer"
-
-        strategy.initiate_agent_flow = fake_flow
+        strategy = RecordingStrategy()
         with patch(
             "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
             new=AsyncMock(return_value=strategy),
         ):
-            events = [
-                event
-                async for event in _hosted_stream(
-                    TurnRequest(ask="hello", conversation_id="conv_existing"),
-                    "maf_agent_service",
-                )
-            ]
+            turn = TurnRequest(
+                ask="hello",
+                conversation_id="caller-supplied-conv-id",
+                foundry_call_id="call-1",
+            )
+            [event async for event in _hosted_stream(turn, strategy_key)]
 
-        openai_client.conversations.retrieve.assert_awaited_once_with(
-            "conv_existing"
-        )
-        openai_client.conversations.create.assert_not_awaited()
-        assert received[0]["thread_id"] == "conv_existing"
-        assert events[0].conversation_id == "conv_existing"
-
-    @pytest.mark.asyncio
-    async def test_agent_service_creates_managed_conversation_when_id_absent(self):
-        from api.hosted_entrypoint import _hosted_stream
-
-        openai_client = MagicMock()
-        openai_client.__aenter__ = AsyncMock(return_value=openai_client)
-        openai_client.__aexit__ = AsyncMock(return_value=False)
-        openai_client.conversations.retrieve = AsyncMock()
-        openai_client.conversations.create = AsyncMock(
-            return_value=SimpleNamespace(id="conv_created"),
-        )
-
-        strategy = MagicMock()
-        strategy.project_client.get_openai_client.return_value = openai_client
-        received = []
-
-        async def fake_flow(_ask):
-            received.append(deepcopy(strategy.conversation))
-            yield "answer"
-
-        strategy.initiate_agent_flow = fake_flow
-        with patch(
-            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
-            new=AsyncMock(return_value=strategy),
-        ):
-            events = [
-                event
-                async for event in _hosted_stream(
-                    TurnRequest(ask="hello", conversation_id=None),
-                    "maf_agent_service",
-                )
-            ]
-
-        openai_client.conversations.create.assert_awaited_once_with()
-        openai_client.conversations.retrieve.assert_not_awaited()
-        assert received[0]["thread_id"] == "conv_created"
-        assert events[0].conversation_id == "conv_created"
-
-    @pytest.mark.asyncio
-    async def test_agent_service_rejects_failed_conversation_validation(self):
-        from api.hosted_entrypoint import _hosted_stream
-
-        openai_client = MagicMock()
-        openai_client.__aenter__ = AsyncMock(return_value=openai_client)
-        openai_client.__aexit__ = AsyncMock(return_value=False)
-        openai_client.conversations.retrieve = AsyncMock(
-            side_effect=RuntimeError("conversation not found"),
-        )
-
-        strategy = MagicMock()
-        strategy.project_client.get_openai_client.return_value = openai_client
-        strategy.initiate_agent_flow = AsyncMock()
-
-        with patch(
-            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
-            new=AsyncMock(return_value=strategy),
-        ):
-            with pytest.raises(RuntimeError, match="conversation not found"):
-                _ = [
-                    event
-                    async for event in _hosted_stream(
-                        TurnRequest(
-                            ask="hello",
-                            conversation_id="conv_missing",
-                        ),
-                        "maf_agent_service",
-                    )
-                ]
-
-        strategy.initiate_agent_flow.assert_not_called()
+        # No Conversations client accessor was ever touched.
+        strategy.project_client.get_openai_client.assert_not_called()
+        strategy.project_client.assert_not_called()
+        # No leftover thread/backend tagging: the strategy conversation dict
+        # never carries a service-managed thread identity.
+        assert "thread_id" not in strategy.conversation
+        assert "agent_backend" not in strategy.conversation
 
     @pytest.mark.asyncio
     async def test_separate_conversations_and_untrusted_callers_share_no_state(self):
@@ -1441,113 +1297,11 @@ class TestHostedEntrypointAPI:
         for frame in frames:
             _RESPONSE_EVENT_ADAPTER.validate_python(frame["data"])
 
-    @pytest.mark.parametrize(
-        ("conversation", "expected_id"),
-        [
-            ("conv-string", "conv-string"),
-            ({"id": "conv-object"}, "conv-object"),
-        ],
-    )
-    def test_responses_maps_conversation_to_managed_conversation_path(
-        self,
-        client,
-        mock_config,
-        conversation,
-        expected_id,
-    ):
-        self._use_strategy(mock_config, "maf_agent_service")
-
-        async def fake_flow(_ask):
-            yield "answer"
-
-        strategy = MagicMock()
-        strategy.initiate_agent_flow = fake_flow
-        resolve_conversation = AsyncMock(return_value=expected_id)
-
-        with (
-            patch(
-                "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
-                new=AsyncMock(return_value=strategy),
-            ),
-            patch(
-                "api.hosted_entrypoint.resolve_managed_conversation_id",
-                new=resolve_conversation,
-            ),
-        ):
-            response = client.post(
-                "/responses",
-                json={
-                    "input": "Continue",
-                    "stream": True,
-                    "store": True,
-                    "conversation": conversation,
-                },
-            )
-
-        assert response.status_code == 200
-        resolve_conversation.assert_awaited_once_with(
-            strategy.project_client,
-            expected_id,
-        )
-        assert expected_id in response.text
-        assert "event: response.created" in response.text
-        assert "event: response.output_text.delta" in response.text
-        assert "event: response.completed" in response.text
-
-    def test_responses_rejects_extra_conversation_object_fields(self, client):
-        response = client.post(
-            "/responses",
-            json={
-                "input": "Continue",
-                "stream": True,
-                "store": True,
-                "conversation": {"id": "conv-object", "unexpected": "value"},
-            },
-        )
-
-        assert response.status_code == 422
-        assert response.json()["detail"] == (
-            "Responses conversation must be a non-empty id string "
-            "or an object containing only a non-empty string id."
-        )
-
-    @pytest.mark.parametrize(
-        "conversation",
-        [
-            "",
-            "   ",
-            123,
-            [],
-            {"id": None},
-            {"id": 123},
-            {"id": ""},
-        ],
-    )
-    def test_responses_rejects_invalid_conversation_ids(
-        self,
-        client,
-        conversation,
-    ):
-        response = client.post(
-            "/responses",
-            json={
-                "input": "Continue",
-                "stream": True,
-                "store": True,
-                "conversation": conversation,
-            },
-        )
-
-        assert response.status_code == 422
-        assert response.json()["detail"] == (
-            "Responses conversation must be a non-empty id string "
-            "or an object containing only a non-empty string id."
-        )
-
-    def test_responses_rejects_conversation_with_previous_response_id(
-        self,
-        client,
-    ):
+    def test_responses_rejects_conversation_field(self, client):
+        """Security regression: ``conversation`` is a server-side state
+        selector that would let a caller-selected id drive Foundry
+        Conversations create/read on the hosted container. It must be
+        rejected outright, not resolved."""
         response = client.post(
             "/responses",
             json={
@@ -1555,14 +1309,32 @@ class TestHostedEntrypointAPI:
                 "stream": True,
                 "store": True,
                 "conversation": "conv-explicit",
+            },
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == (
+            "Unsupported Responses request fields: conversation."
+        )
+
+    def test_responses_rejects_previous_response_id_field(self, client):
+        """Security regression: ``previous_response_id`` is a server-side
+        state selector that could recreate history access. It must be
+        rejected outright; the caller must send the complete ordered input
+        instead."""
+        response = client.post(
+            "/responses",
+            json={
+                "input": "Continue",
+                "stream": True,
+                "store": True,
                 "previous_response_id": "resp_previous",
             },
         )
 
         assert response.status_code == 422
         assert response.json()["detail"] == (
-            "Responses conversation and previous_response_id "
-            "cannot be used together."
+            "Unsupported Responses request fields: previous_response_id."
         )
 
     def test_responses_maps_metadata_without_projecting_legacy_history(
@@ -1702,24 +1474,30 @@ class TestHostedEntrypointAPI:
         assert response.status_code == 400
 
     @pytest.mark.parametrize(
-        "unsupported_input",
+        ("unsupported_input", "expected_detail"),
         [
-            ["plain array input"],
-            [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_image",
-                            "image_url": "https://example.invalid",
-                        }
-                    ],
-                }
-            ],
+            (
+                ["plain array input"],
+                "Each Responses input array item must be a role/content message object.",
+            ),
+            (
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_image",
+                                "image_url": "https://example.invalid",
+                            }
+                        ],
+                    }
+                ],
+                "This hosted adapter supports text-only Responses input content.",
+            ),
         ],
     )
     def test_responses_rejects_array_and_multimodal_input(
-        self, client, unsupported_input
+        self, client, unsupported_input, expected_detail
     ):
         response = client.post(
             "/responses",
@@ -1731,10 +1509,7 @@ class TestHostedEntrypointAPI:
         )
 
         assert response.status_code == 422
-        assert (
-            "This hosted adapter supports string Responses input."
-            in str(response.json())
-        )
+        assert response.json()["detail"] == expected_detail
 
     def test_responses_rejects_empty_string_input(self, client):
         response = client.post(
@@ -1913,75 +1688,54 @@ class TestHostedEntrypointAPI:
         assert events[0]["data"]["response"]["id"] == response_id
         assert events[-1]["data"]["response"]["id"] == response_id
 
-    def test_responses_projects_previous_response_history(
-        self,
-        client,
-        mock_config,
+    def test_responses_accepts_ordered_message_array_input(
+        self, client, mock_config
     ):
-        self._use_strategy(mock_config, "maf_agent_service")
-        received = {}
+        """Canonical hosted path: the caller supplies the complete, bounded,
+        ordered history directly as the ``input`` array. Prior turns are
+        replayed as strategy history and the final ``user`` item becomes the
+        current ask -- with no ``conversation``/``previous_response_id``
+        state dependency at all."""
+        self._use_strategy(mock_config, "maf_lite")
+        captured = {}
 
-        async def first_flow(_ask):
-            yield "first answer"
+        async def fake_stream(turn, strategy_key, history):
+            captured["turn"] = turn
+            captured["strategy_key"] = strategy_key
+            captured["history"] = history
+            yield TurnConversationEvent("conv-list-input")
+            yield TurnTextEvent("second answer")
 
-        async def second_flow(ask):
-            received["ask"] = ask
-            received["conversation"] = deepcopy(second_strategy.conversation)
-            yield "second answer"
-
-        first_strategy = MagicMock()
-        first_strategy.initiate_agent_flow = first_flow
-        second_strategy = MagicMock()
-        second_strategy.initiate_agent_flow = second_flow
-
-        conversation_resolver = AsyncMock(return_value="conv-managed-chain")
-        with (
-            patch(
-                "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
-                new=AsyncMock(side_effect=[first_strategy, second_strategy]),
-            ),
-            patch(
-                "api.hosted_entrypoint.resolve_managed_conversation_id",
-                new=conversation_resolver,
-            ),
-        ):
-            first = client.post(
-                "/responses",
-                json={"input": "first question", "store": True},
-            )
-            second = client.post(
+        with patch("api.hosted_entrypoint._hosted_stream", new=fake_stream):
+            response = client.post(
                 "/responses",
                 json={
-                    "input": "follow-up question",
-                    "previous_response_id": first.json()["id"],
+                    "input": [
+                        {"role": "user", "content": "first question"},
+                        {"role": "assistant", "content": "first answer"},
+                        {"role": "user", "content": "follow-up question"},
+                    ],
                     "store": True,
                 },
             )
 
-        assert first.status_code == 200
-        assert second.status_code == 200
-        assert received["ask"] == "follow-up question"
-        assert received["conversation"]["thread_id"] == "conv-managed-chain"
-        assert received["conversation"]["messages"] == [
+        assert response.status_code == 200
+        assert captured["turn"].ask == "follow-up question"
+        assert captured["turn"].conversation_id is None
+        assert captured["history"] == [
             {"role": "user", "text": "first question"},
             {"role": "assistant", "text": "first answer"},
         ]
-        assert conversation_resolver.await_args_list[0].args == (
-            first_strategy.project_client,
-            None,
-        )
-        assert conversation_resolver.await_args_list[1].args == (
-            second_strategy.project_client,
-            "conv-managed-chain",
-        )
 
-    def test_responses_rejects_unsupported_list_input(self, client):
+    def test_responses_rejects_message_array_input_not_ending_in_user(
+        self, client
+    ):
         response = client.post(
             "/responses",
             json={
                 "input": [
                     {"role": "user", "content": "first question"},
-                    {"role": "user", "content": "follow-up question"},
+                    {"role": "assistant", "content": "first answer"},
                 ],
                 "store": True,
             },
@@ -1989,8 +1743,40 @@ class TestHostedEntrypointAPI:
 
         assert response.status_code == 422
         assert response.json()["detail"] == (
-            "This hosted adapter supports string Responses input."
+            "The final Responses input item must have role='user'."
         )
+
+    def test_responses_rejects_empty_message_array_input(self, client):
+        response = client.post(
+            "/responses",
+            json={"input": [], "store": True},
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == (
+            "The Responses input array must not be empty."
+        )
+
+    def test_responses_rejects_message_array_input_with_empty_final_ask(
+        self, client
+    ):
+        """The final ``user`` item must resolve to non-empty text; otherwise
+        an intermediate item could be silently misinterpreted as the current
+        ask instead of failing explicitly."""
+        response = client.post(
+            "/responses",
+            json={
+                "input": [
+                    {"role": "user", "content": "first question"},
+                    {"role": "assistant", "content": "first answer"},
+                    {"role": "user", "content": [{"type": "input_text", "text": "   "}]},
+                ],
+                "store": True,
+            },
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == "The Responses input must not be empty."
 
     def test_responses_cancel_route_terminates_background_response(
         self,
@@ -2086,15 +1872,9 @@ class TestHostedEntrypointAPI:
         strategy = MagicMock()
         strategy.initiate_agent_flow = fake_flow
 
-        with (
-            patch(
-                "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
-                new=AsyncMock(return_value=strategy),
-            ),
-            patch(
-                "api.hosted_entrypoint.resolve_managed_conversation_id",
-                new=AsyncMock(return_value="conv-toolbox"),
-            ),
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
         ):
             response = client.post(
                 "/responses",

@@ -20,7 +20,7 @@ import asyncio
 import hashlib
 import logging
 import uuid
-from typing import Any, AsyncIterator, Optional, Sequence
+from typing import Any, AsyncIterator, Optional, Sequence, Union
 
 from azure.core.exceptions import HttpResponseError, ResourceExistsError, ResourceNotFoundError
 from azure.ai.projects.aio import AIProjectClient
@@ -257,7 +257,7 @@ def is_invalid_payload_error(exc: BaseException) -> bool:
 
 async def stream_agent_run(
     agent: Any,
-    user_message: str,
+    user_message: Union[str, Sequence[Any]],
     *,
     thread: Any,
     options: Optional[dict] = None,
@@ -272,6 +272,11 @@ async def stream_agent_run(
     when nothing has been yielded yet, so it cannot duplicate streamed text; the
     rejection is a request-validation 400 that the service raises before mutating
     the thread.
+
+    ``user_message`` may be a single string (the current ask, relying on the
+    ``thread`` for prior context) or a complete ordered sequence of chat
+    messages (the stateless hosted path, which replays history explicitly on
+    every turn instead of resuming a service-managed thread).
     """
     produced = False
     try:
