@@ -1,7 +1,7 @@
 """Hosted agent entrypoint for Azure AI Foundry.
 
-This FastAPI application wires the runtime-neutral orchestration core to the
-Foundry Responses API streaming format.  It is intentionally separate from the
+This ASGI application wires the runtime-neutral orchestration core to the
+Foundry Responses protocol.  It is intentionally separate from the
 classic ``main.py`` so that:
 
 - No Cosmos DB or orchestrator Container Apps dependency exists in the hosted
@@ -9,7 +9,8 @@ classic ``main.py`` so that:
 - Only ADR-eligible strategies are admitted; unsupported strategies fail
   explicitly rather than silently falling back.
 - The hosted image is immutable: the ``VERSION`` file is read once at startup
-  and served on the ``GET /health`` endpoint.
+  and served on the ``GET /readiness`` and compatibility ``GET /health``
+  endpoints.
 
 Usage::
 
@@ -21,15 +22,32 @@ Or via Docker by overriding the entrypoint command.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
+import time
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from pathlib import Path
-from typing import Any, Literal, Optional, Sequence
+from typing import Any, Awaitable, Callable, Literal, Optional, Sequence, cast
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from azure.ai.agentserver.core import (
+    configure_observability as configure_agentserver_observability,
+)
+from azure.ai.agentserver.responses import (
+    CreateResponse,
+    ResponseContext,
+    ResponseEventStream,
+    ResponseProviderProtocol,
+    ResponsesAgentServerHost,
+    ResponsesServerOptions,
+)
+from pydantic import BaseModel, Field, ValidationError
+from starlette.exceptions import HTTPException
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.routing import Route
 
 from api.responses_adapter import responses_terminal_events, serialize_responses_events
 from connectors.foundry_conversations import resolve_managed_conversation_id
@@ -69,7 +87,7 @@ except FileNotFoundError:
     _APP_VERSION = "0.0.0"
 
 
-# ── Pydantic schemas for the Foundry invocation contract ────────────────────
+# ── Pydantic schema for the legacy Invocations protocol ─────────────────────
 
 class InvocationMessage(BaseModel):
     """One message turn in the inbound invocation request."""
@@ -193,39 +211,61 @@ def _sse_generator(
     response_id: str,
     item_id: str,
     history: Sequence[HostedConversationMessage] = (),
+    *,
+    model: str = "unknown",
+    response_metadata: dict[str, str] | None = None,
 ) -> AsyncIterator[str]:
     """Wrap ``_hosted_stream`` and serialize events to Responses API SSE."""
 
     async def _gen() -> AsyncIterator[str]:
         full_text: list[str] = []
         error_emitted = False
+        managed_conversation_id: str | None = None
+        sequence_number = 0
+        created_at = time.time()
 
         try:
             async for event in _hosted_stream(turn, strategy_key, history):
+                if isinstance(event, TurnConversationEvent):
+                    managed_conversation_id = event.conversation_id
                 frames = serialize_responses_events(
                     event,
                     response_id=response_id,
                     item_id=item_id,
+                    sequence_number=sequence_number,
+                    created_at=created_at,
+                    model=model,
+                    response_metadata=response_metadata,
                 )
-                if isinstance(event, TurnErrorEvent):
+                if isinstance(event, (TurnErrorEvent, TurnCancelledEvent)):
                     error_emitted = True
                 if isinstance(event, TurnTextEvent):
                     full_text.append(event.text)
                 for frame in frames:
                     yield frame
+                sequence_number += len(frames)
 
             # Emit closing frames only when no error occurred.
             if not error_emitted:
+                if managed_conversation_id is None:
+                    raise ValueError(
+                        "Hosted stream ended without a managed conversation id."
+                    )
                 for frame in responses_terminal_events(
                     response_id=response_id,
                     item_id=item_id,
+                    conversation_id=managed_conversation_id,
                     full_text="".join(full_text),
+                    created_at=created_at,
+                    model=model,
+                    sequence_number=sequence_number,
+                    response_metadata=response_metadata,
                 ):
                     yield frame
 
         except MissingFoundryCallContextError as exc:
-            # Defense-in-depth only: the normal ``/invocations`` path already
-            # rejects a missing/malformed call id with an HTTP 401 *before*
+            # Defense-in-depth only: the normal ``/invocations`` route rejects a
+            # missing/malformed call id with an HTTP 401 *before*
             # ``StreamingResponse`` is constructed, so this branch cannot be
             # reached from a real HTTP request today. It exists solely to
             # correctly classify the error if some future/internal caller
@@ -243,55 +283,38 @@ def _sse_generator(
                 strategy_key,
             )
             if not error_emitted:
-                from api.responses_adapter import _sse
-                yield _sse(
-                    "error",
-                    {
-                        "type": "error",
-                        "code": "missing_call_context",
-                        "message": str(exc),
-                        "retryable": False,
-                    },
-                )
+                for frame in serialize_responses_events(
+                    TurnErrorEvent(
+                        code="missing_call_context",
+                        message=str(exc),
+                        retryable=False,
+                    ),
+                    response_id=response_id,
+                    item_id=item_id,
+                    sequence_number=sequence_number,
+                ):
+                    yield frame
 
         except Exception:
             logger.exception("[hosted] Unhandled error in SSE generator")
             if not error_emitted:
-                from api.responses_adapter import _sse
-                yield _sse(
-                    "error",
-                    {
-                        "type": "error",
-                        "code": "internal_error",
-                        "message": "An internal server error occurred.",
-                        "retryable": False,
-                    },
-                )
+                for frame in serialize_responses_events(
+                    TurnErrorEvent(
+                        code="internal_error",
+                        message="An internal server error occurred.",
+                        retryable=False,
+                    ),
+                    response_id=response_id,
+                    item_id=item_id,
+                    sequence_number=sequence_number,
+                ):
+                    yield frame
 
     return _gen()
 
 
-# ── FastAPI application ──────────────────────────────────────────────────────
+# ── Hosted protocol application ──────────────────────────────────────────────
 
-app = FastAPI(
-    title="GPT-RAG Hosted Agent",
-    description=(
-        "Foundry-hosted execution of the GPT-RAG orchestration core "
-        "over the Responses API streaming contract."
-    ),
-    version=_APP_VERSION,
-)
-
-
-@app.get(
-    "/health",
-    response_model=HealthResponse,
-    summary="Liveness check",
-    description=(
-        "Returns the immutable image version and the set of strategies "
-        "eligible for this hosted runtime.  Use for container readiness probes."
-    ),
-)
 async def health() -> HealthResponse:
     return HealthResponse(
         status="ok",
@@ -300,84 +323,24 @@ async def health() -> HealthResponse:
     )
 
 
-@app.post(
-    "/invocations",
-    summary="Handle a Foundry invocation",
-    description=(
-        "Accepts one conversation turn from the Foundry runtime and streams "
-        "a response in the Azure AI Foundry Responses API SSE format.  "
-        "Only hosted-eligible strategies are admitted; unsupported strategies "
-        "return HTTP 422."
-    ),
-    responses={
-        200: {
-            "description": "OK — Responses API SSE stream",
-            "content": {"text/event-stream": {}},
-        },
-        401: {
-            "description": (
-                "Missing or malformed platform call context — hosted "
-                "retrieval failed closed rather than falling back to "
-                "service identity or a manual filter."
-            ),
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": (
-                            "Missing or malformed platform call context "
-                            "('x-agent-foundry-call-id')."
-                        )
-                    }
-                }
-            },
-        },
-        422: {
-            "description": "Unsupported strategy or validation error",
-            "content": {
-                "application/json": {
-                    "example": {"detail": "Strategy 'multimodal' is not supported in the hosted runtime."}
-                }
-            },
-        },
-    },
-)
-async def invocations(request: Request, body: InvocationRequest) -> StreamingResponse:
-    """Translate a Foundry invocation into a Responses API SSE stream.
+async def _health_endpoint(_request: Request) -> JSONResponse:
+    return JSONResponse((await health()).model_dump())
 
-    The final message must be the current user ask. Messages after the current
-    ask are rejected rather than silently discarded. Responses-backed
-    strategies validate a supplied ``conversation_id`` or create a real managed
-    Conversation when it is absent.
 
-    Toolbox-integrated strategies additionally require the platform-injected
-    ``x-agent-foundry-call-id`` header (Foundry hosted-agent container
-    protocol 2.0). This container never reads or forwards ``Authorization``,
-    and never trusts caller/model identity fields or ``x-client`` group
-    claims — the opaque call id is the only supported identity-passthrough
-    correlation, echoed to Toolbox so it can resolve the signed-in user and
-    supply per-user credentials. When the header is absent or malformed,
-    hosted retrieval fails closed with HTTP 401 rather than falling back to
-    service identity or a manual ``metadata_security_id`` filter.
-    """
-    current_message = body.messages[-1]
-    if current_message.role != "user":
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "The final message must have role='user'; messages after the "
-                "current ask are not allowed."
-            ),
-        )
-    ask = current_message.content.strip()
-    if not ask:
-        raise HTTPException(
-            status_code=422,
-            detail="The last user message must not be empty.",
-        )
-
+async def _create_hosted_streaming_response(
+    request: Request,
+    *,
+    ask: str,
+    conversation_id: Optional[str],
+    metadata: dict[str, Any],
+    history: Sequence[HostedConversationMessage] = (),
+    response_metadata: dict[str, str] | None = None,
+) -> StreamingResponse:
+    """Build one hosted SSE response after protocol-specific validation."""
     # Resolve and guard the strategy.
     cfg = get_config()
     strategy_key = cfg.get("AGENT_STRATEGY", "maf_lite")
+    model = cfg.get("CHAT_DEPLOYMENT_NAME", "unknown")
 
     try:
         guard_hosted_strategy(strategy_key)
@@ -394,15 +357,10 @@ async def invocations(request: Request, body: InvocationRequest) -> StreamingRes
         except MissingFoundryCallContextError as exc:
             raise HTTPException(status_code=401, detail=str(exc)) from exc
 
-    # Build the transport-neutral turn request.
-    metadata = body.metadata or {}
-    history: list[HostedConversationMessage] = [
-        {"role": message.role, "text": message.content}
-        for message in body.messages[:-1]
-    ]
+    metadata = metadata or {}
     turn = TurnRequest(
         ask=ask,
-        conversation_id=body.conversation_id,
+        conversation_id=conversation_id,
         question_id=metadata.get("question_id"),
         user_context={},
         correlation_id=metadata.get("correlation_id"),
@@ -413,14 +371,506 @@ async def invocations(request: Request, body: InvocationRequest) -> StreamingRes
     item_id = f"item_{uuid.uuid4().hex}"
 
     logger.info(
-        "[hosted] invocation: strategy=%s conversation_id=%s response_id=%s",
+        "[hosted] response: strategy=%s conversation_id=%s response_id=%s",
         strategy_key,
-        body.conversation_id or "∅",
+        conversation_id or "∅",
         response_id,
     )
 
     return StreamingResponse(
-        _sse_generator(turn, strategy_key, response_id, item_id, history),
+        _sse_generator(
+            turn,
+            strategy_key,
+            response_id,
+            item_id,
+            history,
+            model=model,
+            response_metadata=response_metadata,
+        ),
         media_type="text/event-stream",
         headers={"X-Response-ID": response_id},
     )
+
+
+async def invocations(request: Request, body: InvocationRequest) -> StreamingResponse:
+    """Translate the legacy Foundry invocation contract into an SSE stream."""
+    current_message = body.messages[-1]
+    if current_message.role != "user":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "The final message must have role='user'; messages after the "
+                "current ask are not allowed."
+            ),
+        )
+    ask = current_message.content.strip()
+    if not ask:
+        raise HTTPException(
+            status_code=422,
+            detail="The last user message must not be empty.",
+        )
+
+    history: list[HostedConversationMessage] = [
+        {"role": message.role, "text": message.content}
+        for message in body.messages[:-1]
+    ]
+    return await _create_hosted_streaming_response(
+        request,
+        ask=ask,
+        conversation_id=body.conversation_id,
+        metadata=body.metadata or {},
+        history=history,
+    )
+
+
+async def _invocations_endpoint(request: Request) -> JSONResponse | StreamingResponse:
+    """Validate the legacy request model before invoking its SSE handler."""
+    try:
+        body = InvocationRequest.model_validate(await request.json())
+        return await invocations(request, body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JSONResponse(
+            {"detail": "The Invocations request body must be valid JSON."},
+            status_code=400,
+        )
+    except ValidationError as exc:
+        return JSONResponse(
+            {"detail": exc.errors(include_url=False)},
+            status_code=422,
+        )
+    except HTTPException as exc:
+        return JSONResponse(
+            {"detail": exc.detail},
+            status_code=exc.status_code,
+            headers=exc.headers,
+        )
+
+
+def _responses_history(
+    items: Sequence[dict[str, Any]],
+) -> list[HostedConversationMessage]:
+    """Project platform-managed Responses history into strategy chat history."""
+    messages: list[HostedConversationMessage] = []
+    for item in items:
+        if item.get("type") not in {"message", "output_message"}:
+            continue
+        role = item.get("role")
+        if role == "developer":
+            role = "system"
+        if role not in {"user", "assistant", "system"}:
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        text = "".join(
+            part["text"]
+            for part in content
+            if isinstance(part, dict)
+            and part.get("type") in {"input_text", "output_text"}
+            and isinstance(part.get("text"), str)
+        )
+        if text:
+            messages.append({"role": role, "text": text})
+    return messages
+
+
+async def _responses_conversation_id(
+    context: ResponseContext,
+    provider: ResponseProviderProtocol,
+) -> str | None:
+    """Recover the managed conversation attached to a chained response."""
+    if context.conversation_id:
+        return context.conversation_id
+
+    previous_response_id = (context.request or {}).get("previous_response_id")
+    if not isinstance(previous_response_id, str):
+        return None
+
+    previous_response = await provider.get_response(
+        previous_response_id,
+        context=context.platform_context,
+    )
+    conversation = previous_response.get("conversation")
+    if isinstance(conversation, str):
+        return conversation
+    if isinstance(conversation, dict):
+        conversation_id = conversation.get("id")
+        if isinstance(conversation_id, str):
+            return conversation_id
+    return None
+
+
+async def _cancel_aware_events(
+    events: AsyncIterator[TurnOutputEvent],
+    cancellation_signal: asyncio.Event,
+    shutdown_signal: asyncio.Event,
+) -> AsyncIterator[TurnOutputEvent]:
+    """Stop and close in-flight strategy work on cancellation or shutdown."""
+    iterator = events.__aiter__()
+    active_tasks: set[asyncio.Task[Any]] = set()
+    try:
+        while not cancellation_signal.is_set() and not shutdown_signal.is_set():
+            next_event = asyncio.create_task(anext(iterator))
+            cancelled = asyncio.create_task(cancellation_signal.wait())
+            shutting_down = asyncio.create_task(shutdown_signal.wait())
+            active_tasks.update({next_event, cancelled, shutting_down})
+            done, _ = await asyncio.wait(
+                active_tasks,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancelled in done or shutting_down in done:
+                return
+
+            cancelled.cancel()
+            shutting_down.cancel()
+            with suppress(asyncio.CancelledError):
+                await cancelled
+            with suppress(asyncio.CancelledError):
+                await shutting_down
+            active_tasks.clear()
+            try:
+                yield next_event.result()
+            except StopAsyncIteration:
+                return
+    finally:
+        for task in active_tasks:
+            if not task.done():
+                task.cancel()
+        for task in active_tasks:
+            with suppress(asyncio.CancelledError, StopAsyncIteration):
+                await task
+        if hasattr(iterator, "aclose"):
+            await iterator.aclose()
+
+
+async def _responses_events(
+    request: CreateResponse,
+    context: ResponseContext,
+    cancellation_signal: asyncio.Event,
+    provider: ResponseProviderProtocol,
+) -> AsyncIterator[Any]:
+    """Adapt one strategy turn to the official Responses event lifecycle."""
+    ask = (await context.get_input_text()).strip()
+    if not ask:
+        raise ValueError("The Responses input must not be empty.")
+
+    cfg = get_config()
+    strategy_key = cfg.get("AGENT_STRATEGY", "maf_lite")
+    guard_hosted_strategy(strategy_key)
+
+    foundry_call_id: Optional[str] = None
+    if strategy_key in HOSTED_TOOLBOX_STRATEGIES:
+        platform_call_id = context.platform_context.call_id
+        headers = (
+            {"x-agent-foundry-call-id": platform_call_id}
+            if platform_call_id is not None
+            else {}
+        )
+        foundry_call_id = require_foundry_call_id(headers)
+
+    metadata = request.get("metadata")
+    conversation_id = await _responses_conversation_id(context, provider)
+    turn = TurnRequest(
+        ask=ask,
+        conversation_id=conversation_id,
+        question_id=metadata.get("question_id") if metadata else None,
+        user_context={},
+        correlation_id=metadata.get("correlation_id") if metadata else None,
+        foundry_call_id=foundry_call_id,
+    )
+    history = _responses_history(
+        cast(Sequence[dict[str, Any]], await context.get_history())
+    )
+
+    response_stream: ResponseEventStream | None = None
+    message = None
+    text_content = None
+    full_text: list[str] = []
+
+    async for event in _cancel_aware_events(
+        _hosted_stream(turn, strategy_key, history),
+        cancellation_signal,
+        context.shutdown,
+    ):
+        if isinstance(event, TurnConversationEvent):
+            response_stream = ResponseEventStream(
+                response_id=context.response_id,
+                request=request,
+            )
+            response_stream.response.setdefault("tools", [])
+            response_stream.response.setdefault("tool_choice", "auto")
+            response_stream.response["conversation"] = {"id": event.conversation_id}
+            yield response_stream.emit_created()
+            yield response_stream.emit_in_progress()
+            message = response_stream.add_output_item_message()
+            yield message.emit_added()
+            text_content = message.add_text_content()
+            yield text_content.emit_added()
+        elif isinstance(event, TurnTextEvent):
+            if text_content is None:
+                raise RuntimeError("Hosted strategy emitted text before conversation identity.")
+            full_text.append(event.text)
+            yield text_content.emit_delta(event.text)
+        elif isinstance(event, TurnErrorEvent):
+            raise RuntimeError(event.message)
+        elif isinstance(event, TurnCancelledEvent):
+            cancellation_signal.set()
+            return
+
+    if cancellation_signal.is_set() or context.shutdown.is_set():
+        return
+
+    if response_stream is None or message is None or text_content is None:
+        raise RuntimeError("Hosted strategy did not emit a conversation identity.")
+
+    final_text = "".join(full_text)
+    yield text_content.emit_text_done(final_text)
+    yield text_content.emit_done()
+    yield message.emit_done()
+    yield response_stream.emit_completed()
+
+
+class HostedResponsesAgentServerHost(ResponsesAgentServerHost):
+    """Responses host with the image's immutable readiness contract."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._responses_provider = cast(
+            ResponseProviderProtocol,
+            self._endpoint._provider,
+        )
+        for index, route in enumerate(self.routes):
+            route_name = getattr(route, "name", None)
+            if route_name not in {
+                "create_response",
+                "get_response",
+                "delete_response",
+                "cancel_response",
+                "get_input_items",
+            }:
+                continue
+            endpoint = cast(Callable[[Request], Awaitable[Response]], route.endpoint)
+            guarded_endpoint = (
+                self._create_endpoint(endpoint)
+                if route_name == "create_response"
+                else self._responses_endpoint(endpoint)
+            )
+            self.routes[index] = Route(
+                route.path,
+                guarded_endpoint,
+                methods=sorted(route.methods or ()),
+                name=route.name,
+            )
+
+    async def handle_response(
+        self,
+        request: CreateResponse,
+        context: ResponseContext,
+        cancellation_signal: asyncio.Event,
+    ) -> AsyncIterator[Any]:
+        async for event in _responses_events(
+            request,
+            context,
+            cancellation_signal,
+            self._responses_provider,
+        ):
+            yield event
+
+    async def _readiness_endpoint(self, request: Request) -> JSONResponse:
+        return await _health_endpoint(request)
+
+    def _responses_endpoint(
+        self,
+        endpoint: Callable[[Request], Awaitable[Response]],
+    ) -> Callable[[Request], Awaitable[Response]]:
+        async def guarded(request: Request) -> Response:
+            call_context_error = self._call_context_error(request)
+            if call_context_error is not None:
+                return call_context_error
+            return await endpoint(request)
+
+        return guarded
+
+    def _create_endpoint(
+        self,
+        endpoint: Callable[[Request], Awaitable[Response]],
+    ) -> Callable[[Request], Awaitable[Response]]:
+        async def validated(request: Request) -> Response:
+            call_context_error = self._call_context_error(request)
+            if call_context_error is not None:
+                return call_context_error
+
+            try:
+                payload = await request.json()
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return JSONResponse(
+                    {"detail": "The Responses request body must be valid JSON."},
+                    status_code=400,
+                )
+
+            if not isinstance(payload, dict) or "input" not in payload:
+                return JSONResponse(
+                    {"detail": "The Responses request requires an input field."},
+                    status_code=422,
+                )
+
+            supported_fields = {
+                "agent_reference",
+                "background",
+                "conversation",
+                "input",
+                "metadata",
+                "previous_response_id",
+                "store",
+                "stream",
+            }
+            unsupported_fields = sorted(set(payload) - supported_fields)
+            if unsupported_fields:
+                return JSONResponse(
+                    {
+                        "detail": (
+                            "Unsupported Responses request fields: "
+                            + ", ".join(unsupported_fields)
+                            + "."
+                        )
+                    },
+                    status_code=422,
+                )
+
+            response_input = payload["input"]
+            if not isinstance(response_input, str):
+                return JSONResponse(
+                    {
+                        "detail": (
+                            "This hosted adapter supports string Responses input."
+                        )
+                    },
+                    status_code=422,
+                )
+            if not response_input.strip():
+                return JSONResponse(
+                    {"detail": "The Responses input must not be empty."},
+                    status_code=422,
+                )
+
+            conversation = payload.get("conversation")
+            valid_conversation = (
+                conversation is None
+                or (isinstance(conversation, str) and bool(conversation.strip()))
+                or (
+                    isinstance(conversation, dict)
+                    and set(conversation) == {"id"}
+                    and isinstance(conversation["id"], str)
+                    and bool(conversation["id"].strip())
+                )
+            )
+            if not valid_conversation:
+                return JSONResponse(
+                    {
+                        "detail": (
+                            "Responses conversation must be a non-empty id string "
+                            "or an object containing only a non-empty string id."
+                        )
+                    },
+                    status_code=422,
+                )
+
+            if conversation is not None and payload.get("previous_response_id") is not None:
+                return JSONResponse(
+                    {
+                        "detail": (
+                            "Responses conversation and previous_response_id "
+                            "cannot be used together."
+                        )
+                    },
+                    status_code=422,
+                )
+
+            metadata = payload.get("metadata")
+            if metadata is not None and (
+                not isinstance(metadata, dict)
+                or not all(
+                    isinstance(key, str) and isinstance(value, str)
+                    for key, value in metadata.items()
+                )
+            ):
+                return JSONResponse(
+                    {
+                        "detail": (
+                            "Responses metadata must contain only string keys and values."
+                        )
+                    },
+                    status_code=422,
+                )
+
+            return await endpoint(request)
+
+        return validated
+
+    @staticmethod
+    def _call_context_error(request: Request) -> JSONResponse | None:
+        strategy_key = get_config().get("AGENT_STRATEGY", "maf_lite")
+        if strategy_key not in HOSTED_TOOLBOX_STRATEGIES:
+            return None
+        try:
+            require_foundry_call_id(request.headers)
+        except MissingFoundryCallContextError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=401)
+        return None
+
+
+_DEFAULT_OBSERVABILITY = object()
+
+
+def _configure_host_observability(
+    *,
+    connection_string: str | None,
+    log_level: str | None,
+    enable_sensitive_data: bool,
+) -> None:
+    """Configure SDK telemetry with content capture disabled by default."""
+    del enable_sensitive_data
+    capture_setting = os.environ.get(
+        "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT",
+        "false",
+    )
+    configure_agentserver_observability(
+        connection_string=connection_string,
+        log_level=log_level,
+        enable_sensitive_data=capture_setting.strip().lower() in {"true", "1"},
+    )
+
+
+def create_app(
+    *,
+    store: ResponseProviderProtocol | None = None,
+    configure_observability: Any = _DEFAULT_OBSERVABILITY,
+) -> HostedResponsesAgentServerHost:
+    """Create the multi-protocol hosted app with injectable test boundaries."""
+    host_options: dict[str, Any] = {}
+    if configure_observability is _DEFAULT_OBSERVABILITY:
+        host_options["configure_observability"] = _configure_host_observability
+    else:
+        host_options["configure_observability"] = configure_observability
+
+    hosted_app = HostedResponsesAgentServerHost(
+        options=ResponsesServerOptions(
+            additional_server_version=f"gpt-rag-orchestrator/{_APP_VERSION}",
+        ),
+        store=store,
+        routes=[
+            Route("/health", _health_endpoint, methods=["GET"], name="health"),
+            Route(
+                "/invocations",
+                _invocations_endpoint,
+                methods=["POST"],
+                name="invocations",
+            ),
+        ],
+        **host_options,
+    )
+    hosted_app.response_handler(hosted_app.handle_response)
+    return hosted_app
+
+
+app = create_app()

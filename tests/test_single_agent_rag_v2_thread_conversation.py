@@ -88,6 +88,37 @@ class TestEnsureConversationId:
             conv = {"thread_id": "conv_existing"}
             assert await agent_provider_v2.ensure_conversation_id(conv) == "conv_existing"
 
+
+class TestStreamAgentRunFallback:
+    @pytest.mark.asyncio
+    async def test_removes_optional_token_limit_when_rejected(self):
+        class FakeAgent:
+            def __init__(self):
+                self.options = []
+
+            async def run_stream(self, _message, *, thread, options):
+                self.options.append(options)
+                if len(self.options) == 1:
+                    raise RuntimeError("invalid_payload")
+                yield types.SimpleNamespace(text="persisted")
+
+        agent = FakeAgent()
+        output = [
+            chunk.text
+            async for chunk in agent_provider_v2.stream_agent_run(
+                agent,
+                "hello",
+                thread=MagicMock(),
+                options={"max_tokens": 100},
+            )
+        ]
+
+        assert output == ["persisted"]
+        assert agent.options == [
+            {"max_tokens": 100},
+            {},
+        ]
+
     @pytest.mark.asyncio
     async def test_raises_when_provider_not_initialized(self):
         agent_provider_v2._project_client = None
@@ -133,6 +164,8 @@ class TestStreamAgentThreadResume:
         # A fake agent: async context manager whose get_new_thread records the
         # service_thread_id it was resumed from.
         resume_ids = []
+        run_options = []
+        persisted_turns = []
 
         def _get_new_thread(*, service_thread_id=None):
             resume_ids.append(service_thread_id)
@@ -147,7 +180,13 @@ class TestStreamAgentThreadResume:
         provider.as_agent = MagicMock(return_value=agent)
 
         async def _fake_stream(*args, **kwargs):
+            run_options.append(kwargs["options"])
             yield types.SimpleNamespace(text="hello")
+
+        async def _persist_turn(conversation_id, user_message, assistant_message):
+            persisted_turns.append(
+                (conversation_id, user_message, assistant_message)
+            )
 
         # One shared conversation object id handed out on first creation.
         created = types.SimpleNamespace(id="conv_stable")
@@ -162,6 +201,8 @@ class TestStreamAgentThreadResume:
             agent_provider_v2, "stream_agent_run", _fake_stream
         ), patch.object(
             agent_provider_v2, "_get_openai_client", AsyncMock(return_value=oai)
+        ), patch.object(
+            agent_provider_v2, "persist_conversation_turn", _persist_turn
         ):
             # Turn 1
             out1 = "".join([c async for c in s._stream_agent("first question")])
@@ -176,3 +217,169 @@ class TestStreamAgentThreadResume:
         assert resume_ids == ["conv_stable", "conv_stable"]
         # The stored thread id is the conversation object, never a per-turn resp id.
         assert conv["thread_id"] == "conv_stable"
+        assert run_options == [
+            {"max_tokens": s.max_completion_tokens},
+            {"max_tokens": s.max_completion_tokens},
+        ]
+        assert persisted_turns == [
+            ("conv_stable", "first question", "hello"),
+            ("conv_stable", "second question", "hello"),
+        ]
+
+
+class TestPersistConversationTurn:
+    @pytest.mark.asyncio
+    async def test_appends_complete_user_and_assistant_messages(self):
+        oai = MagicMock()
+        oai.conversations.items.create = AsyncMock()
+
+        with patch.object(
+            agent_provider_v2, "_get_openai_client", AsyncMock(return_value=oai)
+        ), patch.object(agent_provider_v2.uuid, "uuid4") as uuid4:
+            uuid4.return_value.hex = "abc123"
+            await agent_provider_v2.persist_conversation_turn(
+                "conv_stable",
+                "remember JADE-7394",
+                "JADE-7394",
+            )
+
+        oai.conversations.items.create.assert_awaited_once_with(
+            "conv_stable",
+            items=[
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "remember JADE-7394",
+                        }
+                    ],
+                },
+                {
+                    "type": "message",
+                    "id": "msg_abc123",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "JADE-7394",
+                            "annotations": [],
+                        }
+                    ],
+                },
+            ],
+        )
+
+    @pytest.mark.asyncio
+    async def test_reconciles_ambiguous_create_failure_without_duplicate(self):
+        oai = MagicMock()
+        oai.conversations.items.create = AsyncMock(
+            side_effect=RuntimeError("response lost")
+        )
+        oai.conversations.items.list = AsyncMock(
+            return_value=types.SimpleNamespace(
+                data=[
+                    types.SimpleNamespace(
+                        role="assistant",
+                        content=[types.SimpleNamespace(text="JADE-7394")],
+                    ),
+                    types.SimpleNamespace(
+                        role="user",
+                        content=[
+                            types.SimpleNamespace(text="remember JADE-7394")
+                        ],
+                    ),
+                ]
+            )
+        )
+
+        with patch.object(
+            agent_provider_v2, "_get_openai_client", AsyncMock(return_value=oai)
+        ):
+            await agent_provider_v2.persist_conversation_turn(
+                "conv_stable",
+                "remember JADE-7394",
+                "JADE-7394",
+            )
+
+        oai.conversations.items.list.assert_awaited_once_with(
+            "conv_stable",
+            limit=2,
+            order="desc",
+        )
+
+    @pytest.mark.asyncio
+    async def test_raises_ambiguous_failure_when_tail_does_not_match(self):
+        oai = MagicMock()
+        oai.conversations.items.create = AsyncMock(
+            side_effect=RuntimeError("response lost")
+        )
+        oai.conversations.items.list = AsyncMock(
+            return_value=types.SimpleNamespace(data=[])
+        )
+
+        with patch.object(
+            agent_provider_v2, "_get_openai_client", AsyncMock(return_value=oai)
+        ), pytest.raises(RuntimeError, match="response lost"):
+            await agent_provider_v2.persist_conversation_turn(
+                "conv_stable",
+                "remember JADE-7394",
+                "JADE-7394",
+            )
+
+    @pytest.mark.asyncio
+    async def test_persistence_failure_is_not_emitted_as_answer_text(
+        self, patch_dependencies, mock_config
+    ):
+        from strategies.single_agent_rag_strategy_v2 import SingleAgentRAGStrategyV2
+
+        with patch(
+            "strategies.single_agent_rag_strategy_v2.get_config",
+            return_value=mock_config,
+        ), patch(
+            "strategies.single_agent_rag_strategy_v2.get_search_client",
+            return_value=MagicMock(),
+        ), patch(
+            "strategies.single_agent_rag_strategy_v2.get_genai_client",
+            return_value=MagicMock(),
+        ):
+            strategy = SingleAgentRAGStrategyV2()
+
+        strategy.search_client = MagicMock()
+        strategy.project_endpoint = "https://example.services.ai.azure.com/api/projects/p"
+        strategy.credential = MagicMock()
+        strategy.model_name = "chat"
+        strategy.conversation = {
+            "thread_id": "conv_stable",
+            "agent_backend": agent_provider_v2.AGENT_BACKEND_TAG,
+        }
+
+        agent = MagicMock()
+        agent.__aenter__ = AsyncMock(return_value=agent)
+        agent.__aexit__ = AsyncMock(return_value=False)
+        agent.get_new_thread.return_value = MagicMock()
+        provider = MagicMock()
+        provider.as_agent.return_value = agent
+
+        async def _fake_stream(*args, **kwargs):
+            yield types.SimpleNamespace(text="completed answer")
+
+        with patch.object(
+            agent_provider_v2, "get_provider", AsyncMock(return_value=provider)
+        ), patch.object(
+            agent_provider_v2,
+            "get_or_create_agent_details",
+            AsyncMock(return_value=MagicMock()),
+        ), patch.object(
+            agent_provider_v2, "stream_agent_run", _fake_stream
+        ), patch.object(
+            agent_provider_v2,
+            "persist_conversation_turn",
+            AsyncMock(side_effect=RuntimeError("storage unavailable")),
+        ):
+            stream = strategy._stream_agent("question")
+            assert await anext(stream) == "completed answer"
+            with pytest.raises(RuntimeError, match="storage unavailable"):
+                await anext(stream)

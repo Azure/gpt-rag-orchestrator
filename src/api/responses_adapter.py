@@ -22,13 +22,61 @@ from orchestration.turn import (
     TurnOutputEvent,
     TurnTextEvent,
     TurnToolActivityEvent,
-    TurnToolStatus,
 )
 
 
 def _sse(event_type: str, data: dict) -> str:
     """Format one SSE frame from an event name and a JSON-serialisable dict."""
     return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+
+def _output_text(text: str) -> dict:
+    """Build an SDK-compatible Responses output-text content part."""
+    return {
+        "type": "output_text",
+        "text": text,
+        "annotations": [],
+        "logprobs": [],
+    }
+
+
+def _output_message(item_id: str, text: str, status: str) -> dict:
+    """Build an SDK-compatible assistant output item."""
+    return {
+        "id": item_id,
+        "type": "message",
+        "role": "assistant",
+        "status": status,
+        "content": [] if status == "in_progress" else [_output_text(text)],
+    }
+
+
+def _response(
+    *,
+    response_id: str,
+    conversation_id: str,
+    created_at: float,
+    model: str,
+    status: str,
+    output: list[dict],
+    metadata: dict[str, str] | None = None,
+) -> dict:
+    """Build the required common fields of an SDK Responses object."""
+    response = {
+        "id": response_id,
+        "created_at": created_at,
+        "model": model,
+        "object": "response",
+        "status": status,
+        "conversation": {"id": conversation_id},
+        "output": output,
+        "tools": [],
+        "tool_choice": "none",
+        "parallel_tool_calls": False,
+    }
+    if metadata is not None:
+        response["metadata"] = metadata
+    return response
 
 
 def serialize_responses_events(
@@ -38,6 +86,10 @@ def serialize_responses_events(
     item_id: str,
     output_index: int = 0,
     content_index: int = 0,
+    sequence_number: int = 0,
+    created_at: float = 0.0,
+    model: str = "unknown",
+    response_metadata: dict[str, str] | None = None,
 ) -> list[str]:
     """Translate one typed turn event into Foundry Responses API SSE frames.
 
@@ -54,38 +106,36 @@ def serialize_responses_events(
                 "response.created",
                 {
                     "type": "response.created",
-                    "response": {
-                        "id": response_id,
-                        "object": "response",
-                        "status": "in_progress",
-                        "conversation_id": event.conversation_id,
-                        "output": [],
-                    },
+                    "sequence_number": sequence_number,
+                    "response": _response(
+                        response_id=response_id,
+                        conversation_id=event.conversation_id,
+                        created_at=created_at,
+                        model=model,
+                        status="in_progress",
+                        output=[],
+                        metadata=response_metadata,
+                    ),
                 },
             ),
             _sse(
                 "response.output_item.added",
                 {
                     "type": "response.output_item.added",
-                    "response_id": response_id,
+                    "sequence_number": sequence_number + 1,
                     "output_index": output_index,
-                    "item": {
-                        "id": item_id,
-                        "type": "message",
-                        "role": "assistant",
-                        "status": "in_progress",
-                        "content": [],
-                    },
+                    "item": _output_message(item_id, "", "in_progress"),
                 },
             ),
             _sse(
                 "response.content_part.added",
                 {
                     "type": "response.content_part.added",
+                    "sequence_number": sequence_number + 2,
                     "item_id": item_id,
                     "output_index": output_index,
                     "content_index": content_index,
-                    "part": {"type": "output_text", "text": ""},
+                    "part": _output_text(""),
                 },
             ),
         ]
@@ -96,67 +146,28 @@ def serialize_responses_events(
                 "response.output_text.delta",
                 {
                     "type": "response.output_text.delta",
+                    "sequence_number": sequence_number,
                     "item_id": item_id,
                     "output_index": output_index,
                     "content_index": content_index,
                     "delta": event.text,
+                    "logprobs": [],
                 },
             )
         ]
 
     if isinstance(event, TurnCitationEvent):
-        c = event.citation
-        annotation: dict = {
-            "type": "url_citation",
-            "citation_id": c.citation_id,
-        }
-        if c.title is not None:
-            annotation["title"] = c.title
-        if c.url is not None:
-            annotation["url"] = c.url
-        if c.snippet is not None:
-            annotation["snippet"] = c.snippet
-        return [
-            _sse(
-                "response.output_text.annotation.added",
-                {
-                    "type": "response.output_text.annotation.added",
-                    "item_id": item_id,
-                    "output_index": output_index,
-                    "content_index": content_index,
-                    "annotation": annotation,
-                },
-            )
-        ]
+        # Turn citations do not carry the character offsets required by public
+        # Responses annotations. Keep them internal rather than emitting an
+        # annotation that cannot be reconciled with the terminal output text.
+        return []
 
     if isinstance(event, TurnToolActivityEvent):
-        a = event.activity
-        status = a.status.value  # "started" | "completed" | "failed"
-        if a.status == TurnToolStatus.STARTED:
-            return [
-                _sse(
-                    "response.function_call_arguments.delta",
-                    {
-                        "type": "response.function_call_arguments.delta",
-                        "call_id": a.call_id or "",
-                        "name": a.tool_name,
-                        "delta": "",
-                        "status": status,
-                    },
-                )
-            ]
-        return [
-            _sse(
-                "response.function_call_arguments.done",
-                {
-                    "type": "response.function_call_arguments.done",
-                    "call_id": a.call_id or "",
-                    "name": a.tool_name,
-                    "status": status,
-                    **({"message": a.message} if a.message else {}),
-                },
-            )
-        ]
+        # Tool activity is internal progress telemetry, not a model-authored
+        # function-call output item. Emitting function-call argument events
+        # without the corresponding item lifecycle makes SDK stream state
+        # invalid, so keep these events out of the Responses wire contract.
+        return []
 
     if isinstance(event, TurnErrorEvent):
         return [
@@ -164,9 +175,10 @@ def serialize_responses_events(
                 "error",
                 {
                     "type": "error",
+                    "sequence_number": sequence_number,
                     "code": event.code,
                     "message": event.message,
-                    "retryable": event.retryable,
+                    "param": None,
                 },
             )
         ]
@@ -174,10 +186,13 @@ def serialize_responses_events(
     if isinstance(event, TurnCancelledEvent):
         return [
             _sse(
-                "response.cancelled",
+                "error",
                 {
-                    "type": "response.cancelled",
-                    "reason": event.reason,
+                    "type": "error",
+                    "sequence_number": sequence_number,
+                    "code": "cancelled",
+                    "message": event.reason,
+                    "param": None,
                 },
             )
         ]
@@ -189,9 +204,14 @@ def responses_terminal_events(
     *,
     response_id: str,
     item_id: str,
+    conversation_id: str,
     full_text: str,
+    created_at: float = 0.0,
+    model: str = "unknown",
     output_index: int = 0,
     content_index: int = 0,
+    sequence_number: int = 0,
+    response_metadata: dict[str, str] | None = None,
 ) -> list[str]:
     """Return the closing SSE frames emitted after all deltas have been sent.
 
@@ -204,46 +224,48 @@ def responses_terminal_events(
             "response.output_text.done",
             {
                 "type": "response.output_text.done",
+                "sequence_number": sequence_number,
                 "item_id": item_id,
                 "output_index": output_index,
                 "content_index": content_index,
                 "text": full_text,
+                "logprobs": [],
             },
         ),
         _sse(
             "response.content_part.done",
             {
                 "type": "response.content_part.done",
+                "sequence_number": sequence_number + 1,
                 "item_id": item_id,
                 "output_index": output_index,
                 "content_index": content_index,
-                "part": {"type": "output_text", "text": full_text},
+                "part": _output_text(full_text),
             },
         ),
         _sse(
             "response.output_item.done",
             {
                 "type": "response.output_item.done",
-                "response_id": response_id,
+                "sequence_number": sequence_number + 2,
                 "output_index": output_index,
-                "item": {
-                    "id": item_id,
-                    "type": "message",
-                    "role": "assistant",
-                    "status": "completed",
-                    "content": [{"type": "output_text", "text": full_text}],
-                },
+                "item": _output_message(item_id, full_text, "completed"),
             },
         ),
         _sse(
             "response.completed",
             {
                 "type": "response.completed",
-                "response": {
-                    "id": response_id,
-                    "object": "response",
-                    "status": "completed",
-                },
+                "sequence_number": sequence_number + 3,
+                "response": _response(
+                    response_id=response_id,
+                    conversation_id=conversation_id,
+                    created_at=created_at,
+                    model=model,
+                    status="completed",
+                    output=[_output_message(item_id, full_text, "completed")],
+                    metadata=response_metadata,
+                ),
             },
         ),
     ]

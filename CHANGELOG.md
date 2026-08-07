@@ -1,5 +1,61 @@
 # Changelog
 
+## [v3.11.0] - 2026-08-06
+
+### Fixed
+
+- **Managed Conversation persistence for hosted Responses.** Completed
+  user/assistant turns are now appended through the Foundry Conversations Items
+  API because the pinned Agent Framework client does not support the Responses
+  `store` option. Both agent and empty-index direct-LLM routes persist history,
+  reject legacy thread IDs, initialize correctly on fresh workers, and
+  reconcile ambiguous write failures without duplicating a committed turn.
+
+- **Offline tokenizer initialization for network-isolated hosted agents.**
+  Runtime images now pre-cache the `o200k_base` tokenizer during the image
+  build, preventing the first hosted request from attempting public Blob
+  Storage egress in private-only deployments.
+
+- **Microsoft Foundry hosted-agent Responses route contract.** Added canonical
+  Responses v2 hosting through `azure-ai-agentserver-responses`, so real
+  Foundry requests to `POST /responses` no longer receive HTTP 404 or require
+  the separate Invocations schema. The adapter accepts standard string `input`,
+  streaming and synchronous execution, storage controls, managed
+  `conversation` identity, `previous_response_id`, metadata, and the
+  platform-injected `agent_reference`, and supplies protocol retrieval,
+  input-items, cancellation, and deletion routes. List input and unsupported
+  request fields are rejected instead of silently dropping semantics, and
+  mutually exclusive `conversation` and `previous_response_id` inputs cannot
+  contaminate each other's history. The
+  existing `POST /invocations` route retains its distinct message-list schema
+  and compatibility behavior. Toolbox-backed deployments validate the Foundry
+  call context before any create or stored-response route can reach the
+  platform storage provider. Invalid managed-conversation identifiers are
+  rejected instead of creating a new thread, and generative-AI content capture
+  is disabled by default unless explicitly enabled by the operator. Shutdown,
+  client cancellation, and malformed call-id boundaries now stop upstream
+  strategy work without leaking tasks or forwarding a different value than the
+  one validated.
+
+- **Microsoft Foundry hosted-agent readiness probe contract.** Added
+  `GET /readiness` to `api.hosted_entrypoint` so the platform readiness probe no
+  longer receives HTTP 404 after Uvicorn starts. The existing `GET /health`
+  compatibility route remains available, and both endpoints return the same
+  immutable image version and hosted-eligible strategy set.
+
+### Added
+
+- **Repository-local release skill with publication safety gates.**
+  Added `.github/skills/release/SKILL.md` as the reusable Copilot workflow for
+  release preparation, versioning, tagging, and release notes. The skill
+  reconciles tags, GitHub Releases, `VERSION`, and `CHANGELOG.md`; enforces
+  `release/X.Y.Z` branches from `develop` with pull requests to `main`; requires
+  exact SemVer metadata and sanitized public notes; documents rollback and
+  reconciliation; and blocks every tag, release, package, image, or deployment
+  publication until a human explicitly approves the exact publication plan.
+  Added focused asset tests for skill discovery, required release contracts,
+  and continued absence of the abandoned release custom agent.
+
 ## [v3.10.0] - 2026-08-05
 
 ### Added

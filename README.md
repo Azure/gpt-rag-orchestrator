@@ -79,13 +79,40 @@ rewriting the existing SSE configuration.
 
 ### Foundry hosted-agent Toolbox identity passthrough
 
-When the orchestrator runs as a Microsoft Foundry hosted agent (`api.hosted_entrypoint`,
-`POST /invocations`) with `AGENT_STRATEGY=mcp`, document-security identity is
-established solely through the Foundry hosted-agent protocol 2.0 call context —
-per
+When the orchestrator runs as a Microsoft Foundry hosted agent
+(`api.hosted_entrypoint`, canonical `POST /responses`) with
+`AGENT_STRATEGY=mcp`, document-security identity is established solely through
+the Foundry hosted-agent protocol 2.0 call context — per
 [Azure/GPT-RAG ADR-0001](https://github.com/Azure/GPT-RAG/blob/main/docs/adr/ADR-0001-hosted-agents.md),
 Toolbox OAuth identity passthrough is the required native path and a manual
 group-filter fallback is never the default.
+
+`POST /responses` is hosted by Microsoft's
+`azure-ai-agentserver-responses` implementation of the Foundry Responses v2
+protocol. The orchestrator adapter accepts the documented string `input`
+contract with streaming or synchronous execution, storage controls, managed
+`conversation` identity, `previous_response_id`, metadata, and the
+platform-injected `agent_reference`; list input is rejected rather than
+silently losing role semantics in server-thread strategies. Other Responses
+request fields are rejected rather than silently ignored, and `conversation`
+cannot be combined with `previous_response_id`. The protocol host also owns
+response retrieval, input-item listing, cancellation, and deletion.
+`POST /invocations` remains a separate compatibility protocol for the existing
+`messages` request schema. Both protocols reuse the same hosted strategy
+execution and identity guard after parsing their distinct request contracts.
+
+The runtime image pre-caches its tokenizer during the build so hosted requests
+do not require public Blob Storage egress in network-isolated environments.
+
+The hosted Responses server disables generative-AI prompt and completion
+capture in OpenTelemetry by default. Set
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` only when the
+deployment's data-handling policy explicitly permits sensitive content
+telemetry.
+
+The hosted entrypoint exposes `GET /readiness` for Microsoft Foundry readiness
+probes. The compatibility `GET /health` route returns the same immutable image
+version and hosted-eligible strategy set.
 
 The platform injects two headers on every hosted-agent request:
 
@@ -94,12 +121,15 @@ The platform injects two headers on every hosted-agent request:
 | `x-agent-user-id` | Per-user container partition key. | No — container-side only. |
 | `x-agent-foundry-call-id` | Opaque per-request call identifier. | Yes — the only supported identity passthrough correlation token. |
 
-`POST /invocations` captures and strictly validates `x-agent-foundry-call-id`
+Both `POST /responses` and `POST /invocations` capture and strictly validate
+`x-agent-foundry-call-id`
 (printable ASCII, no spaces or control characters, 256 characters max)
 whenever the resolved strategy is Toolbox-backed (currently only `mcp`). A
-missing or malformed value is rejected with **HTTP 401** before any strategy
-or Toolbox client is constructed — there is no fallback to service identity or
-to the legacy `metadata_security_id` manual filter. The validated call id
+missing or malformed value is rejected with HTTP 401 before the Responses
+storage provider, strategy, or Toolbox client is reached; the same guard covers
+response retrieval, input-item listing, cancellation, and deletion. There is no
+fallback to service identity or to the legacy `metadata_security_id` manual
+filter. The validated call id
 then flows unchanged through the runtime-neutral `TurnRequest` into the
 strategy and is echoed as the sole outbound identity header on every Toolbox
 MCP HTTP call, so Toolbox can resolve the signed-in user and mint per-user

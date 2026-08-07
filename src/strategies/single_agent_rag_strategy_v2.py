@@ -393,6 +393,8 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
              logging.error(f"[Agent Flow V2] Direct LLM Streaming failed: {e}", exc_info=True)
              raise
 
+        await self._persist_managed_turn(user_message, full_response)
+
         # Add assistant response to history
         self.conversation.setdefault("messages", []).extend([
             {"role": "user", "text": user_message},
@@ -524,7 +526,9 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                     agent,
                     user_message,
                     thread=thread,
-                    options={"max_tokens": self.max_completion_tokens},
+                    options={
+                        "max_tokens": self.max_completion_tokens,
+                    },
                 ):
                     for event in event_translator.translate(chunk):
                         yield event
@@ -535,13 +539,45 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                         full_response += chunk.text
                         yield chunk.text
 
-        except Exception as e:
+        except Exception:
             err_msg = traceback.format_exc()
             logging.error(f"[Agent Flow V2] Streaming failed: {err_msg}")
-            yield f"[ERROR in Streaming]: {e}"
+            raise
+
+        try:
+            await self._persist_managed_turn(user_message, full_response)
+        except Exception:
+            logging.error(
+                "[Agent Flow V2] Managed Conversation persistence failed",
+                exc_info=True,
+            )
+            raise
 
         # Persist conversation history
         conv.setdefault("messages", []).extend([
             {"role": "user", "text": user_message},
             {"role": "assistant", "text": full_response}
         ])
+
+    async def _persist_managed_turn(
+        self,
+        user_message: str,
+        assistant_message: str,
+    ) -> None:
+        """Persist a completed turn when this runtime has a managed thread."""
+        conversation_id = self.conversation.get("thread_id")
+        if (
+            not conversation_id
+            or self.conversation.get("agent_backend")
+            != agent_provider_v2.AGENT_BACKEND_TAG
+        ):
+            return
+        await agent_provider_v2.get_provider(
+            self.project_endpoint,
+            self.credential,
+        )
+        await agent_provider_v2.persist_conversation_turn(
+            conversation_id,
+            user_message,
+            assistant_message,
+        )

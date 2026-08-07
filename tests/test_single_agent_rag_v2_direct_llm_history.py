@@ -15,6 +15,7 @@ history in chronological order. An empty index must never surface an error.
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
+from strategies import agent_provider_v2
 from strategies.agent_strategies import AgentStrategies  # noqa: F401
 
 
@@ -115,6 +116,58 @@ class TestSingleAgentRagV2DirectLLMHistory:
             "content": "como funciona a injecao eletronica?",
         }
         assert out == "Olá mundo"
+
+    @pytest.mark.asyncio
+    async def test_hosted_direct_turn_is_persisted_to_managed_conversation(self):
+        s = self._make_strategy()
+        s.conversation = {
+            "thread_id": "conv_hosted",
+            "agent_backend": agent_provider_v2.AGENT_BACKEND_TAG,
+            "messages": [],
+        }
+        s.project_endpoint = "https://example.services.ai.azure.com/api/projects/p"
+        s.credential = MagicMock()
+
+        with patch(
+            "strategies.single_agent_rag_strategy_v2.agent_provider_v2."
+            "persist_conversation_turn",
+            new=AsyncMock(),
+        ) as persist, patch(
+            "strategies.single_agent_rag_strategy_v2.agent_provider_v2."
+            "get_provider",
+            new=AsyncMock(),
+        ):
+            _, out = await self._run(s, "remember JADE-7394")
+
+        assert out == "Olá mundo"
+        persist.assert_awaited_once_with(
+            "conv_hosted",
+            "remember JADE-7394",
+            "Olá mundo",
+        )
+
+    @pytest.mark.asyncio
+    async def test_direct_turn_does_not_persist_to_legacy_thread_id(self):
+        s = self._make_strategy()
+        s.conversation = {
+            "thread_id": "thread_legacy",
+            "messages": [],
+        }
+
+        with patch(
+            "strategies.single_agent_rag_strategy_v2.agent_provider_v2."
+            "persist_conversation_turn",
+            new=AsyncMock(),
+        ) as persist, patch(
+            "strategies.single_agent_rag_strategy_v2.agent_provider_v2."
+            "get_provider",
+            new=AsyncMock(),
+        ) as get_provider:
+            _, out = await self._run(s, "hello")
+
+        assert out == "Olá mundo"
+        persist.assert_not_awaited()
+        get_provider.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_empty_and_unknown_history_entries_skipped(self):
