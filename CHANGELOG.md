@@ -1,11 +1,15 @@
 # Changelog
 
-## [Unreleased]
+## [v3.12.0] - 2026-08-07
+
+Supersedes v3.11.0. This release contains a **wire compatibility change** for
+the canonical `/responses` route on the hosted runtime — see the migration
+note below before upgrading a caller that uses managed conversation identity.
 
 ### Security
 
-- **Stateless, history-blind hosted container.** The hosted Foundry agent
-  container now performs zero managed Foundry Conversations data-plane
+- **Stateless, history-blind hosted container (PR #308).** The hosted Foundry
+  agent container now performs zero managed Foundry Conversations data-plane
   operations: it never constructs a Conversations client and never
   creates, reads, appends to, or deletes a managed Conversation. Previously,
   the hosted `/invocations` and `/responses` paths resolved (and, for
@@ -23,6 +27,46 @@
   Cosmos-backed (non-hosted) behavior, Toolbox call-context validation
   (ADR-0001), and Responses streaming/sync/store/background/lifecycle
   support are unchanged.
+
+### Changed
+
+- **Wire compatibility change — breaking for hosted callers using managed
+  conversation identity.** The hosted `/responses` route no longer accepts
+  the `conversation` or `previous_response_id` top-level request fields;
+  both are now rejected with HTTP 422 instead of being resolved against a
+  managed Foundry Conversation. Callers that previously relied on either
+  field to carry history must switch
+  to sending the complete, ordered conversation as the `input` array (a new
+  accepted shape alongside the existing plain string `input`) on every
+  request; the hosted runtime is now fully stateless and history-blind and
+  will not reconstruct prior turns on the caller's behalf. There is no server
+  fallback and no deprecation window for the old fields on the hosted route.
+  `/invocations`'s opaque `conversation_id` and classic (non-hosted,
+  Cosmos-backed) `/responses` behavior are **unaffected** — both continue to
+  accept their existing request shapes unchanged.
+
+### Migration
+
+- **Hosted `/responses` callers only.** Before upgrading a hosted deployment
+  to v3.12.0, update any client that sends `conversation` or
+  `previous_response_id` to the hosted `/responses` endpoint to instead
+  accumulate and send the full ordered turn history as the `input` array on
+  every call. Requests still using `conversation` or `previous_response_id`
+  will start failing with HTTP 422 immediately after the upgrade. No
+  migration is required for `/invocations` callers or for classic
+  (non-hosted) deployments.
+
+### Validation
+
+- **Reviewed release evidence.** At reviewed commit
+  `a828253b85c6ed7a63f6085c1666f75a9ca2b7d8` (`develop`, merged PR #308), the
+  full pytest suite passed (718 passed), pyflakes-level Ruff checks (`--select
+  F`) passed with zero findings on every file changed by this release,
+  `compileall` passed for `src` and `tests`, `pip check` reported no broken
+  requirements, and the Copilot engineering asset validator passed (2 agents,
+  5 skills, 8 scoped instructions). No frontend or `contracts/` files changed
+  in this release, so no additional frontend or schema-hash validation was
+  required.
 
 ## [v3.11.0] - 2026-08-06
 
