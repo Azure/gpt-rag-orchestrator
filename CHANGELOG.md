@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [v3.12.0] - 2026-08-07
 
 Supersedes v3.11.0. This release contains a **wire compatibility change** for
