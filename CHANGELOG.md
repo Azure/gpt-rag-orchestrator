@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [v4.0.0] - 2026-08-07
 
 Supersedes v3.12.0 as the SemVer-correct canonical release for the same
