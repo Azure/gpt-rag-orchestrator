@@ -227,6 +227,109 @@ class TestStreamAgentThreadResume:
         ]
 
 
+class TestStreamAgentHostedStateless:
+    """The hosted runtime must be history-blind and stateless: zero managed
+    Conversations data-plane operations, no service-managed thread, the
+    complete caller-supplied ordered history replayed explicitly every turn,
+    and no server-side persistence of the turn."""
+
+    @pytest.fixture(autouse=True)
+    def _patch(self, patch_dependencies, mock_config):
+        with patch(
+            "strategies.single_agent_rag_strategy_v2.get_config",
+            return_value=mock_config,
+        ):
+            yield
+
+    def _make_strategy(self):
+        from strategies.base_agent_strategy import hosted_runtime_construction
+        from strategies.single_agent_rag_strategy_v2 import SingleAgentRAGStrategyV2
+
+        with hosted_runtime_construction(), patch(
+            "strategies.single_agent_rag_strategy_v2.get_search_client",
+            return_value=MagicMock(),
+        ), patch(
+            "strategies.single_agent_rag_strategy_v2.get_genai_client",
+            return_value=MagicMock(),
+        ):
+            s = SingleAgentRAGStrategyV2()
+        s.search_client = MagicMock()
+        s.project_endpoint = "https://example.services.ai.azure.com/api/projects/p"
+        s.credential = MagicMock()
+        s.model_name = "chat"
+        return s
+
+    @pytest.mark.asyncio
+    async def test_hosted_turn_never_touches_conversations_data_plane(self):
+        s = self._make_strategy()
+        assert s.hosted_runtime is True
+        s.conversation = {
+            "id": "caller-supplied-conv-id",
+            "messages": [
+                {"role": "user", "text": "first question"},
+                {"role": "assistant", "text": "first answer"},
+            ],
+        }
+
+        captured_thread_kwargs = []
+        run_calls = []
+
+        def _get_new_thread(**kwargs):
+            captured_thread_kwargs.append(kwargs)
+            return types.SimpleNamespace(service_thread_id=None)
+
+        agent = MagicMock()
+        agent.__aenter__ = AsyncMock(return_value=agent)
+        agent.__aexit__ = AsyncMock(return_value=False)
+        agent.get_new_thread = _get_new_thread
+
+        provider = MagicMock()
+        provider.as_agent = MagicMock(return_value=agent)
+
+        async def _fake_stream(_agent, run_input, *, thread, options):
+            run_calls.append((run_input, options))
+            yield types.SimpleNamespace(text="hello")
+
+        ensure_conversation_id = AsyncMock()
+        persist_conversation_turn = AsyncMock()
+        get_openai_client = AsyncMock()
+
+        with patch.object(
+            agent_provider_v2, "get_provider", AsyncMock(return_value=provider)
+        ), patch.object(
+            agent_provider_v2, "get_or_create_agent_details", AsyncMock(return_value=MagicMock())
+        ), patch.object(
+            agent_provider_v2, "stream_agent_run", _fake_stream
+        ), patch.object(
+            agent_provider_v2, "ensure_conversation_id", ensure_conversation_id
+        ), patch.object(
+            agent_provider_v2, "persist_conversation_turn", persist_conversation_turn
+        ), patch.object(
+            agent_provider_v2, "_get_openai_client", get_openai_client
+        ):
+            out = "".join([c async for c in s._stream_agent("follow-up")])
+
+        assert out == "hello"
+        # No service-managed thread was requested: purely local/ephemeral.
+        assert captured_thread_kwargs == [{}]
+        # No Conversations data-plane call of any kind.
+        ensure_conversation_id.assert_not_awaited()
+        persist_conversation_turn.assert_not_awaited()
+        get_openai_client.assert_not_awaited()
+        # The complete ordered history plus the current ask was replayed
+        # locally, and the turn is explicitly never stored server-side.
+        [(run_input, options)] = run_calls
+        assert [(m.role.value, m.text) for m in run_input] == [
+            ("user", "first question"),
+            ("assistant", "first answer"),
+            ("user", "follow-up"),
+        ]
+        assert options == {"max_tokens": s.max_completion_tokens, "store": False}
+        # No thread/backend tag leaks into the request-local conversation dict.
+        assert "thread_id" not in s.conversation
+        assert "agent_backend" not in s.conversation
+
+
 class TestPersistConversationTurn:
     @pytest.mark.asyncio
     async def test_appends_complete_user_and_assistant_messages(self):

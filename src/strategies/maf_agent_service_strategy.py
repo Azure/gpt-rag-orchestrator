@@ -38,6 +38,7 @@ from .search_context_provider import SearchContextProvider
 from .foundry_iq_context_provider import FoundryIQContextProvider
 from .maf_plugins import UserProfile, UserProfileMemory
 from . import agent_provider_v2
+from . import hosted_strategies
 from connectors.foundry_iq_mcp import is_mcp_enabled
 from connectors.openai_chat_client import OpenAIChatClient
 from connectors.search import acquire_obo_search_token
@@ -355,8 +356,11 @@ Guidelines:
             )
 
             # Legacy Assistants thread ids are not valid Responses conversation
-            # ids; drop them before reusing the server thread.
-            agent_provider_v2.reset_legacy_thread(conv)
+            # ids; drop them before reusing the server thread. Not applicable to
+            # the stateless hosted runtime, which never binds to a
+            # service-managed thread at all.
+            if not self.hosted_runtime:
+                agent_provider_v2.reset_legacy_thread(conv)
 
             context_providers = [user_memory] if user_memory is not None else []
             if self._search_provider:
@@ -374,17 +378,38 @@ Guidelines:
                 ),
             ) as agent:
 
-                # Get or create thread
-                thread_id = conv.get("thread_id")
-                if thread_id:
-                    # Resume existing thread
-                    thread = agent.get_new_thread(service_thread_id=thread_id)
-                else:
-                    # Create new thread
+                if self.hosted_runtime:
+                    # Stateless hosted path: zero managed-Conversations
+                    # data-plane operations. No service-managed thread is
+                    # created, read, or resumed -- there is no service
+                    # identity a caller-selected conversation id could
+                    # redirect. The complete ordered history already supplied
+                    # by the authenticated caller is replayed as plain input
+                    # messages on a purely local, ephemeral thread, and
+                    # ``store: False`` guarantees the turn is never persisted
+                    # server-side either.
                     thread = agent.get_new_thread()
-                    # service_thread_id may be None until first run; we'll update after
-                    if thread.service_thread_id:
-                        conv["thread_id"] = thread.service_thread_id
+                    run_input = hosted_strategies.build_stateless_messages(
+                        conv.get("messages", []), user_message,
+                    )
+                    run_options = {
+                        "max_tokens": self.max_completion_tokens,
+                        "store": False,
+                    }
+                else:
+                    # Get or create thread
+                    thread_id = conv.get("thread_id")
+                    if thread_id:
+                        # Resume existing thread
+                        thread = agent.get_new_thread(service_thread_id=thread_id)
+                    else:
+                        # Create new thread
+                        thread = agent.get_new_thread()
+                        # service_thread_id may be None until first run; we'll update after
+                        if thread.service_thread_id:
+                            conv["thread_id"] = thread.service_thread_id
+                    run_input = user_message
+                    run_options = {"max_tokens": self.max_completion_tokens}
 
                 # If new session with existing profile, provide summary
                 if (
@@ -406,9 +431,9 @@ Guidelines:
                 event_translator = AgentEventTranslator()
                 async for chunk in agent_provider_v2.stream_agent_run(
                     agent,
-                    user_message,
+                    run_input,
                     thread=thread,
-                    options={"max_tokens": self.max_completion_tokens},
+                    options=run_options,
                 ):
                     for event in event_translator.translate(chunk):
                         yield event
@@ -416,8 +441,13 @@ Guidelines:
                         full_response += chunk.text
                         yield chunk.text
 
-                # Capture thread_id if it was set during the run
-                if not conv.get("thread_id") and thread.service_thread_id:
+                # Capture thread_id if it was set during the run (classic
+                # runtime only; the hosted runtime never persists one).
+                if (
+                    not self.hosted_runtime
+                    and not conv.get("thread_id")
+                    and thread.service_thread_id
+                ):
                     conv["thread_id"] = thread.service_thread_id
 
                 # Store in conversation history
