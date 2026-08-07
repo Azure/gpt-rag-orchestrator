@@ -1,6 +1,57 @@
 # Changelog
 
-## [Unreleased]
+## [v4.0.0] - 2026-08-07
+
+Supersedes v3.12.0 as the SemVer-correct canonical release for the same
+validated wire-compatibility change. v3.12.0 shipped a breaking change to the
+hosted `/responses` contract under a MINOR version number; this repository's
+own versioning rule (`MAJOR: breaking changes`) required a MAJOR bump for
+that change. v3.12.0 remains published, tagged, and **immutable** — it is not
+deleted, retagged, or edited — but it must not be treated as the supported
+integration target and must not be pinned by the GPT-RAG umbrella manifest.
+v4.0.0 is the supported release for this contract going forward and contains
+the same reviewed code as v3.12.0; no additional feature or behavior change
+is introduced by this release.
+
+### Changed
+
+- **Reclassified as MAJOR for SemVer correctness — no code change from
+  v3.12.0.** This release republishes the identical, already-reviewed
+  breaking change first shipped in v3.12.0 under the version number that
+  correctly reflects its impact. The hosted `/responses` route continues to
+  reject the `conversation` and `previous_response_id` top-level request
+  fields with HTTP 422 and requires the authenticated caller to supply the
+  complete, ordered turn history as the `input` array (or the existing plain
+  string `input`) on every request. `/invocations`'s opaque `conversation_id`
+  and classic (non-hosted, Cosmos-backed) `/responses` behavior remain
+  **unaffected**. See the `v3.12.0` entry below for the full technical
+  description of the underlying change — it is intentionally not repeated
+  here to avoid ambiguity about which release introduced which behavior.
+
+### Migration
+
+- **Hosted `/responses` callers on any version before v4.0.0.** Remove
+  `conversation` and `previous_response_id` from hosted `/responses`
+  requests and instead accumulate and send the full ordered turn history as
+  the `input` array on every call. Requests still using `conversation` or
+  `previous_response_id` will fail with HTTP 422. No migration is required
+  for `/invocations` callers or for classic (non-hosted) deployments.
+- **Callers already on v3.12.0.** No client or server behavior changes; this
+  is a version-number correction only. Re-point any pin from `v3.12.0` to
+  `v4.0.0`. Do not pin `v3.12.0` in new integrations or in the GPT-RAG
+  umbrella manifest.
+
+### Validation
+
+- Same reviewed code as v3.12.0, re-validated at release time on
+  `release/4.0.0` (branched from `develop`, changed only `VERSION` and
+  `CHANGELOG.md`): full pytest suite passed (718 passed), pyflakes-level
+  Ruff checks (`--select F`) passed with zero findings on every file changed
+  by this release, `compileall` passed for `src` and `tests`, `pip check`
+  reported no broken requirements, and the Copilot engineering asset
+  validator passed (2 agents, 5 skills, 8 scoped instructions). No frontend
+  or `contracts/` files changed in this release, so no additional frontend or
+  schema-hash validation was required.
 
 ## [v3.12.0] - 2026-08-07
 
