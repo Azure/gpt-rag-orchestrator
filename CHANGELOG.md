@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v3.11.0] - 2026-08-06
+
 ### Fixed
 
 - **Managed Conversation persistence for hosted Responses.** Completed
