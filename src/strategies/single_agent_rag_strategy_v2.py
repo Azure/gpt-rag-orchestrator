@@ -21,6 +21,7 @@ for _azure_logger in [
 from .base_agent_strategy import BaseAgentStrategy
 from .agent_strategies import AgentStrategies
 from . import agent_provider_v2
+from . import hosted_strategies
 
 from dependencies import get_config
 from connectors.search import get_search_client
@@ -489,9 +490,6 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         )
         logging.info(f"[Agent Flow V2][Telemetry] Agent resolve took: {time.time() - t0:.2f}s")
 
-        # Legacy Assistants thread ids are not valid Responses conversation ids.
-        agent_provider_v2.reset_legacy_thread(conv)
-
         # Per-request bound retrieval tool. It carries the same tool name as the
         # definition's function tool (set explicitly below) so MAF can match and
         # invoke it, while closing over this request's OBO/search context.
@@ -508,13 +506,39 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         event_translator = AgentEventTranslator()
         try:
             async with agent:
-                # Back the chat thread with a dedicated server-side conversation
-                # object (created once, resumed every turn). Resuming from the
-                # previous turn's response id instead breaks tool-call chaining on
-                # follow-up turns, which fail with "400 No tool call found for
-                # function call output" (Azure/GPT-RAG#505).
-                thread_id = await agent_provider_v2.ensure_conversation_id(conv)
-                thread = agent.get_new_thread(service_thread_id=thread_id)
+                if self.hosted_runtime:
+                    # Stateless hosted path: zero managed-Conversations
+                    # data-plane operations. No service-managed thread is
+                    # created, read, or resumed, so there is no service
+                    # identity a caller-selected conversation id could
+                    # redirect. The complete ordered history already supplied
+                    # by the authenticated caller is replayed as plain input
+                    # messages on a purely local, ephemeral thread, and
+                    # ``store: False`` guarantees the turn is never persisted
+                    # server-side either.
+                    thread = agent.get_new_thread()
+                    run_input = hosted_strategies.build_stateless_messages(
+                        conv.get("messages", []), user_message,
+                    )
+                    run_options = {
+                        "max_tokens": self.max_completion_tokens,
+                        "store": False,
+                    }
+                else:
+                    # Legacy Assistants thread ids are not valid Responses
+                    # conversation ids.
+                    agent_provider_v2.reset_legacy_thread(conv)
+
+                    # Back the chat thread with a dedicated server-side
+                    # conversation object (created once, resumed every turn).
+                    # Resuming from the previous turn's response id instead
+                    # breaks tool-call chaining on follow-up turns, which fail
+                    # with "400 No tool call found for function call output"
+                    # (Azure/GPT-RAG#505).
+                    thread_id = await agent_provider_v2.ensure_conversation_id(conv)
+                    thread = agent.get_new_thread(service_thread_id=thread_id)
+                    run_input = user_message
+                    run_options = {"max_tokens": self.max_completion_tokens}
 
                 logging.info("[Agent Flow V2] Streaming from Foundry prompt agent (Responses)...")
                 first_token = False
@@ -524,11 +548,9 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                 # to no options if the service ever rejects it too.
                 async for chunk in agent_provider_v2.stream_agent_run(
                     agent,
-                    user_message,
+                    run_input,
                     thread=thread,
-                    options={
-                        "max_tokens": self.max_completion_tokens,
-                    },
+                    options=run_options,
                 ):
                     for event in event_translator.translate(chunk):
                         yield event
@@ -544,14 +566,15 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
             logging.error(f"[Agent Flow V2] Streaming failed: {err_msg}")
             raise
 
-        try:
-            await self._persist_managed_turn(user_message, full_response)
-        except Exception:
-            logging.error(
-                "[Agent Flow V2] Managed Conversation persistence failed",
-                exc_info=True,
-            )
-            raise
+        if not self.hosted_runtime:
+            try:
+                await self._persist_managed_turn(user_message, full_response)
+            except Exception:
+                logging.error(
+                    "[Agent Flow V2] Managed Conversation persistence failed",
+                    exc_info=True,
+                )
+                raise
 
         # Persist conversation history
         conv.setdefault("messages", []).extend([
@@ -564,7 +587,15 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
         user_message: str,
         assistant_message: str,
     ) -> None:
-        """Persist a completed turn when this runtime has a managed thread."""
+        """Persist a completed turn when this runtime has a managed thread.
+
+        Never runs for the hosted runtime: the hosted container performs zero
+        managed-Conversations data-plane operations, so this is a defense-in-
+        depth guard in addition to the hosted conversation dict never
+        carrying a ``thread_id``/``agent_backend`` tag in the first place.
+        """
+        if self.hosted_runtime:
+            return
         conversation_id = self.conversation.get("thread_id")
         if (
             not conversation_id

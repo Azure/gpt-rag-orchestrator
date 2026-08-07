@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Security
+
+- **Stateless, history-blind hosted container.** The hosted Foundry agent
+  container now performs zero managed Foundry Conversations data-plane
+  operations: it never constructs a Conversations client and never
+  creates, reads, appends to, or deletes a managed Conversation. Previously,
+  the hosted `/invocations` and `/responses` paths resolved (and, for
+  `single_agent_rag`, appended to) a Foundry Conversation using a
+  caller-supplied or platform-chained id — letting a caller-selected
+  identifier drive service-identity read/write. The canonical `/responses`
+  route now explicitly rejects the `conversation` and `previous_response_id`
+  top-level fields (422) instead of resolving them, and accepts a complete,
+  bounded, ordered message-array `input` (in addition to the existing plain
+  string `input`) so the authenticated caller supplies full history directly.
+  Hosted-eligible strategies (`single_agent_rag`, `maf_agent_service`) replay
+  that ordered history on a purely local, ephemeral model-call thread and
+  explicitly disable server-side storage (`store: False`) instead of binding
+  to or creating any service-managed thread/conversation. Classic
+  Cosmos-backed (non-hosted) behavior, Toolbox call-context validation
+  (ADR-0001), and Responses streaming/sync/store/background/lifecycle
+  support are unchanged.
+
 ## [v3.11.0] - 2026-08-06
 
 ### Fixed

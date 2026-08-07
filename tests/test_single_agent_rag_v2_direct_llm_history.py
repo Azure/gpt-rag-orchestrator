@@ -118,8 +118,18 @@ class TestSingleAgentRagV2DirectLLMHistory:
         assert out == "Olá mundo"
 
     @pytest.mark.asyncio
-    async def test_hosted_direct_turn_is_persisted_to_managed_conversation(self):
-        s = self._make_strategy()
+    async def test_hosted_runtime_direct_turn_never_persists_to_managed_conversation(
+        self,
+    ):
+        """Security regression: the hosted runtime performs zero managed
+        Conversations data-plane operations. Even if a conversation dict were
+        forged with a thread_id/agent_backend tag that would trigger
+        persistence in the classic runtime, the hosted runtime must still
+        never call the Conversations API."""
+        from strategies.base_agent_strategy import hosted_runtime_construction
+
+        with hosted_runtime_construction():
+            s = self._make_strategy()
         s.conversation = {
             "thread_id": "conv_hosted",
             "agent_backend": agent_provider_v2.AGENT_BACKEND_TAG,
@@ -136,15 +146,12 @@ class TestSingleAgentRagV2DirectLLMHistory:
             "strategies.single_agent_rag_strategy_v2.agent_provider_v2."
             "get_provider",
             new=AsyncMock(),
-        ):
+        ) as get_provider:
             _, out = await self._run(s, "remember JADE-7394")
 
         assert out == "Olá mundo"
-        persist.assert_awaited_once_with(
-            "conv_hosted",
-            "remember JADE-7394",
-            "Olá mundo",
-        )
+        persist.assert_not_awaited()
+        get_provider.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_direct_turn_does_not_persist_to_legacy_thread_id(self):
