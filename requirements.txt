@@ -1,5 +1,5 @@
 # Azure SDK dependencies
-azure-keyvault-secrets==4.8.0
+azure-keyvault-secrets==4.11.0
 azure-cosmos==4.5.1
 azure-identity==1.21.0
 azure-mgmt-web==8.0.0
