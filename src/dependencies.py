@@ -1,18 +1,35 @@
 """
 Provides dependencies for API calls.
 """
+from __future__ import annotations
+
 import logging
 import os
 import json
 import httpx
 import hmac
 import hashlib
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, TYPE_CHECKING
 from datetime import datetime, timedelta
 from fastapi import HTTPException, Header
-from connectors.appconfig import AppConfigClient
 import jwt
 
+if TYPE_CHECKING:
+    from connectors.appconfig import AppConfigClient
+
+# NOTE: `connectors/__init__.py` imports several submodules (cosmosdb,
+# search, aifoundry, ...) that themselves import this module (`dependencies`)
+# at their own module level to call `get_config()`. Importing
+# `connectors.appconfig` eagerly here therefore creates a circular import:
+# whichever module is imported first (this one, or one of those connector
+# submodules) ends up needing the other before it has finished initializing.
+# This is fatal -- not merely slow -- for any entrypoint that imports
+# `dependencies` before anything else has already loaded `connectors` (for
+# example the hosted-agent entrypoint, `src/api/hosted_entrypoint.py`, which
+# is intentionally Cosmos-free and so never "warms up" `connectors` first).
+# `AppConfigClient` construction is deferred into `get_config()` below to
+# break the cycle; `from __future__ import annotations` keeps the type hints
+# in this module lazy so they don't need the real class at import time.
 __config: AppConfigClient = None
 __cached_public_keys = {}  # {cache_key: {"keys": {...}, "expires_at": datetime}}
 
@@ -142,6 +159,7 @@ def _parse_cache_control_ttl(cache_control_header: str) -> int:
 
 def get_config(action: str = None) -> AppConfigClient:
     global __config
+    from connectors.appconfig import AppConfigClient  # deferred: see note above __config
 
     if action == "refresh":
         __config = AppConfigClient()
