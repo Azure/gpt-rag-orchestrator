@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Hosted-agent entrypoint no longer crashes on import (circular import
+  between `dependencies` and `connectors`).** `dependencies.py` eagerly
+  imported `connectors.appconfig` at module level. `connectors/__init__.py`
+  eagerly imports several connector submodules (`cosmosdb`, `search`,
+  `aifoundry`, ...) that each import `dependencies` back, at their own module
+  level, to call `get_config()`. Any entrypoint whose first touch of this
+  package tree is `dependencies` — notably `src/api/hosted_entrypoint.py`,
+  which is intentionally Cosmos-free and never imports `connectors` first —
+  hit `ImportError: cannot import name 'get_config' from partially
+  initialized module 'dependencies' (most likely due to a circular import)`
+  and crashed before uvicorn could bind a port or serve `GET /readiness`.
+  Deployed as a Microsoft Foundry hosted agent, this was observed as the
+  platform returning HTTP 424 `session_not_ready` on invoke ("container
+  started but `/readiness` didn't return HTTP 200 within the timeout"),
+  because the container's Python process never reached that far.
+  `AppConfigClient` construction is now deferred into `get_config()` instead
+  of imported eagerly at module level, breaking the cycle with no change to
+  `get_config()`'s public behavior or the `connectors` package's re-export
+  surface. Added `tests/test_hosted_entrypoint_import.py`, which spawns a
+  fresh interpreter (mirroring the container's `uvicorn ...:app` startup) to
+  regression-test that `api.hosted_entrypoint` imports cleanly and that
+  `dependencies` does not eagerly pull in `connectors` at module level.
+
 ## [v4.0.0] - 2026-08-07
 
 Supersedes v3.12.0 as the SemVer-correct canonical release for the same
