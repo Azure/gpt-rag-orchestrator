@@ -89,14 +89,24 @@ group-filter fallback is never the default.
 
 `POST /responses` is hosted by Microsoft's
 `azure-ai-agentserver-responses` implementation of the Foundry Responses v2
-protocol. The orchestrator adapter accepts the documented string `input`
-contract with streaming or synchronous execution, storage controls, managed
-`conversation` identity, `previous_response_id`, metadata, and the
-platform-injected `agent_reference`; list input is rejected rather than
-silently losing role semantics in server-thread strategies. Other Responses
-request fields are rejected rather than silently ignored, and `conversation`
-cannot be combined with `previous_response_id`. The protocol host also owns
-response retrieval, input-item listing, cancellation, and deletion.
+protocol. The orchestrator adapter accepts a plain string `input` or an
+ordered array of text-only `role`/`content` message objects, streaming or
+synchronous (`stream`) execution, `metadata`, and the platform-injected
+`agent_reference`. `conversation` and `previous_response_id` are rejected
+outright with HTTP 422 (ADR-0004): a caller-selected server-side state
+selector is never resolved; the authenticated caller must instead send the
+complete, ordered turn history as `input` on every request. `store` is
+overridden to `False` unconditionally, regardless of what the caller sends or
+omits, because the hosted container holds zero managed-Conversations
+data-plane RBAC and must never depend on Foundry's managed persistence — see
+`CHANGELOG.md`. `background: true` requires `store: true` in the underlying
+SDK and is therefore also rejected with HTTP 422. Non-message-object array
+items and multimodal (non-text) content are rejected rather than silently
+losing role semantics or dropping content. Other Responses request fields are
+rejected rather than silently ignored. The protocol host still exposes
+response retrieval, input-item listing, cancellation, and deletion, but since
+every response is created with `store: False` none of those routes ever
+return a previously created response.
 `POST /invocations` remains a separate compatibility protocol for the existing
 `messages` request schema. Both protocols reuse the same hosted strategy
 execution and identity guard after parsing their distinct request contracts.
