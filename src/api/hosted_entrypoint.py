@@ -10,6 +10,14 @@ classic ``main.py`` so that:
   create/read/append/delete, no Conversations client construction). The
   authenticated UI BFF owns managed Conversation lifecycle exclusively and
   sends the complete, bounded, ordered history on every request.
+- Every ``POST /responses`` unconditionally forces ``store: False`` before the
+  pinned ``azure-ai-agentserver-responses`` host processes it (ADR-0004),
+  regardless of what a caller sends or omits. This fails closed against the
+  host's own auto-activated, network-bound Foundry storage provider, which
+  the hosted container has no RBAC to use and which otherwise raises a
+  platform ``storage_error`` under network isolation whenever a caller's
+  ``store`` is left unset (the Responses default is ``true``) or explicit
+  ``true``. See ``HostedResponsesAgentServerHost._create_endpoint``.
 - Only ADR-eligible strategies are admitted; unsupported strategies fail
   explicitly rather than silently falling back.
 - The hosted image is immutable: the ``VERSION`` file is read once at startup
@@ -846,6 +854,57 @@ class HostedResponsesAgentServerHost(ResponsesAgentServerHost):
                     },
                     status_code=422,
                 )
+
+            # The pinned SDK requires ``store: true`` whenever ``background:
+            # true`` is requested (a queued/polled response is meaningless if
+            # it can never be retrieved). This hosted runtime forces
+            # ``store: False`` unconditionally below (ADR-0004), so
+            # ``background: true`` can never be honored. Reject it outright
+            # with an explicit, self-documenting error instead of letting the
+            # caller-opaque SDK-level "background=true requires store=true"
+            # 400 stand as the de-facto contract.
+            if payload.get("background"):
+                return JSONResponse(
+                    {
+                        "detail": (
+                            "The Responses background parameter is not "
+                            "supported by this hosted runtime: background=true "
+                            "requires store=true, and every request is forced "
+                            "to store=False (ADR-0004, zero managed-"
+                            "Conversations RBAC, stateless hosted container)."
+                        )
+                    },
+                    status_code=422,
+                )
+
+            # ADR-0004: the hosted container holds zero managed-Conversations
+            # data-plane RBAC and must never rely on Foundry managed
+            # persistence. ``ResponsesAgentServerHost.__init__`` auto-activates
+            # a network-bound ``FoundryStorageProvider`` whenever no explicit
+            # ``store`` override is supplied and the process detects it is
+            # running as a hosted agent, and the pinned SDK orchestrator only
+            # calls that provider when the *caller's* ``store`` is true. Per
+            # the OpenAI/Foundry Responses contract ``store`` defaults to
+            # ``true`` when omitted, so an unset or explicit ``store: true``
+            # request reaches that provider and fails closed with a platform
+            # ``storage_error`` under network isolation, while ``store: false``
+            # skips it and succeeds. Fail closed unconditionally instead of
+            # trusting caller intent: force ``store: False`` for every create
+            # call regardless of what was sent or omitted, so implicit managed
+            # persistence is never attempted by any caller on any product
+            # surface. Mutating ``payload`` here is sufficient — Starlette's
+            # ``Request.json()`` caches the parsed body dict on the request
+            # instance, so the SDK's own downstream ``await request.json()``
+            # call returns this same, already-overridden object.
+            if payload.get("store") is not False:
+                logger.info(
+                    "Hosted Responses request store=%r (omitted defaults to "
+                    "true); overriding to store=False so Foundry managed "
+                    "persistence is never attempted (ADR-0004 zero-RBAC "
+                    "stateless hosted container).",
+                    payload.get("store"),
+                )
+            payload["store"] = False
 
             return await endpoint(request)
 
