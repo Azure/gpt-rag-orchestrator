@@ -1589,49 +1589,6 @@ class TestHostedEntrypointAPI:
         assert resp.json()["status"] == "completed"
         assert resp.json()["output"][0]["content"][0]["text"] == "answer"
 
-    def test_responses_persists_retrieves_and_deletes_response(
-        self,
-        client,
-        mock_config,
-    ):
-        self._use_strategy(mock_config, "maf_lite")
-
-        async def fake_flow(_ask):
-            yield "stored answer"
-
-        strategy = MagicMock()
-        strategy.initiate_agent_flow = fake_flow
-
-        with patch(
-            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
-            new=AsyncMock(return_value=strategy),
-        ):
-            created = client.post(
-                "/responses",
-                json={"input": "Stored question", "store": True},
-            )
-
-        response_id = created.json()["id"]
-        retrieved = client.get(f"/responses/{response_id}")
-        input_items = client.get(f"/responses/{response_id}/input_items")
-        deleted = client.delete(f"/responses/{response_id}")
-        missing = client.get(f"/responses/{response_id}")
-
-        assert created.status_code == 200
-        assert retrieved.status_code == 200
-        assert retrieved.json()["id"] == response_id
-        assert retrieved.json()["status"] == "completed"
-        assert input_items.status_code == 200
-        assert input_items.json()["object"] == "list"
-        assert input_items.json()["data"][0]["role"] == "user"
-        assert deleted.status_code == 200
-        assert deleted.json() == {
-            "id": response_id,
-            "object": "response",
-            "deleted": True,
-        }
-        assert missing.status_code == 404
-
     def test_responses_store_false_is_not_retrievable(
         self,
         client,
@@ -1656,6 +1613,93 @@ class TestHostedEntrypointAPI:
 
         assert created.status_code == 200
         assert client.get(f"/responses/{created.json()['id']}").status_code == 404
+
+    @pytest.mark.parametrize(
+        "store_field",
+        [
+            pytest.param({"store": True}, id="explicit-store-true"),
+            pytest.param({}, id="omitted-store-defaults-true"),
+        ],
+    )
+    def test_responses_ignores_caller_store_and_fails_closed(
+        self,
+        client,
+        mock_config,
+        store_field,
+    ):
+        """ADR-0004: the hosted container has zero managed-Conversations RBAC.
+
+        A caller asking for (or defaulting to, since the Responses contract
+        treats an omitted ``store`` as ``true``) managed persistence must never
+        reach the SDK's auto-activated, network-bound Foundry storage
+        provider. The container overrides ``store`` to ``False`` for every
+        create call, so the response is created successfully but is never
+        retrievable, listable, or deletable afterward — regardless of what
+        the caller sent or omitted. This is the fail-closed override that
+        replaces caller-controlled persistence (formerly proven by a
+        ``store: True`` round trip through GET/DELETE, which this test
+        supersedes: that round trip must no longer succeed).
+        """
+        self._use_strategy(mock_config, "maf_lite")
+
+        async def fake_flow(_ask):
+            yield "stored answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            created = client.post(
+                "/responses",
+                json={"input": "Stored question", **store_field},
+            )
+
+        assert created.status_code == 200
+        response_id = created.json()["id"]
+
+        assert client.get(f"/responses/{response_id}").status_code == 404
+        assert (
+            client.get(f"/responses/{response_id}/input_items").status_code == 404
+        )
+        assert client.delete(f"/responses/{response_id}").status_code == 404
+
+    def test_responses_stream_ignores_caller_store_and_fails_closed(
+        self,
+        client,
+        mock_config,
+    ):
+        """The override applies uniformly to streaming create calls too."""
+        self._use_strategy(mock_config, "maf_lite")
+
+        async def fake_flow(_ask):
+            yield "streamed answer"
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = fake_flow
+
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(return_value=strategy),
+        ):
+            created = client.post(
+                "/responses",
+                json={"input": "Stored question", "stream": True, "store": True},
+            )
+
+        assert created.status_code == 200
+        events = _parse_sse_body(created.text)
+        response_ids = {
+            event["data"]["response"]["id"]
+            for event in events
+            if isinstance(event["data"].get("response"), dict)
+        }
+        assert len(response_ids) == 1
+        response_id = next(iter(response_ids))
+
+        assert client.get(f"/responses/{response_id}").status_code == 404
 
     def test_responses_honors_platform_response_id_header(
         self,
@@ -1778,11 +1822,17 @@ class TestHostedEntrypointAPI:
         assert response.status_code == 422
         assert response.json()["detail"] == "The Responses input must not be empty."
 
-    def test_responses_cancel_route_terminates_background_response(
+    def test_responses_rejects_background_mode(
         self,
         client,
         mock_config,
     ):
+        """ADR-0004: the hosted runtime forces store=False on every request,
+        and the pinned SDK requires store=true whenever background=true is
+        requested (a queued/polled response is meaningless if it can never
+        be retrieved). background=true must therefore be rejected outright
+        with a self-documenting error instead of silently queuing a response
+        that can never be observed again."""
         self._use_strategy(mock_config, "maf_lite")
 
         async def fake_flow(_ask):
@@ -1805,12 +1855,9 @@ class TestHostedEntrypointAPI:
                     "store": True,
                 },
             )
-            cancelled = client.post(f"/responses/{created.json()['id']}/cancel")
 
-        assert created.status_code == 200
-        assert created.json()["status"] in {"queued", "in_progress"}
-        assert cancelled.status_code == 200
-        assert cancelled.json()["status"] == "cancelled"
+        assert created.status_code == 422
+        assert "background" in created.json()["detail"]
 
     def test_responses_rejects_missing_foundry_call_id_for_toolbox_strategy(
         self,

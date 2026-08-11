@@ -1,5 +1,47 @@
 # Changelog
 
+## [v4.0.2] - 2026-08-11
+
+### Security
+
+- **Hosted `/responses` now unconditionally forces `store: False`, closing an
+  implicit Foundry managed-persistence path that violated the ADR-0004
+  zero-RBAC, stateless hosted container contract.** The pinned
+  `azure-ai-agentserver-responses==2.0.0b1` host
+  (`ResponsesAgentServerHost.__init__`) auto-activates its own network-bound
+  `FoundryStorageProvider` (built from `DefaultAzureCredential`) whenever no
+  explicit `store` override is supplied and the process detects it is running
+  as a hosted agent — true on every real deployment. Its orchestrator only
+  invokes that provider when the *caller's* `store` is true, and the
+  OpenAI/Foundry Responses contract defaults an omitted `store` to `true`.
+  Live validation confirmed the resulting split: a caller that explicitly sent
+  `store: false` succeeded, while the same request with `store` left unset or
+  `true` deterministically failed with a platform `storage_error` once
+  `NETWORK_ISOLATION=true` blocked the provider's path to the Foundry storage
+  plane. The container's own internal model invocation
+  (`single_agent_rag_strategy_v2.py`, `maf_agent_service_strategy.py`) already
+  hardcoded `store: False` on the *separate*, inner Foundry agent/model call
+  for the hosted runtime — that guarantee was never the gap. The gap was the
+  *outer* wire-level `store` field on the incoming `POST /responses` request,
+  which every caller could still set (or omit) freely, reaching the
+  auto-activated storage provider before any GPT-RAG code ran. Every hosted
+  `/responses` create call (`HostedResponsesAgentServerHost._create_endpoint`)
+  now overrides `store` to `False` unconditionally — regardless of what a
+  caller sends or omits, for both streaming and non-streaming (sync) requests
+  — so the container never depends on Foundry managed persistence and never
+  needs Conversations data-plane RBAC to answer a request. `background: true`
+  requires `store: true` in the pinned SDK and is therefore no longer
+  reachable; it now fails fast with an explicit HTTP 422 instead of the
+  opaque SDK-level 400, since a queued/polled response that can never be
+  retrieved is not a meaningful capability for a stateless container.
+  `/invocations` and classic (non-hosted, Cosmos-backed) `/responses` behavior
+  are **unaffected**. Added `test_responses_ignores_caller_store_and_fails_closed`
+  (parametrized over explicit `store: true` and an omitted `store` field),
+  `test_responses_stream_ignores_caller_store_and_fails_closed`, and
+  `test_responses_rejects_background_mode`; replaced
+  `test_responses_persists_retrieves_and_deletes_response`, which asserted the
+  now-removed caller-controlled persistence round trip.
+
 ## [v4.0.1] - 2026-08-09
 
 ### Fixed
