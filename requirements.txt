@@ -13,7 +13,7 @@ azure-ai-agentserver-responses==2.0.0b1
 azure-search-documents==11.7.0b2
 
 # AI and NLP dependencies
-tiktoken==0.13.0
+tiktoken==0.14.0
 regex>=2022.1.18
 openai==2.41.1
 
