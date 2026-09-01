@@ -38,7 +38,7 @@ tenacity
 jinja2==3.1.6
 
 # Character detection (pin to <6 for requests compatibility)
-chardet>=5.2,<6.0.0
+chardet>=7.6.0,<8.0.0
 
 # For evaluation
 requests==2.33.0
