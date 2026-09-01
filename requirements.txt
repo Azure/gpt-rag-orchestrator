@@ -23,7 +23,7 @@ pydantic==2.13.5
 
 # Authentication and token validation
 PyJWT==2.13.0
-cryptography>=42.0.0
+cryptography>=50.0.1
 httpx>=0.28.1
 
 # Microsoft Agent Framework (MAF) dependencies
