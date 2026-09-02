@@ -1297,25 +1297,35 @@ class TestHostedEntrypointAPI:
         for frame in frames:
             _RESPONSE_EVENT_ADAPTER.validate_python(frame["data"])
 
-    def test_responses_rejects_conversation_field(self, client):
-        """Security regression: ``conversation`` is a server-side state
-        selector that would let a caller-selected id drive Foundry
-        Conversations create/read on the hosted container. It must be
-        rejected outright, not resolved."""
-        response = client.post(
-            "/responses",
-            json={
-                "input": "Continue",
-                "stream": True,
-                "store": True,
-                "conversation": "conv-explicit",
-            },
-        )
+    def test_responses_ignores_conversation_field(self, client, mock_config):
+        """The Playground's selector never reaches managed Conversations."""
+        self._use_strategy(mock_config, "maf_lite")
+        captured = {}
 
-        assert response.status_code == 422
-        assert response.json()["detail"] == (
-            "Unsupported Responses request fields: conversation."
-        )
+        async def fake_stream(turn, strategy_key, history):
+            captured.update(
+                turn=turn,
+                strategy_key=strategy_key,
+                history=history,
+            )
+            yield TurnConversationEvent("conv-stateless")
+            yield TurnTextEvent("answer")
+
+        with patch("api.hosted_entrypoint._hosted_stream", new=fake_stream):
+            response = client.post(
+                "/responses",
+                json={
+                    "input": "Continue",
+                    "stream": True,
+                    "store": True,
+                    "conversation": "conv-explicit",
+                },
+            )
+
+        assert response.status_code == 200
+        assert captured["turn"].ask == "Continue"
+        assert captured["turn"].conversation_id is None
+        assert captured["history"] == []
 
     def test_responses_rejects_previous_response_id_field(self, client):
         """Security regression: ``previous_response_id`` is a server-side

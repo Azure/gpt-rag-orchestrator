@@ -795,6 +795,16 @@ class HostedResponsesAgentServerHost(ResponsesAgentServerHost):
                     status_code=422,
                 )
 
+            # Foundry's hosted-agent Playground injects a conversation selector
+            # even for stateless agents. Remove it before the SDK sees the
+            # request so it cannot activate managed Conversations state.
+            if "conversation" in payload:
+                logger.info(
+                    "Ignoring Foundry-injected Responses conversation selector; "
+                    "the hosted runtime remains stateless."
+                )
+                payload.pop("conversation")
+
             supported_fields = {
                 "agent_reference",
                 "background",

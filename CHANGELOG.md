@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Foundry Playground requests no longer fail with HTTP 422 when the platform
+  injects a top-level `conversation` selector.** The hosted `/responses`
+  adapter now removes that selector before invoking
+  `azure-ai-agentserver-responses`, so it is never resolved through managed
+  Conversations and the ADR-0004 stateless, zero-data-plane-RBAC contract is
+  preserved. `previous_response_id` remains rejected because discarding it
+  could silently lose caller-requested history.
+
 ## [v4.0.2] - 2026-08-11
 
 ### Security

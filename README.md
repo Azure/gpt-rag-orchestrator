@@ -92,10 +92,12 @@ group-filter fallback is never the default.
 protocol. The orchestrator adapter accepts a plain string `input` or an
 ordered array of text-only `role`/`content` message objects, streaming or
 synchronous (`stream`) execution, `metadata`, and the platform-injected
-`agent_reference`. `conversation` and `previous_response_id` are rejected
-outright with HTTP 422 (ADR-0004): a caller-selected server-side state
-selector is never resolved; the authenticated caller must instead send the
-complete, ordered turn history as `input` on every request. `store` is
+`agent_reference`. A platform-injected `conversation` selector is ignored
+without being resolved or forwarded to the SDK, preserving the ADR-0004
+stateless contract while remaining compatible with the Foundry Playground.
+`previous_response_id` is rejected outright with HTTP 422: the authenticated
+caller must instead send the complete, ordered turn history as `input` on
+every request. `store` is
 overridden to `False` unconditionally, regardless of what the caller sends or
 omits, because the hosted container holds zero managed-Conversations
 data-plane RBAC and must never depend on Foundry's managed persistence — see
