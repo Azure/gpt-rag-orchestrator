@@ -1297,8 +1297,8 @@ class TestHostedEntrypointAPI:
         for frame in frames:
             _RESPONSE_EVENT_ADAPTER.validate_python(frame["data"])
 
-    def test_responses_ignores_conversation_field(self, client, mock_config):
-        """The Playground's selector never reaches managed Conversations."""
+    def test_responses_ignores_platform_selectors(self, client, mock_config):
+        """Platform selectors never reach the SDK's managed state."""
         self._use_strategy(mock_config, "maf_lite")
         captured = {}
 
@@ -1319,6 +1319,7 @@ class TestHostedEntrypointAPI:
                     "stream": True,
                     "store": True,
                     "conversation": "conv-explicit",
+                    "session_id": "session-hosted-compute",
                 },
             )
 
