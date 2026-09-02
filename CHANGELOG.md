@@ -5,12 +5,30 @@
 ### Fixed
 
 - **Foundry Playground and `azd ai agent invoke` requests no longer fail with
-  HTTP 422 when the platform injects top-level `conversation`, `model`, and
-  `session_id` routing selectors.** The hosted `/responses` adapter now removes those selectors before invoking
-  `azure-ai-agentserver-responses`, so it is never resolved through managed
-  Conversations and the ADR-0004 stateless, zero-data-plane-RBAC contract is
-  preserved. `previous_response_id` remains rejected because discarding it
-  could silently lose caller-requested history.
+  HTTP 422 when the platform injects top-level Responses fields the adapter
+  does not honor.** The hosted `/responses` adapter validated the request body
+  against a strict allowlist, so *any* field a Foundry client sent that the
+  adapter did not already know about produced a hard 422 and an unusable
+  hosted agent. Because the platform injects a different field set per client,
+  per surface, and per release, fixing them one at a time
+  (`conversation`, then `session_id`, then `model`) could never converge. The
+  policy is now inverted: unknown top-level fields are logged and dropped
+  before `azure-ai-agentserver-responses` parses the body — so they are still
+  never resolved through managed Conversations and cannot override the
+  server-side agent definition — and only an explicit deny-list is rejected.
+  `previous_response_id` remains rejected because discarding it could silently
+  answer from truncated history.
+- **Optional Responses parameters serialized as explicit `null` no longer
+  trigger a spurious 422.** Foundry clients emit unset optionals as `null`, and
+  the rejection check tested key presence rather than value, so
+  `"previous_response_id": null` was rejected as if the caller had requested
+  server-side history. A `null` now means absent.
+- **Every hosted `/responses` rejection is now logged with its reason.** The
+  422 detail was returned to the caller but never written to the logger, and
+  the uvicorn access line that reaches the Foundry log stream carries only the
+  status code. A refused Playground request was therefore invisible in
+  Application Insights, which is what allowed the allowlist defect above to
+  survive several diagnosis cycles.
 
 ## [v4.0.2] - 2026-08-11
 

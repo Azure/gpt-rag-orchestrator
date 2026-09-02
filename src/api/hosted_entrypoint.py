@@ -777,6 +777,17 @@ class HostedResponsesAgentServerHost(ResponsesAgentServerHost):
         endpoint: Callable[[Request], Awaitable[Response]],
     ) -> Callable[[Request], Awaitable[Response]]:
         async def validated(request: Request) -> Response:
+            def reject(detail: str, status_code: int = 422) -> JSONResponse:
+                # A rejected request used to surface only in the caller's
+                # response body, so Foundry-side failures were undiagnosable
+                # from container telemetry. Log every rejection reason.
+                logger.warning(
+                    "Rejecting hosted Responses request (%s): %s",
+                    status_code,
+                    detail,
+                )
+                return JSONResponse({"detail": detail}, status_code=status_code)
+
             call_context_error = self._call_context_error(request)
             if call_context_error is not None:
                 return call_context_error
@@ -784,33 +795,46 @@ class HostedResponsesAgentServerHost(ResponsesAgentServerHost):
             try:
                 payload = await request.json()
             except (json.JSONDecodeError, UnicodeDecodeError):
-                return JSONResponse(
-                    {"detail": "The Responses request body must be valid JSON."},
+                return reject(
+                    "The Responses request body must be valid JSON.",
                     status_code=400,
                 )
 
             if not isinstance(payload, dict) or "input" not in payload:
-                return JSONResponse(
-                    {"detail": "The Responses request requires an input field."},
-                    status_code=422,
-                )
+                return reject("The Responses request requires an input field.")
 
-            # Foundry clients inject routing selectors even for stateless
-            # agents. The gateway has already selected the agent and compute
-            # session, so remove them before SDK request validation.
-            platform_selectors = sorted(
-                set(payload).intersection({"conversation", "model", "session_id"})
+            # Foundry clients serialize unset optional Responses parameters as
+            # explicit nulls. A null carries no caller intent, so treat those
+            # keys as absent rather than as caller-supplied fields.
+            for null_field in [
+                key
+                for key, value in payload.items()
+                if value is None and key != "input"
+            ]:
+                payload.pop(null_field)
+
+            # ``previous_response_id`` is the only request field this adapter
+            # refuses: it is a server-side state selector that would recreate
+            # the cross-turn history access the stateless runtime cannot
+            # authorize (ADR-0004). Callers must resend the ordered input.
+            unsupported_fields = sorted(
+                set(payload).intersection({"previous_response_id"})
             )
-            if platform_selectors:
-                logger.info(
-                    "Ignoring Foundry-injected Responses selectors %s; the "
-                    "hosted runtime remains stateless.",
-                    ", ".join(platform_selectors),
+            if unsupported_fields:
+                return reject(
+                    "Unsupported Responses request fields: "
+                    + ", ".join(unsupported_fields)
+                    + "."
                 )
-                for selector in platform_selectors:
-                    payload.pop(selector)
 
-            supported_fields = {
+            # Every other field this adapter does not act on is dropped rather
+            # than rejected. Foundry injects routing selectors the gateway has
+            # already resolved (``conversation``, ``model``, ``session_id``)
+            # plus client-side sampling parameters owned by the server-side
+            # agent definition, and that set grows with the product. A strict
+            # allowlist turned each newly injected client field into a hosted
+            # agent outage, so ignore-and-log is the contract.
+            honored_fields = {
                 "agent_reference",
                 "background",
                 "input",
@@ -818,39 +842,28 @@ class HostedResponsesAgentServerHost(ResponsesAgentServerHost):
                 "store",
                 "stream",
             }
-            unsupported_fields = sorted(set(payload) - supported_fields)
-            if unsupported_fields:
-                return JSONResponse(
-                    {
-                        "detail": (
-                            "Unsupported Responses request fields: "
-                            + ", ".join(unsupported_fields)
-                            + "."
-                        )
-                    },
-                    status_code=422,
+            ignored_fields = sorted(set(payload) - honored_fields)
+            if ignored_fields:
+                logger.info(
+                    "Ignoring Responses request fields %s; the hosted runtime "
+                    "is stateless and its behavior is defined server-side.",
+                    ", ".join(ignored_fields),
                 )
+                for ignored_field in ignored_fields:
+                    payload.pop(ignored_field)
 
             response_input = payload["input"]
             if isinstance(response_input, str):
                 if not response_input.strip():
-                    return JSONResponse(
-                        {"detail": "The Responses input must not be empty."},
-                        status_code=422,
-                    )
+                    return reject("The Responses input must not be empty.")
             elif isinstance(response_input, list):
                 input_error = _validate_responses_input_items(response_input)
                 if input_error is not None:
-                    return JSONResponse({"detail": input_error}, status_code=422)
+                    return reject(input_error)
             else:
-                return JSONResponse(
-                    {
-                        "detail": (
-                            "This hosted adapter supports string or ordered "
-                            "message-array Responses input."
-                        )
-                    },
-                    status_code=422,
+                return reject(
+                    "This hosted adapter supports string or ordered "
+                    "message-array Responses input."
                 )
 
             metadata = payload.get("metadata")
@@ -861,13 +874,8 @@ class HostedResponsesAgentServerHost(ResponsesAgentServerHost):
                     for key, value in metadata.items()
                 )
             ):
-                return JSONResponse(
-                    {
-                        "detail": (
-                            "Responses metadata must contain only string keys and values."
-                        )
-                    },
-                    status_code=422,
+                return reject(
+                    "Responses metadata must contain only string keys and values."
                 )
 
             # The pinned SDK requires ``store: true`` whenever ``background:
@@ -879,17 +887,12 @@ class HostedResponsesAgentServerHost(ResponsesAgentServerHost):
             # caller-opaque SDK-level "background=true requires store=true"
             # 400 stand as the de-facto contract.
             if payload.get("background"):
-                return JSONResponse(
-                    {
-                        "detail": (
-                            "The Responses background parameter is not "
-                            "supported by this hosted runtime: background=true "
-                            "requires store=true, and every request is forced "
-                            "to store=False (ADR-0004, zero managed-"
-                            "Conversations RBAC, stateless hosted container)."
-                        )
-                    },
-                    status_code=422,
+                return reject(
+                    "The Responses background parameter is not "
+                    "supported by this hosted runtime: background=true "
+                    "requires store=true, and every request is forced "
+                    "to store=False (ADR-0004, zero managed-"
+                    "Conversations RBAC, stateless hosted container)."
                 )
 
             # ADR-0004: the hosted container holds zero managed-Conversations
@@ -933,6 +936,11 @@ class HostedResponsesAgentServerHost(ResponsesAgentServerHost):
         try:
             require_foundry_call_id(request.headers)
         except MissingFoundryCallContextError as exc:
+            # Same observability contract as ``reject`` above: a refused
+            # request must be diagnosable from container telemetry alone.
+            logger.warning(
+                "Rejecting hosted Responses request (401): %s", exc
+            )
             return JSONResponse({"detail": str(exc)}, status_code=401)
         return None
 
