@@ -795,11 +795,11 @@ class HostedResponsesAgentServerHost(ResponsesAgentServerHost):
                     status_code=422,
                 )
 
-            # Foundry clients inject transport selectors even for stateless
-            # agents. The gateway has already routed the compute session, so
-            # remove them before the SDK can interpret them as managed state.
+            # Foundry clients inject routing selectors even for stateless
+            # agents. The gateway has already selected the agent and compute
+            # session, so remove them before SDK request validation.
             platform_selectors = sorted(
-                set(payload).intersection({"conversation", "session_id"})
+                set(payload).intersection({"conversation", "model", "session_id"})
             )
             if platform_selectors:
                 logger.info(

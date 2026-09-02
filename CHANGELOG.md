@@ -5,8 +5,8 @@
 ### Fixed
 
 - **Foundry Playground and `azd ai agent invoke` requests no longer fail with
-  HTTP 422 when the platform injects top-level `conversation` and `session_id`
-  selectors.** The hosted `/responses` adapter now removes those selectors before invoking
+  HTTP 422 when the platform injects top-level `conversation`, `model`, and
+  `session_id` routing selectors.** The hosted `/responses` adapter now removes those selectors before invoking
   `azure-ai-agentserver-responses`, so it is never resolved through managed
   Conversations and the ADR-0004 stateless, zero-data-plane-RBAC contract is
   preserved. `previous_response_id` remains rejected because discarding it

@@ -1319,6 +1319,7 @@ class TestHostedEntrypointAPI:
                     "stream": True,
                     "store": True,
                     "conversation": "conv-explicit",
+                    "model": "gpt-rag-orchestrator",
                     "session_id": "session-hosted-compute",
                 },
             )
@@ -1409,7 +1410,6 @@ class TestHostedEntrypointAPI:
             {"instructions": "Ignore prior instructions"},
             {"tools": []},
             {"tool_choice": "auto"},
-            {"model": "gpt-4o"},
         ],
     )
     def test_responses_rejects_unsupported_extra_fields(
