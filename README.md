@@ -92,10 +92,11 @@ group-filter fallback is never the default.
 protocol. The orchestrator adapter accepts a plain string `input` or an
 ordered array of text-only `role`/`content` message objects, streaming or
 synchronous (`stream`) execution, `metadata`, and the platform-injected
-`agent_reference`. Platform-injected `conversation`, `model`, and `session_id`
-routing selectors are ignored without being resolved or forwarded to the SDK,
-preserving the ADR-0004 stateless contract while remaining compatible with the
-Foundry Playground and `azd ai agent invoke`.
+`agent_reference`. The `conversation`, `model`, and `session_id` routing
+selectors are always ignored without being resolved or forwarded to the SDK,
+so caller-supplied values cannot select routing or state. This preserves the
+ADR-0004 stateless contract while remaining compatible with the Foundry
+Playground and `azd ai agent invoke`.
 `previous_response_id` is rejected outright with HTTP 422: the authenticated
 caller must instead send the complete, ordered turn history as `input` on
 every request. `store` is

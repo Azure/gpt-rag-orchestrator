@@ -612,10 +612,10 @@ async def _responses_events(
 ) -> AsyncIterator[Any]:
     """Adapt one strategy turn to the official Responses event lifecycle.
 
-    The canonical hosted path is history-blind: it never resolves a top-level
-    ``conversation``/``previous_response_id`` state selector (both are
-    rejected before this handler ever runs — see ``_create_endpoint``). The
-    caller supplies the complete, bounded, ordered input on every request; a
+    The canonical hosted path is history-blind: top-level ``conversation``
+    routing is discarded, while ``previous_response_id`` is rejected before
+    this handler ever runs (see ``_create_endpoint``). The caller supplies the
+    complete, bounded, ordered input on every request; a
     string ``input`` is the current ask with no prior turns, and an ordered
     message-array ``input`` carries the prior turns plus the current ask as
     its final ``user`` item.
