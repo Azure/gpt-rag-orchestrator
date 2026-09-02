@@ -29,6 +29,20 @@
   status code. A refused Playground request was therefore invisible in
   Application Insights, which is what allowed the allowlist defect above to
   survive several diagnosis cycles.
+- **Streaming turns no longer flood the log with
+  `ERROR:opentelemetry.context:Failed to detach context`.** OpenTelemetry logs
+  that record, with a full traceback, whenever a context token is detached from
+  a different asyncio task than the one that attached it. Async generators have
+  no context of their own — they run in the context of whichever task iterates
+  them — so an instrumented generator that holds a span current across a
+  `yield` always detaches in a foreign context once it is closed by the garbage
+  collector or by the ASGI server. Every streamed response therefore emitted at
+  least one bogus ERROR. `detach` swallows the underlying exception, so the
+  record was never actionable; it only masked real errors. The noise
+  originates in `agent_framework`'s own GenAI instrumentation, which cannot be
+  fixed at our call sites, so the specific record is now filtered out on the
+  `opentelemetry.context` logger in both the hosted and container observability
+  setups. Every other `opentelemetry.context` record still propagates.
 
 ## [v4.0.2] - 2026-08-11
 

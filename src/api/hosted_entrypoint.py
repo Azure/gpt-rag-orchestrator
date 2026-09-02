@@ -86,6 +86,7 @@ from util.foundry_platform import (
     MissingFoundryCallContextError,
     require_foundry_call_id,
 )
+from util.otel_context_noise import silence_context_detach_noise
 
 logger = logging.getLogger(__name__)
 
@@ -965,6 +966,8 @@ def _configure_host_observability(
         log_level=log_level,
         enable_sensitive_data=capture_setting.strip().lower() in {"true", "1"},
     )
+    # Applied after the SDK configures logging so the filter is not discarded.
+    silence_context_detach_noise()
 
 
 def create_app(
