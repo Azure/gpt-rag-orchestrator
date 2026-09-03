@@ -10,8 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@azure/msal-browser": "^3.28.1",
-    "@azure/msal-react": "^5.7.0",
+    "@azure/msal-browser": "^4.21.0",
+    "@azure/msal-react": "^3.0.29",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-select": "^2.3.7",
@@ -24,16 +24,16 @@
     "next-themes": "^0.4.6",
     "postcss": "^8.5.15",
     "react": "^19.2.8",
-    "react-dom": "^18.3.1",
+    "react-dom": "^19.2.8",
     "recharts": "^3.10.1",
     "tailwind-merge": "^3.5.0",
-    "tailwindcss": "^4.3.3",
+    "tailwindcss": "^3.4.19",
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^18.3.1",
+    "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react-swc": "^4.3.3",
     "eslint": "^9.13.0",
     "eslint-plugin-react-hooks": "^7.1.1",

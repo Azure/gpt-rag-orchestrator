@@ -28,3 +28,29 @@ jobs:
 
       - name: Run unit tests
         run: pytest -q
+
+  frontend:
+    name: frontend build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Node 20 mirrors the `javascript-node:20-bookworm` base image used by the
+      # frontend build stage in the root Dockerfile, so a green run here means
+      # the image builds too.
+      - name: Setup Node 20
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+
+      # `npm install` (not `npm ci`) matches the Dockerfile, so an unpublished
+      # or peer-incompatible version is caught here rather than at deploy time.
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+
+      - name: Build dashboard
+        working-directory: frontend
+        run: npm run build
