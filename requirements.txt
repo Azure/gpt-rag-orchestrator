@@ -1,9 +1,9 @@
 # Azure SDK dependencies
-azure-keyvault-secrets==4.8.0
+azure-keyvault-secrets==4.11.2
 azure-cosmos==4.5.1
-azure-identity==1.21.0
-azure-mgmt-web==8.0.0
-azure-mgmt-storage==22.1.1
+azure-identity==1.25.3
+azure-mgmt-web==11.0.1
+azure-mgmt-storage==25.1.0
 azure-storage-blob==12.25.1
 azure-appconfiguration==1.7.1
 azure.appconfiguration.provider
@@ -13,17 +13,17 @@ azure-ai-agentserver-responses==2.0.0b1
 azure-search-documents==11.7.0b2
 
 # AI and NLP dependencies
-tiktoken==0.13.0
+tiktoken==0.14.0
 regex>=2022.1.18
 openai==2.41.1
 
 # Async and data dependencies
 aiohttp==3.14.3
-pydantic==2.11.4
+pydantic==2.13.5
 
 # Authentication and token validation
 PyJWT==2.13.0
-cryptography>=42.0.0
+cryptography>=50.0.1
 httpx>=0.28.1
 
 # Microsoft Agent Framework (MAF) dependencies
@@ -38,10 +38,10 @@ tenacity
 jinja2==3.1.6
 
 # Character detection (pin to <6 for requests compatibility)
-chardet>=5.2,<6.0.0
+chardet>=7.6.0,<8.0.0
 
 # For evaluation
-requests==2.33.0
+requests==2.34.2
 python-dotenv==1.2.2
 
 # fastapi

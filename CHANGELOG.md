@@ -1,5 +1,66 @@
 # Changelog
 
+## [v4.1.0] - 2026-09-03
+
+### Fixed
+
+- **Citation links returned to clients that render the answer directly — the
+  Foundry Playground, `azd ai agent invoke`, and any custom caller — are now
+  signed and therefore openable.** Foundry IQ returns an absolute blob URL for
+  each retrieved document, and the orchestrator passed it into the model
+  context verbatim. On a network-isolated deployment the target storage account
+  has `publicNetworkAccess=Disabled` and `allowBlobPublicAccess=false`, so
+  clicking the citation failed with HTTP 403 from outside the virtual network
+  and `PublicAccessNotPermitted` (HTTP 409) from inside it — joining the network
+  does not help, because the request carries no credential. Only the Chainlit
+  front end resolved this, by signing the href in its own rendering layer, so
+  every other surface was left broken. The link is now signed with a
+  short-lived (1 hour) read-only user-delegation SAS before it enters the
+  context, which makes the citation work on every surface. Signing degrades
+  gracefully: a URL that is relative, already signed, or points at another host
+  is returned untouched, and any failure to obtain a delegation key falls back
+  to the unsigned URL rather than dropping the citation. The audit trail keeps
+  recording the unsigned URL, so no credential reaches telemetry.
+- **Foundry Playground and `azd ai agent invoke` requests no longer fail with
+  HTTP 422 when the platform injects top-level Responses fields the adapter
+  does not honor.** The hosted `/responses` adapter validated the request body
+  against a strict allowlist, so *any* field a Foundry client sent that the
+  adapter did not already know about produced a hard 422 and an unusable
+  hosted agent. Because the platform injects a different field set per client,
+  per surface, and per release, fixing them one at a time
+  (`conversation`, then `session_id`, then `model`) could never converge. The
+  policy is now inverted: unknown top-level fields are logged and dropped
+  before `azure-ai-agentserver-responses` parses the body — so they are still
+  never resolved through managed Conversations and cannot override the
+  server-side agent definition — and only an explicit deny-list is rejected.
+  `previous_response_id` remains rejected because discarding it could silently
+  answer from truncated history.
+- **Optional Responses parameters serialized as explicit `null` no longer
+  trigger a spurious 422.** Foundry clients emit unset optionals as `null`, and
+  the rejection check tested key presence rather than value, so
+  `"previous_response_id": null` was rejected as if the caller had requested
+  server-side history. A `null` now means absent.
+- **Every hosted `/responses` rejection is now logged with its reason.** The
+  422 detail was returned to the caller but never written to the logger, and
+  the uvicorn access line that reaches the Foundry log stream carries only the
+  status code. A refused Playground request was therefore invisible in
+  Application Insights, which is what allowed the allowlist defect above to
+  survive several diagnosis cycles.
+- **Streaming turns no longer flood the log with
+  `ERROR:opentelemetry.context:Failed to detach context`.** OpenTelemetry logs
+  that record, with a full traceback, whenever a context token is detached from
+  a different asyncio task than the one that attached it. Async generators have
+  no context of their own — they run in the context of whichever task iterates
+  them — so an instrumented generator that holds a span current across a
+  `yield` always detaches in a foreign context once it is closed by the garbage
+  collector or by the ASGI server. Every streamed response therefore emitted at
+  least one bogus ERROR. `detach` swallows the underlying exception, so the
+  record was never actionable; it only masked real errors. The noise
+  originates in `agent_framework`'s own GenAI instrumentation, which cannot be
+  fixed at our call sites, so the specific record is now filtered out on the
+  `opentelemetry.context` logger in both the hosted and container observability
+  setups. Every other `opentelemetry.context` record still propagates.
+
 ## [v4.0.2] - 2026-08-11
 
 ### Security
