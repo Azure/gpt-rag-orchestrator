@@ -4,6 +4,23 @@
 
 ### Fixed
 
+- **Citation links returned to clients that render the answer directly — the
+  Foundry Playground, `azd ai agent invoke`, and any custom caller — are now
+  signed and therefore openable.** Foundry IQ returns an absolute blob URL for
+  each retrieved document, and the orchestrator passed it into the model
+  context verbatim. On a network-isolated deployment the target storage account
+  has `publicNetworkAccess=Disabled` and `allowBlobPublicAccess=false`, so
+  clicking the citation failed with HTTP 403 from outside the virtual network
+  and `PublicAccessNotPermitted` (HTTP 409) from inside it — joining the network
+  does not help, because the request carries no credential. Only the Chainlit
+  front end resolved this, by signing the href in its own rendering layer, so
+  every other surface was left broken. The link is now signed with a
+  short-lived (1 hour) read-only user-delegation SAS before it enters the
+  context, which makes the citation work on every surface. Signing degrades
+  gracefully: a URL that is relative, already signed, or points at another host
+  is returned untouched, and any failure to obtain a delegation key falls back
+  to the unsigned URL rather than dropping the citation. The audit trail keeps
+  recording the unsigned URL, so no credential reaches telemetry.
 - **Foundry Playground and `azd ai agent invoke` requests no longer fail with
   HTTP 422 when the platform injects top-level Responses fields the adapter
   does not honor.** The hosted `/responses` adapter validated the request body
