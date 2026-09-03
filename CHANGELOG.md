@@ -1,5 +1,40 @@
 # Changelog
 
+## [v4.1.1] - 2026-09-03
+
+### Fixed
+
+- **The dashboard SPA build is repaired, which unblocks the orchestrator
+  container image.** `Dockerfile` builds `frontend/` in its first stage, so a
+  frontend build failure fails the whole image and therefore `azd deploy`.
+  Three unrelated dependency bumps had been merged without any CI job that
+  builds the frontend, and together they broke it:
+  - `react` was raised to `19.x` while `react-dom` and `@types/react-dom`
+    stayed on `18.x`, so `npm install` aborted with a fatal `ERESOLVE`
+    peer conflict. Both are now `^19.2.8` / `^19.2.5`.
+  - `@azure/msal-react` was pinned to `^5.7.0`, a version that has since been
+    **unpublished from npm** and now returns `E404`. Because the Dockerfile
+    uses `npm install` rather than `npm ci`, the lockfile did not protect the
+    build. Pinned to `^3.0.29`, the newest major that accepts React 19 while
+    keeping the `navigateToLoginRequestUrl` and `storeAuthStateInCookie`
+    options that `src/lib/auth.ts` relies on; `@azure/msal-browser` moves to
+    `^4.21.0` to satisfy its peer range.
+  - `tailwindcss` was raised from `3.x` to `4.x`, which is a migration and
+    not a bump: v4 moves the PostCSS plugin to `@tailwindcss/postcss` and
+    replaces the `@tailwind` directives with `@import "tailwindcss"`. Neither
+    `postcss.config.js` nor `src/index.css` was migrated, so `vite build`
+    failed. Reverted to `^3.4.19`.
+- `frontend/package-lock.json` is regenerated with `npm install --package-lock-only`
+  so it keeps every platform-specific optional dependency. A lockfile written by
+  a full `npm install` on Windows prunes them, leaving 2 of the 25
+  `@rollup/rollup-*` entries and breaking `vite build` on Linux with
+  `Cannot find module @rollup/rollup-linux-x64-gnu`.
+
+### Added
+
+- A `frontend build` job in `.github/workflows/pr_pipeline.yaml`. The
+  frontend previously had no CI coverage at all, which is why all three
+  regressions reached a tagged release.
 ## [v4.1.0] - 2026-09-03
 
 ### Fixed
