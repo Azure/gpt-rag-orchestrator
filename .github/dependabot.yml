@@ -8,3 +8,29 @@ updates:
     labels:
       - "dependencies"
       - "python"
+  - package-ecosystem: "pip"
+    directory: "/evaluations"
+    schedule:
+      interval: "weekly"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+      - "python"
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+      - "javascript"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    groups:
+      github-actions:
+        patterns: ["*"]
+    schedule:
+      interval: "weekly"
+    target-branch: "develop"
+    cooldown:
+      default-days: 7
