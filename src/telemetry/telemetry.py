@@ -9,6 +9,8 @@ from opentelemetry import trace
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource, SERVICE_INSTANCE_ID, SERVICE_VERSION, SERVICE_NAMESPACE
 from opentelemetry.trace import Span, Status, StatusCode, Tracer
 
+from util.otel_context_noise import silence_context_detach_noise
+
 # Custom filter to exclude trace logs
 class ExcludeTraceLogsFilter(logging.Filter):
     def filter(self, record):
@@ -335,6 +337,8 @@ class Telemetry:
 
         #set the logging configuration
         logging.config.dictConfig(LOGGING)
+        # Applied after dictConfig so the filter survives the reconfiguration.
+        silence_context_detach_noise()
         audit_logger = logging.getLogger("gptrag.audit")
         audit_logger.setLevel(logging.INFO)
         audit_logger.propagate = Telemetry.monitor_log_export_mode != "audit"

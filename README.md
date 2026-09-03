@@ -92,18 +92,30 @@ group-filter fallback is never the default.
 protocol. The orchestrator adapter accepts a plain string `input` or an
 ordered array of text-only `role`/`content` message objects, streaming or
 synchronous (`stream`) execution, `metadata`, and the platform-injected
-`agent_reference`. `conversation` and `previous_response_id` are rejected
-outright with HTTP 422 (ADR-0004): a caller-selected server-side state
-selector is never resolved; the authenticated caller must instead send the
-complete, ordered turn history as `input` on every request. `store` is
+`agent_reference`. Every other top-level request field — including the
+`conversation`, `model`, and `session_id` routing selectors and any parameter
+a future Foundry client adds — is logged and dropped before the SDK parses the
+body, so a caller-supplied value can never select routing or state, nor
+override the server-side agent definition. Unknown fields are ignored rather
+than rejected: a strict allowlist turned every newly injected platform field
+into a hosted-agent outage. Optional parameters serialized as explicit `null`
+carry no caller intent and are likewise treated as absent.
+This preserves the
+ADR-0004 stateless contract while remaining compatible with the Foundry
+Playground and `azd ai agent invoke`.
+A non-null `previous_response_id` is rejected outright with HTTP 422 — silently
+dropping it would answer from truncated history instead of failing loudly, so
+the authenticated caller must instead send the complete, ordered turn history
+as `input` on every request. `store` is
 overridden to `False` unconditionally, regardless of what the caller sends or
 omits, because the hosted container holds zero managed-Conversations
 data-plane RBAC and must never depend on Foundry's managed persistence — see
 `CHANGELOG.md`. `background: true` requires `store: true` in the underlying
 SDK and is therefore also rejected with HTTP 422. Non-message-object array
 items and multimodal (non-text) content are rejected rather than silently
-losing role semantics or dropping content. Other Responses request fields are
-rejected rather than silently ignored. The protocol host still exposes
+losing role semantics or dropping content. Every rejection is logged with its
+reason before the response is returned, so a refused request is diagnosable
+from telemetry alone. The protocol host still exposes
 response retrieval, input-item listing, cancellation, and deletion, but since
 every response is created with `store: False` none of those routes ever
 return a previously created response.

@@ -25,6 +25,7 @@ from connectors.foundry_iq import McpSourceError, get_foundry_iq_client
 from connectors.foundry_iq_mcp import McpConfigurationError, McpCredentialError
 from connectors.search import _classify_retrieval_error
 from telemetry import AuditEmitter, ReasonCode
+from util.blob_sas import sign_blob_url
 from .context_shaping import build_context_text, format_context_part
 
 logger = logging.getLogger(__name__)
@@ -124,7 +125,14 @@ class FoundryIQContextProvider(ContextProvider):
                     continue
                 if len(content) > self._max_content_chars:
                     content = content[: self._max_content_chars] + "..."
-                parts.append(format_context_part(title, link, content))
+                # The model copies this href verbatim into its citation, and
+                # surfaces such as the Foundry Playground render that markdown
+                # with no opportunity to rewrite it. Sign the link now so the
+                # citation resolves without public blob access. The audit trail
+                # below keeps the unsigned link so no SAS token reaches
+                # telemetry.
+                citation_link = await sign_blob_url(link) if link else link
+                parts.append(format_context_part(title, citation_link, content))
                 AuditEmitter.default().emit_source(
                     selected=True,
                     source_type=getattr(
