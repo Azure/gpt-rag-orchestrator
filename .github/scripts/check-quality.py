@@ -65,15 +65,39 @@ def git(root, *args):
 
 
 def validate_records(record):
-    if not isinstance(record, dict) or record.get("schema_version") != 1:
+    if (not isinstance(record, dict) or type(record.get("schema_version")) is not int
+            or record["schema_version"] != 1):
         raise QualityError("Unsupported quality record schema")
     entries = record.get("entries", [])
     if not isinstance(entries, list):
         raise QualityError("Record entries must be an array")
     ids = [entry.get("id") for entry in entries if isinstance(entry, dict)]
-    if len(ids) != len(entries) or None in ids or len(set(ids)) != len(ids):
+    if (len(ids) != len(entries) or any(not isinstance(i, str) or not i for i in ids)
+            or len(set(ids)) != len(ids)):
         raise QualityError("Record identities must be present and unique")
     return record
+
+
+def exact_keys(value, keys, label):
+    if not isinstance(value, dict) or set(value) != set(keys):
+        raise QualityError(f"Unexpected or missing fields in {label}")
+
+
+def strings(value, label, *, empty=False):
+    if (not isinstance(value, list) or any(not isinstance(v, str) or not v for v in value)
+            or len(value) != len(set(value)) or (not value and not empty)):
+        raise QualityError(f"{label} must contain unique nonempty strings")
+
+
+def evidence_selectors(value):
+    strings(value, "evidence_tests")
+    if any(not re.fullmatch(r"tests/[\w/]+\.py::[\w:\[\].-]+", v) for v in value):
+        raise QualityError("Evidence must name exact pytest test selectors")
+
+
+def text_fields(value, keys):
+    if any(not isinstance(value.get(key), str) or not value[key] for key in keys):
+        raise QualityError(f"Expected nonempty text fields: {', '.join(keys)}")
 
 
 def load_records(root):
@@ -84,20 +108,80 @@ def load_records(root):
         except (OSError, ValueError) as exc:
             raise QualityError(f"Invalid or missing .quality/{name}") from exc
     policy = result["policy.json"]
-    for key in ("runtime_roots", "modules", "contracts", "toolchain", "required_checks"):
-        if key not in policy:
-            raise QualityError(f"Missing policy field: {key}")
+    exact_keys(policy, ("schema_version", "source_revision", "runtime_roots", "modules",
+                       "contracts", "toolchain", "required_checks", "review"), "policy")
+    text_fields(policy, ("source_revision",))
+    strings(policy["modules"], "modules")
+    if not re.fullmatch("[0-9a-f]{40}", policy["source_revision"]):
+        raise QualityError("Policy must name its immutable source revision")
+    exact_keys(policy["toolchain"], ("ruff", "mypy", "import-linter", "grimp"), "toolchain")
+    if any(not isinstance(pin, str) or not re.fullmatch(r"\d+(?:\.\d+){1,3}", pin)
+           for pin in policy["toolchain"].values()):
+        raise QualityError("Toolchain versions must be exact numeric pins")
+    requirements = {
+        line.strip() for line in (root / "requirements-quality.txt").read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    if requirements != {f"{name}=={pin}" for name, pin in policy["toolchain"].items()}:
+        raise QualityError("Development requirements and policy pins disagree")
+    exact_keys(policy["review"], ("status", "reference", "rationale"), "policy review")
+    if policy["review"]["status"] not in ("proposed", "active") or any(
+            not isinstance(v, str) or not v for v in policy["review"].values()):
+        raise QualityError("Policy review metadata is incomplete")
+    contracts = policy["contracts"]
+    exact_keys(contracts, ("forbidden", "public_surfaces", "private_ownership",
+                          "private_access", "dynamic_imports"), "contracts")
+    strings(contracts["public_surfaces"], "public surfaces")
+    text_fields(contracts, ("private_ownership",))
+    for key in ("forbidden", "private_access", "dynamic_imports"):
+        if not isinstance(contracts[key], list):
+            raise QualityError(f"{key} must be an array")
+    for rule in contracts["forbidden"]:
+        exact_keys(rule, ("from", "to"), "forbidden rule")
+        strings(rule["from"], "forbidden sources")
+        strings(rule["to"], "forbidden targets")
+    for rule in contracts["private_access"]:
+        exact_keys(rule, ("importer", "target"), "private access rule")
+        if any(not isinstance(v, str) or not v or "*" in v for v in rule.values()):
+            raise QualityError("Private access permissions must be exact")
+    for rule in contracts["dynamic_imports"]:
+        exact_keys(rule, ("id", "module_id", "symbol", "source_fingerprint", "targets",
+                          "evidence_tests", "review"), "dynamic import")
+        strings(rule["targets"], "dynamic targets")
+        evidence_selectors(rule["evidence_tests"])
+        text_fields(rule, ("id", "module_id", "symbol", "source_fingerprint", "review"))
+        if not re.fullmatch("[0-9a-f]{64}", rule["source_fingerprint"]):
+            raise QualityError("Dynamic import must bind exact source")
+    dynamic_ids = [rule["id"] for rule in contracts["dynamic_imports"]]
+    if len(dynamic_ids) != len(set(dynamic_ids)):
+        raise QualityError("Dynamic import identities must be unique")
     if policy["runtime_roots"] != ["src"] or policy["required_checks"] != list(REQUIRED_JOBS):
         raise QualityError("Source roots and required checks cannot omit runtime or test coverage")
-    scope = result["typing-scope.json"].get("module_ids")
-    if not isinstance(scope, list) or not scope or len(scope) != len(set(scope)):
-        raise QualityError("Typing scope must contain unique module identities")
+    scope_record = result["typing-scope.json"]
+    exact_keys(scope_record, ("schema_version", "module_ids", "coverage_stage",
+                              "planned_expansion", "move_map", "review"), "typing scope")
+    scope = scope_record["module_ids"]
+    strings(scope, "typing scope")
+    strings(scope_record["planned_expansion"], "typing expansion")
+    text_fields(scope_record, ("coverage_stage", "review"))
+    if scope_record["move_map"] != []:
+        raise QualityError("Only mechanically proven one-to-one source moves are supported")
+    for name in ("typing-baseline.json", "exceptions.json"):
+        exact_keys(result[name], ("schema_version", "entries"), name)
     for entry in result["typing-baseline.json"]["entries"]:
         required = ("module_id", "symbol", "source_fingerprint", "rule",
                     "message_fingerprint", "occurrences", "introduced_at",
                     "rationale", "review", "removal_stage")
         if any(not entry.get(key) for key in required) or type(entry["occurrences"]) is not int:
             raise QualityError("Incomplete typing baseline record")
+        if set(entry) - {"id", *required, "path", "line", "message"}:
+            raise QualityError("Unknown typing baseline field")
+        text_fields(entry, [key for key in required if key != "occurrences"])
+        if not all(re.fullmatch("[0-9a-f]{64}", entry[key]) for key in
+                   ("source_fingerprint", "message_fingerprint")):
+            raise QualityError("Baseline fingerprints must bind exact source and message")
+        if not re.fullmatch("[0-9a-f]{40}", entry["introduced_at"]):
+            raise QualityError("Baseline must name an immutable introduction revision")
         if entry["module_id"] not in scope or entry["occurrences"] < 1:
             raise QualityError("Baseline debt must belong to blocking scope")
     for entry in result["exceptions.json"]["entries"]:
@@ -108,6 +192,18 @@ def load_records(root):
             raise QualityError("Incomplete exception record")
         if entry["status"] not in ("active", "proposed"):
             raise QualityError("Invalid exception status")
+        if set(entry) - {"id", *required, "path", "line"}:
+            raise QualityError("Unknown exception record field")
+        text_fields(entry, [key for key in required if key not in ("caught_types", "evidence_tests")])
+        if entry["failure_outcome"] not in (
+            "propagation", "failure-translation", "cleanup-then-propagation",
+            "contractual-best-effort-side-effect",
+        ):
+            raise QualityError("Unknown exception failure outcome")
+        evidence_selectors(entry["evidence_tests"])
+        strings(entry["caught_types"], "caught types")
+        if not re.fullmatch("[0-9a-f]{64}", entry["handler_fingerprint"]):
+            raise QualityError("Handler fingerprint must bind exact source")
     return result
 
 
@@ -169,6 +265,10 @@ def dotted(node, aliases):
         return aliases.get(node.id, node.id)
     if isinstance(node, ast.Attribute):
         return f"{dotted(node.value, aliases)}.{node.attr}"
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr" and len(node.args) == 2
+            and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str)):
+        return f"{dotted(node.args[0], aliases)}.{node.args[1].value}"
     return "<indirect>"
 
 
@@ -186,15 +286,21 @@ def import_base(module, node):
 
 def aliases_for(module):
     aliases = {}
+    def bind(name, value):
+        if name in aliases and aliases[name] != value:
+            raise QualityError(
+                f"Ambiguous import alias {name} in {module['path']}; use distinct aliases")
+        aliases[name] = value
+
     for node in ast.walk(module["tree"]):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                aliases[alias.asname or alias.name.split(".")[0]] = (
-                    alias.name if alias.asname else alias.name.split(".")[0])
+                bind(alias.asname or alias.name.split(".")[0],
+                     alias.name if alias.asname else alias.name.split(".")[0])
         elif isinstance(node, ast.ImportFrom):
             base = import_base(module, node)
             for alias in node.names:
-                aliases[alias.asname or alias.name] = f"{base}.{alias.name}"
+                bind(alias.asname or alias.name, f"{base}.{alias.name}")
     # Resolve straightforward aliases conservatively, including chained broad types.
     assignments = [n for n in ast.walk(module["tree"]) if isinstance(n, ast.Assign)]
     for _ in range(len(assignments) + 1):
@@ -211,7 +317,7 @@ def aliases_for(module):
         if not changed:
             break
     for node in assignments:
-        if isinstance(node.value, (ast.Call, ast.Subscript, ast.Tuple, ast.List)):
+        if not isinstance(node.value, (ast.Constant, ast.Name, ast.Attribute)):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id not in aliases:
                     aliases[target.id] = "<indirect>"
@@ -222,7 +328,40 @@ def within(name, area):
     return name == area or name.startswith(area + ".")
 
 
-def architecture(modules, contracts):
+def exported_names(module):
+    class Exports(ast.NodeVisitor):
+        def __init__(self):
+            self.names = set()
+
+        def visit_FunctionDef(self, node):
+            self.names.add(node.name)
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+        visit_ClassDef = visit_FunctionDef
+
+        def visit_Import(self, node):
+            self.names.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+
+        visit_ImportFrom = visit_Import
+
+        def visit_Name(self, node):
+            if isinstance(node.ctx, ast.Store):
+                self.names.add(node.id)
+
+        def visit_Lambda(self, node):
+            return
+
+        visit_ListComp = visit_Lambda
+        visit_SetComp = visit_Lambda
+        visit_DictComp = visit_Lambda
+        visit_GeneratorExp = visit_Lambda
+
+    visitor = Exports()
+    visitor.visit(module["tree"])
+    return visitor.names
+
+
+def architecture(modules, contracts, passed_tests=frozenset()):
     edges = {name: set() for name in modules}
     locations = {}
     findings = []
@@ -230,6 +369,8 @@ def architecture(modules, contracts):
     namespaces = {".".join(name.split(".")[:i]) for name in modules
                   for i in range(1, len(name.split(".")))}
     known = set(modules) | namespaces
+    exports = {name: exported_names(module) for name, module in modules.items()}
+    used_dynamic = set()
     for name, module in modules.items():
         aliases = aliases_for(module)
 
@@ -268,6 +409,10 @@ def architecture(modules, contracts):
                         findings.append(finding("star-import", module["path"], node.lineno,
                                                 "Use explicit first-party exports")
                                         ) if base.split(".")[0] in first_party else None
+                    if (child not in known and base in modules and alias.name != "*"
+                            and alias.name not in exports[base]):
+                        findings.append(finding("unresolved-import", module["path"], node.lineno,
+                                                f"Cannot resolve first-party export {base}.{alias.name}"))
                     add(child if child in known else base, node,
                         "" if child in known else alias.name)
             elif isinstance(node, ast.Attribute):
@@ -277,25 +422,46 @@ def architecture(modules, contracts):
                     add(target, node, member)
             elif isinstance(node, ast.Call):
                 call = dotted(node.func, aliases)
+                if (call == "getattr" and node.args
+                        and dotted(node.args[0], aliases) in ("importlib", "builtins")
+                        and (len(node.args) < 2 or not isinstance(node.args[1], ast.Constant))):
+                    findings.append(finding("dynamic-import", module["path"], node.lineno,
+                                            "Computed access to import machinery requires explicit source review"))
                 if call in ("importlib.import_module", "__import__", "builtins.__import__"):
                     target = node.args[0] if node.args else next(
                         (v.value for v in node.keywords if v.arg == "name"), None)
                     if isinstance(target, ast.Constant) and isinstance(target.value, str):
                         if target.value.startswith("."):
-                            findings.append(finding("dynamic-import", module["path"], node.lineno,
-                                                    "Relative dynamic loading needs an explicit inventory"))
+                            package = node.args[1] if len(node.args) > 1 else next(
+                                (v.value for v in node.keywords if v.arg == "package"), None)
+                            if isinstance(package, ast.Constant) and isinstance(package.value, str):
+                                level = len(target.value) - len(target.value.lstrip("."))
+                                relative = ast.ImportFrom(
+                                    module=target.value.lstrip("."), names=[], level=level)
+                                relative.lineno = node.lineno
+                                add(import_base({"name": package.value, "package": True,
+                                                 "path": module["path"]}, relative), node)
+                            else:
+                                findings.append(finding("dynamic-import", module["path"], node.lineno,
+                                                        "Relative dynamic loading needs a literal package"))
                         else:
                             add(target.value, node)
                     else:
                         record = next((r for r in contracts["dynamic_imports"]
                                        if r["module_id"] == name and
+                                       r["symbol"] == symbol_at(module, node.lineno) and
                                        r["source_fingerprint"] == syntax(node)), None)
-                        if record is None:
+                        if (record is None or record["id"] in used_dynamic
+                                or not set(record["evidence_tests"]) <= passed_tests):
                             findings.append(finding("dynamic-import", module["path"], node.lineno,
                                                     "Variable dynamic loading needs policy review"))
                         else:
+                            used_dynamic.add(record["id"])
                             for permitted in record["targets"]:
                                 add(permitted, node)
+    for record in contracts["dynamic_imports"]:
+        if record["id"] not in used_dynamic:
+            findings.append(finding("dynamic-import", message=f"Unused or unproven dynamic import: {record['id']}"))
     try:
         tuple(graphlib.TopologicalSorter(edges).static_order())
     except graphlib.CycleError as exc:
@@ -654,7 +820,8 @@ def main(argv=None):
                                 found.append(finding("nested-policy", path.relative_to(root).as_posix(),
                                                      message="Nested quality configuration is not permitted"))
                     elif check == "architecture":
-                        edges, found = architecture(modules, policy["contracts"])
+                        edges, found = architecture(modules, policy["contracts"],
+                                                    evidence_tests(args.test_results))
                         details["grimp_modules"] = grimp_check(root, modules, edges)
                         details["edges"] = sum(map(len, edges.values()))
                         env = {**os.environ, "PYTHONPATH": str(root / "src")}

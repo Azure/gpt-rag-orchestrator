@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Python quality-policy bootstrap.** Add development-only Ruff, mypy,
+  Import Linter and Grimp checks, incremental typing, source-only import and
+  broad-handler inventories, mutation fixtures and fail-closed PR aggregation.
+  Handler approval and administrator activation remain explicitly pending.
+
+### Fixed
+
+- **Shared OBO exchange no longer creates an import cycle.** Search and
+  Foundry IQ use one connector-owned exchange/cache while preserving Search's
+  public wrappers, delegated scopes and strict/anonymous behavior.
+- **Legacy retrieval plugin resolves the current model connector.** Replace
+  the missing `AzureOpenAIClient` import with the existing `get_genai_client`
+  and await its asynchronous embeddings operation.
+- **Typed API metadata retains its existing wire shape.** Express legacy
+  OpenAPI examples through Pydantic's typed metadata API and restore missing
+  dashboard annotation imports without changing request or response fields.
+
 ## [v4.1.1] - 2026-09-03
 
 ### Fixed

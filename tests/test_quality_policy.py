@@ -276,6 +276,16 @@ def test_baseline_schema_rejects_unknown_and_duplicate_entries():
         )
 
 
+@pytest.mark.parametrize("value", [
+    {"schema_version": True, "entries": []},
+    {"schema_version": 1, "entries": [{"id": ""}]},
+    {"schema_version": 1, "entries": [{"id": 3}]},
+])
+def test_invalid_record_identity_is_not_accepted(value):
+    with pytest.raises(QUALITY["QualityError"]):
+        QUALITY["validate_records"](value)
+
+
 @pytest.mark.parametrize("value", ["skipped", "cancelled", "failure", "neutral", None])
 def test_aggregate_rejects_missing_or_non_success_jobs(value):
     results = {name: "success" for name in QUALITY["REQUIRED_JOBS"]}
@@ -406,6 +416,184 @@ def test_monotonic_scope_expansion_and_debt_retirement_are_allowed(policy_repo):
     for name, value in candidate.items():
         (root / ".quality" / name).write_text(json.dumps(value))
     assert not QUALITY["policy_changes"](root, base, records, candidate)
+
+
+def test_untracked_policy_file_cannot_avoid_review(policy_repo):
+    root, base, records = policy_repo
+    path = root / ".github/scripts/new-policy.py"
+    path.write_text("# candidate-owned evaluator\n")
+    findings = QUALITY["policy_changes"](root, base, records, records)
+    assert [f["path"] for f in findings] == [".github/scripts/new-policy.py"]
+
+
+@pytest.mark.parametrize("statement", [
+    "from pkg.public import missing",
+    "from pkg import missing",
+    "from pkg.public import missing as alias",
+])
+def test_unresolved_first_party_export_is_not_a_valid_edge(tmp_path, statement):
+    _, findings = graph(tmp_path, {
+        "consumer.py": statement, "pkg/__init__.py": "", "pkg/public.py": "value = 1",
+    })
+    assert any(f["rule"] == "unresolved-import" for f in findings)
+
+
+def test_real_symbol_reexport_remains_public(tmp_path):
+    _, findings = graph(tmp_path, {
+        "consumer.py": "from pkg import exported",
+        "pkg/__init__.py": "from .public import value as exported",
+        "pkg/public.py": "value = 1",
+    })
+    assert not findings
+
+
+def test_dynamic_import_inventory_requires_exact_site_targets_and_evidence(tmp_path):
+    code = "from importlib import import_module as load\nload(module_name)"
+    modules = tree(tmp_path, {"loader.py": code, "target.py": "value = 1"})
+    site = next(n for n in ast.walk(modules["loader"]["tree"]) if isinstance(n, ast.Call))
+    record = {
+        "id": "loader-target", "module_id": "loader",
+        "symbol": "<module>",
+        "source_fingerprint": QUALITY["syntax"](site), "targets": ["target"],
+        "evidence_tests": ["tests/test_loader.py::test_target"], "review": "base review",
+    }
+    edges, findings = QUALITY["architecture"](
+        modules, rules(dynamic_imports=[record]), {"tests/test_loader.py::test_target"})
+    assert not findings
+    assert edges["loader"] == {"target"}
+    assert QUALITY["architecture"](modules, rules(dynamic_imports=[record]))[1]
+    assert QUALITY["architecture"](
+        tree(tmp_path, {"loader.py": code.replace("module_name", "different_name")}),
+        rules(dynamic_imports=[record]), {"tests/test_loader.py::test_target"})[1]
+
+
+def test_unused_dynamic_import_approval_fails(tmp_path):
+    modules = tree(tmp_path, {"a.py": "value = 1"})
+    record = {
+        "id": "unused", "module_id": "a", "source_fingerprint": "old-site",
+        "symbol": "<module>",
+        "targets": ["a"], "evidence_tests": ["tests/test_loader.py::test_target"],
+        "review": "base review",
+    }
+    assert QUALITY["architecture"](
+        modules, rules(dynamic_imports=[record]), {"tests/test_loader.py::test_target"})[1]
+
+
+def test_dynamic_site_cannot_duplicate_an_approved_allowance(tmp_path):
+    modules = tree(tmp_path, {
+        "loader.py": "import importlib\nimportlib.import_module(name)\nimportlib.import_module(name)",
+        "target.py": "",
+    })
+    call = next(n for n in ast.walk(modules["loader"]["tree"]) if isinstance(n, ast.Call))
+    record = {
+        "id": "once", "module_id": "loader", "symbol": "<module>",
+        "source_fingerprint": QUALITY["syntax"](call), "targets": ["target"],
+        "evidence_tests": ["tests/test_loader.py::test_target"], "review": "base review",
+    }
+    assert QUALITY["architecture"](
+        modules, rules(dynamic_imports=[record]), {"tests/test_loader.py::test_target"})[1]
+
+
+@pytest.mark.parametrize("statement", [
+    "import importlib\nload = getattr(importlib, 'import_module')\nload(name)",
+    "from importlib import import_module\nload = import_module\nload(name)",
+])
+def test_indirect_loader_alias_needs_review(tmp_path, statement):
+    _, findings = graph(tmp_path, {"loader.py": statement})
+    assert any(f["rule"] == "dynamic-import" for f in findings)
+
+
+def test_relative_literal_dynamic_import_resolves_without_running_code(tmp_path):
+    edges, findings = graph(tmp_path, {
+        "pkg/__init__.py": "",
+        "pkg/loader.py": "import importlib\nimportlib.import_module('.target', 'pkg')",
+        "pkg/target.py": "raise RuntimeError('never execute source')",
+    })
+    assert not findings
+    assert edges["pkg.loader"] == {"pkg.target"}
+
+
+@pytest.mark.parametrize("expression", [
+    "choose_errors()", "(ValueError, Exception)", "Exception if condition else ValueError",
+])
+def test_computed_exception_alias_is_reviewed(tmp_path, expression):
+    modules = tree(tmp_path, {
+        "a.py": f"E = {expression}\ntry:\n work()\nexcept E:\n pass",
+    })
+    assert QUALITY["handlers"](modules)[0]["caught_types"] == ["<indirect>"]
+
+
+def test_computed_import_machinery_access_cannot_bypass_inventory(tmp_path):
+    _, findings = graph(tmp_path, {
+        "a.py": "import importlib\ngetattr(importlib, method_name)(module_name)",
+    })
+    assert any(f["rule"] == "dynamic-import" for f in findings)
+
+
+def test_conflicting_local_alias_cannot_hide_broad_global_catch(tmp_path):
+    modules = tree(tmp_path, {
+        "a.py": "from builtins import Exception as E\n"
+                "def helper():\n from builtins import ValueError as E\n"
+                "try:\n work()\nexcept E:\n pass",
+    })
+    with pytest.raises(QUALITY["QualityError"], match="Ambiguous import alias"):
+        QUALITY["handlers"](modules)
+
+
+def test_conflicting_local_module_alias_cannot_hide_private_global_access(tmp_path):
+    modules = tree(tmp_path, {
+        "a.py": "import pkg as p\n"
+                "def helper():\n import other as p\n"
+                "value = p._private\n",
+        "pkg.py": "_private = 1", "other.py": "value = 1",
+    })
+    with pytest.raises(QUALITY["QualityError"], match="Ambiguous import alias"):
+        QUALITY["architecture"](modules, rules())
+
+
+def test_local_variables_are_not_public_module_exports(tmp_path):
+    _, findings = graph(tmp_path, {
+        "consumer.py": "from pkg import local",
+        "pkg.py": "def f():\n local = 1\n return local",
+    })
+    assert any(f["rule"] == "unresolved-import" for f in findings)
+
+
+def test_audit_proposals_bind_source_without_authorizing_themselves():
+    root = Path(QUALITY["__file__"]).resolve().parents[2]
+    records = QUALITY["load_records"](root)["exceptions.json"]["entries"]
+    current = QUALITY["handlers"](QUALITY["collect"](root, ["src"]))
+    current = [h for h in current if h["module_id"] == "telemetry.audit"]
+    assert len(current) == len(records) == 5
+    passed = {test for record in records for test in record["evidence_tests"]}
+    assert QUALITY["check_exceptions"](current, records, passed)
+    reviewed_fixture = [{**record, "status": "active"} for record in records]
+    assert not QUALITY["check_exceptions"](current, reviewed_fixture, passed)
+
+
+@pytest.mark.parametrize("file,mutate", [
+    ("policy.json", lambda data: data.update(extra_setting=True)),
+    ("policy.json", lambda data: data["toolchain"].update(ruff=">=0.16")),
+    ("policy.json", lambda data: data["contracts"]["private_access"].append(
+        {"importer": "*", "target": "anything"})),
+    ("typing-scope.json", lambda data: data.update(module_ids="schemas")),
+    ("typing-scope.json", lambda data: data.update(move_map=[{"old": "new"}])),
+    ("exceptions.json", lambda data: data["entries"][0].update(caught_types="Exception")),
+    ("exceptions.json", lambda data: data["entries"][0].update(evidence_tests=[])),
+    ("exceptions.json", lambda data: data["entries"][0].update(failure_outcome="ignore everything")),
+])
+def test_policy_documents_are_strictly_validated(tmp_path, file, mutate):
+    root = Path(QUALITY["__file__"]).resolve().parents[2]
+    (tmp_path / ".quality").mkdir()
+    for name in QUALITY["RECORDS"]:
+        data = json.loads((root / ".quality" / name).read_text())
+        if name == file:
+            mutate(data)
+        (tmp_path / ".quality" / name).write_text(json.dumps(data))
+    (tmp_path / "requirements-quality.txt").write_text(
+        (root / "requirements-quality.txt").read_text())
+    with pytest.raises(QUALITY["QualityError"]):
+        QUALITY["load_records"](tmp_path)
 
 
 def test_evidence_does_not_credit_skipped_failed_or_missing_tests(tmp_path):

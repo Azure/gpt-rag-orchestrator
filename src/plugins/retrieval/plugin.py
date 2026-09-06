@@ -10,7 +10,7 @@ import aiohttp
 from agent_framework import ai_function
 from connectors.identity_manager import get_identity_manager
 from dependencies import get_config
-from connectors import AzureOpenAIClient
+from connectors.aifoundry import get_genai_client
 from .retrieval_types import (
     VectorIndexRetrievalResult,
     MultimodalVectorIndexRetrievalResult,
@@ -20,7 +20,7 @@ from .retrieval_types import (
 class RetrievalPlugin:
     def __init__(self):
         cfg = get_config()
-        self.aoai = AzureOpenAIClient()
+        self.aoai = get_genai_client()
         self.search_top_k = int(cfg.get('SEARCH_RAGINDEX_TOP_K', 3))
         self.search_approach = cfg.get('SEARCH_APPROACH', 'hybrid')
         self.semantic_search_config = cfg.get('SEARCH_SEMANTIC_SEARCH_CONFIG', 'my-semantic-config')
@@ -68,7 +68,7 @@ class RetrievalPlugin:
         try:
             start_time = time.time()
             logging.info(f"[vector_index_retrieve] Generating question embeddings. Search query: {search_query}")
-            embeddings_query = await asyncio.to_thread(self.aoai.get_embeddings, search_query)
+            embeddings_query = await self.aoai.get_embeddings(search_query)
             logging.info(f"[vector_index_retrieve] Finished generating embeddings in {round(time.time() - start_time, 2)} seconds")
 
             azure_search_token = await self._get_azure_search_token()
@@ -154,7 +154,7 @@ class RetrievalPlugin:
 
         try:
             start_time = time.time()
-            embeddings_query = await asyncio.to_thread(self.aoai.get_embeddings, input)
+            embeddings_query = await self.aoai.get_embeddings(input)
             logging.info(f"[multimodal_vector_index_retrieve] Query embeddings took {round(time.time() - start_time, 2)} seconds")
         except Exception as e:
             error_message = f"Error generating embeddings: {e}"

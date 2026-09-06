@@ -167,11 +167,18 @@ their containing package. The three existing strategy imports of Search's
 retrieval-error classifier are explicit compatibility permissions, not wildcard
 exemptions. Search's two public OBO callables remain compatibility wrappers;
 `connectors.obo` alone owns the scope-aware token exchange and cache.
+Unresolved first-party members fail, rather than becoming a seemingly valid
+facade edge. Variable dynamic imports require an exact, single-use site
+inventory and passing named evidence; ambiguous alias bindings fail for review.
+The legacy retrieval plugin uses the existing `get_genai_client` and awaits
+its asynchronous embeddings method.
 
 Every broad handler requires an exact exception record and passing named
 failure evidence, including logged/re-raised handlers Ruff exempts. A changed
 try body, catch breadth or handler invalidates the record. No exceptions are
 approved by this bootstrap: existing handlers remain blocking review work.
+Five exact audit exception proposals document the existing side-effect and
+tool-propagation contracts; their `proposed` status grants no exception.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.
