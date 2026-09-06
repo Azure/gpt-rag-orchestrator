@@ -156,7 +156,7 @@ Guidelines:
             if doc and "profile_data" in doc:
                 return UserProfile.model_validate_json(doc["profile_data"])
         except Exception as e:
-            logging.debug(f"[MafAgentServiceStrategy] No existing user profile found: {e}")
+            logging.debug("[MafAgentServiceStrategy] User profile unavailable (%s)", type(e).__name__)
         return UserProfile()
 
     async def _save_user_profile(self, user_id: str, profile: UserProfile):
@@ -170,12 +170,15 @@ Guidelines:
             }
             existing = await self.cosmos.get_document(self.user_profile_container, profile_key)
             if existing:
-                await self.cosmos.update_document(self.user_profile_container, doc)
+                saved_doc = await self.cosmos.update_document(self.user_profile_container, doc)
             else:
-                await self.cosmos.create_document(self.user_profile_container, profile_key, body=doc)
-            logging.info(f"[MafAgentServiceStrategy] Saved user profile for {user_id}")
+                saved_doc = await self.cosmos.create_document(self.user_profile_container, profile_key, body=doc)
+            if saved_doc is None:
+                logging.warning("[MafAgentServiceStrategy] User profile write not confirmed for %s", user_id)
+            else:
+                logging.info("[MafAgentServiceStrategy] Saved user profile for %s", user_id)
         except Exception as e:
-            logging.error(f"[MafAgentServiceStrategy] Failed to save user profile: {e}")
+            logging.error("[MafAgentServiceStrategy] Failed to save user profile (%s)", type(e).__name__)
 
     async def _create_user_memory(
         self,

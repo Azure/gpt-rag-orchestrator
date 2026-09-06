@@ -273,6 +273,13 @@ with a bounded exception-class log. Real in-memory RSA/JWT evidence preserves
 v1/v2 issuers, audience/tenant/signature rejection, key rotation/alternate
 endpoints, required-setting 500 and cancellation; debug claim diagnostics
 remain outside this bounded proposal.
+Six exact inactive profile-helper proposals retain existing empty-profile
+load and best-effort save outcomes in MafLite, MAF Agent Service and the
+legacy multimodal strategy. Profile/exception contents are no longer logged
+by these helpers. A store result of None is now explicitly unconfirmed,
+not logged as Saved. Helper evidence preserves create/update choice, document
+shape and cancellation; it does not approve memory eligibility, default-user
+behavior, primary conversation persistence or legacy terminal-answer paths.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.

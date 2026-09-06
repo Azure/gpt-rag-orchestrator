@@ -760,6 +760,12 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("conversation-rename-http-failure-translation", "failure-translation"),
     ("conversation-delete-http-failure-translation", "failure-translation"),
     ("jwt-verification-fail-closed-http-translation", "failure-translation"),
+    ("maf-lite-optional-profile-load", "failure-translation"),
+    ("maf-lite-optional-profile-save", "contractual-best-effort-side-effect"),
+    ("maf-service-optional-profile-load", "failure-translation"),
+    ("maf-service-optional-profile-save", "contractual-best-effort-side-effect"),
+    ("multimodal-profile-load-compatibility", "failure-translation"),
+    ("multimodal-profile-save-compatibility", "contractual-best-effort-side-effect"),
 ])
 def test_compatibility_proposal_is_exact_and_not_self_authorized(record_id, outcome):
     root = Path(QUALITY["__file__"]).resolve().parents[2]
