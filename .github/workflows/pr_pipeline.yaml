@@ -120,9 +120,15 @@ jobs:
           fi
 
       - name: Install runtime and protected development tools
+        shell: bash
         run: |
-          python -m pip install -r requirements.txt
-          python -m pip install -r "$POLICY_ROOT/requirements-quality.txt"
+          # Static jobs never install the candidate runtime dependency manifest.
+          # Bootstrap tool pins remain diagnostic only until protected adoption.
+          RUNTIME_REQUIREMENTS="$GITHUB_WORKSPACE/.quality-base/requirements.txt"
+          TOOL_REQUIREMENTS="$GITHUB_WORKSPACE/$POLICY_ROOT/requirements-quality.txt"
+          cd "$RUNNER_TEMP"
+          python -I -m pip --isolated install -r "$RUNTIME_REQUIREMENTS"
+          python -I -m pip --isolated install -r "$TOOL_REQUIREMENTS"
 
       - name: Download this run's behavioral evidence
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -132,7 +138,7 @@ jobs:
 
       - name: Run protected-base check against candidate source
         run: >-
-          python "$POLICY_ROOT/.github/scripts/check-quality.py"
+          python -I -S "$POLICY_ROOT/.github/scripts/check-quality.py"
           --check "${{ matrix.check }}" --base-ref "$BASE_SHA"
           --test-results .artifacts/pytest.xml
           --report ".artifacts/quality-${{ matrix.check }}.json"
@@ -179,7 +185,7 @@ jobs:
 
       - name: Validate protected aggregate and report identities
         run: >-
-          python .github/scripts/aggregate-quality.py
+          python -I -S .github/scripts/aggregate-quality.py
           --reports .artifacts --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA"
           --needs "$JOB_RESULTS" --repository "$GITHUB_REPOSITORY"
           --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT"

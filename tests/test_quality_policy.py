@@ -2,6 +2,7 @@
 
 import ast
 import json
+import os
 from pathlib import Path
 import runpy
 import subprocess
@@ -441,7 +442,7 @@ def test_tool_timeout_is_an_error():
 def test_invalid_cli_writes_error_report(tmp_path):
     output = tmp_path / "quality.json"
     proc = subprocess.run(
-        [sys.executable, QUALITY["__file__"], "--base-ref", "not-a-ref",
+        [sys.executable, "-I", "-S", QUALITY["__file__"], "--base-ref", "not-a-ref",
          "--check", "policy", "--report", str(output)],
         capture_output=True, text=True,
     )
@@ -894,7 +895,7 @@ def test_actual_aggregate_fails_closed(tmp_path, protected_aggregate, mutation):
     if mutation == "skipped":
         needs["tests"]["result"] = "skipped"
     proc = subprocess.run(
-        [sys.executable, str(protected / ".github" / "scripts" / "aggregate-quality.py"),
+        [sys.executable, "-I", "-S", str(protected / ".github" / "scripts" / "aggregate-quality.py"),
          "--reports", str(tmp_path),
          "--base-sha", "e" * 40 if mutation == "wrong-base-checkout" else base,
          "--head-sha", "b" * 40, "--repository", QUALITY["REPOSITORY"],
@@ -964,7 +965,7 @@ def test_new_module_stays_covered_across_successive_pr_bases_and_move(tmp_path):
     def check(base):
         report_path = tmp_path / ".artifacts" / "quality.json"
         proc = subprocess.run(
-            [sys.executable, QUALITY["__file__"], "--root", str(tmp_path),
+            [sys.executable, "-I", "-S", QUALITY["__file__"], "--root", str(tmp_path),
              "--base-ref", base, "--check", "typing", "--report", str(report_path)],
             capture_output=True, text=True,
         )
@@ -997,3 +998,153 @@ def test_new_module_stays_covered_across_successive_pr_bases_and_move(tmp_path):
     code, report = check(second_pr)
     assert code == 1, report
     assert report["coverage"]["blocking"] == ["src/moved.py", "src/seed.py"]
+
+
+@pytest.fixture
+def isolated_policy_repo(tmp_path):
+    root = Path(QUALITY["__file__"]).resolve().parents[2]
+    records = QUALITY["load_records"](root)
+    records["policy.json"]["modules"] = ["seed", "pkg", "pkg.child"]
+    records["typing-scope.json"]["module_ids"] = ["seed"]
+    records["exceptions.json"]["entries"] = []
+    (tmp_path / ".quality").mkdir()
+    for name, value in records.items():
+        (tmp_path / ".quality" / name).write_text(json.dumps(value))
+    for name in ("requirements-quality.txt",):
+        (tmp_path / name).write_text((root / name).read_text())
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.ruff.lint]\nselect = ["F821"]\n'
+        '[tool.mypy]\npython_version = "3.12"\nmypy_path = "src"\n'
+        'explicit_package_bases = true\ncheck_untyped_defs = true\n')
+    (tmp_path / ".importlinter").write_text("[importlinter]\nroot_package = pkg\n")
+    tree(tmp_path, {"seed.py": "def f() -> int:\n return 1\n",
+                    "pkg/__init__.py": "from .child import value\n", "pkg/child.py": "value = 1\n"})
+    for args in (("init", "--quiet"), ("config", "user.name", "Quality fixture"),
+                 ("config", "user.email", "quality@example.invalid"),
+                 ("add", "."), ("commit", "--quiet", "-m", "protected source")):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+    return tmp_path
+
+
+def isolated_check(root, check, *, env=None):
+    report = root / ".artifacts" / "isolation.json"
+    proc = subprocess.run(
+        [sys.executable, "-I", "-S", QUALITY["__file__"], "--root", str(root),
+         "--base-ref", "HEAD", "--check", check, "--report", str(report)],
+        cwd=root, env=env, capture_output=True, text=True)
+    return proc, json.loads(report.read_text())
+
+
+@pytest.mark.parametrize("check", ["lint", "typing", "architecture"])
+def test_static_tools_never_execute_candidate_shadows_or_startup_hooks(
+    isolated_policy_repo, check, tmp_path,
+):
+    root = isolated_policy_repo
+    marker = root / "EXECUTED"
+    trap = f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\nraise RuntimeError('candidate executed')\n"
+    for name in ("ruff", "mypy", "grimp", "importlinter", "sitecustomize", "usercustomize"):
+        (root / f"{name}.py").write_text(trap)
+        (root / "src" / f"{name}.py").write_text(trap)
+    # Importable packages must be discovered as data, including raising initializers.
+    (root / "src" / "pkg" / "__init__.py").write_text(trap)
+    env = {**os.environ, "PYTHONPATH": str(root) + os.pathsep + str(root / "src"),
+           "MYPYPATH": str(root), "PYTHONSTARTUP": str(root / "sitecustomize.py"),
+           "RUFF_CACHE_DIR": str(root / "poison-cache"), "MYPY_CACHE_DIR": str(root / "poison-cache")}
+    proc, report = isolated_check(root, check, env=env)
+    assert not marker.exists(), (proc.stdout, proc.stderr)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr, report)
+    assert report["checks"][check]["status"] == "passed"
+    assert not (root / "poison-cache").exists()
+    assert not (root / ".mypy_cache").exists()
+
+
+@pytest.mark.parametrize("option", ["plugins", "python_executable"])
+def test_executable_mypy_config_is_rejected_before_loading(
+    isolated_policy_repo, option,
+):
+    root = isolated_policy_repo
+    marker = root / "EXECUTED"
+    (root / "plugin.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n")
+    with (root / "pyproject.toml").open("a") as stream:
+        stream.write(f'{option} = "plugin.py"\n')
+    # Bootstrap/protected configuration must not authorize source execution either.
+    subprocess.run(["git", "add", "pyproject.toml"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "unsafe tool config"],
+                   cwd=root, check=True, capture_output=True)
+    proc, report = isolated_check(root, "typing")
+    assert not marker.exists()
+    assert proc.returncode == 2, report
+    assert "configuration" in report["checks"]["typing"]["message"].lower()
+
+
+def test_unisolated_cli_cannot_report_success(isolated_policy_repo):
+    root = isolated_policy_repo
+    report = root / "unsafe.json"
+    proc = subprocess.run(
+        [sys.executable, QUALITY["__file__"], "--root", str(root),
+         "--base-ref", "HEAD", "--check", "lint", "--report", str(report)],
+        cwd=root, capture_output=True, text=True)
+    assert proc.returncode == 2
+    assert "-I -S" in proc.stdout + proc.stderr
+
+
+def test_installed_startup_hooks_are_not_executed(tmp_path):
+    environment = tmp_path / "tool-env"
+    subprocess.run([sys.executable, "-I", "-S", "-m", "venv", "--without-pip",
+                    str(environment)], check=True, capture_output=True)
+    interpreter = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    sites = list(environment.rglob("site-packages"))
+    assert len(sites) == 1
+    site = sites[0]
+    pth_marker, site_marker = tmp_path / "PTH", tmp_path / "SITE"
+    (site / "startup.pth").write_text(
+        f"import pathlib; pathlib.Path({str(pth_marker)!r}).touch()\n")
+    (site / "sitecustomize.py").write_text(
+        f"import pathlib; pathlib.Path({str(site_marker)!r}).touch()\n")
+    versions = {"ruff": "0.16.5", "mypy": "2.3.1", "import-linter": "2.14", "grimp": "3.16"}
+    for name, version in versions.items():
+        metadata = site / f"{name.replace('-', '_')}-{version}.dist-info"
+        metadata.mkdir()
+        (metadata / "METADATA").write_text(f"Name: {name}\nVersion: {version}\n")
+    # Positive control: -I alone still executes installed startup hooks.
+    subprocess.run([str(interpreter), "-I", "-c", "pass"], check=True, capture_output=True)
+    assert pth_marker.exists() and site_marker.exists()
+    pth_marker.unlink()
+    site_marker.unlink()
+    proc = subprocess.run(
+        [str(interpreter), "-I", "-S", QUALITY["__file__"], "--static-tool", "versions"],
+        cwd=tmp_path, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout) == versions
+    assert not pth_marker.exists() and not site_marker.exists()
+
+
+@pytest.mark.parametrize("configuration", [
+    "[importlinter]\nroot_package = pkg\ncontract_types = custom: plugin.Contract\n",
+    "[importlinter]\nroot_package = pkg.child\n",
+])
+def test_executable_import_linter_config_is_rejected(isolated_policy_repo, configuration):
+    root = isolated_policy_repo
+    (root / ".importlinter").write_text(configuration)
+    subprocess.run(["git", "add", ".importlinter"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "unsafe import config"],
+                   cwd=root, check=True, capture_output=True)
+    proc, report = isolated_check(root, "architecture")
+    assert proc.returncode == 2, report
+    assert "configuration" in report["checks"]["architecture"]["message"].lower()
+
+
+@pytest.mark.parametrize("check,source,rule", [
+    ("lint", "value = undefined_name\n", "F821"),
+    ("typing", "def f() -> int:\n return 'wrong'\n", "return-value"),
+])
+def test_isolated_tools_still_report_real_source_errors(isolated_policy_repo, check, source, rule):
+    root = isolated_policy_repo
+    (root / "src" / "seed.py").write_text(source)
+    # Candidate tool config cannot replace the protected config or load a plugin.
+    (root / "pyproject.toml").write_text('[tool.mypy]\nplugins = ["malicious"]\n')
+    proc, report = isolated_check(root, check)
+    assert proc.returncode == 1, (proc.stdout, proc.stderr, report)
+    findings = report["checks"][check]["findings"]
+    assert rule in {item.get("identity", {}).get("rule", item["rule"]) for item in findings}

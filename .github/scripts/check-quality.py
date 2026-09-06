@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ast
 from collections import Counter, deque
+import configparser
 import graphlib
 import hashlib
 import importlib.metadata
@@ -14,8 +15,10 @@ import math
 import os
 from pathlib import Path
 import re
+import runpy
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 import tokenize
@@ -64,6 +67,98 @@ def git(root, *args):
     if result.returncode:
         raise QualityError(f"git {args[0]} failed")
     return result.stdout
+
+
+def static_environment(workspace):
+    # Tools inherit OS process necessities, not interpreter/search/cache configuration.
+    allowed = {"SYSTEMROOT", "WINDIR", "PATH", "PATHEXT", "COMSPEC"}
+    env = {k: v for k, v in os.environ.items() if k.upper() in allowed}
+    env.update(HOME=str(workspace), USERPROFILE=str(workspace),
+               TMP=str(workspace), TEMP=str(workspace), TMPDIR=str(workspace),
+               XDG_CONFIG_HOME=str(workspace), XDG_CACHE_HOME=str(workspace),
+               PYTHONIOENCODING="utf-8", NO_COLOR="1")
+    return env
+
+
+def static_tool(tool, workspace, arguments=()):
+    return run([sys.executable, "-I", "-S", str(Path(__file__).resolve()),
+                "--static-tool", tool, *arguments], cwd=workspace,
+               env=static_environment(workspace))
+
+
+def tool_interpreter():
+    """Expose installed wheels as paths, without site initialization or .pth execution."""
+    if not sys.flags.isolated or not sys.flags.no_site:
+        raise QualityError("Static analysis must start with python -I -S")
+    executable = Path(sys.executable)
+    prefix = executable.parent
+    if prefix.name.lower() in ("scripts", "bin"):
+        prefix = prefix.parent
+    variables = {"base": str(prefix), "platbase": str(prefix)}
+    paths = {sysconfig.get_path(key, vars=variables) for key in ("purelib", "platlib")}
+    if not all(Path(path).is_dir() for path in paths):
+        raise QualityError("Missing installed tool site-packages")
+    # Python 3.12 -S does not set virtualenv prefixes; mypy's PEP 561 discovery needs them.
+    sys.prefix = sys.exec_prefix = str(prefix)
+    sys.path.extend(sorted(paths))
+
+
+def static_tool_main(tool, arguments):
+    tool_interpreter()
+    source = Path.cwd() / "src"
+
+    def refuse_source_execution(event, args):
+        if event == "exec" and Path(args[0].co_filename).resolve().is_relative_to(source):
+            raise QualityError("Static tools must not execute candidate source")
+
+    sys.addaudithook(refuse_source_execution)
+    if tool == "versions":
+        print(json.dumps({name: importlib.metadata.version(name)
+                          for name in ("ruff", "mypy", "import-linter", "grimp")}))
+    elif tool in ("ruff", "mypy"):
+        sys.argv = [tool, *arguments]
+        runpy.run_module(tool, run_name="__main__")
+    elif tool == "grimp":
+        import grimp
+
+        sys.path.append(str(source))
+        graph = grimp.build_graph(*arguments, include_external_packages=False,
+                                  exclude_type_checking_imports=False, cache_dir=None)
+        print(json.dumps({name: sorted(graph.find_modules_directly_imported_by(name))
+                          for name in sorted(graph.modules)}))
+    elif tool == "import-linter":
+        from importlinter.cli import lint_imports_command
+
+        sys.path.append(str(source))
+        lint_imports_command(list(arguments))
+    else:
+        raise QualityError("Unknown static tool")
+
+
+def static_configuration(config, import_config):
+    mypy = config.get("tool", {}).get("mypy", {})
+    unsafe = {"plugins", "python_executable", "custom_typeshed_dir"}
+    if any(key in mypy for key in unsafe) or mypy.get("mypy_path", "src") != "src":
+        raise QualityError("Executable or external mypy configuration is not permitted")
+    ruff = config.get("tool", {}).get("ruff", {})
+    if "extend" in ruff:
+        raise QualityError("External Ruff configuration is not permitted")
+    parser = configparser.ConfigParser()
+    parser.read_string(import_config)
+    for section in parser.values():
+        if "contract_types" in section:
+            raise QualityError("Executable Import Linter configuration is not permitted")
+    roots = parser.get("importlinter", "root_packages", fallback="").split()
+    roots += parser.get("importlinter", "root_package", fallback="").split()
+    if any(not name.isidentifier() for name in roots):
+        raise QualityError("Import Linter configuration requires top-level package roots")
+
+
+def write_analysis_sources(workspace, modules):
+    for module in modules.values():
+        dest = workspace / module["path"]
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(module["text"], encoding="utf-8")
 
 
 def validate_records(record):
@@ -838,25 +933,23 @@ def policy_changes(root, base, base_records, candidate):
 
 
 def grimp_check(root, modules, edges):
-    import grimp
-
     packages = [name for name, m in modules.items()
                 if m["package"] and "." not in name and name != "__init__"]
-    previous = list(sys.path)
-    try:
-        sys.path.insert(0, str(root / "src"))
-        graph = grimp.build_graph(*packages, include_external_packages=False,
-                                  exclude_type_checking_imports=False, cache_dir=None)
-    finally:
-        sys.path[:] = previous
-    if not set(graph.modules) <= set(modules):
+    with tempfile.TemporaryDirectory(prefix="orchestrator-grimp-") as directory:
+        workspace = Path(directory)
+        write_analysis_sources(workspace, modules)
+        result = static_tool("grimp", workspace, packages)
+    if result.returncode or result.stderr.strip():
+        raise QualityError("Grimp execution failed: " + result.stderr[-1000:])
+    graph = json.loads(result.stdout)
+    if not isinstance(graph, dict) or not set(graph) <= set(modules):
         raise QualityError("Grimp discovered modules omitted by AST collection")
-    missing = [(source, target) for source in graph.modules
-               for target in graph.find_modules_directly_imported_by(source)
+    missing = [(source, target) for source in graph
+               for target in graph[source]
                if target not in edges[source]]
     if missing:
         raise QualityError(f"AST/Grimp import disagreement: {missing}")
-    return len(graph.modules)
+    return len(graph)
 
 
 def type_findings(values, modules, identities, root, scope):
@@ -909,6 +1002,8 @@ def main(argv=None):
               "base_sha": None, "head_sha": None, "policy_sha": None, "checks": {}}
     exit_code = 0
     try:
+        if not sys.flags.isolated or not sys.flags.no_site:
+            raise QualityError("Run static analysis with python -I -S to disable startup hooks")
         base = git(root, "rev-parse", "--verify", args.base_ref + "^{commit}").strip()
         head = git(root, "rev-parse", "HEAD").strip()
         report.update(base_sha=base, head_sha=head)
@@ -928,9 +1023,13 @@ def main(argv=None):
             policy = records["policy.json"]
             report["policy_sha"] = digest(records)
             report["bootstrap"] = bootstrap
+            versions_result = static_tool("versions", trusted)
+            if versions_result.returncode or versions_result.stderr.strip():
+                raise QualityError("Installed tool discovery failed: " + versions_result.stderr[-1000:])
+            installed = json.loads(versions_result.stdout)
             report["toolchain"] = {}
             for package, pin in policy["toolchain"].items():
-                version = importlib.metadata.version(package)
+                version = installed[package]
                 if version != pin:
                     raise QualityError(f"{package} requires {pin}, found {version}")
                 report["toolchain"][package] = version
@@ -952,6 +1051,15 @@ def main(argv=None):
             config_root = root if bootstrap else trusted
             base_config = tomllib.loads((config_root / "pyproject.toml").read_text())
             head_config = tomllib.loads((root / "pyproject.toml").read_text())
+            analysis = trusted / "analysis"
+            analysis.mkdir()
+            write_analysis_sources(analysis, modules)
+            import_config = (config_root / ".importlinter").read_text() if (
+                config_root / ".importlinter").exists() else ""
+            static_configuration(base_config, import_config)
+            (analysis / "pyproject.toml").write_text(
+                (config_root / "pyproject.toml").read_text(), encoding="utf-8")
+            (analysis / ".importlinter").write_text(import_config, encoding="utf-8")
             current_handlers = handlers(modules)
             report["handler_inventory"] = current_handlers
             for check in requested:
@@ -981,11 +1089,8 @@ def main(argv=None):
                                                     evidence_tests(args.test_results, root))
                         details["grimp_modules"] = grimp_check(root, modules, edges)
                         details["edges"] = sum(map(len, edges.values()))
-                        env = {**os.environ, "PYTHONPATH": str(root / "src")}
-                        tool = Path(sys.executable).parent / (
-                            "lint-imports.exe" if os.name == "nt" else "lint-imports")
-                        result = run([str(tool), "--config", str(config_root / ".importlinter"),
-                                      "--no-cache"], cwd=root, env=env)
+                        result = static_tool("import-linter", analysis, [
+                            "--config", str(analysis / ".importlinter"), "--no-cache"])
                         if result.returncode not in (0, 1):
                             raise QualityError("Import Linter execution failed")
                         if result.returncode:
@@ -1000,25 +1105,29 @@ def main(argv=None):
                         approved = approved_handler_sites(
                             current_handlers, records["exceptions.json"]["entries"],
                             evidence_tests(args.test_results, root))
-                        values = tool_json(run([
-                            sys.executable, "-m", "ruff", "check", "--no-cache",
-                            "--config", str(config_root / "pyproject.toml"),
+                        values = tool_json(static_tool("ruff", analysis, [
+                            "check", "--no-cache",
+                            "--config", str(analysis / "pyproject.toml"),
                             "--output-format", "json", *[m["path"] for m in modules.values()],
-                        ], cwd=root), "ruff")
+                        ]), "ruff")
                         for value in values:
-                            path = Path(value["filename"]).relative_to(root).as_posix()
+                            path = Path(value["filename"]).relative_to(analysis).as_posix()
                             if (value["code"] in ("BLE001", "E722")
                                     and (path, value["location"]["row"]) in approved):
                                 continue
                             found.append(finding(value["code"], path, value["location"]["row"],
                                                  value["message"]))
                     elif check == "typing":
-                        values = tool_json(run([
-                            sys.executable, "-m", "mypy", "--config-file",
-                            str(config_root / "pyproject.toml"), "--no-incremental",
+                        values = tool_json(static_tool("mypy", analysis, [
+                            "--config-file", str(analysis / "pyproject.toml"), "--no-incremental",
+                            "--cache-dir", str(analysis / "mypy-cache"),
+                            "--python-executable", sys.executable,
                             "--output", "json", *report["coverage"]["blocking"],
-                        ], cwd=root), "mypy")
-                        blocking, outside = type_findings(values, modules, identities, root, scope)
+                        ]), "mypy")
+                        for value in values:
+                            if Path(value["file"]).is_absolute():
+                                value["file"] = Path(value["file"]).relative_to(analysis).as_posix()
+                        blocking, outside = type_findings(values, modules, identities, analysis, scope)
                         baseline = candidate["typing-baseline.json"]["entries"]
                         trusted_baseline = records["typing-baseline.json"]["entries"]
                         # Candidate additions are never allowances, even if policy runs separately.
@@ -1035,7 +1144,7 @@ def main(argv=None):
                 except (QualityError, ValueError, OSError, KeyError, TypeError) as exc:
                     report["checks"][check] = {"status": "error", "message": str(exc)}
                     exit_code = 2
-    except (QualityError, ValueError, OSError, KeyError, TypeError,
+    except (QualityError, ValueError, OSError, KeyError, TypeError, configparser.Error,
             importlib.metadata.PackageNotFoundError) as exc:
         for check in requested:
             report["checks"].setdefault(check, {"status": "error", "message": str(exc)})
@@ -1050,4 +1159,7 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--static-tool":
+        static_tool_main(sys.argv[2], sys.argv[3:])
+        raise SystemExit(0)
     raise SystemExit(main())

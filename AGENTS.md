@@ -141,7 +141,7 @@ python -m pip install pytest pytest-asyncio pytest-mock jsonschema
 python -m pip install -r requirements-quality.txt
 python -m pytest -q --junitxml=.artifacts\pytest.xml
 $Base = git merge-base HEAD origin/develop
-python .github\scripts\check-quality.py --check all --base-ref $Base --report .artifacts\quality.json --test-results .artifacts\pytest.xml
+python -I -S .github\scripts\check-quality.py --check all --base-ref $Base --report .artifacts\quality.json --test-results .artifacts\pytest.xml
 ```
 
 The supported individual checks are `lint`, `typing`, `architecture`,
@@ -149,6 +149,17 @@ The supported individual checks are `lint`, `typing`, `architecture`,
 analysis or invalid input, never success. Reports distinguish imported
 out-of-scope type diagnostics from blocking findings. They include complete
 runtime module coverage and the broad-handler inventory.
+
+The checker and aggregate require `-I -S`: ordinary interpreter startup may
+execute hooks before the evaluator can reject them. Static tools run in fresh
+source-only snapshots with isolated startup, sanitized search/cache environment
+and installed wheel paths exposed without processing `.pth` files. Candidate
+packages are analyzed, never imported. Executable mypy plugins and custom
+Import Linter contracts are rejected, not treated as approved policy. CI quality
+jobs install the protected base runtime dependencies, not the candidate
+manifest; behavioral tests intentionally exercise candidate dependencies in
+their separate job. This is static-tool isolation, not an OS sandbox or
+protection from a compromised interpreter/tool wheel.
 
 `requirements-quality.txt` pins development tools only; it is not a runtime
 dependency source. Ruff checks every Python source under `src/`. Blocking mypy

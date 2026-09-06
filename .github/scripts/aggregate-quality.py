@@ -4,9 +4,12 @@ import argparse
 import json
 from pathlib import Path
 import runpy
+import sys
 
 
 def main():
+    if not sys.flags.isolated or not sys.flags.no_site:
+        raise SystemExit("Aggregate must start with python -I -S")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reports", type=Path, required=True)
     parser.add_argument("--base-sha", required=True)
