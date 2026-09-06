@@ -65,6 +65,16 @@ def test_relative_sibling_does_not_invent_parent_initialization_edge(tmp_path):
     assert edges["pkg"] == {"pkg.a"}
 
 
+def test_qualified_child_attribute_does_not_invent_facade_back_edge(tmp_path):
+    edges, findings = graph(tmp_path, {
+        "pkg/__init__.py": "from . import client",
+        "pkg/client.py": "import pkg.impl\nvalue = pkg.impl.value",
+        "pkg/impl.py": "value = 1",
+    })
+    assert not findings
+    assert edges["pkg.client"] == {"pkg.impl"}
+
+
 def test_real_facade_reexports_are_followed(tmp_path):
     _, findings = graph(tmp_path, {
         "a.py": "from pkg import value",
@@ -97,12 +107,15 @@ def test_forbidden_direct_and_transitive_directions(tmp_path, statement):
     "from pkg.public import _secret as secret",
     "import pkg.public as p\nvalue = p._secret",
     "import pkg.public\nvalue = pkg.public._secret",
+    "from pkg.public import Client as C\nvalue = C._secret",
+    "import pkg.public as p\nvalue = p.Client._secret",
+    "import pkg.public as p\nvalue = getattr(p, '_secret')",
 ])
 def test_private_module_and_member_access(tmp_path, statement):
     _, findings = graph(tmp_path, {
         "consumer.py": statement, "pkg/__init__.py": "",
         "pkg/_impl.py": "public = 1",
-        "pkg/public.py": "_secret = 1",
+        "pkg/public.py": "_secret = 1\nclass Client:\n _secret = 1",
     })
     assert any(f["rule"] == "private-access" for f in findings)
 

@@ -385,12 +385,14 @@ def architecture(modules, contracts, passed_tests=frozenset()):
                 edges[name].add(target)
                 locations[name, target] = node.lineno
             private = any(p.startswith("_") and p != "__init__" for p in target.split("."))
-            private = private or (member.startswith("_") and not member.startswith("__"))
+            private_member = any(p.startswith("_") and not p.startswith("__")
+                                 for p in member.split("."))
+            private = private or private_member
             owner = target.rpartition(".")[0] if "." in target else target
             same_owner = name == owner or name.startswith(owner + ".")
             approved = any(
                 record["importer"] == name and record["target"] in (
-                    f"{target}.{member}", *([target] if not member.startswith("_") else []))
+                    f"{target}.{member}", *([target] if not private_member else []))
                 for record in contracts["private_access"]
             )
             if private and not same_owner and not approved:
@@ -417,11 +419,20 @@ def architecture(modules, contracts, passed_tests=frozenset()):
                         "" if child in known else alias.name)
             elif isinstance(node, ast.Attribute):
                 resolved = dotted(node, aliases)
-                target, _, member = resolved.rpartition(".")
-                if target in known:
+                target = resolved if resolved in known else next(
+                    (candidate for candidate in sorted(known, key=len, reverse=True)
+                     if resolved.startswith(candidate + ".")), None)
+                if target:
+                    member = resolved[len(target) + 1:] if resolved != target else ""
                     add(target, node, member)
             elif isinstance(node, ast.Call):
                 call = dotted(node.func, aliases)
+                resolved = dotted(node, aliases)
+                target = resolved if resolved in known else next(
+                    (candidate for candidate in sorted(known, key=len, reverse=True)
+                     if resolved.startswith(candidate + ".")), None)
+                if target:
+                    add(target, node, resolved[len(target) + 1:])
                 if (call == "getattr" and node.args
                         and dotted(node.args[0], aliases) in ("importlib", "builtins")
                         and (len(node.args) < 2 or not isinstance(node.args[1], ast.Constant))):
