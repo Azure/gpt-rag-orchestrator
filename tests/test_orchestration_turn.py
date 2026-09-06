@@ -435,3 +435,43 @@ class TestClassicApiPreservation:
         assert callable(Orchestrator.create)
         assert callable(Orchestrator.stream_response)
         assert callable(Orchestrator.save_feedback)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure_type,terminal_event",
+    [(RuntimeError, TurnErrorEvent()), (LookupError, TurnErrorEvent()),
+     (asyncio.CancelledError, TurnCancelledEvent())],
+    ids=["runtime", "lookup", "cancelled"],
+)
+async def test_partial_turn_drains_events_and_preserves_original_failure(
+    failure_type, terminal_event, caplog,
+):
+    orchestrator = Orchestrator.__new__(Orchestrator)
+    orchestrator.conversation_id = "conv-1"
+    failure = failure_type("sensitive-upstream-failure-marker")
+    pending = TurnToolActivityEvent(
+        TurnToolActivity("search", TurnToolStatus.STARTED, call_id="call-1"))
+
+    async def classic_stream(_ask, _question_id, *, _event_sink=None):
+        yield "conv-1 "
+        yield "partial answer"
+        _event_sink(pending)
+        raise failure
+
+    orchestrator.stream_response = classic_stream
+    events = []
+    with pytest.raises(failure_type) as caught:
+        async for event in orchestrator.stream_turn(_make_turn()):
+            events.append(event)
+
+    assert caught.value is failure
+    assert events == [
+        TurnConversationEvent("conv-1"), TurnTextEvent("partial answer"),
+        pending, terminal_event,
+    ]
+    wire = "".join(serialize_turn_event(event) or "" for event in events)
+    assert "sensitive-upstream-failure-marker" not in wire
+    assert "sensitive-upstream-failure-marker" not in caplog.text
+    if isinstance(terminal_event, TurnErrorEvent):
+        assert wire.endswith("event: error\ndata: An internal server error occurred.\n\n")

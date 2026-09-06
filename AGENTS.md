@@ -176,6 +176,9 @@ exemptions. Search's two public OBO callables remain compatibility wrappers;
 Unresolved first-party members fail, rather than becoming a seemingly valid
 facade edge. Variable dynamic imports require an exact, single-use site
 inventory and passing named evidence; ambiguous alias bindings fail for review.
+JUnit evidence resolves class-based selectors against actual test modules and
+rejects unknown modules or duplicate selectors instead of crediting an
+ambiguous pass.
 The legacy retrieval plugin uses the existing `get_genai_client` and awaits
 its asynchronous embeddings method.
 
@@ -185,6 +188,11 @@ try body, catch breadth or handler invalidates the record. No exceptions are
 approved by this bootstrap: existing handlers remain blocking review work.
 Ten exact audit exception proposals document the existing side-effect and
 tool-propagation contracts; their `proposed` status grants no exception.
+One non-audit turn-stream proposal documents generic error-event emission
+followed by unchanged exception propagation, including partial output and
+cancellation evidence. Necessary boundary translation or cleanup can be
+proposed individually under the existing public contract; necessity and
+passing evidence do not constitute approval.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.

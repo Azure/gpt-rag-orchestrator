@@ -734,6 +734,7 @@ def test_local_variables_are_not_public_module_exports(tmp_path):
 def test_audit_proposals_bind_source_without_authorizing_themselves():
     root = Path(QUALITY["__file__"]).resolve().parents[2]
     records = QUALITY["load_records"](root)["exceptions.json"]["entries"]
+    records = [r for r in records if r["module_id"].startswith("telemetry.audit")]
     current = QUALITY["handlers"](QUALITY["collect"](root, ["src"]))
     current = [h for h in current if h["module_id"] in (
         "telemetry.audit", "telemetry.audit_contract", "telemetry.audit_sanitizer")]
@@ -742,6 +743,21 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     assert QUALITY["check_exceptions"](current, records, passed)
     reviewed_fixture = [{**record, "status": "active"} for record in records]
     assert not QUALITY["check_exceptions"](current, reviewed_fixture, passed)
+
+
+def test_non_audit_turn_proposal_binds_propagation_without_granting_approval():
+    root = Path(QUALITY["__file__"]).resolve().parents[2]
+    records = QUALITY["load_records"](root)["exceptions.json"]["entries"]
+    record = next(r for r in records if r["id"] == "turn-error-event-before-propagation")
+    current = [h for h in QUALITY["handlers"](QUALITY["collect"](root, ["src"]))
+               if h["module_id"] == record["module_id"] and h["symbol"] == record["symbol"]]
+    assert len(current) == 1
+    assert record["failure_outcome"] == "propagation"
+    assert record["status"] == "proposed"
+    passed = set(record["evidence_tests"])
+    assert QUALITY["check_exceptions"](current, [record], passed)
+    assert not QUALITY["check_exceptions"](current, [{**record, "status": "active"}], passed)
+    assert QUALITY["check_exceptions"](current, [{**record, "status": "active"}], set())
 
 
 @pytest.mark.parametrize("file,mutate", [
@@ -786,7 +802,32 @@ def test_evidence_does_not_credit_skipped_failed_or_missing_tests(tmp_path):
         '<testcase classname="tests.test_failure" name="test_skip"><skipped/></testcase>'
         '<testcase classname="tests.test_failure" name="test_fail"><failure/></testcase></testsuite>'
     )
-    assert QUALITY["evidence_tests"](path) == {"tests/test_failure.py::test_pass"}
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_failure.py").write_text("")
+    assert QUALITY["evidence_tests"](path, tmp_path) == {"tests/test_failure.py::test_pass"}
+
+
+def test_junit_class_evidence_resolves_actual_test_module(tmp_path):
+    path = tmp_path / "pytest.xml"
+    path.write_text(
+        '<testsuite><testcase classname="tests.test_quality_policy.TestBoundary" '
+        'name="test_failure[case]"/></testsuite>')
+    assert QUALITY["evidence_tests"](path) == {
+        "tests/test_quality_policy.py::TestBoundary::test_failure[case]"}
+
+
+@pytest.mark.parametrize("cases", [
+    '<testcase classname="tests.test_missing_module" name="test_not_executed"/>',
+    '<testcase classname="tests.test_quality_policy" name="test_duplicate"/>'
+    '<testcase classname="tests.test_quality_policy" name="test_duplicate"><failure/></testcase>',
+    '<testcase classname="tests.test_quality_policy" name="test_duplicate"/>'
+    '<testcase classname="tests.test_quality_policy" name="test_duplicate"/>',
+])
+def test_junit_unknown_or_duplicate_selector_is_not_passing_evidence(tmp_path, cases):
+    path = tmp_path / "pytest.xml"
+    path.write_text(f"<testsuite>{cases}</testsuite>")
+    with pytest.raises(QUALITY["QualityError"]):
+        QUALITY["evidence_tests"](path)
 
 
 @pytest.fixture(scope="module")

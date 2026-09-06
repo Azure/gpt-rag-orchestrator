@@ -170,6 +170,27 @@
       "evidence_tests": ["tests/test_audit_contract.py::test_audit_sequence_failure_is_omitted_and_never_serialized[omitted_fields]", "tests/test_audit_contract.py::test_audit_sequence_failure_is_omitted_and_never_serialized[truncated_fields]"],
       "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
       "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "turn-error-event-before-propagation",
+      "module_id": "orchestration.orchestrator",
+      "symbol": "Orchestrator.stream_turn",
+      "path": "src/orchestration/orchestrator.py",
+      "line": 161,
+      "handler_fingerprint": "4d786aa433d11afeadf4b60adf6aefd403b911f1b22a6ba13a0475962701d2f0",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Runtime-neutral turn stream consuming the classic strategy stream",
+      "reason": "Unknown strategy exceptions must emit the existing generic typed error after pending events and then propagate unchanged. Narrowing to a fixed exception list would omit the required terminal error for other strategy failures; this is not successful recovery.",
+      "failure_outcome": "propagation",
+      "diagnostic_path": "TurnErrorEvent serializes to the existing constant-safe SSE error, followed by a bare re-raise to the caller. This handler does not log or serialize exception content.",
+      "evidence_tests": [
+        "tests/test_orchestration_turn.py::test_partial_turn_drains_events_and_preserves_original_failure[runtime]",
+        "tests/test_orchestration_turn.py::test_partial_turn_drains_events_and_preserves_original_failure[lookup]",
+        "tests/test_orchestration_turn.py::test_partial_turn_drains_events_and_preserves_original_failure[cancelled]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review_by_stage": "before-quality-gate-activation"
     }
   ]
 }

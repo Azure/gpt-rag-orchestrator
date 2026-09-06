@@ -782,7 +782,7 @@ def jobs_passed(results):
         results[name] == "success" for name in REQUIRED_JOBS)
 
 
-def evidence_tests(path):
+def evidence_tests(path, source_root=None):
     if path is None:
         return set()
     try:
@@ -792,8 +792,26 @@ def evidence_tests(path):
     cases = list(root.iter("testcase"))
     if not cases:
         raise QualityError("Failure evidence has no test cases")
-    return {f"{case.attrib['classname'].replace('.', '/')}.py::{case.attrib['name']}"
-            for case in cases if not any(n.tag in ("failure", "error", "skipped") for n in case)}
+    source_root = source_root or Path.cwd()
+    modules = {".".join(p.relative_to(source_root).with_suffix("").parts): p
+               for p in (source_root / "tests").rglob("*.py")}
+    seen, passed = set(), set()
+    for case in cases:
+        text_fields(case.attrib, ("classname", "name"))
+        classname = case.attrib["classname"]
+        module = next((name for name in sorted(modules, key=len, reverse=True)
+                       if classname == name or classname.startswith(name + ".")), None)
+        if module is None:
+            raise QualityError(f"Unknown pytest evidence module: {classname}")
+        classes = classname[len(module):].strip(".").split(".") if classname != module else []
+        selector = "::".join([modules[module].relative_to(source_root).as_posix(),
+                              *classes, case.attrib["name"]])
+        if selector in seen:
+            raise QualityError(f"Ambiguous duplicate pytest evidence: {selector}")
+        seen.add(selector)
+        if not any(n.tag in ("failure", "error", "skipped") for n in case):
+            passed.add(selector)
+    return passed
 
 
 def policy_changes(root, base, base_records, candidate):
@@ -960,7 +978,7 @@ def main(argv=None):
                                                      message="Nested quality configuration is not permitted"))
                     elif check == "architecture":
                         edges, found = architecture(modules, policy["contracts"],
-                                                    evidence_tests(args.test_results))
+                                                    evidence_tests(args.test_results, root))
                         details["grimp_modules"] = grimp_check(root, modules, edges)
                         details["edges"] = sum(map(len, edges.values()))
                         env = {**os.environ, "PYTHONPATH": str(root / "src")}
@@ -974,14 +992,14 @@ def main(argv=None):
                             found.append(finding("import-linter", message=result.stdout[-3000:]))
                     elif check == "exceptions":
                         found = check_exceptions(current_handlers, records["exceptions.json"]["entries"],
-                                                 evidence_tests(args.test_results))
+                                                 evidence_tests(args.test_results, root))
                         details["exception_ids_used"] = [
                             r["id"] for r in records["exceptions.json"]["entries"]
                             if not any(f.get("message", "").endswith(r["id"]) for f in found)]
                     elif check == "lint":
                         approved = approved_handler_sites(
                             current_handlers, records["exceptions.json"]["entries"],
-                            evidence_tests(args.test_results))
+                            evidence_tests(args.test_results, root))
                         values = tool_json(run([
                             sys.executable, "-m", "ruff", "check", "--no-cache",
                             "--config", str(config_root / "pyproject.toml"),
