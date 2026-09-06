@@ -113,7 +113,7 @@ class SearchContextProvider(ContextProvider):
                 ]
                 logger.info("[SearchContextProvider] Embedding generated in %.2fs (dims=%d)", time.time() - embed_start, len(vector))
             except Exception as e:
-                logger.warning("[SearchContextProvider] Embedding failed, falling back to keyword search: %s", e)
+                logger.warning("[SearchContextProvider] Embedding failed, falling back to keyword search: %s", type(e).__name__)
 
         if self._semantic_config:
             search_params["query_type"] = QueryType.SEMANTIC
@@ -189,8 +189,7 @@ class SearchContextProvider(ContextProvider):
                 "%s Search failed in %.2fs: %s",
                 marker,
                 time.time() - search_start,
-                e,
-                exc_info=True,
+                type(e).__name__,
                 extra={
                     "retrieval_index": self._index_name,
                     "retrieval_credential_type": "obo" if obo_token else "managed_identity",

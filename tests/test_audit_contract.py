@@ -563,3 +563,49 @@ def test_oversized_nested_key_is_omitted_before_redaction_classification():
             + result.attributes["truncated_fields"]
         )
     )
+
+
+@pytest.mark.parametrize("container_kind", ["mapping", "sequence"])
+@pytest.mark.parametrize("failure_stage", ["preparation", "iteration"])
+def test_sanitizer_container_failure_discards_partial_data_and_releases_identity(
+    container_kind, failure_stage,
+):
+    def failing_iterator(item):
+        yield item
+        raise RuntimeError("synthetic-private-error")
+
+    class OnceFailingMapping(dict):
+        failed = False
+
+        def items(self):
+            if not self.failed:
+                self.failed = True
+                if failure_stage == "preparation":
+                    raise RuntimeError("synthetic-private-error")
+                return failing_iterator(("partial", "synthetic-private-value"))
+            return super().items()
+
+    class OnceFailingSequence(list):
+        failed = False
+
+        def __iter__(self):
+            if not self.failed:
+                self.failed = True
+                if failure_stage == "preparation":
+                    raise RuntimeError("synthetic-private-error")
+                return failing_iterator("synthetic-private-value")
+            return super().__iter__()
+
+    value = (
+        OnceFailingMapping(safe=True)
+        if container_kind == "mapping"
+        else OnceFailingSequence(["safe"])
+    )
+    event = _base_event()
+    event["tool_arguments"] = {"failed": value, "reused": value}
+    result = sanitize_event(event, additional_redacted_keys=frozenset())
+    assert json.loads(result.attributes["tool_arguments"]) == {
+        "reused": {"safe": True} if container_kind == "mapping" else ["safe"],
+    }
+    assert result.attributes["omitted_fields"] == ["tool_arguments.failed"]
+    assert "synthetic-private" not in result.serialized

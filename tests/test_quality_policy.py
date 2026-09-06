@@ -740,11 +740,35 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     current = QUALITY["handlers"](QUALITY["collect"](root, ["src"]))
     current = [h for h in current if h["module_id"] in (
         "telemetry.audit", "telemetry.audit_contract", "telemetry.audit_sanitizer")]
-    assert len(current) == len(records) == 10
+    assert len(current) == len(records) == 8
     passed = {test for record in records for test in record["evidence_tests"]}
     assert QUALITY["check_exceptions"](current, records, passed)
     reviewed_fixture = [{**record, "status": "active"} for record in records]
     assert not QUALITY["check_exceptions"](current, reviewed_fixture, passed)
+
+
+@pytest.mark.parametrize("record_id", [
+    "appconfig-provider-availability-translation",
+    "search-provider-keyword-fallback",
+    "search-provider-empty-context-translation",
+    "search-connector-strict-anonymous-failure-contract",
+])
+def test_provider_compatibility_proposal_is_exact_and_not_self_authorized(record_id):
+    root = Path(QUALITY["__file__"]).resolve().parents[2]
+    records = QUALITY["load_records"](root)["exceptions.json"]["entries"]
+    record = next(r for r in records if r["id"] == record_id)
+    current = [h for h in QUALITY["handlers"](QUALITY["collect"](root, ["src"]))
+               if h["module_id"] == record["module_id"]
+               and h["symbol"] == record["symbol"]
+               and h["handler_fingerprint"] == record["handler_fingerprint"]]
+    assert len(current) == 1
+    assert record["status"] == "proposed"
+    assert record["failure_outcome"] == "failure-translation"
+    passed = set(record["evidence_tests"])
+    assert QUALITY["check_exceptions"](current, [record], passed)
+    reviewed_fixture = [{**record, "status": "active"}]
+    assert not QUALITY["check_exceptions"](current, reviewed_fixture, passed)
+    assert QUALITY["check_exceptions"](current, reviewed_fixture, set())
 
 
 def test_non_audit_turn_proposal_binds_propagation_without_granting_approval():

@@ -81,10 +81,9 @@ def test_real_appconfig_provider_to_startup_and_required_strategy_consumers(
             else:
                 with pytest.raises(Exception, match="AI_FOUNDRY_PROJECT_ENDPOINT not found"):
                     MafLiteStrategy()
+    assert marker not in caplog.text
     if provider_state == "unavailable":
-        assert marker in caplog.text  # Existing diagnostic exposure remains unapproved.
-    else:
-        assert marker not in caplog.text
+        assert "unavailable (RuntimeError)" in caplog.text
 
 
 @pytest.mark.parametrize("endpoint,host", [
@@ -174,3 +173,22 @@ def test_appconfig_does_not_hide_unexpected_retry_callback_failure(monkeypatch):
     with pytest.raises(RuntimeError) as raised:
         config.get("OPTIONAL", default="fallback")
     assert raised.value is error
+
+
+def test_appconfig_retries_nested_provider_retry_error_instead_of_masking_value(monkeypatch):
+    from types import MethodType
+    from tenacity import Future, RetryError, stop_after_attempt, wait_none
+
+    monkeypatch.delenv("APP_CONFIG_ENDPOINT", raising=False)
+    monkeypatch.setenv("allow_environment_variables", "false")
+    config = AppConfigClient()
+    config.disabled = False
+    attempt = Future(1)
+    attempt.set_exception(RuntimeError("nested provider failure"))
+    config.client = MagicMock()
+    config.client.__getitem__.side_effect = [RetryError(attempt), "configured"]
+    fast_retry = AppConfigClient.get_config_with_retry.retry_with(
+        wait=wait_none(), stop=stop_after_attempt(2))
+    config.get_config_with_retry = MethodType(fast_retry, config)
+    assert config.get("OPTIONAL", default="fallback") == "configured"
+    assert config.client.__getitem__.call_count == 2

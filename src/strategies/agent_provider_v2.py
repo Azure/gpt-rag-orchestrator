@@ -34,10 +34,10 @@ from agent_framework.azure import AzureAIProjectAgentProvider
 # the pinned ``agent-framework-azure-ai`` beta; import defensively so a future
 # package reshuffle degrades loudly (fail-fast at create time) rather than
 # importing-time crashing the whole app.
-try:  # pragma: no cover - exercised implicitly by the create path
+try:
     from agent_framework_azure_ai._shared import to_azure_ai_tools
     _HAS_TOOL_CONVERTER = True
-except Exception:  # pragma: no cover - defensive against private API churn
+except ImportError:
     to_azure_ai_tools = None  # type: ignore[assignment]
     _HAS_TOOL_CONVERTER = False
 

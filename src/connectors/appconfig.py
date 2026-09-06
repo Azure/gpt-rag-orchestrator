@@ -101,7 +101,7 @@ class AppConfigClient:
             # Any other error: disable and keep running without remote config.
             logging.warning(
                 "Azure App Configuration unavailable (%s). Skipping remote configuration and not fetching any keys.",
-                str(e)
+                type(e).__name__
             )
             self.disabled = True
             self.client = {}
@@ -172,8 +172,6 @@ class AppConfigClient:
         try:
             return self.client[name]
         except KeyError:
-            return None
-        except RetryError:
             return None
 
     # Helper functions for reading environment variables

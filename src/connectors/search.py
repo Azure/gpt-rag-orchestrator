@@ -688,8 +688,7 @@ class SearchClient:
                 level,
                 "%s Azure AI Search failed: %s",
                 marker,
-                e,
-                exc_info=True,
+                type(e).__name__,
                 extra={
                     "retrieval_index": self.index_name,
                     "retrieval_credential_type": "obo" if search_user_token else "managed_identity",

@@ -208,8 +208,11 @@ Every broad handler requires an exact exception record and passing named
 failure evidence, including logged/re-raised handlers Ruff exempts. A changed
 try body, catch breadth or handler invalidates the record. No exceptions are
 approved by this bootstrap: existing handlers remain blocking review work.
-Ten exact audit exception proposals document the existing side-effect and
+Eight exact audit exception proposals document the existing side-effect and
 tool-propagation contracts; their `proposed` status grants no exception.
+Redundant inner sanitizer catches are removed; one existing enclosing
+boundary still omits unreadable/partially consumed containers and releases
+cycle-detection state.
 Three non-audit stream proposals document generic error-event emission,
 failed audit/span outcome before propagation, and deduplicated SSE terminal
 translation, including partial output and cancellation evidence.
@@ -231,6 +234,17 @@ but no longer swallows arbitrary implementation failures. App Configuration
 lookup recovery catches exhausted Tenacity `RetryError`; its callback now
 accepts the actual one-argument retry-state contract, so the configured retry
 budget executes before optional defaults or required-value errors.
+Nested provider `RetryError` is retried rather than mistaken for this lookup's
+own exhausted budget. Optional tool-converter imports recover only from
+`ImportError`; unexpected initialization failures propagate.
+Four additional exact proposals describe App Configuration availability,
+Search-provider keyword fallback/empty context and the Search connector's
+distinct strict/anonymous error outcomes. Their diagnostics retain severity
+and classification but no exception text or traceback. Inner OBO, sibling
+provider and other legacy diagnostics remain separate unapproved sites.
+SQL/Fabric connection catches use the actual ODBC/Azure exception families;
+unexpected failures still propagate unchanged and semantic-model credential
+cleanup still runs. These connector logs no longer include exception text.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.

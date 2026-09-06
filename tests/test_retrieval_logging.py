@@ -123,7 +123,7 @@ async def test_connector_failure_preserves_full_error_contract_and_trimming_inpu
     assert sent["body"]["search"] == "policy"
     assert sent["body"]["filter"] == build_conversation_filter("conversation'quoted")
     assert sent["search_user_token"] == token
-    assert marker in caplog.text  # Existing raw diagnostic exposure is not approved.
+    assert marker not in caplog.text
     assert token not in caplog.text
 
 
@@ -176,8 +176,38 @@ async def test_real_search_provider_and_composite_preserve_distinct_failure_outc
         None if failed_boundary == "sibling" else "Independent provider context")
     assert marker not in str(messages)
     assert token not in str(messages)
-    assert marker in caplog.text
+    assert (marker in caplog.text) is (failed_boundary == "sibling")
     assert token not in caplog.text
+
+
+@pytest.mark.parametrize("failed_boundary", ["embedding", "search"])
+async def test_search_provider_cancellation_is_not_empty_context(
+    failed_boundary, mock_config, monkeypatch,
+):
+    import asyncio
+
+    cancelled = asyncio.CancelledError("synthetic cancellation")
+    embed = AsyncMock(return_value=[0.1, 0.2],
+                      side_effect=cancelled if failed_boundary == "embedding" else None)
+    provider = SearchContextProvider(
+        endpoint="https://search.example.invalid", index_name="test-index",
+        credential=MagicMock(), conversation_id="conversation",
+        embed_fn=embed)
+    sdk = MagicMock()
+    sdk.__aenter__ = AsyncMock(return_value=sdk)
+    sdk.__aexit__ = AsyncMock(return_value=False)
+    sdk.search = AsyncMock(side_effect=cancelled)
+    monkeypatch.setattr("strategies.search_context_provider.get_config", lambda: mock_config)
+    monkeypatch.setattr("strategies.search_context_provider.SearchClient", MagicMock(return_value=sdk))
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await provider.invoking(ChatMessage(role=Role.USER, text="policy"))
+    assert caught.value is cancelled
+    if failed_boundary == "embedding":
+        sdk.search.assert_not_awaited()
+    else:
+        sdk.__aexit__.assert_awaited_once()
+        assert sdk.__aexit__.await_args.args[0] is asyncio.CancelledError
+        assert sdk.__aexit__.await_args.args[1] is cancelled
 
 
 @pytest.mark.asyncio
