@@ -563,8 +563,9 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     root = Path(QUALITY["__file__"]).resolve().parents[2]
     records = QUALITY["load_records"](root)["exceptions.json"]["entries"]
     current = QUALITY["handlers"](QUALITY["collect"](root, ["src"]))
-    current = [h for h in current if h["module_id"] == "telemetry.audit"]
-    assert len(current) == len(records) == 5
+    current = [h for h in current if h["module_id"] in (
+        "telemetry.audit", "telemetry.audit_contract", "telemetry.audit_sanitizer")]
+    assert len(current) == len(records) == 10
     passed = {test for record in records for test in record["evidence_tests"]}
     assert QUALITY["check_exceptions"](current, records, passed)
     reviewed_fixture = [{**record, "status": "active"} for record in records]

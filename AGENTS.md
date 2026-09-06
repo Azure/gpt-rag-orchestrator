@@ -177,7 +177,7 @@ Every broad handler requires an exact exception record and passing named
 failure evidence, including logged/re-raised handlers Ruff exempts. A changed
 try body, catch breadth or handler invalidates the record. No exceptions are
 approved by this bootstrap: existing handlers remain blocking review work.
-Five exact audit exception proposals document the existing side-effect and
+Ten exact audit exception proposals document the existing side-effect and
 tool-propagation contracts; their `proposed` status grants no exception.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing

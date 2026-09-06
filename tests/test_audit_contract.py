@@ -415,6 +415,57 @@ def test_additional_redaction_keys_cannot_corrupt_required_identifiers():
     assert "redact-me" not in result.serialized
 
 
+def test_audit_config_lookup_failure_retains_disabled_defaults():
+    class UnavailableConfig:
+        def get(self, key, default=None):
+            raise RuntimeError("synthetic-private-config")
+
+    settings = AuditSettings.from_config(UnavailableConfig())
+    assert settings.enabled is False
+    assert settings.sensitive_content_enabled is False
+    assert settings.actor_pseudonym_enabled is False
+
+
+@pytest.mark.parametrize("failure_phase", ["items", "iteration"])
+def test_audit_mapping_failure_omits_unreadable_value_without_content(failure_phase):
+    class UnreadableMapping(dict):
+        def items(self):
+            if failure_phase == "items":
+                raise RuntimeError("synthetic-private-value")
+
+            def values():
+                yield "safe", 1
+                raise RuntimeError("synthetic-private-value")
+
+            return values()
+
+    event = _base_event()
+    event["tool_arguments"] = UnreadableMapping()
+    result = sanitize_event(event, additional_redacted_keys=frozenset())
+    assert "tool_arguments" in result.attributes["omitted_fields"]
+    assert "tool_arguments" not in result.attributes
+    assert "synthetic-private-value" not in json.dumps(result.attributes)
+
+
+@pytest.mark.parametrize("field", ["tool_arguments", "omitted_fields", "truncated_fields"])
+def test_audit_sequence_failure_is_omitted_and_never_serialized(field):
+    class UnreadableSequence(Sequence):
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            raise RuntimeError("synthetic-private-value")
+
+        def __iter__(self):
+            raise RuntimeError("synthetic-private-value")
+
+    event = _base_event()
+    event[field] = UnreadableSequence()
+    result = sanitize_event(event, additional_redacted_keys=frozenset())
+    assert field in result.attributes["omitted_fields"]
+    assert "synthetic-private-value" not in json.dumps(result.attributes)
+
+
 def test_sanitizer_uses_bounded_iteration_for_virtual_containers():
     class CountingSequence(Sequence):
         def __init__(self):
