@@ -140,6 +140,39 @@ def test_sibling_subpackages_cannot_access_each_others_private_members(tmp_path)
 
 
 @pytest.mark.parametrize("statement", [
+    "from pkg.two import _secret",
+    "from ..two import _secret",
+    "import pkg.two as two\nvalue = two._secret",
+])
+def test_package_initializer_private_members_belong_to_that_package(tmp_path, statement):
+    _, findings = graph(tmp_path, {
+        "pkg/__init__.py": "", "pkg/one/__init__.py": "",
+        "pkg/one/client.py": statement,
+        "pkg/two/__init__.py": "_secret = 1",
+    })
+    assert any(f["rule"] == "private-access" for f in findings)
+
+
+def test_package_initializer_allows_its_children_and_exact_compatibility_access(tmp_path):
+    _, findings = graph(tmp_path, {
+        "pkg/__init__.py": "",
+        "pkg/two/__init__.py": "_secret = 1",
+        "pkg/two/client.py": "from . import _secret",
+        "compat.py": "from pkg.two import _secret",
+    }, private_access=[{"importer": "compat", "target": "pkg.two._secret"}])
+    assert not findings
+
+
+def test_private_package_itself_remains_visible_to_its_containing_package(tmp_path):
+    _, findings = graph(tmp_path, {
+        "pkg/__init__.py": "",
+        "pkg/client.py": "from . import _internal",
+        "pkg/_internal/__init__.py": "_secret = 1",
+    })
+    assert not findings
+
+
+@pytest.mark.parametrize("statement", [
     "import importlib\nimportlib.import_module(name)",
     "from importlib import import_module as load\nload(name)",
     "__import__(name)",
@@ -280,6 +313,22 @@ def test_deleted_annotations_and_new_suppressions_fail(tmp_path):
     assert {f["rule"] for f in findings} >= {"annotation-removed", "suppression"}
 
 
+@pytest.mark.parametrize("prefix,decorator", [
+    ("import typing", "typing.no_type_check"),
+    ("import typing as t", "t.no_type_check"),
+    ("from typing import no_type_check", "no_type_check"),
+    ("from typing import no_type_check as ignore", "ignore"),
+    ("import typing\nignore = typing.no_type_check", "ignore"),
+])
+def test_ast_typing_suppression_cannot_hide_annotated_wrong_return(tmp_path, prefix, decorator):
+    before = tree(tmp_path / "old", {"a.py": "def f() -> int:\n return 1"})
+    after = tree(tmp_path / "new", {
+        "a.py": f"{prefix}\n@{decorator}\ndef f() -> int:\n return 'wrong'",
+    })
+    findings = QUALITY["source_policy"](before, after, {"a": "a"}, {"a"})
+    assert any(f["rule"] == "suppression" for f in findings)
+
+
 def test_baseline_schema_rejects_unknown_and_duplicate_entries():
     with pytest.raises(QUALITY["QualityError"]):
         QUALITY["validate_records"]({"schema_version": 99, "entries": []})
@@ -306,14 +355,67 @@ def test_aggregate_rejects_missing_or_non_success_jobs(value):
     assert not QUALITY["jobs_passed"](results)
 
 
+def report_context():
+    records = QUALITY["load_records"](Path(QUALITY["__file__"]).resolve().parents[2])
+    return QUALITY["report_identity"](records, QUALITY["REPOSITORY"], "1234", "1")
+
+
+def successful_report(check, expected, base="a" * 40, head="b" * 40):
+    details = {
+        "typing": {"diagnostics": [], "outside_scope_diagnostics": [], "baseline_entries": 0},
+        "architecture": {"grimp_modules": 0, "edges": 0},
+        "exceptions": {"exception_ids_used": []},
+    }.get(check, {})
+    return QUALITY["seal_report"]({
+        "schema_version": 2, **expected, "base_sha": base, "head_sha": head,
+        "bootstrap": False, "coverage": {"total": 1, "blocking": ["src/a.py"], "uncovered": []},
+        "handler_inventory": [],
+        "checks": {check: {"status": "passed", "findings": [], "duration_seconds": 0.1, **details}},
+    })
+
+
 def test_aggregate_rejects_stale_or_tampered_report():
-    report = QUALITY["seal_report"](
-        {"base_sha": "base", "head_sha": "head", "checks": {"lint": {"status": "passed"}}}
-    )
-    assert QUALITY["report_valid"](report, "base", "head", {"lint"})
-    assert not QUALITY["report_valid"](report, "base", "different", {"lint"})
+    expected = report_context()
+    report = successful_report("lint", expected)
+    assert QUALITY["report_valid"](report, "a" * 40, "b" * 40, {"lint"}, expected)
+    assert not QUALITY["report_valid"](report, "a" * 40, "c" * 40, {"lint"}, expected)
     report["checks"]["lint"]["status"] = "violations"
-    assert not QUALITY["report_valid"](report, "base", "head", {"lint"})
+    assert not QUALITY["report_valid"](report, "a" * 40, "b" * 40, {"lint"}, expected)
+
+
+@pytest.mark.parametrize("metadata", [
+    {"schema_version": 999}, {"repository": "another/repository"}, {"bootstrap": True},
+    {"toolchain": {}}, {"run_id": "previous-run"}, {"run_attempt": "previous-attempt"},
+    {"policy_sha": "self-asserted-policy"}, {"coverage": None},
+    {"checks": {"lint": {"status": "passed", "findings": ["actually broken"]}}},
+    {"schema_version": True}, {"unexpected": "metadata"},
+    {"handler_inventory": [None]}, {"handler_inventory": {}},
+    {"coverage": {"total": 1, "blocking": ["src/a.py"], "uncovered": ["src/a.py"]}},
+    {"coverage": {"total": True, "blocking": ["src/a.py"], "uncovered": []}},
+    {"coverage": {"total": 1, "blocking": ["src/../a.py"], "uncovered": []}},
+    {"checks": {"lint": {"status": "passed", "findings": [], "duration_seconds": float("nan")}}},
+    {"checks": {"lint": {"status": "passed", "findings": [], "duration_seconds": True}}},
+])
+def test_aggregate_rejects_resealed_invalid_metadata(metadata):
+    expected = report_context()
+    report = QUALITY["seal_report"]({**successful_report("lint", expected), **metadata})
+    assert not QUALITY["report_valid"](report, "a" * 40, "b" * 40, {"lint"}, expected)
+
+
+@pytest.mark.parametrize("check,details", [
+    ("typing", {"outside_scope_diagnostics": [{}]}),
+    ("typing", {"diagnostics": [{}]}),
+    ("typing", {"baseline_entries": -1}),
+    ("architecture", {"grimp_modules": 2}),
+    ("architecture", {"edges": False}),
+    ("exceptions", {"exception_ids_used": ["duplicated", "duplicated"]}),
+])
+def test_aggregate_rejects_malformed_check_details(check, details):
+    expected = report_context()
+    report = successful_report(check, expected)
+    report["checks"][check].update(details)
+    assert not QUALITY["report_valid"](
+        QUALITY["seal_report"](report), "a" * 40, "b" * 40, {check}, expected)
 
 
 def test_failed_tools_and_invalid_structured_output_fail_closed():
@@ -564,6 +666,63 @@ def test_conflicting_local_module_alias_cannot_hide_private_global_access(tmp_pa
         QUALITY["architecture"](modules, rules())
 
 
+def test_conflicting_local_loader_alias_cannot_hide_dynamic_global_import(tmp_path):
+    modules = tree(tmp_path, {
+        "a.py": "from importlib import import_module as load\n"
+                "def helper():\n from json import loads as load\n"
+                "load(module_name)\n",
+    })
+    with pytest.raises(QUALITY["QualityError"], match="Ambiguous import alias"):
+        QUALITY["architecture"](modules, rules())
+
+
+@pytest.mark.parametrize("source", [
+    "try:\n work()\nexcept Exception:\n pass\n"
+    "def unrelated():\n from builtins import ValueError as Exception\n",
+    "__import__(name)\n"
+    "def unrelated():\n from json import loads as __import__\n",
+])
+def test_local_alias_cannot_shadow_implicit_global_builtin(tmp_path, source):
+    modules = tree(tmp_path, {"a.py": source})
+    with pytest.raises(QUALITY["QualityError"], match="Ambiguous import alias"):
+        QUALITY["handlers"](modules)
+    with pytest.raises(QUALITY["QualityError"], match="Ambiguous import alias"):
+        QUALITY["architecture"](modules, rules())
+
+
+def test_inherited_typing_suppression_cannot_move_to_another_function(tmp_path):
+    before = tree(tmp_path / "old", {
+        "a.py": "from typing import no_type_check as ignore\n"
+                "@ignore\ndef old() -> int:\n return 'legacy'\n"
+                "def fresh() -> int:\n return 1\n",
+    })
+    after = tree(tmp_path / "new", {
+        "a.py": "from typing import no_type_check as ignore\n"
+                "def old() -> int:\n return 'legacy'\n"
+                "@ignore\ndef fresh() -> int:\n return 'wrong'\n",
+    })
+    findings = QUALITY["source_policy"](before, after, {"a": "a"}, {"a"})
+    assert any(f["rule"] == "suppression" for f in findings)
+
+
+def test_dynamic_record_cannot_move_between_functions(tmp_path):
+    modules = tree(tmp_path, {
+        "loader.py": "from importlib import import_module\n"
+                     "def original(name):\n return import_module(name)\n"
+                     "def copied(name):\n return import_module(name)\n",
+        "target.py": "",
+    })
+    call = next(n for n in ast.walk(modules["loader"]["tree"]) if isinstance(n, ast.Call))
+    record = {
+        "id": "original", "module_id": "loader", "symbol": "original",
+        "source_fingerprint": QUALITY["syntax"](call), "targets": ["target"],
+        "evidence_tests": ["tests/test_loader.py::test_target"], "review": "base review",
+    }
+    _, findings = QUALITY["architecture"](
+        modules, rules(dynamic_imports=[record]), {"tests/test_loader.py::test_target"})
+    assert [(f["rule"], f["line"]) for f in findings] == [("dynamic-import", 5)]
+
+
 def test_local_variables_are_not_public_module_exports(tmp_path):
     _, findings = graph(tmp_path, {
         "consumer.py": "from pkg import local",
@@ -595,6 +754,16 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("exceptions.json", lambda data: data["entries"][0].update(caught_types="Exception")),
     ("exceptions.json", lambda data: data["entries"][0].update(evidence_tests=[])),
     ("exceptions.json", lambda data: data["entries"][0].update(failure_outcome="ignore everything")),
+    ("policy.json", lambda data: data["contracts"]["dynamic_imports"].append({
+        "id": "empty-targets", "module_id": "loader", "symbol": "load",
+        "source_fingerprint": "a" * 64, "targets": [],
+        "evidence_tests": ["tests/test_loader.py::test_target"], "review": "proposal",
+    })),
+    ("policy.json", lambda data: data["contracts"]["dynamic_imports"].append({
+        "id": "empty-evidence", "module_id": "loader", "symbol": "load",
+        "source_fingerprint": "a" * 64, "targets": ["target"],
+        "evidence_tests": [], "review": "proposal",
+    })),
 ])
 def test_policy_documents_are_strictly_validated(tmp_path, file, mutate):
     root = Path(QUALITY["__file__"]).resolve().parents[2]
@@ -620,30 +789,170 @@ def test_evidence_does_not_credit_skipped_failed_or_missing_tests(tmp_path):
     assert QUALITY["evidence_tests"](path) == {"tests/test_failure.py::test_pass"}
 
 
-@pytest.mark.parametrize("mutation", ["missing", "stale", "tampered", "skipped", "policy"])
-def test_actual_aggregate_fails_closed(tmp_path, mutation):
+@pytest.fixture(scope="module")
+def protected_aggregate(tmp_path_factory):
+    root = Path(QUALITY["__file__"]).resolve().parents[2]
+    protected = tmp_path_factory.mktemp("protected-aggregate")
+    for path in (
+        ".github/scripts/check-quality.py", ".github/scripts/aggregate-quality.py",
+        *[f".quality/{name}" for name in QUALITY["RECORDS"]], "requirements-quality.txt",
+    ):
+        target = protected / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text((root / path).read_text(encoding="utf-8"), encoding="utf-8")
+    for args in (
+        ["init", "--quiet"], ["config", "user.name", "Quality fixture"],
+        ["config", "user.email", "quality@example.invalid"],
+        ["add", "."], ["commit", "--quiet", "-m", "protected evaluator"],
+    ):
+        subprocess.run(["git", *args], cwd=protected, capture_output=True, check=True)
+    base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=protected,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    return protected, base
+
+
+@pytest.mark.parametrize("mutation", [
+    None, "missing", "stale", "tampered", "skipped", "policy", "all-policy",
+    "toolchain", "run_id", "run_attempt", "repository", "schema", "bootstrap",
+    "inventory", "duplicate", "wrong-base-checkout",
+])
+def test_actual_aggregate_fails_closed(tmp_path, protected_aggregate, mutation):
+    protected, base = protected_aggregate
+    expected = report_context()
     for check in QUALITY["CHECKS"]:
-        report = QUALITY["seal_report"]({
-            "base_sha": "base", "head_sha": "head", "policy_sha": "policy",
-            "checks": {check: {"status": "passed"}},
-        })
+        report = successful_report(check, expected, base)
+        if mutation == "all-policy":
+            report["policy_sha"] = "c" * 64
         if check == "lint":
             if mutation == "missing":
                 continue
             if mutation == "stale":
-                report = QUALITY["seal_report"]({**report, "head_sha": "old"})
-            if mutation == "tampered":
-                report["head_sha"] = "edited"
+                report["head_sha"] = "d" * 40
             if mutation == "policy":
-                report = QUALITY["seal_report"]({**report, "policy_sha": "other-policy"})
+                report["policy_sha"] = "c" * 64
+            if mutation in ("run_id", "run_attempt"):
+                report[mutation] = "999"
+            if mutation == "toolchain":
+                report["toolchain"] = {**report["toolchain"], "mypy": "1.0.0"}
+            if mutation == "repository":
+                report["repository"] = "other/repository"
+            if mutation == "schema":
+                report["schema_version"] = 999
+            if mutation == "bootstrap":
+                report["bootstrap"] = True
+            if mutation == "inventory":
+                report["coverage"]["blocking"] = ["src/different.py"]
+        report = QUALITY["seal_report"](report)
+        if mutation == "tampered" and check == "lint":
+            report["head_sha"] = "edited"
+        if mutation == "duplicate" and check == "lint":
+            (tmp_path / "duplicate").mkdir()
+            (tmp_path / "duplicate" / "quality-lint.json").write_text(json.dumps(report))
         (tmp_path / f"quality-{check}.json").write_text(json.dumps(report))
     needs = {name: {"result": "success"} for name in ("tests", "frontend", "quality")}
     if mutation == "skipped":
         needs["tests"]["result"] = "skipped"
     proc = subprocess.run(
-        [sys.executable, str(Path(QUALITY["__file__"]).with_name("aggregate-quality.py")),
-         "--reports", str(tmp_path), "--base-sha", "base", "--head-sha", "head",
+        [sys.executable, str(protected / ".github" / "scripts" / "aggregate-quality.py"),
+         "--reports", str(tmp_path),
+         "--base-sha", "e" * 40 if mutation == "wrong-base-checkout" else base,
+         "--head-sha", "b" * 40, "--repository", QUALITY["REPOSITORY"],
+         "--run-id", "1234", "--run-attempt", "1",
          "--needs", json.dumps(needs)],
         capture_output=True, text=True,
     )
-    assert proc.returncode != 0
+    assert (proc.returncode == 0) == (mutation is None), proc.stdout + proc.stderr
+
+
+def mypy_diagnostic(**overrides):
+    return {
+        "file": "src/a.py", "line": 1, "column": 0, "end_line": 1, "end_column": 1,
+        "message": "Incompatible return type", "hint": None,
+        "code": "return-value", "severity": "error", **overrides,
+    }
+
+
+@pytest.mark.parametrize("value", [
+    {},
+    {k: v for k, v in mypy_diagnostic().items() if k != "severity"},
+    mypy_diagnostic(severity="unknown"),
+    mypy_diagnostic(line=True),
+    mypy_diagnostic(file=None),
+    mypy_diagnostic(message=[]),
+    mypy_diagnostic(extra="unexpected"),
+])
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_mypy_malformed_diagnostics_are_errors_not_ignored(value, exit_code):
+    result = subprocess.CompletedProcess(["mypy"], exit_code, json.dumps(value), "")
+    with pytest.raises(QUALITY["QualityError"]):
+        QUALITY["tool_json"](result, "mypy")
+
+
+def test_mypy_valid_notes_and_errors_reconcile_exit_status():
+    note = mypy_diagnostic(severity="note")
+    error = mypy_diagnostic()
+    assert QUALITY["tool_json"](
+        subprocess.CompletedProcess(["mypy"], 0, json.dumps(note), ""), "mypy") == [note]
+    assert QUALITY["tool_json"](
+        subprocess.CompletedProcess(["mypy"], 1, json.dumps(error), ""), "mypy") == [error]
+    for code, diagnostic in ((0, error), (1, note)):
+        with pytest.raises(QUALITY["QualityError"]):
+            QUALITY["tool_json"](
+                subprocess.CompletedProcess(["mypy"], code, json.dumps(diagnostic), ""), "mypy")
+
+
+def test_new_module_stays_covered_across_successive_pr_bases_and_move(tmp_path):
+    root = Path(QUALITY["__file__"]).resolve().parents[2]
+    records = QUALITY["load_records"](root)
+    records["policy.json"]["modules"] = ["seed", "legacy"]
+    records["typing-scope.json"]["module_ids"] = ["seed"]
+    records["exceptions.json"]["entries"] = []
+    (tmp_path / ".quality").mkdir()
+    for name, value in records.items():
+        (tmp_path / ".quality" / name).write_text(json.dumps(value))
+    (tmp_path / "requirements-quality.txt").write_text(
+        (root / "requirements-quality.txt").read_text())
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.mypy]\npython_version = "3.12"\ncheck_untyped_defs = true\n')
+    tree(tmp_path, {"seed.py": "value: int = 1", "legacy.py": "value = 1"})
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=tmp_path, capture_output=True,
+                              text=True, check=True).stdout.strip()
+
+    def check(base):
+        report_path = tmp_path / ".artifacts" / "quality.json"
+        proc = subprocess.run(
+            [sys.executable, QUALITY["__file__"], "--root", str(tmp_path),
+             "--base-ref", base, "--check", "typing", "--report", str(report_path)],
+            capture_output=True, text=True,
+        )
+        return proc.returncode, json.loads(report_path.read_text())
+
+    git("init", "--quiet")
+    git("config", "user.name", "Quality fixture")
+    git("config", "user.email", "quality@example.invalid")
+    git("add", ".")
+    git("commit", "--quiet", "-m", "protected inventory")
+    initial = git("rev-parse", "HEAD")
+    (tmp_path / "src" / "new.py").write_text("def f() -> int:\n return 1\n")
+    code, report = check(initial)
+    assert code == 0, report
+    assert report["coverage"]["blocking"] == ["src/new.py", "src/seed.py"]
+    git("add", "src")
+    git("commit", "--quiet", "-m", "first PR adds covered module")
+    first_pr = git("rev-parse", "HEAD")
+    (tmp_path / "src" / "new.py").write_text("def f() -> int:\n return 'wrong'\n")
+    code, report = check(first_pr)
+    assert code == 1, report
+    assert report["coverage"]["blocking"] == ["src/new.py", "src/seed.py"]
+    assert report["checks"]["typing"]["findings"][0]["rule"] == "new-type-debt"
+
+    # A mechanically unchanged move cannot turn inherited new code into legacy debt.
+    git("add", "src")
+    git("commit", "--quiet", "-m", "fixture for move with known type error")
+    second_pr = git("rev-parse", "HEAD")
+    (tmp_path / "src" / "new.py").rename(tmp_path / "src" / "moved.py")
+    code, report = check(second_pr)
+    assert code == 1, report
+    assert report["coverage"]["blocking"] == ["src/moved.py", "src/seed.py"]

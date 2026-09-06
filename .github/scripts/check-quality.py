@@ -10,6 +10,7 @@ import hashlib
 import importlib.metadata
 import io
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -23,6 +24,7 @@ import xml.etree.ElementTree as ET
 
 
 CHECKS = ("lint", "typing", "architecture", "exceptions", "policy")
+REPOSITORY = "Azure/gpt-rag-orchestrator"
 REQUIRED_JOBS = (*CHECKS, "tests", "frontend")
 RECORDS = ("policy.json", "typing-scope.json", "typing-baseline.json", "exceptions.json")
 PROTECTED = (".quality/", ".github/scripts/", ".github/workflows/",
@@ -287,7 +289,9 @@ def import_base(module, node):
 def aliases_for(module):
     aliases = {}
     def bind(name, value):
-        if name in aliases and aliases[name] != value:
+        if ((name in aliases and aliases[name] != value)
+                or (name in ("Exception", "BaseException", "__import__", "getattr")
+                    and value not in (name, f"builtins.{name}"))):
             raise QualityError(
                 f"Ambiguous import alias {name} in {module['path']}; use distinct aliases")
         aliases[name] = value
@@ -312,7 +316,7 @@ def aliases_for(module):
                          "builtins.__import__", "__import__"):
                 for target in node.targets:
                     if isinstance(target, ast.Name) and aliases.get(target.id) != value:
-                        aliases[target.id] = value
+                        bind(target.id, value)
                         changed = True
         if not changed:
             break
@@ -388,7 +392,9 @@ def architecture(modules, contracts, passed_tests=frozenset()):
             private_member = any(p.startswith("_") and not p.startswith("__")
                                  for p in member.split("."))
             private = private or private_member
-            owner = target.rpartition(".")[0] if "." in target else target
+            owner = (target if private_member and (
+                         target in namespaces or modules.get(target, {}).get("package"))
+                     else target.rpartition(".")[0] if "." in target else target)
             same_owner = name == owner or name.startswith(owner + ".")
             approved = any(
                 record["importer"] == name and record["target"] in (
@@ -584,6 +590,18 @@ def ratchet(current, baseline):
 
 def suppressions(module):
     result = Counter()
+    aliases = aliases_for(module)
+    parents = {child: parent for parent in ast.walk(module["tree"])
+               for child in ast.iter_child_nodes(parent)}
+    for node in ast.walk(module["tree"]):
+        if isinstance(node, (ast.Name, ast.Attribute, ast.Call)) and dotted(node, aliases) in {
+            f"{package}.{name}" for package in ("typing", "typing_extensions")
+            for name in ("no_type_check", "no_type_check_decorator")
+        }:
+            context = node
+            while context in parents and not isinstance(context, ast.stmt):
+                context = parents[context]
+            result["typing-suppression", syntax(context)] += 1
     for token in tokenize.generate_tokens(io.StringIO(module["text"]).readline):
         if token.type == tokenize.COMMENT and re.search(
                 r"noqa|type:\s*ignore|mypy:|pyright:|ruff:", token.string, re.I):
@@ -635,10 +653,28 @@ def tool_json(result, tool):
         raise QualityError(f"{tool} returned invalid JSON") from exc
     if not isinstance(values, list) or any(not isinstance(v, dict) for v in values):
         raise QualityError(f"{tool} returned an unexpected result")
-    errors = values if tool == "ruff" else [v for v in values if v.get("severity") == "error"]
+    if tool == "mypy":
+        for value in values:
+            validate_mypy_diagnostic(value)
+    errors = values if tool == "ruff" else [v for v in values if v["severity"] == "error"]
     if bool(errors) != (result.returncode == 1):
         raise QualityError(f"{tool} exit status contradicts its diagnostics")
     return values
+
+
+def validate_mypy_diagnostic(value):
+    exact_keys(value, ("file", "line", "column", "end_line", "end_column",
+                       "message", "hint", "code", "severity"), "mypy diagnostic")
+    text_fields(value, ("file", "message", "severity"))
+    if (value["severity"] not in ("error", "note")
+            or any(type(value[key]) is not int or value[key] < -1
+                   for key in ("line", "column"))
+            or any(value[key] is not None and (type(value[key]) is not int or value[key] < -1)
+                   for key in ("end_line", "end_column"))
+            or any(value[key] is not None and not isinstance(value[key], str)
+                   for key in ("hint", "code"))
+            or (value["severity"] == "error" and not value["code"])):
+        raise QualityError("Malformed mypy diagnostic")
 
 
 def seal_report(report):
@@ -646,11 +682,99 @@ def seal_report(report):
     return {**report, "artifact_integrity": digest(report)}
 
 
-def report_valid(report, base, head, checks):
-    return (report.get("artifact_integrity") == seal_report(report)["artifact_integrity"]
-            and report.get("base_sha") == base and report.get("head_sha") == head
-            and set(report.get("checks", {})) == checks
-            and all(value.get("status") == "passed" for value in report["checks"].values()))
+def report_identity(records, repository, run_id, run_attempt):
+    if repository != REPOSITORY or any(
+            not re.fullmatch(r"[1-9][0-9]*", value) for value in (run_id, run_attempt)):
+        raise QualityError("Aggregate requires this repository and an exact CI run/attempt")
+    return {"repository": repository, "run_id": run_id, "run_attempt": run_attempt,
+            "policy_sha": digest(records), "toolchain": records["policy.json"]["toolchain"]}
+
+
+def nonnegative(value, label):
+    if type(value) is not int or value < 0:
+        raise QualityError(f"{label} must be a nonnegative integer")
+
+
+def validate_report(report, base, head, checks, expected):
+    exact_keys(report, ("schema_version", "repository", "base_sha", "head_sha", "policy_sha",
+                        "run_id", "run_attempt", "bootstrap", "toolchain", "coverage",
+                        "handler_inventory", "checks", "artifact_integrity"), "quality report")
+    if (type(report["schema_version"]) is not int or report["schema_version"] != 2
+            or report["bootstrap"] is not False
+            or not all(re.fullmatch("[0-9a-f]{40}", sha) for sha in (base, head))
+            or report["base_sha"] != base or report["head_sha"] != head
+            or any(report[key] != value for key, value in expected.items())
+            or report["artifact_integrity"] != seal_report(report)["artifact_integrity"]):
+        raise QualityError("Report schema, integrity or independently expected identity mismatch")
+    coverage = report["coverage"]
+    exact_keys(coverage, ("total", "blocking", "uncovered"), "coverage")
+    nonnegative(coverage["total"], "coverage total")
+    strings(coverage["blocking"], "blocking coverage")
+    strings(coverage["uncovered"], "uncovered coverage", empty=True)
+    sources = coverage["blocking"] + coverage["uncovered"]
+    if (coverage["total"] != len(set(sources)) or len(sources) != len(set(sources))
+            or any(not path.startswith("src/") or not path.endswith(".py")
+                   or "\\" in path or any(p in (".", "..", "") for p in path.split("/"))
+                   for path in sources)):
+        raise QualityError("Invalid or contradictory source coverage")
+    if not isinstance(report["handler_inventory"], list):
+        raise QualityError("Handler inventory must be an array")
+    sites = set()
+    for handler in report["handler_inventory"]:
+        exact_keys(handler, ("module_id", "path", "line", "symbol", "handler_fingerprint",
+                             "caught_types"), "handler inventory site")
+        text_fields(handler, ("module_id", "path", "symbol", "handler_fingerprint"))
+        strings(handler["caught_types"], "caught types")
+        nonnegative(handler["line"], "handler line")
+        site = (handler["path"], handler["line"])
+        if (handler["path"] not in sources or handler["line"] == 0 or site in sites
+                or not re.fullmatch("[0-9a-f]{64}", handler["handler_fingerprint"])):
+            raise QualityError("Invalid handler inventory site")
+        sites.add(site)
+    exact_keys(report["checks"], checks, "requested checks")
+    for check, result in report["checks"].items():
+        extra = {
+            "typing": ("diagnostics", "outside_scope_diagnostics", "baseline_entries"),
+            "architecture": ("grimp_modules", "edges"), "exceptions": ("exception_ids_used",),
+        }.get(check, ())
+        exact_keys(result, ("status", "findings", "duration_seconds", *extra), f"{check} result")
+        if (result["status"] != "passed" or result["findings"] != []
+                or type(result["duration_seconds"]) not in (int, float)
+                or not math.isfinite(result["duration_seconds"]) or result["duration_seconds"] < 0):
+            raise QualityError("A successful check requires empty findings and valid duration")
+        if check == "architecture":
+            nonnegative(result["edges"], "edge count")
+            nonnegative(result["grimp_modules"], "Grimp coverage")
+            if result["grimp_modules"] > coverage["total"]:
+                raise QualityError("Grimp coverage exceeds runtime coverage")
+        elif check == "exceptions":
+            strings(result["exception_ids_used"], "used exceptions", empty=True)
+        elif check == "typing":
+            nonnegative(result["baseline_entries"], "baseline entries")
+            for key in ("diagnostics", "outside_scope_diagnostics"):
+                if not isinstance(result[key], list):
+                    raise QualityError("Typing diagnostics must be arrays")
+            for value in result["outside_scope_diagnostics"]:
+                validate_mypy_diagnostic(value)
+            for value in result["diagnostics"]:
+                exact_keys(value, ("module_id", "symbol", "source_fingerprint", "rule",
+                                   "message_fingerprint", "path", "line", "message"),
+                           "anchored type diagnostic")
+                text_fields(value, ("module_id", "symbol", "rule", "message",
+                                    "source_fingerprint", "message_fingerprint", "path"))
+                nonnegative(value["line"], "diagnostic line")
+                if (value["path"] not in coverage["blocking"]
+                        or not all(re.fullmatch("[0-9a-f]{64}", value[key]) for key in
+                                   ("source_fingerprint", "message_fingerprint"))):
+                    raise QualityError("Invalid anchored type diagnostic")
+
+
+def report_valid(report, base, head, checks, expected):
+    try:
+        validate_report(report, base, head, checks, expected)
+    except QualityError:
+        return False
+    return True
 
 
 def jobs_passed(results):
@@ -761,7 +885,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     root = args.root.resolve()
     requested = CHECKS if args.check == "all" else (args.check,)
-    report = {"schema_version": 1, "repository": "Azure/gpt-rag-orchestrator",
+    report = {"schema_version": 2, "repository": REPOSITORY,
+              "run_id": os.environ.get("GITHUB_RUN_ID", "local"),
+              "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", "local"),
               "base_sha": None, "head_sha": None, "policy_sha": None, "checks": {}}
     exit_code = 0
     try:
@@ -795,7 +921,9 @@ def main(argv=None):
             identities, identity_findings = module_identities(before, modules)
             scope = set(records["typing-scope.json"]["module_ids"])
             scope.update(candidate["typing-scope.json"]["module_ids"])
-            scope.update(identities[n] for n in modules if identities[n] not in before)
+            # The protected adoption inventory is immutable across successive PR bases.
+            scope.update(identities[n] for n in modules
+                         if n not in policy["modules"] or identities[n] not in policy["modules"])
             if not scope <= set(identities.values()):
                 identity_findings.append(finding("typing-scope", message="Covered module missing"))
             report["coverage"] = {

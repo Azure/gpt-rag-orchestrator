@@ -154,7 +154,12 @@ runtime module coverage and the broad-handler inventory.
 dependency source. Ruff checks every Python source under `src/`. Blocking mypy
 scope starts with `schemas`, `connectors.types`,
 `plugins.retrieval.retrieval_types`, `plugins.nl2sql.nl2sql_types`, and the new
-`connectors.obo`. Newly discovered runtime modules automatically join scope.
+`connectors.obo`. Newly discovered runtime modules automatically join scope,
+relative to the protected adoption inventory in `policy.json`, not merely the
+immediate PR base. They stay covered in subsequent PRs, including unchanged
+moves. Imported diagnostics outside that declared scope remain visible but
+nonblocking. Source-policy review includes `typing.no_type_check` and aliases,
+not just comment suppressions. Malformed tool diagnostics are analysis errors.
 The initial debt baseline is empty. Debt is matched by individual source,
 symbol, diagnostic and multiplicity, not totals. Unambiguous unchanged moves
 retain identity; ambiguous moves/deletions require review.
@@ -163,7 +168,8 @@ The AST import graph includes flat modules, namespace packages, local and
 type-only imports. Grimp cross-checks its package overlap; Import Linter
 enforces the package prohibition as well. Connectors/plugins/telemetry cannot
 depend transitively on `api` or `main`. Private modules and members belong to
-their containing package. The three existing strategy imports of Search's
+their containing package; private members of a package initializer belong to
+that package, not its parent. The three existing strategy imports of Search's
 retrieval-error classifier are explicit compatibility permissions, not wildcard
 exemptions. Search's two public OBO callables remain compatibility wrappers;
 `connectors.obo` alone owns the scope-aware token exchange and cache.
@@ -187,6 +193,11 @@ CI uses `pull_request`, read-only permissions, immutable action references,
 the protected-base checker/configuration and this run's pytest evidence.
 `quality-gate` depends on the actual Python tests, frontend build and all five
 quality matrix runs, and rejects missing, skipped, failed or stale evidence.
+Report schema v2 binds the repository, base/head commits, protected policy
+digest, exact toolchain and CI run/attempt. The aggregate independently loads
+policy from its exact base checkout and validates closed report schemas and
+consistent source inventories; a recomputed checksum is not approval. Reports
+from earlier attempts are rejected, so rerun all quality jobs together.
 Candidate policy/checker/owner changes cannot self-approve. Bootstrap has no
 base policy and deliberately fails its policy result.
 

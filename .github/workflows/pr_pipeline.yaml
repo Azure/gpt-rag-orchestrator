@@ -181,4 +181,5 @@ jobs:
         run: >-
           python .github/scripts/aggregate-quality.py
           --reports .artifacts --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA"
-          --needs "$JOB_RESULTS"
+          --needs "$JOB_RESULTS" --repository "$GITHUB_REPOSITORY"
+          --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT"
