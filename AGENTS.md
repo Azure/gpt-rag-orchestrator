@@ -193,8 +193,8 @@ base policy and deliberately fails its policy result.
 Before activation, an administrator must independently review the bootstrap,
 configure required `quality-gate` and test checks on `develop`/`main`, require
 code-owner review of the latest head, dismiss stale approvals and restrict
-bypasses. `CODEOWNERS` names the verified existing administrator `@placerda`;
-an independent authorized owner/reviewer is required for owner-authored PRs.
+bypasses. `CODEOWNERS` names verified existing administrators `@placerda` and
+`@gxjorge`, permitting an independent owner review for an owner-authored PR.
 Adding this file or workflow does not activate those settings. Policy repair
 must use a separately reviewed PR, not removal of protections.
 
