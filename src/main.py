@@ -670,7 +670,7 @@ async def list_conversations(
             conversations=conversations, has_more=has_more, skip=skip, limit=limit,
         )
     except Exception as e:
-        logging.error("[ListConversations] Error retrieving conversations: %s", e)
+        logging.error("[ListConversations] Error retrieving conversations (%s)", type(e).__name__)
         raise HTTPException(status_code=500, detail="Error retrieving conversations")
 
 
@@ -715,7 +715,7 @@ async def get_conversation(
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("[GetConversation] Error retrieving conversation: %s", e)
+        logging.error("[GetConversation] Error retrieving conversation (%s)", type(e).__name__)
         raise HTTPException(status_code=500, detail="Error retrieving conversation")
 
 
@@ -765,7 +765,7 @@ async def update_conversation(
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("[UpdateConversation] Error updating conversation: %s", e)
+        logging.error("[UpdateConversation] Error updating conversation (%s)", type(e).__name__)
         raise HTTPException(status_code=500, detail="Error updating conversation")
 
 
@@ -807,7 +807,7 @@ async def delete_conversation(
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("[DeleteConversation] Error deleting conversation: %s", e)
+        logging.error("[DeleteConversation] Error deleting conversation (%s)", type(e).__name__)
         raise HTTPException(status_code=500, detail="Error deleting conversation")
 
 

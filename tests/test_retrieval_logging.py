@@ -12,6 +12,7 @@ These tests pin the contract for the standardized log markers emitted from
 - ``[Retrieval][ERROR]`` at WARNING level for any other swallowed failure.
 """
 
+import asyncio
 import json
 import logging
 from types import SimpleNamespace
@@ -19,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from agent_framework import ChatMessage, Context, Role
+from azure.core.exceptions import ClientAuthenticationError
 
 from connectors.search import (
     _RETRIEVAL_AUTH_FAILURE_MARKER,
@@ -67,6 +69,33 @@ def search_client(patch_dependencies, mock_config):
     # Token acquisition is exercised by other tests; short-circuit it here.
     client._get_search_user_token_for_trimming = AsyncMock(return_value=None)
     return client
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["search", "get_document"])
+@pytest.mark.parametrize("failure_type", [ClientAuthenticationError, RuntimeError, asyncio.CancelledError])
+async def test_low_level_search_token_failure_propagates_without_request_or_raw_log(
+    search_client, operation, failure_type, caplog,
+):
+    marker = "synthetic-private-token-provider-detail"
+    failure = failure_type(marker)
+    search_client.credential = SimpleNamespace(get_token=AsyncMock(side_effect=failure))
+    search_client._get_session = AsyncMock()
+    call = (
+        search_client.search("documents", {"search": "question"})
+        if operation == "search"
+        else search_client.get_document("documents", "document-1")
+    )
+    with pytest.raises(failure_type) as raised:
+        await call
+    assert raised.value is failure
+    search_client.credential.get_token.assert_awaited_once_with(
+        "https://search.azure.com/.default"
+    )
+    search_client._get_session.assert_not_awaited()
+    assert marker not in caplog.text
+    if failure_type is ClientAuthenticationError:
+        assert "failed to acquire token" in caplog.text
 
 
 @pytest.mark.asyncio

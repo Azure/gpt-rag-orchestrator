@@ -251,6 +251,21 @@ provider and other legacy diagnostics remain separate unapproved sites.
 SQL/Fabric connection catches use the actual ODBC/Azure exception families;
 unexpected failures still propagate unchanged and semantic-model credential
 cleanup still runs. These connector logs no longer include exception text.
+Cosmos recovery now catches the Azure SDK exception family: documented SDK
+failures still return the existing unavailable result, while unexpected
+implementation failures propagate. Partition keys, document mutation and
+soft-delete behavior remain; SDK read failures still map to the legacy API
+404 and mutation failures to 500, not a new persistence availability contract.
+Conversation-route and Cosmos diagnostics omit raw exception details.
+Four exact inactive conversation-route proposals preserve generic HTTP 500
+translation, explicit 403/404 outcomes and cancellation propagation; these
+do not approve the connector's legacy unavailable-result mapping.
+Search token acquisition catches Azure SDK errors while preserving original
+propagation and never issuing a request after token failure.
+Telemetry consumers use App Configuration's explicit optional-value contract,
+not broad fallback catches. Missing/unavailable values retain defaults and
+environment precedence; unexpected retry-callback failures surface.
+The HTTP log-level setting is read once, outside the per-logger loop.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.

@@ -755,6 +755,10 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("hosted-turn-error-before-propagation", "propagation"),
     ("hosted-sse-safe-terminal-error-translation", "failure-translation"),
     ("mcp-chat-cleanup-preserves-primary-outcome", "propagation"),
+    ("conversation-list-http-failure-translation", "failure-translation"),
+    ("conversation-read-http-failure-translation", "failure-translation"),
+    ("conversation-rename-http-failure-translation", "failure-translation"),
+    ("conversation-delete-http-failure-translation", "failure-translation"),
 ])
 def test_compatibility_proposal_is_exact_and_not_self_authorized(record_id, outcome):
     root = Path(QUALITY["__file__"]).resolve().parents[2]

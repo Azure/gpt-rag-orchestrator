@@ -72,10 +72,9 @@ class Telemetry:
             lg.addHandler(logging.NullHandler())
 
         # Azure HTTP pipeline logger: completely silent unless AZURE_HTTP_LOG_LEVEL is provided
-            try:
-                http_level_override = config.get_value('AZURE_HTTP_LOG_LEVEL', default=None, allow_none=True, type=str)
-            except Exception:
-                http_level_override = None
+        http_level_override = config.get_value(
+            'AZURE_HTTP_LOG_LEVEL', default=None, allow_none=True, type=str
+        )
         if http_level_override is not None:
             http_level = Telemetry.translate_log_level(http_level_override)
             http_disabled = False
@@ -111,14 +110,11 @@ class Telemetry:
         service_version: str,
     ):
 
-        # Try to get the connection string without throwing if config is disabled/unavailable.
-        try:
-            Telemetry.telemetry_connection_string = config.get(
-                telemetry_connection_string,
-                default=os.getenv(telemetry_connection_string)
-            )
-        except Exception:
-            Telemetry.telemetry_connection_string = os.getenv(telemetry_connection_string)
+        Telemetry.telemetry_connection_string = config.get_value(
+            telemetry_connection_string,
+            default=os.getenv(telemetry_connection_string),
+            allow_none=True,
+        )
 
         # If we have no connection string, disable telemetry gracefully with a clear message.
         if not Telemetry.telemetry_connection_string:
@@ -239,10 +235,9 @@ class Telemetry:
         Telemetry.azure_log_level = Telemetry.translate_log_level(
             config.get("AZURE_LOG_LEVEL", default="WARNING")
         )
-        try:
-            http_level_override = config.get_value("AZURE_HTTP_LOG_LEVEL", default=None, allow_none=True, type=str)
-        except Exception:
-            http_level_override = None
+        http_level_override = config.get_value(
+            "AZURE_HTTP_LOG_LEVEL", default=None, allow_none=True, type=str
+        )
         if http_level_override is not None:
             Telemetry.azure_http_log_level = Telemetry.translate_log_level(http_level_override)
             Telemetry.azure_http_logs_disabled = False

@@ -10,6 +10,7 @@ import uuid
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +253,9 @@ class TestCosmosDBStandaloneFunctions:
     async def test_read_user_conversation_not_found(self):
         from connectors.cosmosdb import read_user_conversation
 
-        self.mock_container.read_item = AsyncMock(side_effect=Exception("Not found"))
+        self.mock_container.read_item = AsyncMock(
+            side_effect=CosmosResourceNotFoundError(status_code=404, message="Not found")
+        )
 
         with patch("connectors.cosmosdb.get_cosmosdb_client", return_value=self.mock_client):
             result = await read_user_conversation("conv-1", "user-1")
@@ -298,7 +301,9 @@ class TestCosmosDBStandaloneFunctions:
     async def test_soft_delete_conversation_not_found(self):
         from connectors.cosmosdb import soft_delete_conversation
 
-        self.mock_container.read_item = AsyncMock(side_effect=Exception("Not found"))
+        self.mock_container.read_item = AsyncMock(
+            side_effect=CosmosResourceNotFoundError(status_code=404, message="Not found")
+        )
 
         with patch("connectors.cosmosdb.get_cosmosdb_client", return_value=self.mock_client):
             result = await soft_delete_conversation("conv-1", "user-1")

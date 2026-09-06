@@ -5,6 +5,7 @@ import time
 import hashlib
 from typing import Optional, Any, Dict
 from pydantic import BaseModel, Field
+from azure.core.exceptions import AzureError
 
 from dependencies import get_config
 from util.metadata import format_custom_metadata, parse_allowed_keys
@@ -397,8 +398,8 @@ class SearchClient:
         # get bearer token
         try:
             token = (await self.credential.get_token("https://search.azure.com/.default")).token
-        except Exception:
-            logging.exception("[search] failed to acquire token")
+        except AzureError as exc:
+            logging.error("[search] failed to acquire token (%s)", type(exc).__name__)
             raise
 
         headers = {
@@ -446,8 +447,11 @@ class SearchClient:
         # Get bearer token
         try:
             token = (await self.credential.get_token("https://search.azure.com/.default")).token
-        except Exception:
-            logging.exception("[search] failed to acquire token for get_document")
+        except AzureError as exc:
+            logging.error(
+                "[search] failed to acquire token for get_document (%s)",
+                type(exc).__name__,
+            )
             raise
 
         headers = {
