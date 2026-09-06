@@ -55,7 +55,7 @@ def decode_jwt_claims_unverified(token: str) -> Dict[str, Any]:
         payload = _b64url_decode(payload_b64)
         claims = json.loads(payload.decode("utf-8"))
         return claims if isinstance(claims, dict) else {}
-    except Exception:
+    except (ValueError, RecursionError):
         return {}
 
 

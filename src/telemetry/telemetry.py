@@ -186,10 +186,7 @@ class Telemetry:
         finally:
             # Restore original levels
             for lg, lvl in saved:
-                try:
-                    lg.setLevel(lvl)
-                except Exception:
-                    pass
+                lg.setLevel(lvl)
 
     #Configure telemetry logging (console + optional Azure Monitor logging via SDK)
         Telemetry.configure_logging(config)

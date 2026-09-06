@@ -43,10 +43,7 @@ def _log_app_config_state(cfg: AppConfigClient, keys_to_check: Optional[List[str
 
     endpoint = os.getenv("APP_CONFIG_ENDPOINT")
     endpoint_set = bool(endpoint and str(endpoint).strip())
-    try:
-        endpoint_host = endpoint.replace("https://", "").replace("http://", "").split("/")[0] if endpoint else None
-    except Exception:
-        endpoint_host = None
+    endpoint_host = endpoint.replace("https://", "").replace("http://", "").split("/")[0] if endpoint else None
 
     disabled = bool(getattr(cfg, "disabled", False))
     auth_failed = bool(getattr(cfg, "auth_failed", False))

@@ -1,4 +1,7 @@
+import logging
 from unittest.mock import patch
+
+import pytest
 
 from opentelemetry.sdk.resources import SERVICE_VERSION
 
@@ -82,3 +85,28 @@ def test_disabled_audit_does_not_enable_log_export():
 
     assert configure.call_args.kwargs["disable_logging"] is True
     assert configure.call_args.kwargs["logger_name"] == ""
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_monitor_setup_restores_logger_levels_and_preserves_original_failure(fails):
+    names = [
+        "azure.monitor.opentelemetry", "azure.monitor.opentelemetry._configure",
+        "opentelemetry", "azure.core.pipeline.policies.http_logging_policy",
+    ]
+    loggers = [logging.getLogger(name) for name in names]
+    levels = [logger.level for logger in loggers]
+    error = RuntimeError("synthetic monitor initialization failure")
+    config = Config({"APPLICATIONINSIGHTS_CONNECTION_STRING": "InstrumentationKey=test"})
+    with (
+        patch("telemetry.telemetry.configure_azure_monitor", side_effect=error if fails else None),
+        patch.object(Telemetry, "configure_logging"),
+    ):
+        if fails:
+            with pytest.raises(RuntimeError) as raised:
+                Telemetry.configure_monitoring(
+                    config, "APPLICATIONINSIGHTS_CONNECTION_STRING", "gpt-rag-orchestrator", "test")
+            assert raised.value is error
+        else:
+            Telemetry.configure_monitoring(
+                config, "APPLICATIONINSIGHTS_CONNECTION_STRING", "gpt-rag-orchestrator", "test")
+    assert [logger.level for logger in loggers] == levels

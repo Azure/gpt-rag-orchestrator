@@ -226,6 +226,11 @@ Actual strategy-chain evidence covers early/partial failure, initialization,
 cancellation, success, failed audit outcomes and an in-memory SDK exporter.
 The enclosing orchestration span and SSE log use constant safe diagnostics;
 this is not a guarantee about every third-party span or legacy diagnostic.
+Malformed JWT/URL/OBO parsing retains its existing unavailable-result contract
+but no longer swallows arbitrary implementation failures. App Configuration
+lookup recovery catches exhausted Tenacity `RetryError`; its callback now
+accepts the actual one-argument retry-state contract, so the configured retry
+budget executes before optional defaults or required-value errors.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.

@@ -127,7 +127,7 @@ class AppConfigClient:
         if value is None and not self.disabled:
             try:
                 value = self.get_config_with_retry(name=key)
-            except Exception:
+            except RetryError:
                 value = None
 
         if value is not None:
@@ -147,7 +147,8 @@ class AppConfigClient:
             
             raise Exception(f'The configuration variable {key} not found.')
         
-    def retry_before_sleep(self, retry_state):
+    @staticmethod
+    def retry_before_sleep(retry_state):
         # Log the outcome of each retry attempt.
         message = f"""Retrying {retry_state.fn}:
                         attempt {retry_state.attempt_number}

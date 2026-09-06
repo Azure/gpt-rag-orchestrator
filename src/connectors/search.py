@@ -207,7 +207,7 @@ class SearchClient:
             return "<none>"
         try:
             return hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
-        except Exception:
+        except UnicodeError:
             return "<unknown>"
 
     async def _acquire_search_user_token_via_obo(self, api_access_token: str) -> Optional[str]:
@@ -265,6 +265,9 @@ class SearchClient:
                     level, marker = _classify_retrieval_error(resp.status)
                     try:
                         err = json.loads(raw)
+                    except (ValueError, RecursionError):
+                        err = None
+                    if isinstance(err, dict):
                         error = err.get("error")
                         desc = err.get("error_description")
                         trace_id = err.get("trace_id")
@@ -289,7 +292,7 @@ class SearchClient:
                                 "retrieval_credential_type": "obo",
                             },
                         )
-                    except Exception:
+                    else:
                         self._last_obo_error = f"status={resp.status} body={raw[:200]}"
                         logging.log(
                             level,
@@ -308,7 +311,7 @@ class SearchClient:
                 data = {}
                 try:
                     data = json.loads(raw)
-                except Exception:
+                except (ValueError, RecursionError):
                     logging.error("[Retrieval][OBO] Token endpoint returned non-JSON response")
                     return None
 
@@ -322,7 +325,7 @@ class SearchClient:
                 # Cache for the remainder of the request.
                 try:
                     ttl = int(expires_in) if expires_in is not None else 0
-                except Exception:
+                except (TypeError, ValueError, OverflowError):
                     ttl = 0
                 self._cached_search_user_token = token
                 self._cached_search_user_token_expires_at = time.time() + max(0, ttl - 30)

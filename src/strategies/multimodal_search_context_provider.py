@@ -193,7 +193,7 @@ def _extract_blob_relative_path(blob_url: str) -> str | None:
         parts = parsed.path.lstrip("/").split("/", 1)
         if len(parts) == 2:
             return parts[1]  # everything after container
-    except Exception:
+    except ValueError:
         pass
     return None
 

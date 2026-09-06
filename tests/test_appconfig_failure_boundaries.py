@@ -105,3 +105,72 @@ def test_appconfig_endpoint_host_formatting_needs_no_broad_recovery(
     assert config.disabled is False
     assert f"endpoint_host={host} " in caplog.text
     assert load.call_args.kwargs["endpoint"] == endpoint
+
+
+@pytest.mark.parametrize("endpoint,host", [
+    (None, "None"), ("", "None"), ("https://config.example.invalid/path", "config.example.invalid"),
+])
+def test_auth_config_diagnostics_use_environment_string_contract(endpoint, host, monkeypatch, caplog):
+    from dependencies import _log_app_config_state
+
+    if endpoint is None:
+        monkeypatch.delenv("APP_CONFIG_ENDPOINT", raising=False)
+    else:
+        monkeypatch.setenv("APP_CONFIG_ENDPOINT", endpoint)
+    config = MagicMock(disabled=True, auth_failed=False, allow_env_vars=False, client={})
+    _log_app_config_state(config, keys_to_check=["MISSING_KEY"])
+    assert f"endpoint_host={host} " in caplog.text
+    assert "keys_loaded=0" in caplog.text
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_real_provider_retries_preserve_optional_and_required_outcomes(
+    required, monkeypatch, mock_identity_manager,
+):
+    from types import MethodType
+    from tenacity import stop_after_attempt, wait_none
+
+    class UnavailableProvider(dict):
+        attempts = 0
+
+        def __getitem__(self, key):
+            self.attempts += 1
+            raise RuntimeError("synthetic transient provider failure")
+
+    monkeypatch.setenv("APP_CONFIG_ENDPOINT", "https://config.example.invalid")
+    monkeypatch.setenv("allow_environment_variables", "false")
+    with (
+        patch("connectors.appconfig.get_identity_manager", return_value=mock_identity_manager),
+        patch("connectors.appconfig.load", return_value=UnavailableProvider(configured=True)),
+    ):
+        config = AppConfigClient()
+    fast_retry = AppConfigClient.get_config_with_retry.retry_with(
+        wait=wait_none(), stop=stop_after_attempt(2))
+    config.get_config_with_retry = MethodType(fast_retry, config)
+    if required:
+        with pytest.raises(Exception, match="configuration variable REQUIRED not found"):
+            config.get("REQUIRED")
+    else:
+        assert config.get("OPTIONAL", default="fallback") == "fallback"
+        assert config.get_value("OPTIONAL", allow_none=True) is None
+    assert config.client.attempts == (2 if required else 4)
+
+
+def test_appconfig_does_not_hide_unexpected_retry_callback_failure(monkeypatch):
+    from types import MethodType
+    from tenacity import stop_after_attempt, wait_none
+
+    monkeypatch.delenv("APP_CONFIG_ENDPOINT", raising=False)
+    monkeypatch.setenv("allow_environment_variables", "false")
+    config = AppConfigClient()
+    config.disabled = False
+    config.client = MagicMock()
+    config.client.__getitem__.side_effect = RuntimeError("provider failure")
+    error = RuntimeError("retry callback failure")
+    fast_retry = AppConfigClient.get_config_with_retry.retry_with(
+        wait=wait_none(), stop=stop_after_attempt(2),
+        before_sleep=MagicMock(side_effect=error))
+    config.get_config_with_retry = MethodType(fast_retry, config)
+    with pytest.raises(RuntimeError) as raised:
+        config.get("OPTIONAL", default="fallback")
+    assert raised.value is error
