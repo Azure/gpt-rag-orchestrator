@@ -380,7 +380,7 @@ async def validate_access_token(token: str) -> Dict:
                     _pl_len,
                     _sig_len,
                 )
-        except Exception:
+        except ValueError:
             # If signature segment isn't decodable, that's a strong indicator the token was mutated.
             logging.warning(
                 "[Auth] Token base64url decode failed for at least one segment (fp=%s). "
@@ -603,7 +603,7 @@ async def validate_access_token(token: str) -> Dict:
                 except jwt.exceptions.InvalidIssuerError as e:
                     last_error = e
                     continue
-                except Exception as e:
+                except jwt.exceptions.PyJWTError as e:
                     last_error = e
                     break
             return None, last_error
@@ -706,7 +706,7 @@ async def validate_access_token(token: str) -> Dict:
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("[Auth] Token validation failed: %s: %s", type(e).__name__, str(e))
+        logging.error("[Auth] Token validation failed: %s", type(e).__name__)
         raise HTTPException(status_code=401, detail="Invalid token")
 
 async def get_user_groups_from_graph(user_oid: str) -> List[str]:

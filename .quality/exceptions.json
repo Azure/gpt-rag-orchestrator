@@ -283,6 +283,36 @@
       "review_by_stage": "before-quality-gate-activation"
     },
     {
+      "id": "jwt-verification-fail-closed-http-translation",
+      "module_id": "dependencies",
+      "symbol": "validate_access_token",
+      "path": "src/dependencies.py",
+      "line": 708,
+      "handler_fingerprint": "3f0415a57c163c90c43e8f5246c73847c22a9cd6f97c6ca241cb8f6fc67a8646",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "API JWT verification after required authentication configuration is resolved",
+      "reason": "Unexpected JWKS transport, key construction or verifier failures must deny access under the existing generic 401 contract, never trust unverified roles or continue with service identity. Required configuration remains a separate 500 before this handler; cancellation and explicit HTTP errors propagate separately. One provider-specific exception tuple cannot cover these independent verification boundaries.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Bounded exception-class authentication failure log and fixed Invalid token HTTP detail, without raw provider exception text. Existing debug claim diagnostics are outside this proposal.",
+      "evidence_tests": [
+        "tests/test_auth_failure_boundaries.py::test_real_jwt_provider_failure_is_denied_without_raw_diagnostic[ConnectError]",
+        "tests/test_auth_failure_boundaries.py::test_real_jwt_provider_failure_is_denied_without_raw_diagnostic[RuntimeError]",
+        "tests/test_auth_failure_boundaries.py::test_real_jwt_provider_failure_is_denied_without_raw_diagnostic[CancelledError]",
+        "tests/test_auth_failure_boundaries.py::test_unexpected_verifier_failure_still_denies_without_fallback_or_raw_log",
+        "tests/test_auth_failure_boundaries.py::test_real_jwt_preserves_identity_rejection_and_rotation[v2]",
+        "tests/test_auth_failure_boundaries.py::test_real_jwt_preserves_identity_rejection_and_rotation[v1]",
+        "tests/test_auth_failure_boundaries.py::test_real_jwt_preserves_identity_rejection_and_rotation[signature]",
+        "tests/test_auth_failure_boundaries.py::test_real_jwt_preserves_identity_rejection_and_rotation[audience]",
+        "tests/test_auth_failure_boundaries.py::test_real_jwt_preserves_identity_rejection_and_rotation[rotation]",
+        "tests/test_auth_failure_boundaries.py::test_real_jwt_preserves_identity_rejection_and_rotation[alternate]",
+        "tests/test_auth_failure_boundaries.py::test_real_jwt_required_config_remains_server_error[OAUTH_AZURE_AD_TENANT_ID]",
+        "tests/test_auth_failure_boundaries.py::test_real_jwt_required_config_remains_server_error[OAUTH_AZURE_AD_CLIENT_ID]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact fail-closed boundary proposal grants no permission.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
       "id": "conversation-list-http-failure-translation",
       "module_id": "main",
       "symbol": "list_conversations",

@@ -266,6 +266,13 @@ Telemetry consumers use App Configuration's explicit optional-value contract,
 not broad fallback catches. Missing/unavailable values retain defaults and
 environment precedence; unexpected retry-callback failures surface.
 The HTTP log-level setting is read once, outside the per-logger loop.
+JWT diagnostic decoding and issuer verification now catch their actual
+ValueError/PyJWTError families. A separate inactive proposal retains the
+existing fail-closed generic 401 for unexpected verification/provider errors,
+with a bounded exception-class log. Real in-memory RSA/JWT evidence preserves
+v1/v2 issuers, audience/tenant/signature rejection, key rotation/alternate
+endpoints, required-setting 500 and cancellation; debug claim diagnostics
+remain outside this bounded proposal.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.
