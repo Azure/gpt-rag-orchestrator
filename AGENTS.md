@@ -216,6 +216,12 @@ cycle-detection state.
 Three non-audit stream proposals document generic error-event emission,
 failed audit/span outcome before propagation, and deduplicated SSE terminal
 translation, including partial output and cancellation evidence.
+Three separate hosted-stream/MCP-cleanup proposals preserve typed hosted
+errors, deduplicated Responses SSE errors and the original primary exception
+when chat cleanup also fails. Cancellation during cleanup propagates when
+there is no primary exception. Hosted transport and suppressed-cleanup logs
+now omit exception text/tracebacks; this bounded change does not certify
+strategy-internal logs or third-party spans.
 Necessary boundary translation or cleanup can be
 proposed individually under the existing public contract; necessity and
 passing evidence do not constitute approval.

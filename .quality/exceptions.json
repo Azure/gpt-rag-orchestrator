@@ -283,6 +283,77 @@
       "review_by_stage": "before-quality-gate-activation"
     },
     {
+      "id": "hosted-turn-error-before-propagation",
+      "module_id": "api.hosted_entrypoint",
+      "symbol": "_hosted_stream",
+      "path": "src/api/hosted_entrypoint.py",
+      "line": 214,
+      "handler_fingerprint": "ffda26fac26a2c21905ab003e8a1fd9df02538ff0b9641ee543a2c740a616b1c",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Hosted typed turn stream consuming a selected runtime strategy",
+      "reason": "Unknown strategy failures must emit the existing generic typed terminal error before unchanged propagation. A provider-specific exception tuple cannot cover all selected strategies. Cancellation remains a separate typed event and unchanged propagation, not success.",
+      "failure_outcome": "propagation",
+      "diagnostic_path": "Generic TurnErrorEvent without raw exception data; direct caller retains the original failure. Hosted transport separately deduplicates the error. No strategy-internal diagnostic guarantee.",
+      "evidence_tests": [
+        "tests/test_hosted_responses.py::TestHostedStream::test_emits_error_event_on_exception",
+        "tests/test_hosted_responses.py::TestHostedStream::test_emits_cancelled_event_on_cancellation",
+        "tests/test_hosted_responses.py::TestSseGeneratorErrorClassification::test_real_hosted_stream_keeps_terminal_outcome_and_safe_transport_log[failure-False]",
+        "tests/test_hosted_responses.py::TestSseGeneratorErrorClassification::test_real_hosted_stream_keeps_terminal_outcome_and_safe_transport_log[failure-True]",
+        "tests/test_hosted_responses.py::TestSseGeneratorErrorClassification::test_real_hosted_stream_keeps_terminal_outcome_and_safe_transport_log[cancelled-True]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact boundary proposal grants no permission.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "hosted-sse-safe-terminal-error-translation",
+      "module_id": "api.hosted_entrypoint",
+      "symbol": "_sse_generator._gen",
+      "path": "src/api/hosted_entrypoint.py",
+      "line": 309,
+      "handler_fingerprint": "7d933e1e98ec42712bb1feb09de815692f79e39580feee6a1d59a1dee4dec26f",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Already-started hosted Responses API SSE transport",
+      "reason": "HTTP status cannot change once streaming begins. Arbitrary strategy initialization or stream failures require the existing generic terminal error frame, deduplicated when the typed stream already emitted it. Successful closing frames must not follow failure; missing call context and cancellation retain their separate outcomes.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Constant bounded internal_error log and one generic SSE error frame, without raw exception/traceback. No claim about strategy-internal or SDK telemetry.",
+      "evidence_tests": [
+        "tests/test_hosted_responses.py::TestSseGeneratorErrorClassification::test_real_hosted_stream_keeps_terminal_outcome_and_safe_transport_log[failure-False]",
+        "tests/test_hosted_responses.py::TestSseGeneratorErrorClassification::test_real_hosted_stream_keeps_terminal_outcome_and_safe_transport_log[failure-True]",
+        "tests/test_hosted_responses.py::TestSseGeneratorErrorClassification::test_real_hosted_stream_keeps_terminal_outcome_and_safe_transport_log[initialization-False]",
+        "tests/test_hosted_responses.py::TestSseGeneratorErrorClassification::test_real_hosted_stream_keeps_terminal_outcome_and_safe_transport_log[cancelled-True]",
+        "tests/test_hosted_responses.py::TestSseGeneratorErrorClassification::test_real_hosted_stream_keeps_terminal_outcome_and_safe_transport_log[success-True]",
+        "tests/test_hosted_responses.py::TestSseGeneratorErrorClassification::test_missing_call_context_is_not_downgraded_to_internal_error"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact boundary proposal grants no permission.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "mcp-chat-cleanup-preserves-primary-outcome",
+      "module_id": "strategies.mcp_strategy",
+      "symbol": "McpStrategy.initiate_agent_flow",
+      "path": "src/strategies/mcp_strategy.py",
+      "line": 229,
+      "handler_fingerprint": "cfd7f834e39c4328d8a48dc2617296476a3c86980daacdf4540854deccb2fd49",
+      "caught_types": ["BaseException"],
+      "status": "proposed",
+      "boundary": "Chat-client cleanup after MCP strategy execution",
+      "reason": "Cleanup must not replace an existing model failure or task cancellation, including when cleanup itself is cancelled. Without a primary exception, the identical cleanup failure must propagate after request-status telemetry. Catching only Exception would let cleanup cancellation mask the primary outcome. This is cleanup priority, not successful primary-work recovery.",
+      "failure_outcome": "propagation",
+      "diagnostic_path": "Constant bounded suppressed-cleanup error log; request_status remains error/cancelled for the original failure, or error for cleanup-only failure. No raw chained exception log; strategy/SDK span behavior is outside this proposal.",
+      "evidence_tests": [
+        "tests/test_mcp_strategy.py::test_mcp_strategy_preserves_agent_error_when_chat_cleanup_fails[RuntimeError]",
+        "tests/test_mcp_strategy.py::test_mcp_strategy_preserves_agent_error_when_chat_cleanup_fails[CancelledError]",
+        "tests/test_mcp_strategy.py::test_mcp_strategy_preserves_cancellation_when_chat_cleanup_fails[RuntimeError]",
+        "tests/test_mcp_strategy.py::test_mcp_strategy_preserves_cancellation_when_chat_cleanup_fails[CancelledError]",
+        "tests/test_mcp_strategy.py::test_mcp_strategy_surfaces_chat_cleanup_error_without_primary_error[RuntimeError]",
+        "tests/test_mcp_strategy.py::test_mcp_strategy_surfaces_chat_cleanup_error_without_primary_error[CancelledError]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact cleanup proposal grants no permission.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
       "id": "sse-safe-terminal-error-translation",
       "module_id": "main",
       "symbol": "orchestrator_endpoint.sse_event_generator",

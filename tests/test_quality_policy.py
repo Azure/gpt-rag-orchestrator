@@ -747,13 +747,16 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     assert not QUALITY["check_exceptions"](current, reviewed_fixture, passed)
 
 
-@pytest.mark.parametrize("record_id", [
-    "appconfig-provider-availability-translation",
-    "search-provider-keyword-fallback",
-    "search-provider-empty-context-translation",
-    "search-connector-strict-anonymous-failure-contract",
+@pytest.mark.parametrize("record_id,outcome", [
+    ("appconfig-provider-availability-translation", "failure-translation"),
+    ("search-provider-keyword-fallback", "failure-translation"),
+    ("search-provider-empty-context-translation", "failure-translation"),
+    ("search-connector-strict-anonymous-failure-contract", "failure-translation"),
+    ("hosted-turn-error-before-propagation", "propagation"),
+    ("hosted-sse-safe-terminal-error-translation", "failure-translation"),
+    ("mcp-chat-cleanup-preserves-primary-outcome", "propagation"),
 ])
-def test_provider_compatibility_proposal_is_exact_and_not_self_authorized(record_id):
+def test_compatibility_proposal_is_exact_and_not_self_authorized(record_id, outcome):
     root = Path(QUALITY["__file__"]).resolve().parents[2]
     records = QUALITY["load_records"](root)["exceptions.json"]["entries"]
     record = next(r for r in records if r["id"] == record_id)
@@ -763,7 +766,7 @@ def test_provider_compatibility_proposal_is_exact_and_not_self_authorized(record
                and h["handler_fingerprint"] == record["handler_fingerprint"]]
     assert len(current) == 1
     assert record["status"] == "proposed"
-    assert record["failure_outcome"] == "failure-translation"
+    assert record["failure_outcome"] == outcome
     passed = set(record["evidence_tests"])
     assert QUALITY["check_exceptions"](current, [record], passed)
     reviewed_fixture = [{**record, "status": "active"}]
