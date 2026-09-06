@@ -1,12 +1,17 @@
 import asyncio
+import importlib
 import logging
+import sys
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import Response
+from starlette.requests import Request
 
 from orchestration.orchestrator import Orchestrator
 from strategies.agent_strategy_factory import AgentStrategyFactory
+from strategies.maf_lite_strategy import MafLiteStrategy
 from telemetry.audit import AuditEmitter
 from telemetry.audit_contract import AuditSettings
 
@@ -111,6 +116,89 @@ def test_registry_guard_covers_every_active_strategy():
         "nl2sql",
         "mcp",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancelled", [False, True], ids=["failure", "cancellation"])
+async def test_real_maf_lite_turn_sse_chain_documents_unapproved_failure_contract(
+    cancelled, patch_dependencies, mock_config, audit_capture, caplog,
+):
+    """Characterize legacy error-text exposure; this is not a safety approval."""
+    with patch("strategies.maf_lite_strategy.get_config", return_value=mock_config):
+        strategy = MafLiteStrategy()
+    strategy._cached_instructions = "Test instructions"
+    strategy._user_memory = MagicMock()
+    strategy._user_memory.has_minimum_context.return_value = False
+    strategy._chat_client = MagicMock()
+    strategy._chat_client._client.chat.completions.create = AsyncMock(
+        return_value=SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="GREETING"))]))
+    failure_type = asyncio.CancelledError if cancelled else RuntimeError
+    marker = "synthetic-sensitive-upstream-detail"
+    failure = failure_type(marker)
+
+    async def model_stream(*_args, **_kwargs):
+        yield SimpleNamespace(text="partial answer", contents=[])
+        raise failure
+
+    agent = MagicMock()
+    agent.run_stream = model_stream
+    agent.__aenter__ = AsyncMock(return_value=agent)
+    agent.__aexit__ = AsyncMock(return_value=False)
+    orchestrator = build_orchestrator(strategy)
+    body = SimpleNamespace(
+        type="ask", ask="question", question=None, conversation_id="conversation",
+        question_id="question-id", user_context={})
+    request = Request({
+        "type": "http", "method": "POST", "path": "/orchestrator", "headers": [],
+        "client": ("127.0.0.1", 1234), "server": ("test", 80),
+        "scheme": "http", "query_string": b"",
+    })
+    previous_main = sys.modules.pop("main", None)
+    try:
+        with (
+            patch("dotenv.load_dotenv", return_value=False),
+            patch("telemetry.Telemetry.configure_basic"),
+            patch("telemetry.Telemetry.log_log_level_diagnostics"),
+        ):
+            main = importlib.import_module("main")
+        with (
+            patch("strategies.maf_lite_strategy.ChatAgent", return_value=agent),
+            patch.object(main.Orchestrator, "from_turn_request",
+                         new=AsyncMock(return_value=orchestrator)),
+        ):
+            streaming = await main.orchestrator_endpoint(
+                request=request, response=Response(), body=body,
+                x_api_key=None, dapr_api_token=None, authorization=None)
+            chunks = []
+            if cancelled:
+                with pytest.raises(asyncio.CancelledError) as caught:
+                    async for chunk in streaming.body_iterator:
+                        chunks.append(chunk)
+                assert caught.value is failure
+            else:
+                chunks = [chunk async for chunk in streaming.body_iterator]
+            await asyncio.sleep(0)
+    finally:
+        sys.modules.pop("main", None)
+        if previous_main is not None:
+            sys.modules["main"] = previous_main
+
+    assert chunks[:2] == ["conversation ", "partial answer"]
+    assert not any("event: error" in chunk for chunk in chunks)
+    audit_data = str([record.__dict__ for record in audit_capture.records])
+    assert marker not in audit_data
+    if cancelled:
+        assert chunks == ["conversation ", "partial answer"]
+        assert marker not in "".join(chunks)
+        assert marker not in caplog.text
+        assert types(audit_capture)[-1] == "request.cancelled"
+    else:
+        assert chunks[2:] == [
+            f"I encountered an error processing your request: {marker}. Please try again."]
+        assert marker in caplog.text
+        assert types(audit_capture)[-2:] == ["outcome.produced", "request.completed"]
+    orchestrator.database_client.update_document.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -193,6 +193,13 @@ followed by unchanged exception propagation, including partial output and
 cancellation evidence. Necessary boundary translation or cleanup can be
 proposed individually under the existing public contract; necessity and
 passing evidence do not constitute approval.
+Real provider/consumer characterization distinguishes missing configuration,
+authentication failure, optional defaults and required strategy settings;
+retrieval evidence separately covers keyword fallback, empty provider context
+and the connector's strict/anonymous error contract. The real MafLite-to-turn-
+to-SSE failure path currently emits raw error text and success-shaped audit
+completion, unlike cancellation. These are recorded legacy review gaps, not
+confidentiality-safe behavior or approved exceptions.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.

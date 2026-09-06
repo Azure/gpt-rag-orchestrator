@@ -14,15 +14,20 @@ These tests pin the contract for the standardized log markers emitted from
 
 import json
 import logging
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from agent_framework import ChatMessage, Context, Role
 
 from connectors.search import (
     _RETRIEVAL_AUTH_FAILURE_MARKER,
     _RETRIEVAL_ERROR_MARKER,
     SearchClient,
+    build_conversation_filter,
 )
+from strategies.composite_context_provider import CompositeContextProvider
+from strategies.search_context_provider import SearchContextProvider
 from telemetry.audit import AuditEmitter, begin_audit_request, end_audit_request
 from telemetry.audit_contract import AuditSettings
 
@@ -89,6 +94,90 @@ async def test_generic_error_emits_error_marker_at_warning(search_client, caplog
     assert matches, "expected a generic Retrieval ERROR marker in logs"
     assert all(r.levelno == logging.WARNING for r in matches)
     assert not any(_RETRIEVAL_AUTH_FAILURE_MARKER in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("anonymous", [False, True], ids=["strict", "anonymous"])
+async def test_connector_failure_preserves_full_error_contract_and_trimming_inputs(
+    anonymous, search_client, caplog,
+):
+    search_client._allow_anonymous = anonymous
+    search_client._conversation_id = "conversation'quoted"
+    token = "synthetic-delegated-token"
+    search_client._get_search_user_token_for_trimming = AsyncMock(return_value=token)
+    marker = "synthetic-connector-error-detail"
+    failure = RuntimeError(marker)
+    search_client.search = AsyncMock(side_effect=failure)
+    if anonymous:
+        response = json.loads(await search_client.search_knowledge_base("policy"))
+        assert response == {"results": [], "query": "policy", "error": "search_failed"}
+        assert marker not in json.dumps(response)
+        assert token not in json.dumps(response)
+    else:
+        with pytest.raises(RuntimeError) as caught:
+            await search_client.search_knowledge_base("policy")
+        assert caught.value is failure
+    search_client._get_search_user_token_for_trimming.assert_awaited_once()
+    sent = search_client.search.await_args.kwargs
+    assert sent["index_name"] == search_client.index_name
+    assert sent["body"]["search"] == "policy"
+    assert sent["body"]["filter"] == build_conversation_filter("conversation'quoted")
+    assert sent["search_user_token"] == token
+    assert marker in caplog.text  # Existing raw diagnostic exposure is not approved.
+    assert token not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_boundary", ["embedding", "search", "sibling"])
+async def test_real_search_provider_and_composite_preserve_distinct_failure_outcomes(
+    failed_boundary, patch_dependencies, mock_config, caplog,
+):
+    marker = "synthetic-provider-error-detail"
+    failure = RuntimeError(marker)
+    token = "synthetic-delegated-token"
+    embed = AsyncMock(
+        return_value=[0.1, 0.2], side_effect=failure if failed_boundary == "embedding" else None)
+    obo = AsyncMock(return_value=token)
+    provider = SearchContextProvider(
+        endpoint="https://search.example.invalid", index_name="test-index",
+        credential=MagicMock(), conversation_id="conversation'quoted",
+        embed_fn=embed, get_obo_token=obo)
+    sibling = SimpleNamespace(invoking=AsyncMock(
+        return_value=Context(instructions="Independent provider context"),
+        side_effect=failure if failed_boundary == "sibling" else None))
+
+    async def documents():
+        yield {"id": "doc-1", "title": "Policy", "content": "Grounded content",
+               "filepath": "policy.txt"}
+
+    sdk = MagicMock()
+    sdk.__aenter__ = AsyncMock(return_value=sdk)
+    sdk.__aexit__ = AsyncMock(return_value=False)
+    sdk.search = AsyncMock(
+        return_value=documents(), side_effect=failure if failed_boundary == "search" else None)
+    with (
+        patch("strategies.search_context_provider.get_config", return_value=mock_config),
+        patch("strategies.search_context_provider.SearchClient", return_value=sdk),
+    ):
+        context = await CompositeContextProvider([provider, sibling]).invoking(
+            ChatMessage(role=Role.USER, text="policy"))
+    sent = sdk.search.await_args.kwargs
+    assert sent["search_text"] == "policy"
+    assert sent["filter"] == build_conversation_filter("conversation'quoted")
+    assert sent["x_ms_query_source_authorization"] == token
+    assert ("vector_queries" in sent) is (failed_boundary != "embedding")
+    embed.assert_awaited_once_with("policy")
+    obo.assert_awaited_once()
+    messages = [message.text for message in context.messages or []]
+    assert bool(messages) is (failed_boundary != "search")
+    if messages:
+        assert "Grounded content" in messages[0]
+    assert context.instructions == (
+        None if failed_boundary == "sibling" else "Independent provider context")
+    assert marker not in str(messages)
+    assert token not in str(messages)
+    assert marker in caplog.text
+    assert token not in caplog.text
 
 
 @pytest.mark.asyncio

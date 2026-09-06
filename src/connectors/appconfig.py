@@ -54,10 +54,7 @@ class AppConfigClient:
             return
 
         # Safe endpoint info for troubleshooting
-        try:
-            _endpoint_host = endpoint.replace("https://", "").replace("http://", "").split("/")[0]
-        except Exception:
-            _endpoint_host = "<unknown>"
+        _endpoint_host = endpoint.replace("https://", "").replace("http://", "").split("/")[0]
 
         # Prepare credentials for endpoint-based access
         identity_manager = get_identity_manager()
