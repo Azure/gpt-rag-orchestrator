@@ -286,7 +286,7 @@ async def stream_agent_run(
             # one-shot fallback below must not re-issue it.
             produced = True
             yield chunk
-    except Exception as exc:  # noqa: BLE001 - re-raised unless it's a known retryable payload error
+    except Exception as exc:
         if produced or not options or not is_invalid_payload_error(exc):
             raise
         logging.warning(

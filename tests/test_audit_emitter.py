@@ -128,6 +128,41 @@ def test_emitter_failure_never_escapes_to_user_operation():
         )
 
 
+def test_audit_warning_failure_also_preserves_primary_operation():
+    emitter = enabled_emitter()
+    from telemetry import audit
+
+    warning_logger = audit._warning_logger
+    previous = (list(warning_logger.handlers), warning_logger.propagate)
+    warning_logger.handlers = [RaisingHandler()]
+    warning_logger.propagate = False
+    try:
+        with capture_audit_logs(RaisingHandler()):
+            assert emitter.emit(
+                EventType.REQUEST_STARTED,
+                operation="test",
+                status=AuditStatus.STARTED,
+                reason_code=ReasonCode.REQUEST_RECEIVED,
+            ) is None
+    finally:
+        warning_logger.handlers, warning_logger.propagate = previous
+
+
+def test_audit_environment_lookup_failure_is_metadata_only(monkeypatch):
+    from unittest.mock import MagicMock
+
+    settings = enabled_emitter().settings
+    monkeypatch.setattr(AuditSettings, "from_config", lambda config: settings)
+    monkeypatch.setattr(AuditEmitter, "_default", None)
+    config = MagicMock()
+    config.get.side_effect = RuntimeError("synthetic-private-config")
+    emitter = AuditEmitter.configure(
+        config, service_name="gpt-rag-orchestrator", service_version="test",
+    )
+    assert emitter.environment == "unknown"
+    assert emitter.enabled
+
+
 def test_redaction_failure_discards_payload_and_emits_minimal_failure():
     emitter = enabled_emitter()
 

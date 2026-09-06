@@ -130,6 +130,74 @@ instructions before meaningful changes in these areas.
 
 ## Validation and evidence
 
+### Python quality policy (bootstrap under review)
+
+The quality bootstrap for Azure/GPT-RAG#681 is not an activated merge rule.
+Use Python 3.12 and an isolated environment:
+
+```powershell
+python -m pip install -r requirements.txt
+python -m pip install pytest pytest-asyncio pytest-mock jsonschema
+python -m pip install -r requirements-quality.txt
+python -m pytest -q --junitxml=.artifacts\pytest.xml
+$Base = git merge-base HEAD origin/develop
+python .github\scripts\check-quality.py --check all --base-ref $Base --report .artifacts\quality.json --test-results .artifacts\pytest.xml
+```
+
+The supported individual checks are `lint`, `typing`, `architecture`,
+`exceptions`, and `policy`. Exit 1 reports violations; exit 2 means incomplete
+analysis or invalid input, never success. Reports distinguish imported
+out-of-scope type diagnostics from blocking findings. They include complete
+runtime module coverage and the broad-handler inventory.
+
+`requirements-quality.txt` pins development tools only; it is not a runtime
+dependency source. Ruff checks every Python source under `src/`. Blocking mypy
+scope starts with `schemas`, `connectors.types`,
+`plugins.retrieval.retrieval_types`, `plugins.nl2sql.nl2sql_types`, and the new
+`connectors.obo`. Newly discovered runtime modules automatically join scope.
+The initial debt baseline is empty. Debt is matched by individual source,
+symbol, diagnostic and multiplicity, not totals. Unambiguous unchanged moves
+retain identity; ambiguous moves/deletions require review.
+
+The AST import graph includes flat modules, namespace packages, local and
+type-only imports. Grimp cross-checks its package overlap; Import Linter
+enforces the package prohibition as well. Connectors/plugins/telemetry cannot
+depend transitively on `api` or `main`. Private modules and members belong to
+their containing package. The three existing strategy imports of Search's
+retrieval-error classifier are explicit compatibility permissions, not wildcard
+exemptions. Search's two public OBO callables remain compatibility wrappers;
+`connectors.obo` alone owns the scope-aware token exchange and cache.
+
+Every broad handler requires an exact exception record and passing named
+failure evidence, including logged/re-raised handlers Ruff exempts. A changed
+try body, catch breadth or handler invalidates the record. No exceptions are
+approved by this bootstrap: existing handlers remain blocking review work.
+Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
+or change auth/retrieval behavior to make the gate green. Preserve the existing
+best-effort audit side-effect contract without extending it to primary work.
+
+CI uses `pull_request`, read-only permissions, immutable action references,
+the protected-base checker/configuration and this run's pytest evidence.
+`quality-gate` depends on the actual Python tests, frontend build and all five
+quality matrix runs, and rejects missing, skipped, failed or stale evidence.
+Candidate policy/checker/owner changes cannot self-approve. Bootstrap has no
+base policy and deliberately fails its policy result.
+
+Before activation, an administrator must independently review the bootstrap,
+configure required `quality-gate` and test checks on `develop`/`main`, require
+code-owner review of the latest head, dismiss stale approvals and restrict
+bypasses. `CODEOWNERS` names the verified existing administrator `@placerda`;
+an independent authorized owner/reviewer is required for owner-authored PRs.
+Adding this file or workflow does not activate those settings. Policy repair
+must use a separately reviewed PR, not removal of protections.
+
+This component remains compatible by contract with UI `v2.6.2` and ingestion
+`v2.7.3`; no wire/audit/auth/configuration migration is introduced. Live Azure
+compatibility and recovery are separate, unperformed acceptance steps.
+Recovery is the preceding orchestrator artifact (shipped `v4.1.1`), without
+data migration or peer changes. Coordination is Azure/GPT-RAG#689; published
+contributor documentation is being coordinated in Azure/GPT-RAG#688 on `docs`.
+
 - Discover existing commands from `pyproject.toml`, package manifests, and
   workflows; do not invent validation commands.
 - Run the narrowest relevant tests first, then broaden according to risk.

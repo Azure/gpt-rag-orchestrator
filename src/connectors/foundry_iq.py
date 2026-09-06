@@ -1844,7 +1844,7 @@ class FoundryIQClient:
             # Local imports avoid the existing search -> foundry_iq dependency
             # becoming a module-import cycle.
             from connectors.keyvault import get_secret
-            from connectors.search import acquire_obo_token
+            from connectors.obo import acquire_obo_token
 
             try:
                 mcp_headers, credential_modes = await build_mcp_control_headers(

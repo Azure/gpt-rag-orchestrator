@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 import logging
 import json
 import time

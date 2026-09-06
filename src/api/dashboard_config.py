@@ -263,7 +263,7 @@ async def update_config(
     for key, value in validated.items():
         try:
             await asyncio.to_thread(cfg.set_value, key, value, WRITE_LABEL)
-        except Exception as exc:  # noqa: BLE001 - re-shaped into 500 below
+        except Exception as exc:
             logging.exception("[dashboard-config] write failed for %s", key)
             write_errors.append(
                 DashboardConfigFieldError(key=key, error=str(exc) or exc.__class__.__name__)

@@ -1,0 +1,729 @@
+"""Source-only quality checks. Policy authority comes from the PR base, not JSON approvals."""
+
+from __future__ import annotations
+
+import argparse
+import ast
+from collections import Counter, deque
+import graphlib
+import hashlib
+import importlib.metadata
+import io
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+import time
+import tokenize
+import tomllib
+import xml.etree.ElementTree as ET
+
+
+CHECKS = ("lint", "typing", "architecture", "exceptions", "policy")
+REQUIRED_JOBS = (*CHECKS, "tests", "frontend")
+RECORDS = ("policy.json", "typing-scope.json", "typing-baseline.json", "exceptions.json")
+PROTECTED = (".quality/", ".github/scripts/", ".github/workflows/",
+             ".github/CODEOWNERS", "requirements-quality.txt", ".importlinter")
+
+
+class QualityError(Exception):
+    """Incomplete analysis or invalid inputs, never a passing check."""
+
+
+def digest(value):
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def syntax(node):
+    return digest(ast.dump(node, include_attributes=False))
+
+
+def finding(rule, path="", line=1, message="", **details):
+    return {"rule": rule, "path": path, "line": line, "message": message, **details}
+
+
+def run(command, *, cwd=None, env=None, timeout=300):
+    try:
+        return subprocess.run(command, cwd=cwd, env=env, timeout=timeout,
+                              capture_output=True, text=True, encoding="utf-8")
+    except subprocess.TimeoutExpired as exc:
+        raise QualityError(f"{command[0]} timed out") from exc
+    except OSError as exc:
+        raise QualityError(f"Could not execute {command[0]}") from exc
+
+
+def git(root, *args):
+    result = run(["git", "--no-pager", *args], cwd=root)
+    if result.returncode:
+        raise QualityError(f"git {args[0]} failed")
+    return result.stdout
+
+
+def validate_records(record):
+    if not isinstance(record, dict) or record.get("schema_version") != 1:
+        raise QualityError("Unsupported quality record schema")
+    entries = record.get("entries", [])
+    if not isinstance(entries, list):
+        raise QualityError("Record entries must be an array")
+    ids = [entry.get("id") for entry in entries if isinstance(entry, dict)]
+    if len(ids) != len(entries) or None in ids or len(set(ids)) != len(ids):
+        raise QualityError("Record identities must be present and unique")
+    return record
+
+
+def load_records(root):
+    result = {}
+    for name in RECORDS:
+        try:
+            result[name] = validate_records(json.loads((root / ".quality" / name).read_text()))
+        except (OSError, ValueError) as exc:
+            raise QualityError(f"Invalid or missing .quality/{name}") from exc
+    policy = result["policy.json"]
+    for key in ("runtime_roots", "modules", "contracts", "toolchain", "required_checks"):
+        if key not in policy:
+            raise QualityError(f"Missing policy field: {key}")
+    if policy["runtime_roots"] != ["src"] or policy["required_checks"] != list(REQUIRED_JOBS):
+        raise QualityError("Source roots and required checks cannot omit runtime or test coverage")
+    scope = result["typing-scope.json"].get("module_ids")
+    if not isinstance(scope, list) or not scope or len(scope) != len(set(scope)):
+        raise QualityError("Typing scope must contain unique module identities")
+    for entry in result["typing-baseline.json"]["entries"]:
+        required = ("module_id", "symbol", "source_fingerprint", "rule",
+                    "message_fingerprint", "occurrences", "introduced_at",
+                    "rationale", "review", "removal_stage")
+        if any(not entry.get(key) for key in required) or type(entry["occurrences"]) is not int:
+            raise QualityError("Incomplete typing baseline record")
+        if entry["module_id"] not in scope or entry["occurrences"] < 1:
+            raise QualityError("Baseline debt must belong to blocking scope")
+    for entry in result["exceptions.json"]["entries"]:
+        required = ("module_id", "symbol", "handler_fingerprint", "caught_types",
+                    "boundary", "reason", "failure_outcome", "diagnostic_path",
+                    "evidence_tests", "status", "review", "review_by_stage")
+        if any(not entry.get(key) for key in required):
+            raise QualityError("Incomplete exception record")
+        if entry["status"] not in ("active", "proposed"):
+            raise QualityError("Invalid exception status")
+    return result
+
+
+def collect(root, roots):
+    modules = {}
+    for directory in roots:
+        source = root / directory
+        if not source.is_dir() or source.is_symlink():
+            raise QualityError(f"Missing/unsafe runtime root: {directory}")
+        if any(path.is_symlink() for path in source.rglob("*")):
+            raise QualityError("Symlinked source is not supported")
+        for path in sorted(source.rglob("*.py")):
+            if path.is_symlink() or any(p.is_symlink() for p in path.parents if p != root):
+                raise QualityError("Symlinked source is not supported")
+            relative = path.relative_to(source)
+            parts = list(relative.with_suffix("").parts)
+            if parts[-1] == "__init__" and len(parts) > 1:
+                parts.pop()
+            name = ".".join(parts)
+            if name in modules:
+                raise QualityError(f"Ambiguous module: {name}")
+            text = path.read_text(encoding="utf-8-sig")
+            try:
+                parsed = ast.parse(text, filename=str(relative))
+            except SyntaxError as exc:
+                raise QualityError(f"Invalid Python: {relative}:{exc.lineno}") from exc
+            modules[name] = {
+                "name": name, "path": path.relative_to(root).as_posix(),
+                "package": path.name == "__init__.py", "tree": parsed, "text": text,
+                "fingerprint": syntax(parsed),
+            }
+    if not modules:
+        raise QualityError("Runtime collection was empty")
+    return modules
+
+
+def module_identities(before, after):
+    identities = {name: name for name in after if name in before}
+    findings = []
+    removed = set(before) - set(after)
+    added = set(after) - set(before)
+    for old in sorted(removed):
+        matches = [new for new in added
+                   if before[old]["fingerprint"] == after[new]["fingerprint"]]
+        reverse = [other for other in removed
+                   if before[other]["fingerprint"] == before[old]["fingerprint"]]
+        if len(matches) == 1 and len(reverse) == 1:
+            identities[matches[0]] = old
+        else:
+            findings.append(finding("module-identity", before[old]["path"],
+                                    message="Deletion, split or ambiguous move needs policy review"))
+    for name in after:
+        identities.setdefault(name, name)
+    return identities, findings
+
+
+def dotted(node, aliases):
+    if isinstance(node, ast.Name):
+        return aliases.get(node.id, node.id)
+    if isinstance(node, ast.Attribute):
+        return f"{dotted(node.value, aliases)}.{node.attr}"
+    return "<indirect>"
+
+
+def import_base(module, node):
+    if not node.level:
+        return node.module or ""
+    package = module["name"].split(".")
+    if not module["package"]:
+        package.pop()
+    if node.level > len(package):
+        raise QualityError(f"Invalid relative import: {module['path']}:{node.lineno}")
+    prefix = package[:len(package) - node.level + 1]
+    return ".".join([*prefix, *([node.module] if node.module else [])])
+
+
+def aliases_for(module):
+    aliases = {}
+    for node in ast.walk(module["tree"]):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                aliases[alias.asname or alias.name.split(".")[0]] = (
+                    alias.name if alias.asname else alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            base = import_base(module, node)
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = f"{base}.{alias.name}"
+    # Resolve straightforward aliases conservatively, including chained broad types.
+    assignments = [n for n in ast.walk(module["tree"]) if isinstance(n, ast.Assign)]
+    for _ in range(len(assignments) + 1):
+        changed = False
+        for node in assignments:
+            value = dotted(node.value, aliases)
+            if value in ("Exception", "BaseException", "builtins.Exception",
+                         "builtins.BaseException", "importlib.import_module",
+                         "builtins.__import__", "__import__"):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and aliases.get(target.id) != value:
+                        aliases[target.id] = value
+                        changed = True
+        if not changed:
+            break
+    for node in assignments:
+        if isinstance(node.value, (ast.Call, ast.Subscript, ast.Tuple, ast.List)):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id not in aliases:
+                    aliases[target.id] = "<indirect>"
+    return aliases
+
+
+def within(name, area):
+    return name == area or name.startswith(area + ".")
+
+
+def architecture(modules, contracts):
+    edges = {name: set() for name in modules}
+    locations = {}
+    findings = []
+    first_party = {name.split(".")[0] for name in modules}
+    namespaces = {".".join(name.split(".")[:i]) for name in modules
+                  for i in range(1, len(name.split(".")))}
+    known = set(modules) | namespaces
+    for name, module in modules.items():
+        aliases = aliases_for(module)
+
+        def add(target, node, member=""):
+            if target.split(".")[0] not in first_party:
+                return
+            if target not in known:
+                findings.append(finding("unresolved-import", module["path"], node.lineno,
+                                        f"Cannot resolve first-party module {target}"))
+                return
+            if target in modules:
+                edges[name].add(target)
+                locations[name, target] = node.lineno
+            private = any(p.startswith("_") and p != "__init__" for p in target.split("."))
+            private = private or (member.startswith("_") and not member.startswith("__"))
+            owner = target.rpartition(".")[0] if "." in target else target
+            same_owner = name == owner or name.startswith(owner + ".")
+            approved = any(
+                record["importer"] == name and record["target"] in (
+                    f"{target}.{member}", *([target] if not member.startswith("_") else []))
+                for record in contracts["private_access"]
+            )
+            if private and not same_owner and not approved:
+                findings.append(finding("private-access", module["path"], node.lineno,
+                                        f"{name} cannot access {target}{'.' + member if member else ''}"))
+
+        for node in ast.walk(module["tree"]):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    add(alias.name, node)
+            elif isinstance(node, ast.ImportFrom):
+                base = import_base(module, node)
+                for alias in node.names:
+                    child = f"{base}.{alias.name}"
+                    if alias.name == "*":
+                        findings.append(finding("star-import", module["path"], node.lineno,
+                                                "Use explicit first-party exports")
+                                        ) if base.split(".")[0] in first_party else None
+                    add(child if child in known else base, node,
+                        "" if child in known else alias.name)
+            elif isinstance(node, ast.Attribute):
+                resolved = dotted(node, aliases)
+                target, _, member = resolved.rpartition(".")
+                if target in known:
+                    add(target, node, member)
+            elif isinstance(node, ast.Call):
+                call = dotted(node.func, aliases)
+                if call in ("importlib.import_module", "__import__", "builtins.__import__"):
+                    target = node.args[0] if node.args else next(
+                        (v.value for v in node.keywords if v.arg == "name"), None)
+                    if isinstance(target, ast.Constant) and isinstance(target.value, str):
+                        if target.value.startswith("."):
+                            findings.append(finding("dynamic-import", module["path"], node.lineno,
+                                                    "Relative dynamic loading needs an explicit inventory"))
+                        else:
+                            add(target.value, node)
+                    else:
+                        record = next((r for r in contracts["dynamic_imports"]
+                                       if r["module_id"] == name and
+                                       r["source_fingerprint"] == syntax(node)), None)
+                        if record is None:
+                            findings.append(finding("dynamic-import", module["path"], node.lineno,
+                                                    "Variable dynamic loading needs policy review"))
+                        else:
+                            for permitted in record["targets"]:
+                                add(permitted, node)
+    try:
+        tuple(graphlib.TopologicalSorter(edges).static_order())
+    except graphlib.CycleError as exc:
+        # TopologicalSorter returns dependency order; reverse to show import direction.
+        cycle = list(reversed(exc.args[1]))
+        findings.append(finding("cycle", modules[cycle[0]]["path"],
+                                locations.get((cycle[0], cycle[1]), 1),
+                                " -> ".join(cycle), dependency_path=cycle))
+    for contract in contracts["forbidden"]:
+        for source in edges:
+            if not any(within(source, area) for area in contract["from"]):
+                continue
+            queue = deque([[source]])
+            seen = {source}
+            while queue:
+                path = queue.popleft()
+                for target in sorted(edges[path[-1]]):
+                    chain = [*path, target]
+                    if any(within(target, area) for area in contract["to"]):
+                        findings.append(finding("forbidden-import", modules[source]["path"],
+                                                locations.get((source, chain[1]), 1),
+                                                " -> ".join(chain), dependency_path=chain))
+                    if target not in seen:
+                        seen.add(target)
+                        queue.append(chain)
+    return edges, findings
+
+
+def symbol_at(module, line):
+    owners = [n for n in ast.walk(module["tree"])
+              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+              and n.lineno <= line <= n.end_lineno]
+    return ".".join(n.name for n in sorted(owners, key=lambda n: n.lineno)) or "<module>"
+
+
+def handlers(modules):
+    result = []
+    for name, module in modules.items():
+        aliases = aliases_for(module)
+        parents = {child: parent for parent in ast.walk(module["tree"])
+                   for child in ast.iter_child_nodes(parent)}
+        for node in ast.walk(module["tree"]):
+            if not isinstance(node, ast.ExceptHandler):
+                continue
+            values = node.type.elts if isinstance(node.type, ast.Tuple) else [node.type]
+            types = sorted(dotted(value, aliases) if value else "<bare>" for value in values)
+            broad = {"Exception", "BaseException", "builtins.Exception",
+                     "builtins.BaseException", "<bare>", "<indirect>"}
+            if any(value in broad for value in types):
+                result.append({
+                    "module_id": name, "path": module["path"], "line": node.lineno,
+                    "symbol": symbol_at(module, node.lineno),
+                    "handler_fingerprint": digest([syntax(node), syntax(parents[node])]),
+                    "caught_types": types,
+                })
+    return sorted(result, key=lambda h: (h["path"], h["line"]))
+
+
+def approved_exceptions(current, records, passed_tests):
+    keys = ("module_id", "symbol", "handler_fingerprint", "caught_types")
+    counts = Counter(digest({key: h[key] for key in keys}) for h in current)
+    approved = []
+    for handler in current:
+        matches = [r for r in records if all(r.get(key) == handler[key] for key in keys)]
+        if (len(matches) == 1 and matches[0]["status"] == "active"
+                and counts[digest({key: handler[key] for key in keys})] == 1
+                and matches[0]["evidence_tests"]
+                and set(matches[0]["evidence_tests"]) <= passed_tests):
+            approved.append((handler, matches[0]))
+    return approved
+
+
+def check_exceptions(current, records, passed_tests):
+    findings = []
+    approved = approved_exceptions(current, records, passed_tests)
+    used = {record["id"] for _, record in approved}
+    for handler in current:
+        if not any(handler is h for h, _ in approved):
+            findings.append(finding("broad-handler", handler["path"], handler["line"],
+                                    "Requires exact protected approval and passing failure evidence",
+                                    handler=handler))
+    for record in records:
+        if record["id"] not in used:
+            findings.append(finding("unused-exception", record.get("path", ""),
+                                    message=f"Stale, proposed or unproven exception: {record['id']}"))
+    return findings
+
+
+def approved_handler_sites(current, records, passed_tests):
+    return {(h["path"], h["line"]) for h, _ in approved_exceptions(current, records, passed_tests)}
+
+
+def ratchet(current, baseline):
+    keys = ("module_id", "symbol", "source_fingerprint", "rule", "message_fingerprint")
+    identity = lambda value: tuple(value[key] for key in keys)
+    actual = Counter(identity(value) for value in current)
+    allowed = Counter()
+    for entry in baseline:
+        allowed[identity(entry)] += entry["occurrences"]
+    findings = []
+    for key, count in (actual - allowed).items():
+        findings.append(finding("new-type-debt", message=f"{key[0]}:{key[1]} [{key[3]}]",
+                                occurrences=count, identity=dict(zip(keys, key))))
+    for key, count in (allowed - actual).items():
+        findings.append(finding("retired-type-debt", message=f"Remove stale baseline for {key[0]}:{key[1]}",
+                                occurrences=count))
+    return findings
+
+
+def suppressions(module):
+    result = Counter()
+    for token in tokenize.generate_tokens(io.StringIO(module["text"]).readline):
+        if token.type == tokenize.COMMENT and re.search(
+                r"noqa|type:\s*ignore|mypy:|pyright:|ruff:", token.string, re.I):
+            statements = [n for n in ast.walk(module["tree"])
+                          if isinstance(n, ast.stmt)
+                          and n.lineno <= token.start[0] <= n.end_lineno]
+            context = (syntax(min(statements, key=lambda n: n.end_lineno - n.lineno))
+                       if statements else "<module>")
+            result[token.string.strip(), context] += 1
+    return result
+
+
+def annotations(module):
+    result = set()
+    for node in ast.walk(module["tree"]):
+        symbol = symbol_at(module, getattr(node, "lineno", 0))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
+            args += [a for a in (node.args.vararg, node.args.kwarg) if a]
+            result.update((symbol, a.arg) for a in args if a.annotation)
+            if node.returns:
+                result.add((symbol, "<return>"))
+        elif isinstance(node, ast.AnnAssign):
+            result.add((symbol, ast.dump(node.target)))
+    return result
+
+
+def source_policy(before, after, identities, scope):
+    findings = []
+    for name, module in after.items():
+        old = before.get(identities[name])
+        inherited = suppressions(old) if old else Counter()
+        if suppressions(module) - inherited:
+            findings.append(finding("suppression", module["path"],
+                                    message="New or broadened suppression requires protected policy review"))
+        if old and identities[name] in scope and annotations(old) - annotations(module):
+            findings.append(finding("annotation-removed", module["path"],
+                                    message="Covered annotations cannot be silently removed"))
+    return findings
+
+
+def tool_json(result, tool):
+    if result.returncode not in (0, 1) or result.stderr.strip():
+        raise QualityError(f"{tool} execution failed: {result.stderr[:1000]}")
+    try:
+        values = json.loads(result.stdout) if tool == "ruff" else [
+            json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    except ValueError as exc:
+        raise QualityError(f"{tool} returned invalid JSON") from exc
+    if not isinstance(values, list) or any(not isinstance(v, dict) for v in values):
+        raise QualityError(f"{tool} returned an unexpected result")
+    errors = values if tool == "ruff" else [v for v in values if v.get("severity") == "error"]
+    if bool(errors) != (result.returncode == 1):
+        raise QualityError(f"{tool} exit status contradicts its diagnostics")
+    return values
+
+
+def seal_report(report):
+    report = {k: v for k, v in report.items() if k != "artifact_integrity"}
+    return {**report, "artifact_integrity": digest(report)}
+
+
+def report_valid(report, base, head, checks):
+    return (report.get("artifact_integrity") == seal_report(report)["artifact_integrity"]
+            and report.get("base_sha") == base and report.get("head_sha") == head
+            and set(report.get("checks", {})) == checks
+            and all(value.get("status") == "passed" for value in report["checks"].values()))
+
+
+def jobs_passed(results):
+    return set(results) == set(REQUIRED_JOBS) and all(
+        results[name] == "success" for name in REQUIRED_JOBS)
+
+
+def evidence_tests(path):
+    if path is None:
+        return set()
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError) as exc:
+        raise QualityError("Invalid pytest evidence") from exc
+    cases = list(root.iter("testcase"))
+    if not cases:
+        raise QualityError("Failure evidence has no test cases")
+    return {f"{case.attrib['classname'].replace('.', '/')}.py::{case.attrib['name']}"
+            for case in cases if not any(n.tag in ("failure", "error", "skipped") for n in case)}
+
+
+def policy_changes(root, base, base_records, candidate):
+    findings = []
+    changed = set(git(root, "diff", "--name-only", base, "--").splitlines())
+    changed.update(git(root, "ls-files", "--others", "--exclude-standard").splitlines())
+    for path in sorted(changed):
+        if path.startswith(PROTECTED):
+            # Debt retirement is safe only if every remaining record is byte-equivalent.
+            if path == ".quality/typing-baseline.json":
+                old = base_records["typing-baseline.json"]["entries"]
+                if all(entry in old for entry in candidate["typing-baseline.json"]["entries"]):
+                    continue
+            if path == ".quality/typing-scope.json":
+                old = base_records["typing-scope.json"]
+                new = candidate["typing-scope.json"]
+                if (set(old["module_ids"]) <= set(new["module_ids"])
+                        and {k: v for k, v in old.items() if k != "module_ids"}
+                        == {k: v for k, v in new.items() if k != "module_ids"}):
+                    continue
+            findings.append(finding("protected-policy", path,
+                                    message="Policy change requires independent maintainer review; cannot self-approve"))
+    return findings
+
+
+def grimp_check(root, modules, edges):
+    import grimp
+
+    packages = [name for name, m in modules.items()
+                if m["package"] and "." not in name and name != "__init__"]
+    previous = list(sys.path)
+    try:
+        sys.path.insert(0, str(root / "src"))
+        graph = grimp.build_graph(*packages, include_external_packages=False,
+                                  exclude_type_checking_imports=False, cache_dir=None)
+    finally:
+        sys.path[:] = previous
+    if not set(graph.modules) <= set(modules):
+        raise QualityError("Grimp discovered modules omitted by AST collection")
+    missing = [(source, target) for source in graph.modules
+               for target in graph.find_modules_directly_imported_by(source)
+               if target not in edges[source]]
+    if missing:
+        raise QualityError(f"AST/Grimp import disagreement: {missing}")
+    return len(graph.modules)
+
+
+def type_findings(values, modules, identities, root, scope):
+    blocking, outside = [], []
+    by_path = {m["path"]: name for name, m in modules.items()}
+    for value in values:
+        if value.get("severity") != "error":
+            continue
+        path = Path(value["file"])
+        if path.is_absolute():
+            try:
+                path = path.relative_to(root)
+            except ValueError as exc:
+                raise QualityError("mypy diagnostic outside repository") from exc
+        name = by_path.get(path.as_posix())
+        if name is None:
+            raise QualityError(f"mypy diagnostic has unknown source: {path}")
+        if identities[name] not in scope:
+            outside.append(value)
+            continue
+        module = modules[name]
+        line = value["line"]
+        statements = [n for n in ast.walk(module["tree"])
+                      if isinstance(n, ast.stmt) and n.lineno <= line <= n.end_lineno]
+        if not statements:
+            raise QualityError("Unanchored mypy diagnostic")
+        context = min(statements, key=lambda n: n.end_lineno - n.lineno)
+        blocking.append({
+            "module_id": identities[name], "symbol": symbol_at(module, line),
+            "source_fingerprint": syntax(context), "rule": value["code"],
+            "message_fingerprint": digest(value["message"]),
+            "path": module["path"], "line": line, "message": value["message"],
+        })
+    return blocking, outside
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", choices=("all", *CHECKS), default="all")
+    parser.add_argument("--base-ref", required=True)
+    parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--root", type=Path, default=Path.cwd())
+    parser.add_argument("--test-results", type=Path)
+    args = parser.parse_args(argv)
+    root = args.root.resolve()
+    requested = CHECKS if args.check == "all" else (args.check,)
+    report = {"schema_version": 1, "repository": "Azure/gpt-rag-orchestrator",
+              "base_sha": None, "head_sha": None, "policy_sha": None, "checks": {}}
+    exit_code = 0
+    try:
+        base = git(root, "rev-parse", "--verify", args.base_ref + "^{commit}").strip()
+        head = git(root, "rev-parse", "HEAD").strip()
+        report.update(base_sha=base, head_sha=head)
+        candidate = load_records(root)
+        with tempfile.TemporaryDirectory(prefix="orchestrator-quality-") as directory:
+            trusted = Path(directory)
+            files = git(root, "ls-tree", "-r", "--name-only", base).splitlines()
+            bootstrap = ".quality/policy.json" not in files
+            # Reconstruct data only. Never check out or execute base runtime modules.
+            for path in files:
+                if path.startswith(("src/", ".quality/")) or path in (
+                        "pyproject.toml", ".importlinter", "requirements-quality.txt"):
+                    dest = trusted / path
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_text(git(root, "show", f"{base}:{path}"), encoding="utf-8")
+            records = candidate if bootstrap else load_records(trusted)
+            policy = records["policy.json"]
+            report["policy_sha"] = digest(records)
+            report["bootstrap"] = bootstrap
+            report["toolchain"] = {}
+            for package, pin in policy["toolchain"].items():
+                version = importlib.metadata.version(package)
+                if version != pin:
+                    raise QualityError(f"{package} requires {pin}, found {version}")
+                report["toolchain"][package] = version
+            modules = collect(root, policy["runtime_roots"])
+            before = collect(trusted, policy["runtime_roots"])
+            identities, identity_findings = module_identities(before, modules)
+            scope = set(records["typing-scope.json"]["module_ids"])
+            scope.update(candidate["typing-scope.json"]["module_ids"])
+            scope.update(identities[n] for n in modules if identities[n] not in before)
+            if not scope <= set(identities.values()):
+                identity_findings.append(finding("typing-scope", message="Covered module missing"))
+            report["coverage"] = {
+                "total": len(modules), "blocking": sorted(
+                    m["path"] for n, m in modules.items() if identities[n] in scope),
+                "uncovered": sorted(m["path"] for n, m in modules.items() if identities[n] not in scope),
+            }
+            config_root = root if bootstrap else trusted
+            base_config = tomllib.loads((config_root / "pyproject.toml").read_text())
+            head_config = tomllib.loads((root / "pyproject.toml").read_text())
+            current_handlers = handlers(modules)
+            report["handler_inventory"] = current_handlers
+            for check in requested:
+                start = time.monotonic()
+                found = []
+                details = {}
+                try:
+                    if check == "policy":
+                        if bootstrap:
+                            found.append(finding("bootstrap-review", ".quality/policy.json",
+                                message="No protected base policy exists. Bootstrap requires maintainer review and administrator activation."))
+                        else:
+                            found.extend(policy_changes(root, base, records, candidate))
+                            for tool in ("ruff", "mypy", "importlinter"):
+                                if base_config.get("tool", {}).get(tool) != head_config.get("tool", {}).get(tool):
+                                    found.append(finding("protected-policy", "pyproject.toml",
+                                                         message=f"{tool} configuration changed"))
+                        found.extend(identity_findings)
+                        found.extend(source_policy(before, modules, identities, scope))
+                        for path in (root / "src").rglob("*"):
+                            if path.name in ("pyproject.toml", "mypy.ini", ".mypy.ini",
+                                             "ruff.toml", ".ruff.toml", ".importlinter") or path.suffix == ".pyi":
+                                found.append(finding("nested-policy", path.relative_to(root).as_posix(),
+                                                     message="Nested quality configuration is not permitted"))
+                    elif check == "architecture":
+                        edges, found = architecture(modules, policy["contracts"])
+                        details["grimp_modules"] = grimp_check(root, modules, edges)
+                        details["edges"] = sum(map(len, edges.values()))
+                        env = {**os.environ, "PYTHONPATH": str(root / "src")}
+                        tool = Path(sys.executable).parent / (
+                            "lint-imports.exe" if os.name == "nt" else "lint-imports")
+                        result = run([str(tool), "--config", str(config_root / ".importlinter"),
+                                      "--no-cache"], cwd=root, env=env)
+                        if result.returncode not in (0, 1):
+                            raise QualityError("Import Linter execution failed")
+                        if result.returncode:
+                            found.append(finding("import-linter", message=result.stdout[-3000:]))
+                    elif check == "exceptions":
+                        found = check_exceptions(current_handlers, records["exceptions.json"]["entries"],
+                                                 evidence_tests(args.test_results))
+                        details["exception_ids_used"] = [
+                            r["id"] for r in records["exceptions.json"]["entries"]
+                            if not any(f.get("message", "").endswith(r["id"]) for f in found)]
+                    elif check == "lint":
+                        approved = approved_handler_sites(
+                            current_handlers, records["exceptions.json"]["entries"],
+                            evidence_tests(args.test_results))
+                        values = tool_json(run([
+                            sys.executable, "-m", "ruff", "check", "--no-cache",
+                            "--config", str(config_root / "pyproject.toml"),
+                            "--output-format", "json", *[m["path"] for m in modules.values()],
+                        ], cwd=root), "ruff")
+                        for value in values:
+                            path = Path(value["filename"]).relative_to(root).as_posix()
+                            if (value["code"] in ("BLE001", "E722")
+                                    and (path, value["location"]["row"]) in approved):
+                                continue
+                            found.append(finding(value["code"], path, value["location"]["row"],
+                                                 value["message"]))
+                    elif check == "typing":
+                        values = tool_json(run([
+                            sys.executable, "-m", "mypy", "--config-file",
+                            str(config_root / "pyproject.toml"), "--no-incremental",
+                            "--output", "json", *report["coverage"]["blocking"],
+                        ], cwd=root), "mypy")
+                        blocking, outside = type_findings(values, modules, identities, root, scope)
+                        baseline = candidate["typing-baseline.json"]["entries"]
+                        trusted_baseline = records["typing-baseline.json"]["entries"]
+                        # Candidate additions are never allowances, even if policy runs separately.
+                        baseline = [entry for entry in baseline if entry in trusted_baseline]
+                        found = ratchet(blocking, baseline)
+                        details.update(diagnostics=blocking, outside_scope_diagnostics=outside,
+                                       baseline_entries=len(candidate["typing-baseline.json"]["entries"]))
+                    report["checks"][check] = {
+                        "status": "violations" if found else "passed",
+                        "findings": found, "duration_seconds": round(time.monotonic() - start, 3),
+                        **details,
+                    }
+                    exit_code = max(exit_code, int(bool(found)))
+                except (QualityError, ValueError, OSError, KeyError, TypeError) as exc:
+                    report["checks"][check] = {"status": "error", "message": str(exc)}
+                    exit_code = 2
+    except (QualityError, ValueError, OSError, KeyError, TypeError,
+            importlib.metadata.PackageNotFoundError) as exc:
+        for check in requested:
+            report["checks"].setdefault(check, {"status": "error", "message": str(exc)})
+        exit_code = 2
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(json.dumps(seal_report(report), indent=2) + "\n", encoding="utf-8")
+    for check, result in report["checks"].items():
+        print(f"{check}: {result['status']} ({len(result.get('findings', []))} findings)")
+        if result.get("message"):
+            print(result["message"])
+    return exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

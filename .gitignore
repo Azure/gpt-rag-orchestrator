@@ -169,6 +169,9 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+.ruff_cache/
+.artifacts/
+.quality-base/
 .dmypy.json
 dmypy.json
 
