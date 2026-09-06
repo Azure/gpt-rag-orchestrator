@@ -175,6 +175,17 @@ The initial debt baseline is empty. Debt is matched by individual source,
 symbol, diagnostic and multiplicity, not totals. Unambiguous unchanged moves
 retain identity; ambiguous moves/deletions require review.
 
+The protected `module-surfaces.json` classifies every runtime module with a
+stable id, current path/import name, owning area, public exports, private
+modules, exact allowed importers, compatibility aliases, typing status,
+responsibilities and immutable source revision. Its current-path records are
+separate from `policy.json`'s immutable adoption names: editing an inventory
+must not reclassify newly covered code as legacy. Source checks reject missing
+or duplicate ownership, stale exports/aliases, unsupported consumers and
+unverifiable source provenance. Surface changes require the same independent
+policy review; they cannot self-authorize new access. Stable ids follow
+successive unchanged moves for annotation, diagnostic and handler ownership.
+
 The AST import graph includes flat modules, namespace packages, local and
 type-only imports. Grimp cross-checks its package overlap; Import Linter
 enforces the package prohibition as well. Connectors/plugins/telemetry cannot

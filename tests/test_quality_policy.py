@@ -513,6 +513,7 @@ def policy_repo(tmp_path):
     (".quality/typing-scope.json", '{"module_ids": ["a"], "schema_version": 1}'),
     (".quality/typing-baseline.json",
      '{"entries": [{"id": "old"}, {"id": "new"}], "schema_version": 1}'),
+    (".quality/module-surfaces.json", '{"entries": [], "schema_version": 1}'),
 ])
 def test_candidate_cannot_bless_checker_baseline_owner_or_scope_weakening(policy_repo, path, text):
     root, base, records = policy_repo
@@ -948,6 +949,8 @@ def test_new_module_stays_covered_across_successive_pr_bases_and_move(tmp_path):
     records = QUALITY["load_records"](root)
     records["policy.json"]["modules"] = ["seed", "legacy"]
     records["typing-scope.json"]["module_ids"] = ["seed"]
+    records["module-surfaces.json"]["entries"] = [
+        surface_record(), surface_record("legacy", typing_status="inventoried")]
     records["exceptions.json"]["entries"] = []
     (tmp_path / ".quality").mkdir()
     for name, value in records.items():
@@ -1006,6 +1009,11 @@ def isolated_policy_repo(tmp_path):
     records = QUALITY["load_records"](root)
     records["policy.json"]["modules"] = ["seed", "pkg", "pkg.child"]
     records["typing-scope.json"]["module_ids"] = ["seed"]
+    records["module-surfaces.json"]["entries"] = [
+        surface_record(public_exports=["f"]),
+        surface_record("pkg", path="src/pkg/__init__.py", typing_status="inventoried"),
+        surface_record("pkg.child", typing_status="inventoried", allowed_importers=["pkg"]),
+    ]
     records["exceptions.json"]["entries"] = []
     (tmp_path / ".quality").mkdir()
     for name, value in records.items():
@@ -1148,3 +1156,122 @@ def test_isolated_tools_still_report_real_source_errors(isolated_policy_repo, ch
     assert proc.returncode == 1, (proc.stdout, proc.stderr, report)
     findings = report["checks"][check]["findings"]
     assert rule in {item.get("identity", {}).get("rule", item["rule"]) for item in findings}
+
+
+def surface_record(name="seed", **overrides):
+    return {
+        "id": name, "path": f"src/{name.replace('.', '/')}.py", "import_name": name,
+        "area": "composition", "public_exports": ["value"], "private_modules": [],
+        "allowed_importers": [], "legacy_aliases": [], "typing_status": "blocking",
+        "responsibilities": "Own the fixture's typed integer value.",
+        "source_revision": "a" * 40, **overrides,
+    }
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda value: value.pop("responsibilities"),
+    lambda value: value.update(extra=True),
+    lambda value: value.update(path="../outside.py"),
+    lambda value: value.update(path="src/../outside.py"),
+    lambda value: value.update(area="unknown"),
+    lambda value: value.update(public_exports=["*"]),
+    lambda value: value.update(public_exports=["value", "value"]),
+    lambda value: value.update(allowed_importers=["*"]),
+    lambda value: value.update(typing_status="ignored"),
+    lambda value: value.update(source_revision="HEAD"),
+])
+def test_module_surface_records_fail_closed(mutation):
+    record = surface_record()
+    mutation(record)
+    with pytest.raises(QUALITY["QualityError"]):
+        QUALITY["validate_surfaces"]([record])
+
+
+@pytest.mark.parametrize("field", ["id", "path", "import_name"])
+def test_module_surface_records_have_unique_owners(field):
+    first, second = surface_record(), surface_record("other")
+    second[field] = first[field]
+    with pytest.raises(QUALITY["QualityError"]):
+        QUALITY["validate_surfaces"]([first, second])
+
+
+def test_surface_identity_survives_successive_moves(tmp_path):
+    before = tree(tmp_path / "before", {"renamed.py": "value: int = 1"})
+    after = tree(tmp_path / "after", {"renamed_again.py": "value: int = 1"})
+    records = [surface_record(import_name="renamed", path="src/renamed.py")]
+    identities, findings = QUALITY["module_identities"](before, after, records)
+    assert not findings
+    assert identities == {"renamed_again": "seed"}
+
+
+def test_surface_inventory_detects_unclassified_modules_and_stale_exports(tmp_path):
+    modules = tree(tmp_path, {"seed.py": "changed: int = 1", "new.py": "value = 1"})
+    findings = QUALITY["surface_findings"](
+        [surface_record()], modules, {"seed": "seed", "new": "new"}, {"seed", "new"})
+    assert {item["rule"] for item in findings} == {"surface-export", "surface-missing"}
+
+
+def test_surface_move_does_not_drop_annotation_ratchet(tmp_path):
+    before = tree(tmp_path / "before", {"renamed.py": "def f() -> int:\n return 1"})
+    after = tree(tmp_path / "after", {"renamed.py": "def f():\n return 1"})
+    records = [surface_record(import_name="renamed", path="src/renamed.py")]
+    identities, _ = QUALITY["module_identities"](before, after, records)
+    findings = QUALITY["source_policy"](before, after, identities, {"seed"}, records)
+    assert {item["rule"] for item in findings} == {"annotation-removed"}
+
+
+def test_surface_move_cannot_duplicate_stable_identity(tmp_path):
+    before = tree(tmp_path / "before", {"renamed.py": "value: int = 1"})
+    after = tree(tmp_path / "after", {"renamed.py": "value: int = 1", "seed.py": "other = 2"})
+    records = [surface_record(import_name="renamed", path="src/renamed.py")]
+    _, findings = QUALITY["module_identities"](before, after, records)
+    assert {item["rule"] for item in findings} == {"module-identity"}
+
+
+def test_surface_move_preserves_exact_exception_owner(tmp_path):
+    modules = tree(tmp_path, {"renamed.py": "try:\n work()\nexcept Exception:\n raise"})
+    inventory = QUALITY["handlers"](modules, {"renamed": "seed"})
+    assert inventory[0]["module_id"] == "seed"
+
+
+@pytest.mark.parametrize("overrides,rule", [
+    ({"legacy_aliases": ["missing.value"]}, "surface-alias"),
+    ({"legacy_aliases": ["alias.missing"]}, "surface-alias"),
+    ({"private_modules": ["unrelated._secret"]}, "surface-private"),
+    ({"allowed_importers": ["missing"]}, "surface-importer"),
+    ({"typing_status": "inventoried"}, "surface-typing"),
+])
+def test_surface_relationships_and_typing_are_source_backed(tmp_path, overrides, rule):
+    modules = tree(tmp_path, {"seed.py": "value: int = 1", "alias.py": "from seed import value"})
+    records = [surface_record(**overrides), surface_record("alias", typing_status="inventoried")]
+    findings = QUALITY["surface_findings"](records, modules, {n: n for n in modules}, {"seed"})
+    assert rule in {item["rule"] for item in findings}
+
+
+def test_surface_declared_consumers_and_public_boundary_are_enforced(tmp_path):
+    modules = tree(tmp_path, {"seed.py": "value = 1\ninternal = 2",
+                              "consumer.py": "from seed import internal"})
+    records = [surface_record(), surface_record("consumer", public_exports=[])]
+    _, findings = QUALITY["architecture"](modules, rules(), surfaces=records)
+    assert {item["rule"] for item in findings} == {"surface-consumer", "surface-access"}
+
+
+def test_surface_cannot_claim_unrelated_private_module(tmp_path):
+    modules = tree(tmp_path, {"seed.py": "value = 1", "unrelated/_secret.py": "value = 2"})
+    records = [surface_record(private_modules=["unrelated._secret"]),
+               surface_record("unrelated._secret", typing_status="inventoried")]
+    findings = QUALITY["surface_findings"](records, modules, {n: n for n in modules}, {"seed"})
+    assert {item["rule"] for item in findings} == {"surface-private"}
+
+
+def test_source_provenance_requires_real_export_in_frozen_revision(isolated_policy_repo):
+    root = isolated_policy_repo
+    revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                              text=True, capture_output=True).stdout.strip()
+    record = surface_record(public_exports=["f"], source_revision=revision)
+    assert not QUALITY["surface_provenance"](root, [record])
+    record["public_exports"] = ["missing"]
+    assert QUALITY["surface_provenance"](root, [record])[0]["rule"] == "surface-provenance"
+    record["source_revision"] = "a" * 40
+    with pytest.raises(QUALITY["QualityError"]):
+        QUALITY["surface_provenance"](root, [record])

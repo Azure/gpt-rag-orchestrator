@@ -29,7 +29,8 @@ import xml.etree.ElementTree as ET
 CHECKS = ("lint", "typing", "architecture", "exceptions", "policy")
 REPOSITORY = "Azure/gpt-rag-orchestrator"
 REQUIRED_JOBS = (*CHECKS, "tests", "frontend")
-RECORDS = ("policy.json", "typing-scope.json", "typing-baseline.json", "exceptions.json")
+RECORDS = ("policy.json", "module-surfaces.json", "typing-scope.json",
+           "typing-baseline.json", "exceptions.json")
 PROTECTED = (".quality/", ".github/scripts/", ".github/workflows/",
              ".github/CODEOWNERS", "requirements-quality.txt", ".importlinter")
 
@@ -197,6 +198,46 @@ def text_fields(value, keys):
         raise QualityError(f"Expected nonempty text fields: {', '.join(keys)}")
 
 
+def validate_surfaces(entries):
+    if not isinstance(entries, list) or not entries:
+        raise QualityError("Module surfaces must classify runtime modules")
+    fields = ("id", "path", "import_name", "area", "public_exports", "private_modules",
+              "allowed_importers", "legacy_aliases", "typing_status", "responsibilities",
+              "source_revision")
+    areas = {"api", "connectors", "orchestration", "plugins", "strategies",
+             "telemetry", "util", "composition", "contracts"}
+    for entry in entries:
+        exact_keys(entry, fields, "module surface")
+        text_fields(entry, ("id", "path", "import_name", "area", "typing_status",
+                            "responsibilities", "source_revision"))
+        for key in ("id", "import_name"):
+            if not all(part.isidentifier() for part in entry[key].split(".")):
+                raise QualityError("Module surface requires explicit Python identities")
+        if (not entry["path"].startswith("src/") or not entry["path"].endswith(".py")
+                or "\\" in entry["path"]
+                or any(part in ("", ".", "..") for part in entry["path"].split("/"))):
+            raise QualityError("Module surface path must be a canonical runtime source path")
+        source_name = entry["path"][4:-3].removesuffix("/__init__").replace("/", ".")
+        if source_name != entry["import_name"]:
+            raise QualityError("Module surface path and import name disagree")
+        if entry["area"] not in areas or entry["typing_status"] not in ("inventoried", "blocking"):
+            raise QualityError("Unknown module surface area or typing status")
+        for key in ("public_exports", "private_modules", "allowed_importers", "legacy_aliases"):
+            strings(entry[key], key, empty=True)
+            if any(not all(part.isidentifier() for part in name.split("."))
+                   for name in entry[key]):
+                raise QualityError("Module surfaces cannot grant wildcard or indirect access")
+        if not re.fullmatch("[0-9a-f]{40}", entry["source_revision"]):
+            raise QualityError("Module surfaces require immutable source provenance")
+    for key in ("id", "path", "import_name"):
+        if len({entry[key] for entry in entries}) != len(entries):
+            raise QualityError(f"Duplicate module surface {key}")
+    for key in ("private_modules", "legacy_aliases"):
+        claims = [value for entry in entries for value in entry[key]]
+        if len(claims) != len(set(claims)):
+            raise QualityError(f"Duplicate module surface ownership: {key}")
+
+
 def load_records(root):
     result = {}
     for name in RECORDS:
@@ -205,6 +246,9 @@ def load_records(root):
         except (OSError, ValueError) as exc:
             raise QualityError(f"Invalid or missing .quality/{name}") from exc
     policy = result["policy.json"]
+    surfaces = result["module-surfaces.json"]
+    exact_keys(surfaces, ("schema_version", "entries"), "module surfaces")
+    validate_surfaces(surfaces["entries"])
     exact_keys(policy, ("schema_version", "source_revision", "runtime_roots", "modules",
                        "contracts", "toolchain", "required_checks", "review"), "policy")
     text_fields(policy, ("source_revision",))
@@ -337,8 +381,9 @@ def collect(root, roots):
     return modules
 
 
-def module_identities(before, after):
-    identities = {name: name for name in after if name in before}
+def module_identities(before, after, surfaces=()):
+    stable = {entry["import_name"]: entry["id"] for entry in surfaces}
+    identities = {name: stable.get(name, name) for name in after if name in before}
     findings = []
     removed = set(before) - set(after)
     added = set(after) - set(before)
@@ -348,13 +393,68 @@ def module_identities(before, after):
         reverse = [other for other in removed
                    if before[other]["fingerprint"] == before[old]["fingerprint"]]
         if len(matches) == 1 and len(reverse) == 1:
-            identities[matches[0]] = old
+            identities[matches[0]] = stable.get(old, old)
         else:
             findings.append(finding("module-identity", before[old]["path"],
                                     message="Deletion, split or ambiguous move needs policy review"))
     for name in after:
         identities.setdefault(name, name)
+    if len(set(identities.values())) != len(identities):
+        findings.append(finding("module-identity",
+                                message="Multiple modules cannot consume one stable identity"))
     return identities, findings
+
+
+def surface_findings(surfaces, modules, identities, scope):
+    found = []
+    declared = {entry["id"]: entry for entry in surfaces}
+    for name, module in modules.items():
+        entry = declared.get(identities[name])
+        if entry is None:
+            found.append(finding("surface-missing", module["path"],
+                                 message="Classify new runtime module responsibilities and boundary"))
+            continue
+        if entry["path"] != module["path"] or entry["import_name"] != name:
+            found.append(finding("surface-move", module["path"],
+                                 message="Update the one-to-one surface record without changing its id"))
+        if not set(entry["public_exports"]) <= exported_names(module):
+            found.append(finding("surface-export", module["path"],
+                                 message="Declared public export no longer exists"))
+        if (entry["typing_status"] == "blocking") != (entry["id"] in scope):
+            found.append(finding("surface-typing", module["path"],
+                                 message="Surface typing status disagrees with permanent blocking scope"))
+        for private in entry["private_modules"]:
+            if (private not in modules or not within(private, name)
+                    or not any(p.startswith("_") for p in private.split("."))):
+                found.append(finding("surface-private", module["path"],
+                                     message="Declared private module does not exist"))
+        for importer in entry["allowed_importers"]:
+            if importer not in modules:
+                found.append(finding("surface-importer", module["path"],
+                                     message="Declared importer no longer exists"))
+        for alias in entry["legacy_aliases"]:
+            alias_module, _, member = alias.rpartition(".")
+            if alias_module not in modules or member not in exported_names(modules[alias_module]):
+                found.append(finding("surface-alias", module["path"],
+                                     message="Declared compatibility entrypoint does not exist"))
+    for identity in declared.keys() - set(identities.values()):
+        found.append(finding("surface-retired", declared[identity]["path"],
+                             message="Resolve deleted or split module ownership explicitly"))
+    return found
+
+
+def surface_provenance(root, surfaces):
+    findings = []
+    for entry in surfaces:
+        text = git(root, "show", f"{entry['source_revision']}:{entry['path']}")
+        try:
+            tree = ast.parse(text, filename=entry["path"])
+        except SyntaxError as exc:
+            raise QualityError("Invalid Python in surface source provenance") from exc
+        if not set(entry["public_exports"]) <= exported_names({"tree": tree}):
+            findings.append(finding("surface-provenance", entry["path"],
+                                    message="Public surface is absent from declared source revision"))
+    return findings
 
 
 def dotted(node, aliases):
@@ -460,7 +560,7 @@ def exported_names(module):
     return visitor.names
 
 
-def architecture(modules, contracts, passed_tests=frozenset()):
+def architecture(modules, contracts, passed_tests=frozenset(), surfaces=()):
     edges = {name: set() for name in modules}
     locations = {}
     findings = []
@@ -469,6 +569,7 @@ def architecture(modules, contracts, passed_tests=frozenset()):
                   for i in range(1, len(name.split(".")))}
     known = set(modules) | namespaces
     exports = {name: exported_names(module) for name, module in modules.items()}
+    declared = {entry["import_name"]: entry for entry in surfaces}
     used_dynamic = set()
     for name, module in modules.items():
         aliases = aliases_for(module)
@@ -499,6 +600,15 @@ def architecture(modules, contracts, passed_tests=frozenset()):
             if private and not same_owner and not approved:
                 findings.append(finding("private-access", module["path"], node.lineno,
                                         f"{name} cannot access {target}{'.' + member if member else ''}"))
+            if target in declared and target != name:
+                surface = declared[target]
+                if name not in surface["allowed_importers"]:
+                    findings.append(finding("surface-consumer", module["path"], node.lineno,
+                                            f"Undeclared consumer of {target}: {name}"))
+                if (member and not private_member and not same_owner
+                        and member.split(".")[0] not in surface["public_exports"]):
+                    findings.append(finding("surface-access", module["path"], node.lineno,
+                                            f"Undeclared public export {target}.{member.split('.')[0]}"))
 
         for node in ast.walk(module["tree"]):
             if isinstance(node, ast.Import):
@@ -609,7 +719,7 @@ def symbol_at(module, line):
     return ".".join(n.name for n in sorted(owners, key=lambda n: n.lineno)) or "<module>"
 
 
-def handlers(modules):
+def handlers(modules, identities=None):
     result = []
     for name, module in modules.items():
         aliases = aliases_for(module)
@@ -624,7 +734,8 @@ def handlers(modules):
                      "builtins.BaseException", "<bare>", "<indirect>"}
             if any(value in broad for value in types):
                 result.append({
-                    "module_id": name, "path": module["path"], "line": node.lineno,
+                    "module_id": identities[name] if identities is not None else name,
+                    "path": module["path"], "line": node.lineno,
                     "symbol": symbol_at(module, node.lineno),
                     "handler_fingerprint": digest([syntax(node), syntax(parents[node])]),
                     "caught_types": types,
@@ -724,10 +835,11 @@ def annotations(module):
     return result
 
 
-def source_policy(before, after, identities, scope):
+def source_policy(before, after, identities, scope, surfaces=()):
     findings = []
+    stable = {entry["id"]: entry["import_name"] for entry in surfaces}
     for name, module in after.items():
-        old = before.get(identities[name])
+        old = before.get(stable.get(identities[name], identities[name]))
         inherited = suppressions(old) if old else Counter()
         if suppressions(module) - inherited:
             findings.append(finding("suppression", module["path"],
@@ -1035,9 +1147,11 @@ def main(argv=None):
                 report["toolchain"][package] = version
             modules = collect(root, policy["runtime_roots"])
             before = collect(trusted, policy["runtime_roots"])
-            identities, identity_findings = module_identities(before, modules)
+            surfaces = records["module-surfaces.json"]["entries"]
+            identities, identity_findings = module_identities(before, modules, surfaces)
             scope = set(records["typing-scope.json"]["module_ids"])
             scope.update(candidate["typing-scope.json"]["module_ids"])
+            scope.update(entry["id"] for entry in surfaces if entry["typing_status"] == "blocking")
             # The protected adoption inventory is immutable across successive PR bases.
             scope.update(identities[n] for n in modules
                          if n not in policy["modules"] or identities[n] not in policy["modules"])
@@ -1060,7 +1174,7 @@ def main(argv=None):
             (analysis / "pyproject.toml").write_text(
                 (config_root / "pyproject.toml").read_text(), encoding="utf-8")
             (analysis / ".importlinter").write_text(import_config, encoding="utf-8")
-            current_handlers = handlers(modules)
+            current_handlers = handlers(modules, identities)
             report["handler_inventory"] = current_handlers
             for check in requested:
                 start = time.monotonic()
@@ -1078,7 +1192,10 @@ def main(argv=None):
                                     found.append(finding("protected-policy", "pyproject.toml",
                                                          message=f"{tool} configuration changed"))
                         found.extend(identity_findings)
-                        found.extend(source_policy(before, modules, identities, scope))
+                        found.extend(surface_findings(candidate["module-surfaces.json"]["entries"],
+                                                      modules, identities, scope))
+                        found.extend(surface_provenance(root, candidate["module-surfaces.json"]["entries"]))
+                        found.extend(source_policy(before, modules, identities, scope, surfaces))
                         for path in (root / "src").rglob("*"):
                             if path.name in ("pyproject.toml", "mypy.ini", ".mypy.ini",
                                              "ruff.toml", ".ruff.toml", ".importlinter") or path.suffix == ".pyi":
@@ -1086,7 +1203,7 @@ def main(argv=None):
                                                      message="Nested quality configuration is not permitted"))
                     elif check == "architecture":
                         edges, found = architecture(modules, policy["contracts"],
-                                                    evidence_tests(args.test_results, root))
+                                                    evidence_tests(args.test_results, root), surfaces)
                         details["grimp_modules"] = grimp_check(root, modules, edges)
                         details["edges"] = sum(map(len, edges.values()))
                         result = static_tool("import-linter", analysis, [
