@@ -24,7 +24,7 @@ from orchestration.turn import (
 from strategies.agent_strategy_factory import AgentStrategyFactory
 from strategies.base_agent_strategy import BaseAgentStrategy
 from dependencies import get_config
-from opentelemetry.trace import SpanKind
+from opentelemetry.trace import SpanKind, Status, StatusCode
 from telemetry import (
     AuditEmitter,
     AuditStatus,
@@ -171,7 +171,14 @@ class Orchestrator:
         *,
         _event_sink: Callable[[TurnOutputEvent], None] | None = None,
     ):
-        with tracer.start_as_current_span('stream_response', kind=SpanKind.SERVER) as span:
+        # Exceptions reach the transport, but provider details must not be
+        # exported automatically in exception events or status descriptions.
+        with tracer.start_as_current_span(
+            'stream_response',
+            kind=SpanKind.SERVER,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
             emitter = AuditEmitter.default()
             span_conversation_id = (
                 emitter.pseudonymize("conversation", self.conversation_id)
@@ -388,6 +395,7 @@ class Orchestrator:
                     )
                 raise
             except Exception:
+                span.set_status(Status(StatusCode.ERROR, "internal_error"))
                 if audit_context is not None:
                     emitter.emit(
                         EventType.OUTCOME_REJECTED,

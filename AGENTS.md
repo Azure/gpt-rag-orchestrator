@@ -210,18 +210,22 @@ try body, catch breadth or handler invalidates the record. No exceptions are
 approved by this bootstrap: existing handlers remain blocking review work.
 Ten exact audit exception proposals document the existing side-effect and
 tool-propagation contracts; their `proposed` status grants no exception.
-One non-audit turn-stream proposal documents generic error-event emission
-followed by unchanged exception propagation, including partial output and
-cancellation evidence. Necessary boundary translation or cleanup can be
+Three non-audit stream proposals document generic error-event emission,
+failed audit/span outcome before propagation, and deduplicated SSE terminal
+translation, including partial output and cancellation evidence.
+Necessary boundary translation or cleanup can be
 proposed individually under the existing public contract; necessity and
 passing evidence do not constitute approval.
 Real provider/consumer characterization distinguishes missing configuration,
 authentication failure, optional defaults and required strategy settings;
 retrieval evidence separately covers keyword fallback, empty provider context
-and the connector's strict/anonymous error contract. The real MafLite-to-turn-
-to-SSE failure path currently emits raw error text and success-shaped audit
-completion, unlike cancellation. These are recorded legacy review gaps, not
-confidentiality-safe behavior or approved exceptions.
+and the connector's strict/anonymous error contract. MafLite and MAF Agent
+Service failures now propagate through the existing typed turn/SSE error
+channel instead of yielding raw exception text as an ordinary answer.
+Actual strategy-chain evidence covers early/partial failure, initialization,
+cancellation, success, failed audit outcomes and an in-memory SDK exporter.
+The enclosing orchestration span and SSE log use constant safe diagnostics;
+this is not a guarantee about every third-party span or legacy diagnostic.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.

@@ -325,146 +325,141 @@ Guidelines:
             else None
         )
 
-        try:
-            user_memory = await self._create_user_memory(user_id)
+        user_memory = await self._create_user_memory(user_id)
 
-            # Initialize search provider if not done
-            if self._search_provider is None:
-                self._search_provider = await self._create_search_provider()
+        # Initialize search provider if not done
+        if self._search_provider is None:
+            self._search_provider = await self._create_search_provider()
 
-            # Read base instructions
-            base_instructions = await self._read_prompt("main")
-            instructions = base_instructions if base_instructions else self.AGENT_INSTRUCTIONS
+        # Read base instructions
+        base_instructions = await self._read_prompt("main")
+        instructions = base_instructions if base_instructions else self.AGENT_INSTRUCTIONS
 
-            # Resolve the shared, reusable Foundry prompt agent (created once via
-            # create_version, then reused on every request and across restarts).
-            provider = await agent_provider_v2.get_provider(self.project_endpoint, self.credential)
-            agent_name = agent_provider_v2.compute_agent_name(
-                "gptrag-maf-agent-service",
-                model=self.model_name,
-                instructions=instructions,
-                tool_names=[],
-                extra={"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else None,
-            )
-            details = await agent_provider_v2.get_or_create_agent_details(
-                provider=provider,
-                name=agent_name,
-                model=self.model_name,
-                instructions=instructions,
-                tools=None,
-                reasoning_effort=self.reasoning_effort,
-            )
+        # Resolve the shared, reusable Foundry prompt agent (created once via
+        # create_version, then reused on every request and across restarts).
+        provider = await agent_provider_v2.get_provider(self.project_endpoint, self.credential)
+        agent_name = agent_provider_v2.compute_agent_name(
+            "gptrag-maf-agent-service",
+            model=self.model_name,
+            instructions=instructions,
+            tool_names=[],
+            extra={"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else None,
+        )
+        details = await agent_provider_v2.get_or_create_agent_details(
+            provider=provider,
+            name=agent_name,
+            model=self.model_name,
+            instructions=instructions,
+            tools=None,
+            reasoning_effort=self.reasoning_effort,
+        )
 
-            # Legacy Assistants thread ids are not valid Responses conversation
-            # ids; drop them before reusing the server thread. Not applicable to
-            # the stateless hosted runtime, which never binds to a
-            # service-managed thread at all.
-            if not self.hosted_runtime:
-                agent_provider_v2.reset_legacy_thread(conv)
+        # Legacy Assistants thread ids are not valid Responses conversation
+        # ids; drop them before reusing the server thread. Not applicable to
+        # the stateless hosted runtime, which never binds to a
+        # service-managed thread at all.
+        if not self.hosted_runtime:
+            agent_provider_v2.reset_legacy_thread(conv)
 
-            context_providers = [user_memory] if user_memory is not None else []
-            if self._search_provider:
-                context_providers.append(self._search_provider)
+        context_providers = [user_memory] if user_memory is not None else []
+        if self._search_provider:
+            context_providers.append(self._search_provider)
 
-            # Wrap the cached agent version into a ChatAgent (no HTTP call). The
-            # underlying client reuses the shared project client and does NOT
-            # close it on exit, so the singleton survives across requests.
-            async with provider.as_agent(
-                details,
-                context_provider=(
-                    CompositeContextProvider(context_providers)
-                    if context_providers
-                    else None
-                ),
-            ) as agent:
+        # Wrap the cached agent version into a ChatAgent (no HTTP call). The
+        # underlying client reuses the shared project client and does NOT
+        # close it on exit, so the singleton survives across requests.
+        async with provider.as_agent(
+            details,
+            context_provider=(
+                CompositeContextProvider(context_providers)
+                if context_providers
+                else None
+            ),
+        ) as agent:
 
-                if self.hosted_runtime:
-                    # Stateless hosted path: zero managed-Conversations
-                    # data-plane operations. No service-managed thread is
-                    # created, read, or resumed -- there is no service
-                    # identity a caller-selected conversation id could
-                    # redirect. The complete ordered history already supplied
-                    # by the authenticated caller is replayed as plain input
-                    # messages on a purely local, ephemeral thread, and
-                    # ``store: False`` guarantees the turn is never persisted
-                    # server-side either.
-                    thread = agent.get_new_thread()
-                    run_input = hosted_strategies.build_stateless_messages(
-                        conv.get("messages", []), user_message,
-                    )
-                    run_options = {
-                        "max_tokens": self.max_completion_tokens,
-                        "store": False,
-                    }
+            if self.hosted_runtime:
+                # Stateless hosted path: zero managed-Conversations
+                # data-plane operations. No service-managed thread is
+                # created, read, or resumed -- there is no service
+                # identity a caller-selected conversation id could
+                # redirect. The complete ordered history already supplied
+                # by the authenticated caller is replayed as plain input
+                # messages on a purely local, ephemeral thread, and
+                # ``store: False`` guarantees the turn is never persisted
+                # server-side either.
+                thread = agent.get_new_thread()
+                run_input = hosted_strategies.build_stateless_messages(
+                    conv.get("messages", []), user_message,
+                )
+                run_options = {
+                    "max_tokens": self.max_completion_tokens,
+                    "store": False,
+                }
+            else:
+                # Get or create thread
+                thread_id = conv.get("thread_id")
+                if thread_id:
+                    # Resume existing thread
+                    thread = agent.get_new_thread(service_thread_id=thread_id)
                 else:
-                    # Get or create thread
-                    thread_id = conv.get("thread_id")
-                    if thread_id:
-                        # Resume existing thread
-                        thread = agent.get_new_thread(service_thread_id=thread_id)
-                    else:
-                        # Create new thread
-                        thread = agent.get_new_thread()
-                        # service_thread_id may be None until first run; we'll update after
-                        if thread.service_thread_id:
-                            conv["thread_id"] = thread.service_thread_id
-                    run_input = user_message
-                    run_options = {"max_tokens": self.max_completion_tokens}
+                    # Create new thread
+                    thread = agent.get_new_thread()
+                    # service_thread_id may be None until first run; we'll update after
+                    if thread.service_thread_id:
+                        conv["thread_id"] = thread.service_thread_id
+                run_input = user_message
+                run_options = {"max_tokens": self.max_completion_tokens}
 
-                # If new session with existing profile, provide summary
-                if (
-                    is_new_session
-                    and user_memory is not None
-                    and user_memory.has_minimum_context()
-                ):
-                    conv["session_initialized"] = True
-                    session_summary = self._build_session_summary(user_memory)
-                    yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
-                elif is_new_session:
-                    conv["session_initialized"] = True
+            # If new session with existing profile, provide summary
+            if (
+                is_new_session
+                and user_memory is not None
+                and user_memory.has_minimum_context()
+            ):
+                conv["session_initialized"] = True
+                session_summary = self._build_session_summary(user_memory)
+                yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
+            elif is_new_session:
+                conv["session_initialized"] = True
 
-                # Stream the agent response. ``reasoning`` is baked into the agent
-                # definition (definition-level setting, rejected as a per-run
-                # option); only ``max_tokens`` is passed per run, with a one-shot
-                # fallback to no options if the service ever rejects it too.
-                full_response = ""
-                event_translator = AgentEventTranslator()
-                async for chunk in agent_provider_v2.stream_agent_run(
-                    agent,
-                    run_input,
-                    thread=thread,
-                    options=run_options,
-                ):
-                    for event in event_translator.translate(chunk):
-                        yield event
-                    if chunk.text:
-                        full_response += chunk.text
-                        yield chunk.text
+            # Stream the agent response. ``reasoning`` is baked into the agent
+            # definition (definition-level setting, rejected as a per-run
+            # option); only ``max_tokens`` is passed per run, with a one-shot
+            # fallback to no options if the service ever rejects it too.
+            full_response = ""
+            event_translator = AgentEventTranslator()
+            async for chunk in agent_provider_v2.stream_agent_run(
+                agent,
+                run_input,
+                thread=thread,
+                options=run_options,
+            ):
+                for event in event_translator.translate(chunk):
+                    yield event
+                if chunk.text:
+                    full_response += chunk.text
+                    yield chunk.text
 
-                # Capture thread_id if it was set during the run (classic
-                # runtime only; the hosted runtime never persists one).
-                if (
-                    not self.hosted_runtime
-                    and not conv.get("thread_id")
-                    and thread.service_thread_id
-                ):
-                    conv["thread_id"] = thread.service_thread_id
+            # Capture thread_id if it was set during the run (classic
+            # runtime only; the hosted runtime never persists one).
+            if (
+                not self.hosted_runtime
+                and not conv.get("thread_id")
+                and thread.service_thread_id
+            ):
+                conv["thread_id"] = thread.service_thread_id
 
-                # Store in conversation history
-                if "messages" not in conv:
-                    conv["messages"] = []
-                conv["messages"].append({"role": "user", "text": user_message})
-                conv["messages"].append({"role": "assistant", "text": full_response})
+            # Store in conversation history
+            if "messages" not in conv:
+                conv["messages"] = []
+            conv["messages"].append({"role": "user", "text": user_message})
+            conv["messages"].append({"role": "assistant", "text": full_response})
 
-            # Flush any pending background profile extraction before persisting so
-            # the saved profile reflects this turn (parity with MafLiteStrategy).
-            await self._persist_user_memory(user_id, user_memory)
+        # Flush any pending background profile extraction before persisting so
+        # the saved profile reflects this turn (parity with MafLiteStrategy).
+        await self._persist_user_memory(user_id, user_memory)
 
-            logging.info(f"[MafAgentServiceStrategy] Flow completed in {round(time.time() - flow_start, 2)}s")
-
-        except Exception as e:
-            logging.error(f"[MafAgentServiceStrategy] Agent flow failed: {e}", exc_info=True)
-            yield f"I encountered an error processing your request: {str(e)}. Please try again."
+        logging.info(f"[MafAgentServiceStrategy] Flow completed in {round(time.time() - flow_start, 2)}s")
 
     async def clear_session(self):
         """Clear the current session state (but preserve persisted profile)."""

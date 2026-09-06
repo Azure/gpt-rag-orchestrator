@@ -550,7 +550,7 @@ async def orchestrator_endpoint(
                 if chunk is not None:
                     yield chunk
         except Exception:
-            logging.exception("Error in SSE generator")
+            logging.error("Error in SSE generator (internal_error)")
             if not error_event_emitted:
                 yield "event: error\ndata: An internal server error occurred.\n\n"
 

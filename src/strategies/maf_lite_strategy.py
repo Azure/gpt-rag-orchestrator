@@ -367,113 +367,108 @@ class MafLiteStrategy(BaseAgentStrategy):
             else None
         )
 
-        try:
-            chat_client = self._get_or_create_chat_client()
+        chat_client = self._get_or_create_chat_client()
 
-            # Load or initialise user-profile memory
-            await self._ensure_user_memory(user_id, chat_client)
+        # Load or initialise user-profile memory
+        await self._ensure_user_memory(user_id, chat_client)
 
-            # Initialize search provider if not done
-            if self._search_provider is None:
-                t0 = time.time()
-                self._search_provider = await self._create_search_provider()
-                logging.info("[MafLiteStrategy] search_provider_init: %.2fs (hybrid=%s)", time.time() - t0, bool(self.embedding_deployment))
-
-            history = conv.get("messages", [])
-
-            # Classify intent — skip search when retrieval is not needed.
+        # Initialize search provider if not done
+        if self._search_provider is None:
             t0 = time.time()
-            intent = await self._classify_intent(user_message, history=history)
-            logging.info("[MafLiteStrategy] intent_classification: %.2fs", time.time() - t0)
+            self._search_provider = await self._create_search_provider()
+            logging.info("[MafLiteStrategy] search_provider_init: %.2fs (hybrid=%s)", time.time() - t0, bool(self.embedding_deployment))
 
-            # Build context providers
-            context_providers = (
-                [self._user_memory]
-                if self._user_memory is not None
-                else []
-            )
-            if intent == "question" and self._search_provider:
-                context_providers.append(self._search_provider)
-            elif intent == "greeting":
-                logging.info("[MafLiteStrategy] Greeting detected — skipping search")
-            elif intent == "no_retrieval":
-                logging.info("[MafLiteStrategy] No-retrieval follow-up detected — skipping search")
-            else:
-                logging.warning("[MafLiteStrategy] No search provider — agent will answer without grounding")
-            logging.info("[MafLiteStrategy] context_providers: %d", len(context_providers))
+        history = conv.get("messages", [])
 
-            # Read base instructions (cached after first read)
-            if self._cached_instructions is None:
-                base_instructions = await self._read_prompt("main")
-                self._cached_instructions = base_instructions if base_instructions else self.AGENT_INSTRUCTIONS
-            instructions = self._cached_instructions
+        # Classify intent — skip search when retrieval is not needed.
+        t0 = time.time()
+        intent = await self._classify_intent(user_message, history=history)
+        logging.info("[MafLiteStrategy] intent_classification: %.2fs", time.time() - t0)
 
-            # Create agent and stream — no server-side thread needed
-            async with ChatAgent(
-                chat_client=chat_client,
-                instructions=instructions,
-                context_provider=(
-                    CompositeContextProvider(context_providers)
-                    if context_providers
-                    else None
-                ),
-            ) as agent:
+        # Build context providers
+        context_providers = (
+            [self._user_memory]
+            if self._user_memory is not None
+            else []
+        )
+        if intent == "question" and self._search_provider:
+            context_providers.append(self._search_provider)
+        elif intent == "greeting":
+            logging.info("[MafLiteStrategy] Greeting detected — skipping search")
+        elif intent == "no_retrieval":
+            logging.info("[MafLiteStrategy] No-retrieval follow-up detected — skipping search")
+        else:
+            logging.warning("[MafLiteStrategy] No search provider — agent will answer without grounding")
+        logging.info("[MafLiteStrategy] context_providers: %d", len(context_providers))
 
-                thread = agent.get_new_thread()
+        # Read base instructions (cached after first read)
+        if self._cached_instructions is None:
+            base_instructions = await self._read_prompt("main")
+            self._cached_instructions = base_instructions if base_instructions else self.AGENT_INSTRUCTIONS
+        instructions = self._cached_instructions
 
-                # Session welcome with existing profile
-                if (
-                    is_new_session
-                    and self._user_memory is not None
-                    and self._user_memory.has_minimum_context()
-                ):
-                    conv["session_initialized"] = True
-                    session_summary = self._build_session_summary()
-                    yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
-                elif is_new_session:
-                    conv["session_initialized"] = True
+        # Create agent and stream — no server-side thread needed
+        async with ChatAgent(
+            chat_client=chat_client,
+            instructions=instructions,
+            context_provider=(
+                CompositeContextProvider(context_providers)
+                if context_providers
+                else None
+            ),
+        ) as agent:
 
-                # Build message list with conversation history
-                input_messages: list[ChatMessage] = []
-                for msg in history[-self.history_max_messages:]:
-                    role = msg.get("role", "user")
-                    text = msg.get("text") or msg.get("content") or ""
-                    if text:
-                        input_messages.append(ChatMessage(role=role, text=text))
-                input_messages.append(ChatMessage(role="user", text=user_message))
-                logging.info("[MafLiteStrategy] history_messages: %d (total input: %d)", len(history), len(input_messages))
+            thread = agent.get_new_thread()
 
-                # Stream the agent response
-                stream_start = time.time()
-                full_response = ""
-                event_translator = AgentEventTranslator()
-                async for chunk in agent.run_stream(
-                    input_messages,
-                    thread=thread,
-                    options={"max_completion_tokens": self.max_completion_tokens, "reasoning_effort": self.reasoning_effort},
-                ):
-                    for event in event_translator.translate(chunk):
-                        yield event
-                    if chunk.text:
-                        full_response += chunk.text
-                        yield chunk.text
-                logging.info("[MafLiteStrategy] agent_stream: %.2fs (response_len=%d)", time.time() - stream_start, len(full_response))
+            # Session welcome with existing profile
+            if (
+                is_new_session
+                and self._user_memory is not None
+                and self._user_memory.has_minimum_context()
+            ):
+                conv["session_initialized"] = True
+                session_summary = self._build_session_summary()
+                yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
+            elif is_new_session:
+                conv["session_initialized"] = True
 
-                # Persist conversation history locally
-                if "messages" not in conv:
-                    conv["messages"] = []
-                conv["messages"].append({"role": "user", "text": user_message})
-                conv["messages"].append({"role": "assistant", "text": full_response})
+            # Build message list with conversation history
+            input_messages: list[ChatMessage] = []
+            for msg in history[-self.history_max_messages:]:
+                role = msg.get("role", "user")
+                text = msg.get("text") or msg.get("content") or ""
+                if text:
+                    input_messages.append(ChatMessage(role=role, text=text))
+            input_messages.append(ChatMessage(role="user", text=user_message))
+            logging.info("[MafLiteStrategy] history_messages: %d (total input: %d)", len(history), len(input_messages))
 
-            logging.info("[MafLiteStrategy] === Flow done === total: %.2fs", time.time() - flow_start)
+            # Stream the agent response
+            stream_start = time.time()
+            full_response = ""
+            event_translator = AgentEventTranslator()
+            async for chunk in agent.run_stream(
+                input_messages,
+                thread=thread,
+                options={"max_completion_tokens": self.max_completion_tokens, "reasoning_effort": self.reasoning_effort},
+            ):
+                for event in event_translator.translate(chunk):
+                    yield event
+                if chunk.text:
+                    full_response += chunk.text
+                    yield chunk.text
+            logging.info("[MafLiteStrategy] agent_stream: %.2fs (response_len=%d)", time.time() - stream_start, len(full_response))
 
-            # Post-flow: flush + save as background task so SSE stream closes immediately
-            if self.profile_memory_enabled and user_id is not None:
-                asyncio.create_task(self._post_flow_cleanup(user_id))
+            # Persist conversation history locally
+            if "messages" not in conv:
+                conv["messages"] = []
+            conv["messages"].append({"role": "user", "text": user_message})
+            conv["messages"].append({"role": "assistant", "text": full_response})
 
-        except Exception as e:
-            logging.error(f"[MafLiteStrategy] Agent flow failed: {e}", exc_info=True)
-            yield f"I encountered an error processing your request: {str(e)}. Please try again."
+        logging.info("[MafLiteStrategy] === Flow done === total: %.2fs", time.time() - flow_start)
+
+        # Post-flow: flush + save as background task so SSE stream closes immediately
+        if self.profile_memory_enabled and user_id is not None:
+            asyncio.create_task(self._post_flow_cleanup(user_id))
 
     # ------------------------------------------------------------------
     # Post-flow cleanup (runs as background task)

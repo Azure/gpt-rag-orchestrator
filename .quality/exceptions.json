@@ -191,6 +191,58 @@
       ],
       "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
       "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "stream-failed-audit-before-propagation",
+      "module_id": "orchestration.orchestrator",
+      "symbol": "Orchestrator.stream_response",
+      "path": "src/orchestration/orchestrator.py",
+      "line": 397,
+      "handler_fingerprint": "5e0c9488783f92edf25e83644e9400cf4f705e2458774ac501ffebd0ee07a92c",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Orchestration terminal outcome across runtime strategy implementations",
+      "reason": "Arbitrary strategy failures require failed audit outcome and safe span status before unchanged propagation. A provider-specific tuple cannot cover all strategy failures. Cancellation remains a distinct preceding handler.",
+      "failure_outcome": "propagation",
+      "diagnostic_path": "Constant internal_error span status; outcome.rejected and request.failed audit records; automatic exception/span-description capture disabled for this enclosing span. No global provider telemetry guarantee.",
+      "evidence_tests": [
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[failure-False-MafLiteStrategy]",
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[failure-False-MafAgentServiceStrategy]",
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[failure-True-MafLiteStrategy]",
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[failure-True-MafAgentServiceStrategy]",
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[initialization_failure-False-MafLiteStrategy]",
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[initialization_failure-False-MafAgentServiceStrategy]",
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[cancellation-True-MafLiteStrategy]",
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[cancellation-True-MafAgentServiceStrategy]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; parent implemented the bounded runtime correction, not an active handler exemption.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "sse-safe-terminal-error-translation",
+      "module_id": "main",
+      "symbol": "orchestrator_endpoint.sse_event_generator",
+      "path": "src/main.py",
+      "line": 552,
+      "handler_fingerprint": "425ec5f38cdaa5fef635a7b9bed767bec4fad5f2d674700b04bdb9e68e46df4a",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Already-started classic SSE response consuming typed orchestration events",
+      "reason": "HTTP status cannot be replaced once streaming begins. Unknown failures must terminate with the existing generic error frame, deduplicated when stream_turn already emitted it, rather than raw assistant text or an unframed transport failure.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Constant bounded internal_error log and exactly one existing SSE error frame; no raw exception or traceback. Cancellation propagates without an error frame.",
+      "evidence_tests": [
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[failure-False-MafLiteStrategy]",
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[failure-False-MafAgentServiceStrategy]",
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[failure-True-MafLiteStrategy]",
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[failure-True-MafAgentServiceStrategy]",
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[initialization_failure-False-MafLiteStrategy]",
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[initialization_failure-False-MafAgentServiceStrategy]",
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[cancellation-True-MafLiteStrategy]",
+        "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[cancellation-True-MafAgentServiceStrategy]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact boundary proposal grants no permission.",
+      "review_by_stage": "before-quality-gate-activation"
     }
   ]
 }
