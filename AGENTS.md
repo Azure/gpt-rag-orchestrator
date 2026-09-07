@@ -334,6 +334,17 @@ HTTPException statuses, cancellation, role gates and the orchestrator write
 label remain. Writes before and after a failed key may persist while PUT
 returns 500; refresh failure after a durable write also returns 500 and is
 not rollback. Failure diagnostics are bounded within the existing shapes.
+Search's three optional OBO reads now use the real provider's existing
+allow-none/retry semantics without hiding unexpected provider/conversion bugs.
+Four inactive proposals separately retain constructor-to-term fallback,
+unknown-index probes that cannot cache an empty bypass, strict/anonymous/MCP
+Foundry outcomes and the legacy nullable filepath helper. No maintained
+caller was found for that last helper; its compatibility evidence is not a
+primary citation-consumer guarantee. Document HTTP failure diagnostics omit
+provider response bodies. Early embedding/OBO failures no longer mask their
+original outcome with an unbound token variable; strict propagation and the
+explicit anonymous search_failed result remain. The shared mock configuration
+getter now accepts the real default/allow_none/type parameters.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.

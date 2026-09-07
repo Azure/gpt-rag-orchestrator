@@ -86,7 +86,11 @@
         "tests/test_retrieval_logging.py::test_connector_failure_preserves_full_error_contract_and_trimming_inputs[strict]",
         "tests/test_retrieval_logging.py::test_connector_failure_preserves_full_error_contract_and_trimming_inputs[anonymous]",
         "tests/test_retrieval_logging.py::test_403_emits_auth_failure_marker_at_error",
-        "tests/test_retrieval_logging.py::test_generic_error_emits_error_marker_at_warning"
+        "tests/test_retrieval_logging.py::test_generic_error_emits_error_marker_at_warning",
+        "tests/test_search_boundary_dispositions.py::test_failure_before_token_assignment_preserves_original_retrieval_contract[embedding-strict]",
+        "tests/test_search_boundary_dispositions.py::test_failure_before_token_assignment_preserves_original_retrieval_contract[embedding-anonymous]",
+        "tests/test_search_boundary_dispositions.py::test_failure_before_token_assignment_preserves_original_retrieval_contract[obo-strict]",
+        "tests/test_search_boundary_dispositions.py::test_failure_before_token_assignment_preserves_original_retrieval_contract[obo-anonymous]"
       ],
       "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; narrower OBO diagnostics and other connector entrypoints remain separate review work.",
       "review_by_stage": "before-quality-gate-activation"
@@ -723,6 +727,98 @@
         "tests/test_http_boundary_dispositions.py::test_known_auth_http_status_is_preserved[403-history]"
       ],
       "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; principal partitioning and role checks are not relaxed.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "search-initialization-term-compatibility",
+      "module_id": "connectors.search",
+      "symbol": "SearchClient.__init__",
+      "path": "src/connectors/search.py",
+      "line": 159,
+      "handler_fingerprint": "6ac1d4ffa50e939771cdb5eab84725a90372bee67d1f1c343c67c1c68394fa09",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Existing term-search fallback when optional embedding client initialization fails",
+      "reason": "The constructor intentionally retains a usable term-search client when the embedding provider cannot initialize. Actual constructor-to-search evidence proves the question, conversation filter and delegated token still reach Search, with no vector query after this fallback. This is retrieval-mode compatibility, not a best-effort audit side effect.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Bounded exception-class initialization warning followed by the existing term-fallback warning. Cancellation propagates; successful initialization still uses embeddings.",
+      "evidence_tests": [
+        "tests/test_search_boundary_dispositions.py::test_model_initialization_fallback_keeps_real_term_retrieval[failure]",
+        "tests/test_search_boundary_dispositions.py::test_model_initialization_fallback_keeps_real_term_retrieval[cancelled]",
+        "tests/test_search_boundary_dispositions.py::test_model_initialization_fallback_keeps_real_term_retrieval[success]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active approval or guarantee that term and vector grounding are equivalent.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "search-index-probe-unknown-is-not-empty",
+      "module_id": "connectors.search",
+      "symbol": "SearchClient.is_index_empty",
+      "path": "src/connectors/search.py",
+      "line": 523,
+      "handler_fingerprint": "3423933e84ae4e013c70070b463e6c8f11f63d71eda5e8691ffd9e69711b4770",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Empty-index optimization probe",
+      "reason": "Unknown probe results return False without caching an empty-index result. The maintained single-agent caller uses True to bypass retrieval, so failure must not create a false empty bypass. Provider, token and malformed-response failures share this conservative probe contract; it is not evidence that retrieval itself succeeded.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Exception-class probe failure log without provider details; cancellation propagates. Only successful probes populate the existing cache.",
+      "evidence_tests": [
+        "tests/test_search_boundary_dispositions.py::test_index_probe_failure_never_caches_a_false_empty_bypass[failure]",
+        "tests/test_search_boundary_dispositions.py::test_index_probe_failure_never_caches_a_false_empty_bypass[malformed]",
+        "tests/test_search_boundary_dispositions.py::test_index_probe_failure_never_caches_a_false_empty_bypass[cancelled]",
+        "tests/test_search_boundary_dispositions.py::test_index_probe_failure_never_caches_a_false_empty_bypass[empty]",
+        "tests/test_search_boundary_dispositions.py::test_index_probe_failure_never_caches_a_false_empty_bypass[populated]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this does not approve or redesign legacy global index-cache scope.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "search-foundry-strict-anonymous-mcp-contract",
+      "module_id": "connectors.search",
+      "symbol": "SearchClient._search_knowledge_base_foundry_iq",
+      "path": "src/connectors/search.py",
+      "line": 779,
+      "handler_fingerprint": "ce2d376962cca89fcbd1fd58d05be30e3b7bfce07fb1f3b822ccb81029d987af",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Foundry IQ adapter to the Search JSON result contract",
+      "reason": "Strict failures propagate; anonymous generic failures retain an explicit search_failed result with no fabricated or partial documents. MCP configuration errors always propagate, and enabled MCP credential/source errors propagate even in anonymous mode. Preserve those distinctions across provider and result-mapping failures, not a unified empty-context fallback.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Existing classified marker/severity and credential-type metadata, exception class only. Incoming/delegated tokens, user/conversation context and cancellation remain unchanged.",
+      "evidence_tests": [
+        "tests/test_search_boundary_dispositions.py::test_foundry_wrapper_keeps_exact_failure_and_credential_contract[runtime-strict-False]",
+        "tests/test_search_boundary_dispositions.py::test_foundry_wrapper_keeps_exact_failure_and_credential_contract[runtime-anonymous-False]",
+        "tests/test_search_boundary_dispositions.py::test_foundry_wrapper_keeps_exact_failure_and_credential_contract[configuration-anonymous-False]",
+        "tests/test_search_boundary_dispositions.py::test_foundry_wrapper_keeps_exact_failure_and_credential_contract[credential-anonymous-True]",
+        "tests/test_search_boundary_dispositions.py::test_foundry_wrapper_keeps_exact_failure_and_credential_contract[source-anonymous-True]",
+        "tests/test_search_boundary_dispositions.py::test_foundry_wrapper_keeps_exact_failure_and_credential_contract[malformed-anonymous-True]",
+        "tests/test_search_boundary_dispositions.py::test_foundry_wrapper_keeps_exact_failure_and_credential_contract[cancelled-anonymous-True]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active exception or OBO/MCP permission change.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "search-filepath-nullable-compatibility",
+      "module_id": "connectors.search",
+      "symbol": "SearchClient.fetch_filepath_from_index",
+      "path": "src/connectors/search.py",
+      "line": 836,
+      "handler_fingerprint": "4ab68ef9e9c01179d47897ede04d0c262a39a90e38d9a57c19a90be03949b846",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Legacy nullable filepath lookup helper",
+      "reason": "Retain the existing helper's None-on-unavailable result as well as missing/empty-field outcomes. No maintained source caller was found, so the evidence establishes this public helper's compatibility only, not a primary citation-consumer contract. Removing or redesigning its nullable failure signal requires separate review.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Exception-class helper log; actual document HTTP failures no longer log/embed response bodies. Cancellation and response-context cleanup are preserved.",
+      "evidence_tests": [
+        "tests/test_search_boundary_dispositions.py::test_optional_filepath_helper_retains_nullable_result[failure]",
+        "tests/test_search_boundary_dispositions.py::test_optional_filepath_helper_retains_nullable_result[cancelled]",
+        "tests/test_search_boundary_dispositions.py::test_optional_filepath_helper_retains_nullable_result[missing]",
+        "tests/test_search_boundary_dispositions.py::test_real_filepath_http_failure_never_logs_provider_body[403]",
+        "tests/test_search_boundary_dispositions.py::test_real_filepath_http_failure_never_logs_provider_body[500]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346. Unavailability remains indistinguishable from missing in the returned value; this limitation is not approved.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {

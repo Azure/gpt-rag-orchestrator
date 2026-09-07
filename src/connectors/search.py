@@ -157,7 +157,7 @@ class SearchClient:
                 self.aoai_client = get_genai_client()
                 logging.info("[SearchClient] ✅ GenAIModelClient initialized for embeddings")
             except Exception as e:
-                logging.warning("[SearchClient] ⚠️ Could not initialize GenAIModelClient for embeddings: %s", e)
+                logging.warning("[SearchClient] Could not initialize embeddings (%s)", type(e).__name__)
                 logging.warning("[SearchClient] ⚠️ Falling back to term search only")
                 self.search_approach = "term"
 
@@ -216,23 +216,9 @@ class SearchClient:
 
         This exchanges the incoming API token (user assertion) for a Search-audience token.
         """
-        tenant_id = None
-        client_id = None
-        client_secret = None
-        try:
-            tenant_id = (self.cfg.get_value("OAUTH_AZURE_AD_TENANT_ID", default=None, allow_none=True) or "").strip() or None
-        except Exception:
-            tenant_id = None
-
-        try:
-            client_id = (self.cfg.get_value("OAUTH_AZURE_AD_CLIENT_ID", default=None, allow_none=True) or "").strip() or None
-        except Exception:
-            client_id = None
-
-        try:
-            client_secret = (self.cfg.get_value("OAUTH_AZURE_AD_CLIENT_SECRET", default=None, allow_none=True) or "").strip() or None
-        except Exception:
-            client_secret = None
+        tenant_id = (self.cfg.get_value("OAUTH_AZURE_AD_TENANT_ID", default=None, allow_none=True) or "").strip() or None
+        client_id = (self.cfg.get_value("OAUTH_AZURE_AD_CLIENT_ID", default=None, allow_none=True) or "").strip() or None
+        client_secret = (self.cfg.get_value("OAUTH_AZURE_AD_CLIENT_SECRET", default=None, allow_none=True) or "").strip() or None
 
         if not tenant_id or not client_id or not client_secret:
             logging.warning(
@@ -461,13 +447,12 @@ class SearchClient:
 
         session = await self._get_session()
         async with session.get(url, headers=headers) as resp:
-                text = await resp.text()
                 if resp.status == 404:
                     logging.warning(f"[search] Document not found: {document_id}")
                     return None
                 if resp.status >= 400:
-                    logging.error(f"[search] {resp.status} {text}")
-                    raise RuntimeError(f"Get document failed: {resp.status} {text}")
+                    logging.error("[search] Get document failed (status=%s)", resp.status)
+                    raise RuntimeError(f"Get document failed: {resp.status}")
                 return await resp.json()
 
     async def is_index_empty(self):
@@ -536,7 +521,7 @@ class SearchClient:
             return is_empty_result
 
         except Exception as e:
-            logging.error(f"[Retrieval] Failed to check if index is empty: {e}", exc_info=True)
+            logging.error("[Retrieval] Failed to check if index is empty (%s)", type(e).__name__)
             # Default to not empty if we can't tell, to avoid false bypasses
             return False
 
@@ -557,6 +542,7 @@ class SearchClient:
         logging.info(f"[Retrieval] Search approach: {self.search_approach}")
         logging.info(f"[Retrieval] Executing search for query: {query}")
 
+        search_user_token = None
         try:
             logging.info("[Retrieval] Using Azure AI Search for document retrieval")
 
@@ -799,10 +785,9 @@ class SearchClient:
             level, marker = _classify_retrieval_error(e)
             logging.log(
                 level,
-                "%s Foundry IQ retrieval failed: %s",
+                "%s Foundry IQ retrieval failed (%s)",
                 marker,
-                e,
-                exc_info=True,
+                type(e).__name__,
                 extra={
                     "retrieval_credential_type": "obo" if search_user_token else "managed_identity",
                 },
@@ -849,7 +834,7 @@ class SearchClient:
                 logging.warning("[Citations] ⚠️ Document not found with ID: %s", document_id)
 
         except Exception as e:
-            logging.error("[Citations] ❌ Error fetching document from index: %s", e, exc_info=True)
+            logging.error("[Citations] Error fetching document from index (%s)", type(e).__name__)
 
         return None
 
