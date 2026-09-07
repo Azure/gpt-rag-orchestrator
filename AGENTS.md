@@ -294,6 +294,16 @@ answers remain completed answers; multimodal buffering, deduplication,
 validation, welcome prefix, optional profile cleanup and cancellation remain.
 Real strategy-to-HTTP evidence distinguishes buffered data from emitted
 partial output and verifies resource cleanup without changing wire schemas.
+Seven exact inactive NL2SQL tool proposals preserve typed partial/error
+results, datasource selection, DAX user-token forwarding, read-only validation
+and cancellation. Provider/validation exception content is replaced by its
+class in error fields and logs; SQL inputs and full datasource configuration
+are no longer dumped by the execution helper. Table/query retrieval now
+escapes datasource quotes consistently with the other metadata lookups.
+Embedding failures still propagate before metadata-result translation.
+SchemaInfo's existing nullable-columns result has no serialized error field;
+that compatibility limitation is characterized, not silently changed or
+approved by this work.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.

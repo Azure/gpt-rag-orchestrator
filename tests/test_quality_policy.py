@@ -768,6 +768,13 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("multimodal-profile-save-compatibility", "contractual-best-effort-side-effect"),
     ("citation-storage-config-unsigned-compatibility", "contractual-best-effort-side-effect"),
     ("citation-signing-unsigned-compatibility", "contractual-best-effort-side-effect"),
+    ("nl2sql-table-list-result-translation", "failure-translation"),
+    ("nl2sql-schema-unavailable-compatibility", "failure-translation"),
+    ("nl2sql-table-retrieval-result-translation", "failure-translation"),
+    ("nl2sql-measure-list-result-translation", "failure-translation"),
+    ("nl2sql-query-retrieval-result-translation", "failure-translation"),
+    ("nl2sql-dax-result-translation", "failure-translation"),
+    ("nl2sql-sql-result-translation", "failure-translation"),
 ])
 def test_compatibility_proposal_is_exact_and_not_self_authorized(record_id, outcome):
     root = Path(QUALITY["__file__"]).resolve().parents[2]

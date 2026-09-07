@@ -95,7 +95,7 @@ class NL2SQLPlugin:
                     )
                 )
         except Exception as ex:
-            error = str(ex)
+            error = type(ex).__name__
             logging.error(f"[tables] error: {error}")
 
         if not tables_info:
@@ -147,7 +147,7 @@ class NL2SQLPlugin:
                 columns=cols
             )
         except Exception as ex:
-            msg = str(ex)
+            msg = type(ex).__name__
             logging.error(f"[tables] schema error: {msg}")
             return SchemaInfo(
                 datasource=datasource,
@@ -173,7 +173,8 @@ class NL2SQLPlugin:
 
         body: Dict[str, Any] = {"select": "table, description", "top": k}
         if datasource:
-             body["filter"] = f"datasource eq '{datasource}'"
+            safe_ds = datasource.replace("'", "''")
+            body["filter"] = f"datasource eq '{safe_ds}'"
         if approach in ("term", "hybrid"):
             body["search"] = input
         if approach in ("vector", "hybrid"):
@@ -201,7 +202,7 @@ class NL2SQLPlugin:
                     datasource=d.get("datasource",None)
                 ))
         except Exception as ex:
-            err = str(ex)
+            err = type(ex).__name__
             logging.error(f"[tables] retrieval error: {err}")
 
         return TablesRetrievalResult(tables=results, error=err)
@@ -237,7 +238,7 @@ class NL2SQLPlugin:
                     source_model=d.get("source_model", None)
                 ))
         except Exception as ex:
-            err = str(ex)
+            err = type(ex).__name__
             logging.error(f"[measures] error: {err}")
 
         if not measures:
@@ -263,7 +264,8 @@ class NL2SQLPlugin:
 
         body: Dict[str, Any] = {"select": "question, query, reasoning", "top": top_k}
         if datasource:
-             body["filter"] = f"datasource eq '{datasource}'"
+            safe_ds = datasource.replace("'", "''")
+            body["filter"] = f"datasource eq '{safe_ds}'"
         if approach in (TERM, HYBRID):
             body["search"] = input
         if approach in (VECTOR, HYBRID):
@@ -291,7 +293,7 @@ class NL2SQLPlugin:
                     reasoning=d.get("reasoning","")
                 ))
         except Exception as ex:
-            err = str(ex)
+            err = type(ex).__name__
             logging.error(f"[queries] error: {err}")
 
         return QueriesRetrievalResult(queries=results, error=err)
@@ -329,7 +331,8 @@ class NL2SQLPlugin:
             results = await semantic_client.execute_restapi_dax_query(dax_query=query, user_token=access_token)
             return ExecuteQueryResult(results=results)
         except Exception as e:
-            return ExecuteQueryResult(error=str(e))
+            logging.error("[dax] query failed (%s)", type(e).__name__)
+            return ExecuteQueryResult(error=type(e).__name__)
 
     async def execute_sql_query(
         self,
@@ -337,7 +340,7 @@ class NL2SQLPlugin:
         query: Annotated[str, "SQL Query"]
     ) -> ExecuteQueryResult:
         # log entry and parameters
-        logging.info(f"execute_sql_query called with datasource={datasource}, query={query}")
+        logging.info("execute_sql_query called (datasource=%s)", datasource)
         try:
             validation = validate_single_read_only_select(query)
             if not validation.is_valid:
@@ -346,7 +349,7 @@ class NL2SQLPlugin:
 
             cosmosdb = self.cosmos
             datasource_config = await cosmosdb.get_document(self.container_name, datasource)
-            logging.debug(f"Datasource config fetched: {datasource_config}")
+            logging.debug("Datasource configuration fetched (present=%s)", datasource_config is not None)
 
             if not datasource_config:
                 logging.error(f"Datasource '{datasource}' configuration not found.")
@@ -397,5 +400,5 @@ class NL2SQLPlugin:
             return ExecuteQueryResult(results=results)
 
         except Exception as e:
-            logging.error(f"execute_sql_query error: {e}", exc_info=True)
-            return ExecuteQueryResult(error=str(e))
+            logging.error("execute_sql_query error (%s)", type(e).__name__)
+            return ExecuteQueryResult(error=type(e).__name__)
