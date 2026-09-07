@@ -304,6 +304,14 @@ Embedding failures still propagate before metadata-result translation.
 SchemaInfo's existing nullable-columns result has no serialized error field;
 that compatibility limitation is characterized, not silently changed or
 approved by this work.
+The legacy retrieval plugin narrows credential errors to AzureError and HTTP
+translation to aiohttp.ClientError/ValueError without logging response bodies
+or traceback payloads. Four inactive proposals retain explicit typed tool
+errors, valid partial results and unchanged security filters. Real credential
+failure prevents HTTP access, while cancellation propagates through context
+cleanup. Multimodal captions are grouped per document according to the
+existing List[List[str]] contract; a malformed later document cannot leave
+caption/text/image accumulation out of step.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.

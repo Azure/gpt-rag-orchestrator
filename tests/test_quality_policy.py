@@ -775,6 +775,10 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("nl2sql-query-retrieval-result-translation", "failure-translation"),
     ("nl2sql-dax-result-translation", "failure-translation"),
     ("nl2sql-sql-result-translation", "failure-translation"),
+    ("legacy-vector-tool-result-translation", "failure-translation"),
+    ("legacy-multimodal-embedding-result-translation", "failure-translation"),
+    ("legacy-multimodal-credential-result-translation", "failure-translation"),
+    ("legacy-multimodal-search-result-translation", "failure-translation"),
 ])
 def test_compatibility_proposal_is_exact_and_not_self_authorized(record_id, outcome):
     root = Path(QUALITY["__file__"]).resolve().parents[2]

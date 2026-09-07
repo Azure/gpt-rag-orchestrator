@@ -38,5 +38,5 @@ async def test_embedding_failure_remains_an_explicit_error_result(plugin, method
     plugin.aoai.get_embeddings.side_effect = RuntimeError("embedding unavailable")
     result = await getattr(plugin, method)("question")
     assert result.error
-    assert "embedding unavailable" in result.error
+    assert "RuntimeError" in result.error
     plugin._perform_search.assert_not_awaited()

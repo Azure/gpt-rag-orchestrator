@@ -7,6 +7,7 @@ from typing import Annotated, Optional, List, Dict, Any
 from urllib.parse import urlparse
 
 import aiohttp
+from azure.core.exceptions import AzureError
 from agent_framework import ai_function
 from connectors.identity_manager import get_identity_manager
 from dependencies import get_config
@@ -34,22 +35,18 @@ class RetrievalPlugin:
             credential = get_identity_manager().get_credential()
             token_obj = await asyncio.to_thread(credential.get_token, "https://search.azure.com/.default")
             return token_obj.token
-        except Exception as e:
-            logging.error("Error obtaining Azure Search token.", exc_info=True)
+        except AzureError as e:
+            logging.error("Error obtaining Azure Search token (%s).", type(e).__name__)
             raise Exception("Failed to obtain Azure Search token.") from e
 
     async def _perform_search(self, url: str, headers: Dict[str, str], body: Dict[str, Any]) -> Dict[str, Any]:
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(url, headers=headers, json=body) as response:
-                    if response.status >= 400:
-                        text = await response.text()
-                        error_message = f"Error {response.status}: {text}"
-                        logging.error(f"[_perform_search] {error_message}")
-                        raise Exception(error_message)
+                    response.raise_for_status()
                     return await response.json()
-            except Exception as e:
-                logging.error("Error during asynchronous HTTP request.", exc_info=True)
+            except (aiohttp.ClientError, ValueError) as e:
+                logging.error("Error during asynchronous HTTP request (%s).", type(e).__name__)
                 raise Exception("Failed to execute search query.") from e
 
     @ai_function(
@@ -67,7 +64,7 @@ class RetrievalPlugin:
 
         try:
             start_time = time.time()
-            logging.info(f"[vector_index_retrieve] Generating question embeddings. Search query: {search_query}")
+            logging.info("[vector_index_retrieve] Generating question embeddings.")
             embeddings_query = await self.aoai.get_embeddings(search_query)
             logging.info(f"[vector_index_retrieve] Finished generating embeddings in {round(time.time() - start_time, 2)} seconds")
 
@@ -120,8 +117,8 @@ class RetrievalPlugin:
                     content_str = doc.get('content', '').strip()
                     search_results.append(f"{uri}: {content_str}\n")
         except Exception as e:
-            error_message = f"Exception occurred: {e}"
-            logging.error(f"[vector_index_retrieve] {error_message}", exc_info=True)
+            error_message = f"Exception occurred: {type(e).__name__}"
+            logging.error("[vector_index_retrieve] %s", error_message)
 
         sources = ' '.join(search_results)
         return VectorIndexRetrievalResult(result=sources, error=error_message)
@@ -149,7 +146,7 @@ class RetrievalPlugin:
     ) -> MultimodalVectorIndexRetrievalResult:
         text_results: List[str] = []
         image_urls: List[List[str]] = []
-        captions: List[str] = []
+        captions: List[List[str]] = []
         error_message: Optional[str] = None
 
         try:
@@ -157,8 +154,8 @@ class RetrievalPlugin:
             embeddings_query = await self.aoai.get_embeddings(input)
             logging.info(f"[multimodal_vector_index_retrieve] Query embeddings took {round(time.time() - start_time, 2)} seconds")
         except Exception as e:
-            error_message = f"Error generating embeddings: {e}"
-            logging.error(f"[multimodal_vector_index_retrieve] {error_message}", exc_info=True)
+            error_message = f"Error generating embeddings: {type(e).__name__}"
+            logging.error("[multimodal_vector_index_retrieve] %s", error_message)
             return MultimodalVectorIndexRetrievalResult(
                 texts=[],
                 images=[],
@@ -169,8 +166,8 @@ class RetrievalPlugin:
         try:
             azure_search_token = await self._get_azure_search_token()
         except Exception as e:
-            error_message = f"Error acquiring token for Azure Search: {e}"
-            logging.error(f"[multimodal_vector_index_retrieve] {error_message}", exc_info=True)
+            error_message = f"Error acquiring token for Azure Search: {type(e).__name__}"
+            logging.error("[multimodal_vector_index_retrieve] %s", error_message)
             return MultimodalVectorIndexRetrievalResult(
                 texts=[],
                 images=[],
@@ -223,15 +220,17 @@ class RetrievalPlugin:
             for doc in response_json.get('value', []):
                 content = doc.get('content', '')
                 str_captions = doc.get('imageCaptions', '')
-                captions.extend(self.extract_captions(str_captions))
+                document_captions = self.extract_captions(str_captions)
                 url = doc.get('url', '')
                 uri = re.sub(r'https://[^/]+\.blob\.core\.windows\.net', '', url)
-                text_results.append(f"{uri}: {content.strip()}")
+                text_result = f"{uri}: {content.strip()}"
                 content = self.replace_image_filenames_with_urls(content, doc.get('relatedImages', []))
+                text_results.append(text_result)
+                captions.append(document_captions)
                 image_urls.append(doc.get('relatedImages', []))
         except Exception as e:
-            error_message = f"Exception in retrieval: {e}"
-            logging.error(f"[multimodal_vector_index_retrieve] {error_message}", exc_info=True)
+            error_message = f"Exception in retrieval: {type(e).__name__}"
+            logging.error("[multimodal_vector_index_retrieve] %s", error_message)
 
         return MultimodalVectorIndexRetrievalResult(
             texts=text_results,

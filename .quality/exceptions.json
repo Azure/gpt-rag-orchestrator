@@ -449,6 +449,92 @@
       "review_by_stage": "before-quality-gate-activation"
     },
     {
+      "id": "legacy-vector-tool-result-translation",
+      "module_id": "plugins.retrieval.plugin",
+      "symbol": "RetrievalPlugin.vector_index_retrieve",
+      "path": "src/plugins/retrieval/plugin.py",
+      "line": 119,
+      "handler_fingerprint": "0c81dc7297c8ee37d877abacf0657433cdb0c048e22aeea41d4d5a7ab7c00d73",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Legacy vector retrieval typed result",
+      "reason": "The plugin translates embedding, credential, HTTP and document conversion failures into an explicit VectorIndexRetrievalResult.error, retaining already converted documents. Its SDK and HTTP helpers separately narrow their catches; unexpected failures still reach this declared result boundary rather than becoming unmarked empty retrieval.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Stable error prefix plus exception class in result/log, with security filter retained. Failed credentials issue no search request; cancellation propagates.",
+      "evidence_tests": [
+        "tests/test_retrieval_plugin_boundaries.py::test_retrieval_tools_preserve_filtered_partial_results_and_explicit_errors[embedding-vector]",
+        "tests/test_retrieval_plugin_boundaries.py::test_retrieval_tools_preserve_filtered_partial_results_and_explicit_errors[malformed-vector]",
+        "tests/test_retrieval_plugin_boundaries.py::test_retrieval_tools_preserve_filtered_partial_results_and_explicit_errors[cancelled-search-vector]",
+        "tests/test_retrieval_plugin_boundaries.py::test_real_retrieval_chain_keeps_failed_credentials_off_the_network[credential-vector]",
+        "tests/test_retrieval_plugin_boundaries.py::test_real_retrieval_chain_keeps_failed_credentials_off_the_network[http-vector]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; distinct from SearchContextProvider keyword fallback and connector strict/anonymous behavior.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "legacy-multimodal-embedding-result-translation",
+      "module_id": "plugins.retrieval.plugin",
+      "symbol": "RetrievalPlugin.multimodal_vector_index_retrieve",
+      "path": "src/plugins/retrieval/plugin.py",
+      "line": 156,
+      "handler_fingerprint": "9c2eedfc5e8fa5e27f5a3ad59dfe57b9ec1ca41db37cefe868ff8514fc983569",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Legacy multimodal embedding failure result",
+      "reason": "Embedding failure returns empty typed collections with an explicit error before token or search access. Preserve this existing tool result, not a keyword fallback or ordinary primary answer, across model-provider failure types.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Existing embedding-error prefix with exception class only; cancellation propagates and no search request is issued.",
+      "evidence_tests": [
+        "tests/test_retrieval_plugin_boundaries.py::test_retrieval_tools_preserve_filtered_partial_results_and_explicit_errors[embedding-multimodal]",
+        "tests/test_retrieval_plugin_boundaries.py::test_retrieval_tools_preserve_filtered_partial_results_and_explicit_errors[cancelled-embedding-multimodal]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active exception or authorization change.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "legacy-multimodal-credential-result-translation",
+      "module_id": "plugins.retrieval.plugin",
+      "symbol": "RetrievalPlugin.multimodal_vector_index_retrieve",
+      "path": "src/plugins/retrieval/plugin.py",
+      "line": 168,
+      "handler_fingerprint": "3696e5c2ba8dbf7c4a2ffb24e525e17ce1195945a44790ef319c01d4a5188abc",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Legacy multimodal credential failure result",
+      "reason": "Both the credential helper's SDK translation and unexpected credential acquisition failures produce an explicit tool error with empty collections, before any HTTP request. No anonymous retry or managed-identity substitution is introduced.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Existing credential-error prefix with exception class only. Real identity-to-tool evidence asserts no HTTP call, with cancellation unchanged.",
+      "evidence_tests": [
+        "tests/test_retrieval_plugin_boundaries.py::test_real_retrieval_chain_keeps_failed_credentials_off_the_network[credential-multimodal]",
+        "tests/test_retrieval_plugin_boundaries.py::test_real_retrieval_chain_keeps_failed_credentials_off_the_network[unexpected-credential-multimodal]",
+        "tests/test_retrieval_plugin_boundaries.py::test_retrieval_tools_preserve_filtered_partial_results_and_explicit_errors[cancelled-token-multimodal]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; fail-closed result compatibility, not active approval.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "legacy-multimodal-search-result-translation",
+      "module_id": "plugins.retrieval.plugin",
+      "symbol": "RetrievalPlugin.multimodal_vector_index_retrieve",
+      "path": "src/plugins/retrieval/plugin.py",
+      "line": 231,
+      "handler_fingerprint": "ae82680785f57996702f15be3af73f3aa600e8862d2ed4869cc6d5f92c885a63",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Legacy multimodal search and document conversion result",
+      "reason": "HTTP and document conversion failures retain only valid accumulated documents and mark the result with an error. Caption groups now satisfy the existing List[List[str]] model instead of raising a post-handler ValidationError; text, image and caption accumulation occurs together after conversion.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Exception-class error/log only; no response body dump. The existing security filter and token forwarding remain; cancellation propagates with HTTP context cleanup.",
+      "evidence_tests": [
+        "tests/test_retrieval_plugin_boundaries.py::test_retrieval_tools_preserve_filtered_partial_results_and_explicit_errors[malformed-multimodal]",
+        "tests/test_retrieval_plugin_boundaries.py::test_retrieval_tools_preserve_filtered_partial_results_and_explicit_errors[success-multimodal]",
+        "tests/test_retrieval_plugin_boundaries.py::test_retrieval_tools_preserve_filtered_partial_results_and_explicit_errors[cancelled-search-multimodal]",
+        "tests/test_retrieval_plugin_boundaries.py::test_real_retrieval_chain_keeps_failed_credentials_off_the_network[http-multimodal]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; correcting construction of the declared result does not approve primary-operation recovery.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
       "id": "citation-storage-config-unsigned-compatibility",
       "module_id": "util.blob_sas",
       "symbol": "_storage_account_name",
