@@ -794,6 +794,8 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("search-filepath-nullable-compatibility", "failure-translation"),
     ("optional-log-level-diagnostic-reporting", "contractual-best-effort-side-effect"),
     ("context-noise-filter-retains-unformattable-record", "contractual-best-effort-side-effect"),
+    ("optional-profile-background-extraction", "contractual-best-effort-side-effect"),
+    ("optional-profile-pending-task-flush", "contractual-best-effort-side-effect"),
 ])
 def test_compatibility_proposal_is_exact_and_not_self_authorized(record_id, outcome):
     root = Path(QUALITY["__file__"]).resolve().parents[2]

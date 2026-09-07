@@ -867,6 +867,51 @@
       "review_by_stage": "before-quality-gate-activation"
     },
     {
+      "id": "optional-profile-background-extraction",
+      "module_id": "strategies.maf_plugins.user_profile_memory",
+      "symbol": "UserProfileMemory._extract_and_update_profile",
+      "path": "src/strategies/maf_plugins/user_profile_memory.py",
+      "line": 135,
+      "handler_fingerprint": "bd44cba0da1ec356cfb90ad66c9cde4d68c6d98a49a288d2ab3ad4133c77000b",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional background profile extraction after a model invocation",
+      "reason": "Extraction failure preserves the existing profile rather than replacing primary conversation work. Typed extracted values retain field updates and preference/note deduplication; unsupported-client/no-user-message paths remain unscheduled. This proposal does not approve memory eligibility or enable additional retained user data.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Bounded warning or the existing unsupported-path debug classification; no profile or exception payload dump. Background extraction cancellation remains consumed as before, distinct from primary-turn cancellation guarantees.",
+      "evidence_tests": [
+        "tests/test_user_profile_memory_boundaries.py::test_invoked_flush_preserves_optional_profile_contract[failure]",
+        "tests/test_user_profile_memory_boundaries.py::test_invoked_flush_preserves_optional_profile_contract[unsupported]",
+        "tests/test_user_profile_memory_boundaries.py::test_invoked_flush_preserves_optional_profile_contract[cancelled]",
+        "tests/test_user_profile_memory_boundaries.py::test_invoked_flush_preserves_optional_profile_contract[success]",
+        "tests/test_user_profile_memory_boundaries.py::test_superseded_extraction_is_cancelled_before_new_profile_is_flushed",
+        "tests/test_user_profile_memory_boundaries.py::test_current_direct_adapter_does_not_populate_extracted_profile_value[failure]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346. Actual direct-adapter structured extraction remains an explicitly characterized interop gap, not acceptance of lost memory or a new data-retention decision.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "optional-profile-pending-task-flush",
+      "module_id": "strategies.maf_plugins.user_profile_memory",
+      "symbol": "UserProfileMemory.flush",
+      "path": "src/strategies/maf_plugins/user_profile_memory.py",
+      "line": 146,
+      "handler_fingerprint": "68c3192c07024590504e6fe0e820e41942185345093f6676470bb287ac109447",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Awaiting a pending optional extraction task before profile persistence",
+      "reason": "The worker normally translates provider failures, but its own diagnostic reporting can fail. Preserve the pending-task flush's existing optional outcome and clear its reference, while reporting that previously silent failure instead of assuming it was already logged.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Bounded finish-extraction warning on a pending task failure. This exact record does not certify inspection of already-completed failed tasks, downstream logging sinks, or caller-cancellation semantics.",
+      "evidence_tests": [
+        "tests/test_user_profile_memory_boundaries.py::test_invoked_flush_preserves_optional_profile_contract[logging-error]",
+        "tests/test_user_profile_memory_boundaries.py::test_invoked_flush_preserves_optional_profile_contract[no-result]",
+        "tests/test_user_profile_memory_boundaries.py::test_superseded_extraction_is_cancelled_before_new_profile_is_flushed"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active exception, scheduler redesign, identity eligibility or persistence-policy approval.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
       "id": "citation-storage-config-unsigned-compatibility",
       "module_id": "util.blob_sas",
       "symbol": "_storage_account_name",

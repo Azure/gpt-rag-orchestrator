@@ -128,23 +128,23 @@ class UserProfileMemory(ContextProvider):
                         n for n in extracted.notes if n not in self.user_profile.notes
                     )
 
-                logging.debug(f"[UserProfileMemory] Updated user profile: {self.user_profile}")
+                logging.debug("[UserProfileMemory] Processed user profile extraction")
 
         except asyncio.CancelledError:
             logging.debug("[UserProfileMemory] Profile extraction cancelled")
         except Exception as e:
             if isinstance(e, AttributeError) and "conversation_id" in str(e):
-                logging.debug(f"[UserProfileMemory] Skipped unsupported extraction path: {e}")
+                logging.debug("[UserProfileMemory] Skipped unsupported extraction path")
             else:
-                logging.warning(f"[UserProfileMemory] Failed to extract user info: {e}")
+                logging.warning("[UserProfileMemory] Failed to extract user info (%s)", type(e).__name__)
 
     async def flush(self) -> None:
         """Await any pending profile extraction task. Call before saving the profile."""
         if self._pending_task and not self._pending_task.done():
             try:
                 await self._pending_task
-            except Exception:
-                pass  # Already logged in _extract_and_update_profile
+            except Exception as exc:
+                logging.warning("[UserProfileMemory] Failed to finish extraction (%s)", type(exc).__name__)
         self._pending_task = None
 
     async def invoking(

@@ -360,6 +360,14 @@ missing/retry defaults and environment precedence remain. The filter preserves
 an unformattable record without recursively logging, and no longer marks the
 now-exercised branch as uncovered. These are not general guarantees about
 downstream logging sinks or permission to suppress primary failures.
+Two inactive memory-worker proposals preserve optional extraction, pending
+flush, deduplication and superseded-background-task behavior with bounded logs.
+They do not approve memory eligibility or generic caller-cancellation behavior.
+Actual direct-adapter characterization reveals a separate interoperability gap:
+the worker supplies chat_options while OpenAIChatClient consumes options, and
+the adapter does not populate ChatResponse.value for this call. No correction
+enabling additional profile data writes is silently included; the real adapter
+case is characterization, not a claim that extraction works end to end.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.
