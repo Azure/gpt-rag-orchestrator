@@ -535,6 +535,197 @@
       "review_by_stage": "before-quality-gate-activation"
     },
     {
+      "id": "dashboard-admin-auth-translation",
+      "module_id": "api.dashboard",
+      "symbol": "require_admin",
+      "path": "src/api/dashboard.py",
+      "line": 99,
+      "handler_fingerprint": "242e186111f5277b5a155a62e36b31db4e43c992f4b5335a122f37637a0863c4",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Dashboard token-validation HTTP boundary",
+      "reason": "Unexpected verifier failures remain fail-closed generic 401 responses. Existing HTTPException status/detail and cancellation propagate unchanged; no claims or administrator role checks are bypassed.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Constant token-validation failure log and generic Invalid bearer token detail, without provider exception text.",
+      "evidence_tests": [
+        "tests/test_http_boundary_dispositions.py::test_auth_translation_is_fail_closed_bounded_and_preserves_cancellation[RuntimeError-admin]",
+        "tests/test_http_boundary_dispositions.py::test_auth_translation_is_fail_closed_bounded_and_preserves_cancellation[AzureError-admin]",
+        "tests/test_http_boundary_dispositions.py::test_auth_translation_is_fail_closed_bounded_and_preserves_cancellation[CancelledError-admin]",
+        "tests/test_http_boundary_dispositions.py::test_known_auth_http_status_is_preserved[403-admin]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active exception or role-policy change.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "dashboard-per-setting-write-isolation",
+      "module_id": "api.dashboard_config",
+      "symbol": "update_config",
+      "path": "src/api/dashboard_config.py",
+      "line": 262,
+      "handler_fingerprint": "1643f8e3fa1d3bc415f33454fc576b8a045ce0deac8332872104c6f24f111854",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Sequential dashboard configuration writes with per-key errors",
+      "reason": "Each failed set_value is collected while later validated keys are still attempted, then the request returns 500 and skips refresh. Preserve this existing partial-write contract across SDK and unexpected failures, not a transaction or rollback guarantee.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Constant per-key error within the existing response shape; no exception text/traceback. Cancellation propagates. A durable write followed by refresh failure still returns 500 without undoing the write.",
+      "evidence_tests": [
+        "tests/test_http_boundary_dispositions.py::test_dashboard_partial_writes_preserve_500_per_key_and_skip_refresh[AzureError]",
+        "tests/test_http_boundary_dispositions.py::test_dashboard_partial_writes_preserve_500_per_key_and_skip_refresh[RuntimeError]",
+        "tests/test_http_boundary_dispositions.py::test_dashboard_write_cancellation_preserves_identity_and_skips_refresh",
+        "tests/test_http_boundary_dispositions.py::test_actual_appconfig_write_consumer_never_reports_failed_update_as_applied[write]",
+        "tests/test_http_boundary_dispositions.py::test_actual_appconfig_write_consumer_never_reports_failed_update_as_applied[refresh]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no approval of successful partial HTTP responses or rollback claims.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "startup-optional-token-prefetch",
+      "module_id": "main",
+      "symbol": "lifespan",
+      "path": "src/main.py",
+      "line": 251,
+      "handler_fingerprint": "0e0fafabc8fb4d2cf91e060e11eb0d42010e21dfa3e8614c6ae41026e8d7b082",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional startup Search-token prefetch",
+      "reason": "Prefetch is a latency warmup, not a primary request or proof of authorization. Its failure does not prevent later warmup/application startup; real requests must still acquire their required credentials. Cancellation remains startup cancellation.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Constant startup warning without credential-provider exception content.",
+      "evidence_tests": [
+        "tests/test_http_boundary_dispositions.py::test_optional_prewarm_stays_nonfatal_bounded_but_cancellable[RuntimeError-token]",
+        "tests/test_http_boundary_dispositions.py::test_optional_prewarm_stays_nonfatal_bounded_but_cancellable[CancelledError-token]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no credential fallback or authorization decision is approved.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "startup-optional-agent-prewarm",
+      "module_id": "main",
+      "symbol": "lifespan",
+      "path": "src/main.py",
+      "line": 266,
+      "handler_fingerprint": "7ebb06d1a54ab002b3219a65c3a62a341f5583883e45e9eefc678020d7798d16",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional strategy-agent startup warmup",
+      "reason": "The startup prewarm helper is an optional optimization for configured strategies. Preserve continued startup after its failure rather than conflating prewarm with a completed user turn; required startup configuration validation is outside this boundary.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Constant warning that prewarm failed and startup will proceed; cancellation does not enter application lifespan.",
+      "evidence_tests": [
+        "tests/test_http_boundary_dispositions.py::test_optional_prewarm_stays_nonfatal_bounded_but_cancellable[RuntimeError-agent]",
+        "tests/test_http_boundary_dispositions.py::test_optional_prewarm_stays_nonfatal_bounded_but_cancellable[CancelledError-agent]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; not primary strategy recovery permission.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "startup-optional-provider-prewarm",
+      "module_id": "main",
+      "symbol": "lifespan",
+      "path": "src/main.py",
+      "line": 270,
+      "handler_fingerprint": "ab84934a6c6b83db52299d29f19daefd338e927276d75d957597d3e0d370177e",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional identity/Search/Cosmos provider startup warmup",
+      "reason": "Failures constructing warmup providers or probing the index leave application startup available under the existing optional-prewarm contract. This does not alter required AppConfig authentication failure handling or convert later request failures into success.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Constant startup warning, no provider text or traceback; cancellation propagates before lifespan yield.",
+      "evidence_tests": [
+        "tests/test_http_boundary_dispositions.py::test_optional_prewarm_stays_nonfatal_bounded_but_cancellable[RuntimeError-identity]",
+        "tests/test_http_boundary_dispositions.py::test_optional_prewarm_stays_nonfatal_bounded_but_cancellable[RuntimeError-search]",
+        "tests/test_http_boundary_dispositions.py::test_optional_prewarm_stays_nonfatal_bounded_but_cancellable[CancelledError-identity]",
+        "tests/test_http_boundary_dispositions.py::test_optional_prewarm_stays_nonfatal_bounded_but_cancellable[CancelledError-search]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; optional warmup does not certify readiness of unavailable dependencies.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "request-debug-rendering-side-effect",
+      "module_id": "main",
+      "symbol": "orchestrator_endpoint",
+      "path": "src/main.py",
+      "line": 343,
+      "handler_fingerprint": "2e763e9609314b483a218ced55762aedff0887ba5ca06349927fed1e30c9622d",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional DEBUG request diagnostic rendering",
+      "reason": "Failure to render debug information must not replace request orchestration. Preserve that auxiliary logging contract; request authentication and orchestration remain outside this handler.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Constant debug failure message without exception traceback. The record does not certify the content of all successful debug diagnostics.",
+      "evidence_tests": [
+        "tests/test_http_boundary_dispositions.py::test_request_debug_failure_is_optional_without_raw_diagnostic"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; diagnostic side effect only, not primary-work recovery.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "orchestrator-auth-failure-translation",
+      "module_id": "main",
+      "symbol": "orchestrator_endpoint",
+      "path": "src/main.py",
+      "line": 440,
+      "handler_fingerprint": "78e59d4dd69fdf605f19b8aa84fba79ad46157ade5f2abf187221f96829b480b",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Orchestration request token-verification HTTP boundary",
+      "reason": "Unexpected verifier failures retain generic 401 rather than entering an anonymous turn. Existing HTTPException outcomes and cancellation propagate unchanged. Configuration lookup is outside this recovery and an unexpected lookup failure cannot set auth_configured=False.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Constant token-validation failure log and generic Invalid or expired token detail; no raw provider text. Known rejection logging retains status only.",
+      "evidence_tests": [
+        "tests/test_http_boundary_dispositions.py::test_auth_translation_is_fail_closed_bounded_and_preserves_cancellation[RuntimeError-orchestrator]",
+        "tests/test_http_boundary_dispositions.py::test_auth_translation_is_fail_closed_bounded_and_preserves_cancellation[AzureError-orchestrator]",
+        "tests/test_http_boundary_dispositions.py::test_auth_translation_is_fail_closed_bounded_and_preserves_cancellation[CancelledError-orchestrator]",
+        "tests/test_http_boundary_dispositions.py::test_unexpected_auth_configuration_failure_never_downgrades_to_anonymous[orchestrator]",
+        "tests/test_http_boundary_dispositions.py::test_known_auth_http_status_is_preserved[500-orchestrator]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no change to issuer/audience/OBO/allowlist policy.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "request-context-logging-side-effect",
+      "module_id": "main",
+      "symbol": "orchestrator_endpoint",
+      "path": "src/main.py",
+      "line": 479,
+      "handler_fingerprint": "e4a31b911012c624e3e45edb9ecaabb6a2ff7242ea932bcda6cf736822d81b3a",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional resolved-request context diagnostic",
+      "reason": "Rendering/logging the already resolved request context is an auxiliary side effect; failure does not invalidate the turn. The handler does not select identity, modify principal context or perform the primary orchestration.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Constant warning replaces silent pass; no failed diagnostic data or exception text is logged.",
+      "evidence_tests": [
+        "tests/test_http_boundary_dispositions.py::test_request_context_logging_failure_is_reported_without_breaking_turn"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no blanket guarantee about logging infrastructure or every diagnostic field.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "history-auth-failure-translation",
+      "module_id": "main",
+      "symbol": "validate_user_access",
+      "path": "src/main.py",
+      "line": 612,
+      "handler_fingerprint": "4e03a7f0a0c3beb2a152eac1efc41452187f6af95b0654fa07418bf98e127d3b",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Authenticated history token-verification HTTP boundary",
+      "reason": "Unexpected token-validation failures remain generic 401, never anonymous history access. Known HTTPException statuses and cancellation propagate; required auth configuration is read outside this handler with actual missing/retry semantics preserved.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Endpoint-labelled constant validation failure log, no provider exception text; generic Invalid or expired token detail.",
+      "evidence_tests": [
+        "tests/test_http_boundary_dispositions.py::test_auth_translation_is_fail_closed_bounded_and_preserves_cancellation[RuntimeError-history]",
+        "tests/test_http_boundary_dispositions.py::test_auth_translation_is_fail_closed_bounded_and_preserves_cancellation[AzureError-history]",
+        "tests/test_http_boundary_dispositions.py::test_auth_translation_is_fail_closed_bounded_and_preserves_cancellation[CancelledError-history]",
+        "tests/test_http_boundary_dispositions.py::test_unexpected_auth_configuration_failure_never_downgrades_to_anonymous[history]",
+        "tests/test_http_boundary_dispositions.py::test_known_auth_http_status_is_preserved[403-history]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; principal partitioning and role checks are not relaxed.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
       "id": "citation-storage-config-unsigned-compatibility",
       "module_id": "util.blob_sas",
       "symbol": "_storage_account_name",

@@ -82,19 +82,15 @@ def _coerce_for_type(value: Any, spec: SettingSpec) -> Any:
         return str(value)
     except (ValueError, TypeError):
         logging.warning(
-            "[dashboard-config] could not coerce key=%s value=%r to type=%s; using default",
-            spec.key, value, spec.type,
+            "[dashboard-config] could not coerce key=%s to type=%s; using default",
+            spec.key, spec.type,
         )
         return spec.default
 
 
 def _read_current_value(cfg: AppConfigClient, spec: SettingSpec) -> Any:
     """Read the current value for one spec, falling back to the spec's default."""
-    try:
-        raw = cfg.get_value(spec.key, default=None, allow_none=True)
-    except Exception as exc:  # pragma: no cover - defensive
-        logging.warning("[dashboard-config] read of %s failed: %s", spec.key, exc)
-        raw = None
+    raw = cfg.get_value(spec.key, default=None, allow_none=True)
     return _coerce_for_type(raw, spec)
 
 
@@ -263,10 +259,10 @@ async def update_config(
     for key, value in validated.items():
         try:
             await asyncio.to_thread(cfg.set_value, key, value, WRITE_LABEL)
-        except Exception as exc:
-            logging.exception("[dashboard-config] write failed for %s", key)
+        except Exception:
+            logging.error("[dashboard-config] write failed for %s", key)
             write_errors.append(
-                DashboardConfigFieldError(key=key, error=str(exc) or exc.__class__.__name__)
+                DashboardConfigFieldError(key=key, error="Unable to persist setting")
             )
 
     if write_errors:

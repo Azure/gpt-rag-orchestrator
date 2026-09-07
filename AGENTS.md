@@ -325,6 +325,15 @@ than gaining a guessed schema name. Unexpected schema-hook errors propagate
 before model access in both public response and streaming methods, as does
 cancellation; optional-format compatibility is not a guarantee of structured
 output for invalid caller input.
+The returned HTTP slice removes redundant auth/dashboard read recovery:
+actual missing/exhausted-retry defaults remain, but unexpected provider defects
+cannot downgrade authentication to anonymous or masquerade as a default read.
+Nine inactive proposals retain generic fail-closed 401 translation, optional
+prewarm/log-rendering and per-key configuration-write isolation. Existing
+HTTPException statuses, cancellation, role gates and the orchestrator write
+label remain. Writes before and after a failed key may persist while PUT
+returns 500; refresh failure after a durable write also returns 500 and is
+not rollback. Failure diagnostics are bounded within the existing shapes.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.

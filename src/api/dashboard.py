@@ -96,8 +96,8 @@ async def require_admin(
         claims = await validate_access_token(token)
     except HTTPException:
         raise
-    except Exception as exc:  # pragma: no cover - defensive
-        logging.exception("[dashboard] token validation failed: %s", exc)
+    except Exception:
+        logging.error("[dashboard] token validation failed")
         raise HTTPException(status_code=401, detail="Invalid bearer token")
 
     roles = claims.get("roles")

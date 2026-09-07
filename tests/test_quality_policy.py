@@ -779,6 +779,15 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("legacy-multimodal-embedding-result-translation", "failure-translation"),
     ("legacy-multimodal-credential-result-translation", "failure-translation"),
     ("legacy-multimodal-search-result-translation", "failure-translation"),
+    ("dashboard-admin-auth-translation", "failure-translation"),
+    ("dashboard-per-setting-write-isolation", "failure-translation"),
+    ("startup-optional-token-prefetch", "contractual-best-effort-side-effect"),
+    ("startup-optional-agent-prewarm", "contractual-best-effort-side-effect"),
+    ("startup-optional-provider-prewarm", "contractual-best-effort-side-effect"),
+    ("request-debug-rendering-side-effect", "contractual-best-effort-side-effect"),
+    ("orchestrator-auth-failure-translation", "failure-translation"),
+    ("request-context-logging-side-effect", "contractual-best-effort-side-effect"),
+    ("history-auth-failure-translation", "failure-translation"),
 ])
 def test_compatibility_proposal_is_exact_and_not_self_authorized(record_id, outcome):
     root = Path(QUALITY["__file__"]).resolve().parents[2]
