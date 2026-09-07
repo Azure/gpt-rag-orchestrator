@@ -553,137 +553,132 @@ class MultimodalStrategy(BaseAgentStrategy):
         is_new_session = not conv.get("session_initialized", False)
         user_id = conv.get("user_id", "default_user")
 
-        try:
-            chat_client = self._get_or_create_chat_client()
+        chat_client = self._get_or_create_chat_client()
 
-            # Load or initialise user-profile memory
-            if self._user_memory is None:
-                t0 = time.time()
-                user_profile = await self._load_user_profile(user_id)
-                self._user_memory = UserProfileMemory(
-                    chat_client=chat_client,
-                    user_profile=user_profile,
-                )
-                logging.info("[MultimodalStrategy] user_profile_load: %.2fs (user=%s)", time.time() - t0, user_id)
-
-            # Initialize search provider if not done
-            if self._search_provider is None:
-                t0 = time.time()
-                self._search_provider = await self._create_search_provider()
-                logging.info(
-                    "[MultimodalStrategy] search_provider_init: %.2fs (hybrid=%s)",
-                    time.time() - t0, bool(self.embedding_deployment),
-                )
-
-            history = conv.get("messages", [])
-
-            # Classify intent — skip search when retrieval is not needed.
+        # Load or initialise user-profile memory
+        if self._user_memory is None:
             t0 = time.time()
-            intent = await self._classify_intent(user_message, history=history)
-            logging.info("[MultimodalStrategy] intent_classification: %.2fs", time.time() - t0)
-
-            # Build context providers
-            context_providers = [self._user_memory]
-            if intent == "question" and self._search_provider:
-                context_providers.append(self._search_provider)
-            elif intent == "greeting":
-                logging.info("[MultimodalStrategy] Greeting detected — skipping search")
-            elif intent == "no_retrieval":
-                logging.info("[MultimodalStrategy] No-retrieval follow-up detected — skipping search")
-            else:
-                logging.warning("[MultimodalStrategy] No search provider — agent will answer without grounding")
-            logging.info("[MultimodalStrategy] context_providers: %d", len(context_providers))
-
-            # Read base instructions (cached after first read)
-            if self._cached_instructions is None:
-                base_instructions = await self._read_prompt("main")
-                self._cached_instructions = base_instructions if base_instructions else self.AGENT_INSTRUCTIONS
-            instructions = self._cached_instructions
-
-            # Create agent and stream
-            async with ChatAgent(
+            user_profile = await self._load_user_profile(user_id)
+            self._user_memory = UserProfileMemory(
                 chat_client=chat_client,
-                instructions=instructions,
-                context_provider=CompositeContextProvider(context_providers),
-            ) as agent:
+                user_profile=user_profile,
+            )
+            logging.info("[MultimodalStrategy] user_profile_load: %.2fs (user=%s)", time.time() - t0, user_id)
 
-                thread = agent.get_new_thread()
+        # Initialize search provider if not done
+        if self._search_provider is None:
+            t0 = time.time()
+            self._search_provider = await self._create_search_provider()
+            logging.info(
+                "[MultimodalStrategy] search_provider_init: %.2fs (hybrid=%s)",
+                time.time() - t0, bool(self.embedding_deployment),
+            )
 
-                # Session welcome with existing profile
-                if is_new_session and self._user_memory.has_minimum_context():
-                    conv["session_initialized"] = True
-                    session_summary = self._build_session_summary()
-                    yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
-                elif is_new_session:
-                    conv["session_initialized"] = True
+        history = conv.get("messages", [])
 
-                # Build message list with conversation history
-                input_messages: list[ChatMessage] = []
-                for msg in history[-self.history_max_messages:]:
-                    role = msg.get("role", "user")
-                    text = msg.get("text") or msg.get("content") or ""
+        # Classify intent — skip search when retrieval is not needed.
+        t0 = time.time()
+        intent = await self._classify_intent(user_message, history=history)
+        logging.info("[MultimodalStrategy] intent_classification: %.2fs", time.time() - t0)
+
+        # Build context providers
+        context_providers = [self._user_memory]
+        if intent == "question" and self._search_provider:
+            context_providers.append(self._search_provider)
+        elif intent == "greeting":
+            logging.info("[MultimodalStrategy] Greeting detected — skipping search")
+        elif intent == "no_retrieval":
+            logging.info("[MultimodalStrategy] No-retrieval follow-up detected — skipping search")
+        else:
+            logging.warning("[MultimodalStrategy] No search provider — agent will answer without grounding")
+        logging.info("[MultimodalStrategy] context_providers: %d", len(context_providers))
+
+        # Read base instructions (cached after first read)
+        if self._cached_instructions is None:
+            base_instructions = await self._read_prompt("main")
+            self._cached_instructions = base_instructions if base_instructions else self.AGENT_INSTRUCTIONS
+        instructions = self._cached_instructions
+
+        # Create agent and stream
+        async with ChatAgent(
+            chat_client=chat_client,
+            instructions=instructions,
+            context_provider=CompositeContextProvider(context_providers),
+        ) as agent:
+
+            thread = agent.get_new_thread()
+
+            # Session welcome with existing profile
+            if is_new_session and self._user_memory.has_minimum_context():
+                conv["session_initialized"] = True
+                session_summary = self._build_session_summary()
+                yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
+            elif is_new_session:
+                conv["session_initialized"] = True
+
+            # Build message list with conversation history
+            input_messages: list[ChatMessage] = []
+            for msg in history[-self.history_max_messages:]:
+                role = msg.get("role", "user")
+                text = msg.get("text") or msg.get("content") or ""
+                if text:
+                    # Strip image markdown from assistant history so old
+                    # ![...](path) references don't act as few-shot examples
+                    # that teach the model to mention figures by name only
+                    # (without embedding them), and to prevent stale image
+                    # paths that aren't in the current search context.
+                    if role == "assistant":
+                        text = _IMAGE_RE.sub("", text)
+                        text = re.sub(r'\n{3,}', '\n\n', text).strip()
                     if text:
-                        # Strip image markdown from assistant history so old
-                        # ![...](path) references don't act as few-shot examples
-                        # that teach the model to mention figures by name only
-                        # (without embedding them), and to prevent stale image
-                        # paths that aren't in the current search context.
-                        if role == "assistant":
-                            text = _IMAGE_RE.sub("", text)
-                            text = re.sub(r'\n{3,}', '\n\n', text).strip()
-                        if text:
-                            input_messages.append(ChatMessage(role=role, text=text))
-                input_messages.append(ChatMessage(role="user", text=user_message))
+                        input_messages.append(ChatMessage(role=role, text=text))
+            input_messages.append(ChatMessage(role="user", text=user_message))
+            logging.info(
+                "[MultimodalStrategy] history_messages: %d (total input: %d)",
+                len(history), len(input_messages),
+            )
+
+            # Buffer the full response so we can post-process before yielding.
+            # This ensures duplicate image references are removed regardless
+            # of model instruction-following reliability.
+            stream_start = time.time()
+            full_response = ""
+            async for chunk in agent.run_stream(
+                input_messages,
+                thread=thread,
+                options={"max_completion_tokens": self.max_completion_tokens, "reasoning_effort": self.reasoning_effort},
+            ):
+                if chunk.text:
+                    full_response += chunk.text
+            logging.info(
+                "[MultimodalStrategy] agent_stream: %.2fs (response_len=%d)",
+                time.time() - stream_start, len(full_response),
+            )
+
+            # Post-process: remove duplicate ![...]() image references (keep first)
+            full_response = _dedup_markdown_images(full_response)
+
+            # Post-response guardrail: validate each embedded image
+            if self.validate_response_images and "![" in full_response:
+                t0 = time.time()
+                full_response = await self._validate_response_images(full_response, user_message)
                 logging.info(
-                    "[MultimodalStrategy] history_messages: %d (total input: %d)",
-                    len(history), len(input_messages),
+                    "[MultimodalStrategy] image_validation: %.2fs",
+                    time.time() - t0,
                 )
 
-                # Buffer the full response so we can post-process before yielding.
-                # This ensures duplicate image references are removed regardless
-                # of model instruction-following reliability.
-                stream_start = time.time()
-                full_response = ""
-                async for chunk in agent.run_stream(
-                    input_messages,
-                    thread=thread,
-                    options={"max_completion_tokens": self.max_completion_tokens, "reasoning_effort": self.reasoning_effort},
-                ):
-                    if chunk.text:
-                        full_response += chunk.text
-                logging.info(
-                    "[MultimodalStrategy] agent_stream: %.2fs (response_len=%d)",
-                    time.time() - stream_start, len(full_response),
-                )
+            yield full_response
 
-                # Post-process: remove duplicate ![...]() image references (keep first)
-                full_response = _dedup_markdown_images(full_response)
+            # Persist conversation history locally
+            if "messages" not in conv:
+                conv["messages"] = []
+            conv["messages"].append({"role": "user", "text": user_message})
+            conv["messages"].append({"role": "assistant", "text": full_response})
 
-                # Post-response guardrail: validate each embedded image
-                if self.validate_response_images and "![" in full_response:
-                    t0 = time.time()
-                    full_response = await self._validate_response_images(full_response, user_message)
-                    logging.info(
-                        "[MultimodalStrategy] image_validation: %.2fs",
-                        time.time() - t0,
-                    )
+        logging.info("[MultimodalStrategy] === Flow done === total: %.2fs", time.time() - flow_start)
 
-                yield full_response
-
-                # Persist conversation history locally
-                if "messages" not in conv:
-                    conv["messages"] = []
-                conv["messages"].append({"role": "user", "text": user_message})
-                conv["messages"].append({"role": "assistant", "text": full_response})
-
-            logging.info("[MultimodalStrategy] === Flow done === total: %.2fs", time.time() - flow_start)
-
-            # Post-flow: flush + save as background task so SSE stream closes immediately
-            asyncio.create_task(self._post_flow_cleanup(user_id))
-
-        except Exception as e:
-            logging.error(f"[MultimodalStrategy] Agent flow failed: {e}", exc_info=True)
-            yield f"I encountered an error processing your request: {str(e)}. Please try again."
+        # Post-flow: flush + save as background task so SSE stream closes immediately
+        asyncio.create_task(self._post_flow_cleanup(user_id))
 
     # ------------------------------------------------------------------
     # Post-flow cleanup (runs as background task)

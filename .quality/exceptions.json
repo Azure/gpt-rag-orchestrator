@@ -251,7 +251,12 @@
       "evidence_tests": [
         "tests/test_orchestration_turn.py::test_partial_turn_drains_events_and_preserves_original_failure[runtime]",
         "tests/test_orchestration_turn.py::test_partial_turn_drains_events_and_preserves_original_failure[lookup]",
-        "tests/test_orchestration_turn.py::test_partial_turn_drains_events_and_preserves_original_failure[cancelled]"
+        "tests/test_orchestration_turn.py::test_partial_turn_drains_events_and_preserves_original_failure[cancelled]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[failure-True-sql]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[failure-True-vision]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[failure-True-vision-welcome]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[cancelled-True-sql]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[cancelled-True-vision-welcome]"
       ],
       "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
       "review_by_stage": "before-quality-gate-activation"
@@ -270,6 +275,14 @@
       "failure_outcome": "propagation",
       "diagnostic_path": "Constant internal_error span status; outcome.rejected and request.failed audit records; automatic exception/span-description capture disabled for this enclosing span. No global provider telemetry guarantee.",
       "evidence_tests": [
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[failure-True-sql]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[failure-True-vision]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[failure-True-vision-welcome]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[initialization-False-vision]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[cancelled-True-sql]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[cancelled-True-vision-welcome]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_explicit_nl2sql_result_answers_keep_completed_contract[validation]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_explicit_nl2sql_result_answers_keep_completed_contract[execution]",
         "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[failure-False-MafLiteStrategy]",
         "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[failure-False-MafAgentServiceStrategy]",
         "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[failure-True-MafLiteStrategy]",
@@ -433,7 +446,7 @@
       "caught_types": ["Exception"],
       "status": "proposed",
       "boundary": "Legacy multimodal personalization-profile lookup and deserialization",
-      "reason": "This existing helper returns an empty profile for both unreadable stored content and storage failures. A schema-only catch would turn unrelated profile-provider failures into memory-preparation failures. Preserve the helper contract without inferring approval of legacy user selection or the separate terminal-answer fallback.",
+      "reason": "This existing helper returns an empty profile for both unreadable stored content and storage failures. A schema-only catch would turn unrelated profile-provider failures into memory-preparation failures. Preserve the helper contract without inferring approval of legacy user selection or primary agent outcomes.",
       "failure_outcome": "failure-translation",
       "diagnostic_path": "Bounded exception-class debug log, no raw profile/provider error, and unchanged cancellation propagation.",
       "evidence_tests": [
@@ -466,7 +479,7 @@
         "tests/test_profile_persistence_boundaries.py::test_optional_profile_save_preserves_write_scope_and_bounded_failure[MultimodalStrategy-unconfirmed-update]",
         "tests/test_profile_persistence_boundaries.py::test_optional_profile_save_preserves_write_scope_and_bounded_failure[MultimodalStrategy-cancelled-update]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; legacy identity/default-user and terminal-answer contracts remain outside this exact helper proposal.",
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; identity/default-user and primary-agent contracts remain outside this exact helper proposal.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -682,6 +695,12 @@
       "failure_outcome": "failure-translation",
       "diagnostic_path": "Constant bounded internal_error log and exactly one existing SSE error frame; no raw exception or traceback. Cancellation propagates without an error frame.",
       "evidence_tests": [
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[failure-True-sql]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[failure-True-vision]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[failure-True-vision-welcome]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[initialization-False-vision]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[cancelled-True-sql]",
+        "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[cancelled-True-vision-welcome]",
         "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[failure-False-MafLiteStrategy]",
         "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[failure-False-MafAgentServiceStrategy]",
         "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[failure-True-MafLiteStrategy]",

@@ -279,12 +279,21 @@ legacy multimodal strategy. Profile/exception contents are no longer logged
 by these helpers. A store result of None is now explicitly unconfirmed,
 not logged as Saved. Helper evidence preserves create/update choice, document
 shape and cancellation; it does not approve memory eligibility, default-user
-behavior, primary conversation persistence or legacy terminal-answer paths.
+behavior, primary conversation persistence or primary terminal outcomes.
 Citation signing retains its transparent best-effort contract with two exact
 inactive proposals: unavailable configuration or signing failures leave the
 original URL unsigned. Malformed URL ValueError is bounded the same way.
 Failure logs omit blob names and raw exceptions; cancellation, read-only scope,
 same-account binding, renewal margin and unconfirmed-key cache rules remain.
+After the parent's grounded primary-failure disposition, NL2SQL and multimodal
+flows no longer turn thrown failures into raw ordinary answers or completed
+error-answer history. Only their outer catch/yield fallbacks were removed:
+the existing turn/SSE, rejected/failed audit and bounded enclosing-span path
+owns those failures. NL2SQL's explicit typed validation/execution-result
+answers remain completed answers; multimodal buffering, deduplication,
+validation, welcome prefix, optional profile cleanup and cancellation remain.
+Real strategy-to-HTTP evidence distinguishes buffered data from emitted
+partial output and verifies resource cleanup without changing wire schemas.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.
