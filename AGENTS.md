@@ -387,6 +387,28 @@ header. These choices are retained, not newly approved or claimed as strict
 OBO enforcement. Correcting them requires a separate grounded identity
 decision. Cancellation, conversation filters and successful MCP-specific
 guards remain; image failures preserve text without logging Blob SAS URLs.
+Eleven further inactive proposals cover Foundry service/query credentials and
+request translation plus the remaining MAF/multimodal helpers. Foundry HTTP
+errors retain status but no longer expose response bodies; failed credentials
+never issue a retrieve request, and MCP versus legacy propagation stays distinct.
+Real strategy consumers still answer without grounding after provider
+construction returns None: this limitation is retained and explicitly tested,
+not approved as successful retrieval. Intent-classification failure defaults
+to question, not a retrieval-skipping intent. Image-validation failures strip
+images while preserving answer text and cancellation; logs omit image URLs,
+SAS and raw results. Optional profile cleanup preserves flush-before-save and
+existing absent-memory behavior, without approving additional profile retention.
+The returned legacy-runtime slice removes two redundant single-agent wrappers
+and supplies eleven inactive boundary proposals. One-shot invalid-payload
+retry remains strictly pre-output and retains store=False, thread and input.
+Ambiguous managed writes are reconciled only against the exact two-message
+tail, never retried; this is not an idempotency guarantee. Direct/agent errors
+propagate with bounded contextual logs, preserving hosted/managed separation.
+Optional prewarm, lifecycle diagnostics and feedback correlation keep their
+distinct outcomes. Legacy token/search-context setter failures still allow
+continuation and are explicitly not strict OBO enforcement or newly approved
+access. Detached Cosmos persistence can fail after an answer is emitted; the
+bounded failure log is not durable-completion assurance or rollback.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.

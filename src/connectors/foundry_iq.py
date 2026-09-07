@@ -1801,8 +1801,8 @@ class FoundryIQClient:
         # Service bearer token (the same search audience used by SearchClient).
         try:
             token = (await self.credential.get_token(_SEARCH_SCOPE)).token
-        except Exception:
-            logging.exception("[FoundryIQClient] failed to acquire service token")
+        except Exception as exc:
+            logging.error("[FoundryIQClient] failed to acquire service token (%s)", type(exc).__name__)
             if self.mcp_config.enabled:
                 raise McpCredentialError(
                     "Failed to acquire the Foundry IQ service token"
@@ -1989,7 +1989,7 @@ class FoundryIQClient:
         try:
             async with session.post(url, headers=headers, json=body) as resp:
                 response_status = resp.status
-                text = await resp.text()
+                await resp.text()
                 if resp.status >= 400:
                     if self.mcp_config.enabled:
                         logging.error(
@@ -2000,9 +2000,9 @@ class FoundryIQClient:
                             "Foundry IQ MCP retrieve failed: "
                             f"status={resp.status}"
                         )
-                    logging.error("[FoundryIQClient] %s %s", resp.status, text)
+                    logging.error("[FoundryIQClient] retrieve failed status=%s", resp.status)
                     raise RuntimeError(
-                        f"Foundry IQ retrieve failed: {resp.status} {text}"
+                        f"Foundry IQ retrieve failed: {resp.status}"
                     )
                 payload = await resp.json()
         except McpSourceError:

@@ -1,7 +1,6 @@
 import logging
 import json
 import time
-import traceback
 from typing import Optional
 
 # Suppress Azure SDK HTTP logging BEFORE importing azure packages
@@ -129,8 +128,8 @@ async def prewarm_agents_client(*, create_reusable_agent: bool = True) -> None:
             reasoning_effort=cfg.get("REASONING_EFFORT", "low"),
         )
         logging.info("[Startup] ✅ Reusable prompt agent ready (name=%s)", name)
-    except Exception as e:
-        logging.warning("[Startup] ⚠️ Could not pre-create prompt agent (will create on first request): %s", e)
+    except Exception:
+        logging.warning("[Startup] Could not pre-create prompt agent (will create on first request)")
 
 
 class SingleAgentRAGStrategyV2(BaseAgentStrategy):
@@ -170,12 +169,8 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
             logging.warning("[Init V2] SEARCH_RETRIEVAL_ENABLED set to false. SearchClient will not be available.")
             self.search_client = None
         else:
-            try:
-                self.search_client = get_search_client()
-                logging.info("[Init V2] ✅ SearchClient initialized (singleton)")
-            except Exception as e:
-                logging.error("[Init V2] ❌ Could not initialize SearchClient: %s", e)
-                raise
+            self.search_client = get_search_client()
+            logging.info("[Init V2] ✅ SearchClient initialized (singleton)")
 
         # Hard cap on output tokens for the main agent response.
         # Default 8000: reasoning models (e.g. gpt-5-nano) spend part of this
@@ -231,7 +226,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                 user_context=self.user_context,
             )
         except Exception:
-            pass
+            logging.warning("[Agent Flow V2] Failed to apply legacy search request context")
 
     def _build_search_tool(self):
         """Build the per-request retrieval tool bound to this request's context.
@@ -389,8 +384,8 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                      full_response += update.choices[0].delta.content
                      yield update.choices[0].delta.content
 
-        except Exception as e:
-             logging.error(f"[Agent Flow V2] Direct LLM Streaming failed: {e}", exc_info=True)
+        except Exception:
+             logging.error("[Agent Flow V2] Direct LLM Streaming failed")
              raise
 
         await self._persist_managed_turn(user_message, full_response)
@@ -561,19 +556,11 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
                         yield chunk.text
 
         except Exception:
-            err_msg = traceback.format_exc()
-            logging.error(f"[Agent Flow V2] Streaming failed: {err_msg}")
+            logging.error("[Agent Flow V2] Streaming failed")
             raise
 
         if not self.hosted_runtime:
-            try:
-                await self._persist_managed_turn(user_message, full_response)
-            except Exception:
-                logging.error(
-                    "[Agent Flow V2] Managed Conversation persistence failed",
-                    exc_info=True,
-                )
-                raise
+            await self._persist_managed_turn(user_message, full_response)
 
         # Persist conversation history
         conv.setdefault("messages", []).extend([

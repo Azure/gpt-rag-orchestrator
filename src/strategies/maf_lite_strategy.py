@@ -304,7 +304,7 @@ class MafLiteStrategy(BaseAgentStrategy):
             )
             return provider
         except Exception as e:
-            logging.error(f"[MafLiteStrategy] Failed to create search provider: {e}")
+            logging.error("[MafLiteStrategy] Failed to create search provider (%s)", type(e).__name__)
             return None
 
     # ------------------------------------------------------------------
@@ -351,7 +351,7 @@ class MafLiteStrategy(BaseAgentStrategy):
             logging.info("[MafLiteStrategy] intent=%s (raw=%r)", intent, result)
             return intent
         except Exception as e:
-            logging.warning("[MafLiteStrategy] Intent classification failed: %s — defaulting to question", e)
+            logging.warning("[MafLiteStrategy] Intent classification failed (%s); defaulting to question", type(e).__name__)
             return "question"
 
     # ------------------------------------------------------------------
@@ -488,7 +488,7 @@ class MafLiteStrategy(BaseAgentStrategy):
             await self._save_user_profile(user_id, self._user_memory.user_profile)
             logging.info("[MafLiteStrategy] post_flow_profile_save: %.2fs", time.time() - t0)
         except Exception as e:
-            logging.error("[MafLiteStrategy] post_flow_cleanup failed: %s", e, exc_info=True)
+            logging.error("[MafLiteStrategy] post_flow_cleanup failed (%s)", type(e).__name__)
 
     # ------------------------------------------------------------------
     # Session management

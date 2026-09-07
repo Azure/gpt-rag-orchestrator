@@ -290,9 +290,8 @@ async def stream_agent_run(
         if produced or not options or not is_invalid_payload_error(exc):
             raise
         logging.warning(
-            "[AgentProviderV2] Run rejected run-time options %s as invalid payload; "
-            "retrying without the optional token limit: %s",
-            sorted(options.keys()), exc,
+            "[AgentProviderV2] Run rejected run-time options as invalid payload; "
+            "retrying without the optional token limit",
         )
         retry_options = dict(options)
         retry_options.pop("max_tokens", None)
@@ -448,9 +447,7 @@ async def _conversation_tail_matches(
     except Exception:
         logging.error(
             "[AgentProviderV2] Failed to reconcile ambiguous Conversation "
-            "persistence for %s",
-            conversation_id,
-            exc_info=True,
+            "persistence",
         )
         return False
 

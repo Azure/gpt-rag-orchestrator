@@ -102,7 +102,7 @@ class Orchestrator:
         try:
             setattr(instance.agentic_strategy, "request_access_token", request_access_token)
         except Exception:
-            pass
+            logging.warning("[Orchestrator] Failed to apply legacy strategy token context")
 
         return instance
 
@@ -289,8 +289,7 @@ class Orchestrator:
                         principal,
                     )
                 except Exception:
-                    # Never fail due to logging.
-                    pass
+                    logging.warning("[Orchestrator] Failed to render conversation lifecycle diagnostic")
 
                 # Optionally record the incoming question (id + text) for traceability
                 if question_id:
@@ -438,8 +437,8 @@ class Orchestrator:
                             self.agentic_strategy.conversation = conversation_to_persist
                             await self.database_client.update_document(self.database_container, conversation_to_persist)
                             logging.info(f"[Orchestrator][Timing] conversation_persist_async_done: {time.time() - start_time:.2f}s")
-                        except Exception as e:
-                            logging.error(f"[Orchestrator] Error asynchronously persisting conversation: {e}")
+                        except Exception:
+                            logging.error("[Orchestrator] Error asynchronously persisting conversation")
 
                     asyncio.create_task(persist_conversation())
                 if audit_token is not None:
@@ -488,9 +487,9 @@ class Orchestrator:
                     logging.warning(
                         f"Could not resolve question_id for feedback in conversation {self.conversation_id}; saving with question_id=null"
                     )
-        except Exception as e:
+        except Exception:
             # Do not fail feedback saving if resolution logic errors; just log
-            logging.exception("Error attempting to resolve question_id from conversation questions: %s", e)
+            logging.warning("Error attempting to resolve question_id from conversation questions")
 
         if "feedback" not in conversation:
             conversation["feedback"] = []

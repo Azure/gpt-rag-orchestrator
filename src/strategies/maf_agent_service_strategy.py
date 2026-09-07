@@ -288,7 +288,7 @@ Guidelines:
             return provider
 
         except Exception as e:
-            logging.error(f"[MafAgentServiceStrategy] Failed to create search provider: {e}")
+            logging.error("[MafAgentServiceStrategy] Failed to create search provider (%s)", type(e).__name__)
             return None
 
     def _build_session_summary(self, user_memory: UserProfileMemory) -> str:

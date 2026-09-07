@@ -329,7 +329,7 @@ class MultimodalStrategy(BaseAgentStrategy):
             )
             return provider
         except Exception as e:
-            logging.error(f"[MultimodalStrategy] Failed to create search provider: {e}")
+            logging.error("[MultimodalStrategy] Failed to create search provider (%s)", type(e).__name__)
             return None
 
     async def _classify_image_relevance(self, candidate: dict[str, Any]) -> bool:
@@ -426,8 +426,7 @@ class MultimodalStrategy(BaseAgentStrategy):
                 # No base64 available — cannot validate, strip to be safe
                 invalid_paths.add(path)
                 logging.warning(
-                    "[MultimodalStrategy] image_validation fig=%s result=NO_DATA (stripping)",
-                    path,
+                    "[MultimodalStrategy] image_validation result=NO_DATA (stripping)",
                 )
                 return
 
@@ -464,19 +463,17 @@ class MultimodalStrategy(BaseAgentStrategy):
                             timeout=self.image_validation_timeout_seconds,
                         )
                     result = (resp.choices[0].message.content or "").strip().upper()
-                    finish = getattr(resp.choices[0], "finish_reason", "?")
-                    tokens = getattr(getattr(resp, "usage", None), "completion_tokens", "?")
                     logging.info(
-                        "[MultimodalStrategy] image_validation fig=%s result=%r finish=%s tokens=%s",
-                        path, result, finish, tokens,
+                        "[MultimodalStrategy] image_validation valid=%s",
+                        bool(result and result.startswith("VALID")),
                     )
                     # Fail-closed: anything other than explicit VALID is stripped
                     if not result or not result.startswith("VALID"):
                         invalid_paths.add(path)
                 except Exception as e:
                     logging.warning(
-                        "[MultimodalStrategy] image_validation fig=%s error=%s (stripping)",
-                        path, e,
+                        "[MultimodalStrategy] image_validation failed (%s); stripping",
+                        type(e).__name__,
                     )
                     invalid_paths.add(path)
 
@@ -538,7 +535,7 @@ class MultimodalStrategy(BaseAgentStrategy):
             logging.info("[MultimodalStrategy] intent=%s (raw=%r)", intent, result)
             return intent
         except Exception as e:
-            logging.warning("[MultimodalStrategy] Intent classification failed: %s — defaulting to question", e)
+            logging.warning("[MultimodalStrategy] Intent classification failed (%s); defaulting to question", type(e).__name__)
             return "question"
 
     # ------------------------------------------------------------------
@@ -692,7 +689,7 @@ class MultimodalStrategy(BaseAgentStrategy):
             await self._save_user_profile(user_id, self._user_memory.user_profile)
             logging.info("[MultimodalStrategy] post_flow_profile_save: %.2fs", time.time() - t0)
         except Exception as e:
-            logging.error("[MultimodalStrategy] post_flow_cleanup failed: %s", e, exc_info=True)
+            logging.error("[MultimodalStrategy] post_flow_cleanup failed (%s)", type(e).__name__)
 
     # ------------------------------------------------------------------
     # Session management
