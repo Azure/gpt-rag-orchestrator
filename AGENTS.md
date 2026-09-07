@@ -312,6 +312,19 @@ failure prevents HTTP access, while cancellation propagates through context
 cleanup. Multimodal captions are grouped per document according to the
 existing List[List[str]] contract; a malformed later document cannot leave
 caption/text/image accumulation out of step.
+Key Vault lookup retains unavailable results for configuration/input and Azure
+SDK failures, including failed cleanup, with class-only or constant diagnostics.
+Unexpected non-SDK/non-validation failures and cancellation propagate through
+the existing credential/client context managers; no secret name or provider
+exception payload is added to failure logs.
+OpenAI response-format conversion keeps mapping/model support and the legacy
+unsupported-format fallback for the converter's TypeError/ValueError and
+PydanticInvalidForJsonSchema failures, now with a bounded warning. A non-model
+adapter remains unsupported rather
+than gaining a guessed schema name. Unexpected schema-hook errors propagate
+before model access in both public response and streaming methods, as does
+cancellation; optional-format compatibility is not a guarantee of structured
+output for invalid caller input.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.
