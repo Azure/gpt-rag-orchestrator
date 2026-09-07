@@ -283,6 +283,55 @@
       "review_by_stage": "before-quality-gate-activation"
     },
     {
+      "id": "citation-storage-config-unsigned-compatibility",
+      "module_id": "util.blob_sas",
+      "symbol": "_storage_account_name",
+      "path": "src/util/blob_sas.py",
+      "line": 52,
+      "handler_fingerprint": "c196f264c45aa48936d37421a7a61b934ac65c0320e8090d4fa6f16726072217",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional storage-account lookup for transparent citation signing",
+      "reason": "The signing helper explicitly preserves an otherwise valid citation when configuration or account lookup is unavailable. It must not guess an account or make optional link enrichment fail primary retrieval. Failures from configuration acquisition and account resolution have independent sources.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Constant unsigned-link debug message without configuration exception text; no account is returned or substituted on failure.",
+      "evidence_tests": [
+        "tests/test_blob_sas_failure_boundaries.py::test_unavailable_configuration_preserves_unsigned_citation[config]",
+        "tests/test_blob_sas_failure_boundaries.py::test_unavailable_configuration_preserves_unsigned_citation[account]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346. Parent confirmed the existing transparent signing contract, not an active exception approval.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "citation-signing-unsigned-compatibility",
+      "module_id": "util.blob_sas",
+      "symbol": "sign_blob_url",
+      "path": "src/util/blob_sas.py",
+      "line": 150,
+      "handler_fingerprint": "c1ad86321f8e5adab4da26098a8c3e03e10dcedb5e3428f5829169a97e924127",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional read-only SAS enrichment of same-account citation URLs",
+      "reason": "The existing public helper promises the original URL on signing failure. Delegation acquisition, signing and client cleanup can fail independently; all ordinary failures preserve the citation rather than drop it or fail the answer. Cancellation must still propagate and an unconfirmed delegation key must not be cached.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Constant unsigned-link warning without blob name, raw exception or traceback. Original URL returned; no new account/permission/expiry behavior or success claim.",
+      "evidence_tests": [
+        "tests/test_blob_sas_failure_boundaries.py::test_optional_signing_failure_is_unsigned_safe_and_closes_client[AzureError-acquire]",
+        "tests/test_blob_sas_failure_boundaries.py::test_optional_signing_failure_is_unsigned_safe_and_closes_client[AzureError-sign]",
+        "tests/test_blob_sas_failure_boundaries.py::test_optional_signing_failure_is_unsigned_safe_and_closes_client[AzureError-cleanup]",
+        "tests/test_blob_sas_failure_boundaries.py::test_optional_signing_failure_is_unsigned_safe_and_closes_client[RuntimeError-acquire]",
+        "tests/test_blob_sas_failure_boundaries.py::test_optional_signing_failure_is_unsigned_safe_and_closes_client[RuntimeError-sign]",
+        "tests/test_blob_sas_failure_boundaries.py::test_optional_signing_failure_is_unsigned_safe_and_closes_client[RuntimeError-cleanup]",
+        "tests/test_blob_sas_failure_boundaries.py::test_cancellation_propagates_and_does_not_cache_unconfirmed_key[acquire]",
+        "tests/test_blob_sas_failure_boundaries.py::test_cancellation_propagates_and_does_not_cache_unconfirmed_key[cleanup]",
+        "tests/test_blob_sas_failure_boundaries.py::test_malformed_url_is_not_fatal_or_logged_verbatim",
+        "tests/test_blob_sas_failure_boundaries.py::test_cache_never_reuses_another_account_or_near_expiry_key[False]",
+        "tests/test_blob_sas_failure_boundaries.py::test_cache_never_reuses_another_account_or_near_expiry_key[True]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; parent implementation and passing contract evidence do not activate this exception.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
       "id": "maf-lite-optional-profile-load",
       "module_id": "strategies.maf_lite_strategy",
       "symbol": "MafLiteStrategy._load_user_profile",

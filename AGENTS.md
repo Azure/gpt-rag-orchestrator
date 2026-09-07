@@ -280,6 +280,11 @@ by these helpers. A store result of None is now explicitly unconfirmed,
 not logged as Saved. Helper evidence preserves create/update choice, document
 shape and cancellation; it does not approve memory eligibility, default-user
 behavior, primary conversation persistence or legacy terminal-answer paths.
+Citation signing retains its transparent best-effort contract with two exact
+inactive proposals: unavailable configuration or signing failures leave the
+original URL unsigned. Malformed URL ValueError is bounded the same way.
+Failure logs omit blob names and raw exceptions; cancellation, read-only scope,
+same-account binding, renewal margin and unconfirmed-key cache rules remain.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.
