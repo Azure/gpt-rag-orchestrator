@@ -822,6 +822,51 @@
       "review_by_stage": "before-quality-gate-activation"
     },
     {
+      "id": "optional-log-level-diagnostic-reporting",
+      "module_id": "telemetry.telemetry",
+      "symbol": "Telemetry.log_log_level_diagnostics",
+      "path": "src/telemetry/telemetry.py",
+      "line": 364,
+      "handler_fingerprint": "f91650fc68fc070e402c357516db16838ad8c4b626d5cea1d5f8e192bd143b91",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional reporting of already configured logging state",
+      "reason": "Reporting the resolved/effective log level is auxiliary diagnostics, not configuration application. Its provider/rendering failure must not replace primary startup work. Actual missing/retry defaults and environment precedence remain, while unexpected errors no longer emit a false successful INFO/default resolution.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Bounded warning instead of silent pass, with no exception text; cancellation propagates. The required monitoring/logging configuration path is not covered by this proposal.",
+      "evidence_tests": [
+        "tests/test_optional_logging_boundaries.py::test_log_level_diagnostics_preserve_sources_without_false_default[provider-error]",
+        "tests/test_optional_logging_boundaries.py::test_log_level_diagnostics_preserve_sources_without_false_default[logging-error]",
+        "tests/test_optional_logging_boundaries.py::test_log_level_diagnostics_preserve_sources_without_false_default[missing]",
+        "tests/test_optional_logging_boundaries.py::test_log_level_diagnostics_preserve_sources_without_false_default[retry]",
+        "tests/test_optional_logging_boundaries.py::test_log_level_diagnostics_preserve_sources_without_false_default[cancelled]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active exception or fallback for required configuration.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "context-noise-filter-retains-unformattable-record",
+      "module_id": "util.otel_context_noise",
+      "symbol": "AsyncGeneratorContextDetachFilter.filter",
+      "path": "src/util/otel_context_noise.py",
+      "line": 37,
+      "handler_fingerprint": "006bf111796020c73db89525fa175e5eba8765468e766018d70ed2a2a7e6c16b",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional suppression of one known OpenTelemetry context-detach message",
+      "reason": "LogRecord.getMessage performs arbitrary message conversion as well as percent formatting. If inspection fails, retain the original record rather than dropping an unknown error or raising from the optional filter. Emitting another log here could recurse through the same filter.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Original record and severity are retained for configured handlers; no replacement success event. This does not guarantee that malformed records can be formatted safely by every downstream sink.",
+      "evidence_tests": [
+        "tests/test_otel_context_noise.py::TestAsyncGeneratorContextDetachFilter::test_never_breaks_logging_when_formatting_fails",
+        "tests/test_otel_context_noise.py::TestAsyncGeneratorContextDetachFilter::test_retains_original_record_when_message_conversion_fails[RuntimeError]",
+        "tests/test_otel_context_noise.py::TestAsyncGeneratorContextDetachFilter::test_retains_original_record_when_message_conversion_fails[ValueError]",
+        "tests/test_otel_context_noise.py::TestSilenceContextDetachNoise::test_suppresses_the_record_end_to_end"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; exact filter side effect, not generic logging-error suppression.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
       "id": "citation-storage-config-unsigned-compatibility",
       "module_id": "util.blob_sas",
       "symbol": "_storage_account_name",

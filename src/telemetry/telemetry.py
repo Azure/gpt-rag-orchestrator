@@ -348,10 +348,7 @@ class Telemetry:
                 src = "env"
                 resolved = lvl_env.strip().upper()
             else:
-                try:
-                    cfg_val = config.get("LOG_LEVEL", None)
-                except Exception:
-                    cfg_val = None
+                cfg_val = config.get_value("LOG_LEVEL", default=None, allow_none=True)
                 if cfg_val:
                     src = "appconfig"
                     resolved = str(cfg_val).strip().upper()
@@ -364,6 +361,5 @@ class Telemetry:
                 "Effective root logger level: %s",
                 logging.getLevelName(logging.getLogger().getEffectiveLevel()),
             )
-        except Exception:
-            # Best effort only
-            pass
+        except Exception as exc:
+            logging.warning("[Telemetry] Could not report log-level diagnostics (%s)", type(exc).__name__)

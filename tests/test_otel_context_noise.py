@@ -92,6 +92,23 @@ class TestAsyncGeneratorContextDetachFilter:
         )
         assert AsyncGeneratorContextDetachFilter().filter(record) is True
 
+    @pytest.mark.parametrize("failure_type", [RuntimeError, ValueError])
+    def test_retains_original_record_when_message_conversion_fails(self, failure_type):
+        failure = failure_type("synthetic-private-log-detail")
+
+        class Message:
+            def __str__(self):
+                raise failure
+
+        message = Message()
+        record = logging.LogRecord(
+            name=CONTEXT_LOGGER_NAME, level=logging.ERROR, pathname=__file__,
+            lineno=1, msg=message, args=(), exc_info=None,
+        )
+        assert AsyncGeneratorContextDetachFilter().filter(record) is True
+        assert record.msg is message
+        assert record.levelno == logging.ERROR
+
 
 class TestSilenceContextDetachNoise:
     def test_installs_the_filter_on_the_context_logger(self, clean_context_logger):

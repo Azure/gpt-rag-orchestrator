@@ -345,6 +345,21 @@ provider response bodies. Early embedding/OBO failures no longer mask their
 original outcome with an unbound token variable; strict propagation and the
 explicit anonymous search_failed result remain. The shared mock configuration
 getter now accepts the real default/allow_none/type parameters.
+The prompt uploader and local stream diagnostic now signal primary operation
+failure with a nonzero process exit rather than printing an error and exiting
+successfully. The uploader still processes other files after known read or
+unconfirmed-write failures, then exits 1; confirmed writes are not rolled back.
+A missing prompts directory exits before Azure initialization. Unexpected
+failures and cancellation propagate. The stream diagnostic preserves emitted
+chunks and client cleanup, exits 1 on HTTP/transport failures with bounded
+diagnostics, and no longer prints non-success HTTP response bodies.
+Two inactive logging proposals retain optional diagnostic reporting and the
+context-noise filter's original-record fallback. Unexpected diagnostic provider
+failures now warn instead of claiming a resolved INFO/default value; real
+missing/retry defaults and environment precedence remain. The filter preserves
+an unformattable record without recursively logging, and no longer marks the
+now-exercised branch as uncovered. These are not general guarantees about
+downstream logging sinks or permission to suppress primary failures.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.
