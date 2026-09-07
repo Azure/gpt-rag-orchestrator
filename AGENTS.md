@@ -368,6 +368,15 @@ the worker supplies chat_options while OpenAIChatClient consumes options, and
 the adapter does not populate ChatResponse.value for this call. No correction
 enabling additional profile data writes is silently included; the real adapter
 case is characterization, not a claim that extraction works end to end.
+The returned dependency slice removes six redundant JWT/Graph configuration
+catches while preserving actual provider defaults. Eight inactive records
+cover existing API-key environment fallback, optional JWKS/claim diagnostics
+and Graph enrichment. The existing JWT translation record is rebound after
+the diagnostic changes. Real JWT/JWKS/HTTPX evidence preserves signature,
+audience, cache and cancellation behavior; Graph and handle_exception have no
+identified maintained consumer, so their helper evidence is not an ACL or
+primary-HTTP integration claim. API-key fallback is explicitly retained but
+not approved under the parent's plan8b6c5c7 identity disposition.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.

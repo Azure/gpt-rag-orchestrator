@@ -796,6 +796,14 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("context-noise-filter-retains-unformattable-record", "contractual-best-effort-side-effect"),
     ("optional-profile-background-extraction", "contractual-best-effort-side-effect"),
     ("optional-profile-pending-task-flush", "contractual-best-effort-side-effect"),
+    ("legacy-api-key-environment-fallback", "failure-translation"),
+    ("optional-jwks-cache-refresh-diagnostics", "contractual-best-effort-side-effect"),
+    ("optional-jwt-segment-length-diagnostics", "contractual-best-effort-side-effect"),
+    ("optional-jwt-base64-diagnostics", "contractual-best-effort-side-effect"),
+    ("optional-unverified-claim-diagnostics", "contractual-best-effort-side-effect"),
+    ("optional-graph-audience-preverification-hint", "contractual-best-effort-side-effect"),
+    ("optional-graph-audience-signature-hint", "contractual-best-effort-side-effect"),
+    ("legacy-optional-graph-group-result", "failure-translation"),
 ])
 def test_compatibility_proposal_is_exact_and_not_self_authorized(record_id, outcome):
     root = Path(QUALITY["__file__"]).resolve().parents[2]

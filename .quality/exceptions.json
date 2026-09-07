@@ -912,6 +912,169 @@
       "review_by_stage": "before-quality-gate-activation"
     },
     {
+      "id": "legacy-api-key-environment-fallback",
+      "module_id": "dependencies",
+      "symbol": "validate_auth",
+      "path": "src/dependencies.py",
+      "line": 225,
+      "handler_fingerprint": "04398c1e635e66e5d4a9697546be771d6a4590801bcff315af8ddf8ae84b3ab1",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Existing API-key configuration failure fallback to the environment",
+      "reason": "Preserve the demonstrated fallback to ORCHESTRATOR_APP_APIKEY when provider lookup fails: a matching environment key can still authenticate. This is explicitly negative compatibility evidence under parent plan8b6c5c7, not approval of this retained identity choice or a new fallback.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Constant warning makes environment fallback visible without key/provider contents. Missing/mismatched keys remain 401; cancellation and existing Dapr/disable-auth precedence remain.",
+      "evidence_tests": [
+        "tests/test_dependency_boundary_dispositions.py::test_api_key_provider_failure_preserves_legacy_env_fallback[match]",
+        "tests/test_dependency_boundary_dispositions.py::test_api_key_provider_failure_preserves_legacy_env_fallback[missing]",
+        "tests/test_dependency_boundary_dispositions.py::test_api_key_provider_failure_preserves_legacy_env_fallback[mismatch]",
+        "tests/test_dependency_boundary_dispositions.py::test_api_key_provider_failure_preserves_legacy_env_fallback[cancelled]",
+        "tests/test_dependency_boundary_dispositions.py::test_api_key_and_dapr_precedence_is_unchanged[False]"
+      ],
+      "review": "Pending independent maintainer/security approval in Azure/gpt-rag-orchestrator#346. Do not claim this compatibility proposal approves fallback credentials or strict provider availability.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "optional-jwks-cache-refresh-diagnostics",
+      "module_id": "dependencies",
+      "symbol": "_force_refresh_jwks_cache",
+      "path": "src/dependencies.py",
+      "line": 313,
+      "handler_fingerprint": "24c9e6377d66a9f8cacbeaa2ed4d4ca0fe83df621660b839ac05da4982efe76d",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional tenant-scoped JWKS cache cleanup",
+      "reason": "Cache cleanup/reporting failure does not itself authenticate a token or replace signature verification. Real signed-token evidence exercises cleanup-log failure followed by new-key validation; HTTP cache evidence separately requires successful fetch before caching.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Constant debug failure message without traceback. Tenant/URL keys and subsequent verifier behavior are preserved.",
+      "evidence_tests": [
+        "tests/test_dependency_boundary_dispositions.py::test_optional_jwt_diagnostics_never_log_raw_failure_or_change_validation[cache]",
+        "tests/test_dependency_boundary_dispositions.py::test_actual_jwks_http_cache_only_stores_successful_fetches[http]",
+        "tests/test_dependency_boundary_dispositions.py::test_actual_jwks_http_cache_only_stores_successful_fetches[success]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active exception or cache/issuer policy change.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "optional-jwt-segment-length-diagnostics",
+      "module_id": "dependencies",
+      "symbol": "validate_access_token",
+      "path": "src/dependencies.py",
+      "line": 338,
+      "handler_fingerprint": "d6c5bd6795ce1075d529fa2f6775f61faf075ac34cc50c30ff5050c3a0877d2f",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional token segment-length debug reporting",
+      "reason": "Failure rendering diagnostic lengths must not substitute for the actual JWT validation that follows. The test injects a logging failure and still verifies the real signed token and trusted identity.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Constant debug fallback, no raw token or exception traceback.",
+      "evidence_tests": [
+        "tests/test_dependency_boundary_dispositions.py::test_optional_jwt_diagnostics_never_log_raw_failure_or_change_validation[segment_lengths]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; diagnostic side effect only.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "optional-jwt-base64-diagnostics",
+      "module_id": "dependencies",
+      "symbol": "validate_access_token",
+      "path": "src/dependencies.py",
+      "line": 391,
+      "handler_fingerprint": "d1e49827f845f2e5b7a2ac6571017847276a95b8477b1adf796e48f574674c9c",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional JWT structural/base64 diagnostics before verification",
+      "reason": "Diagnostic decoding is not the signature-validation path. Its unexpected failure must not preempt the real verifier or be treated as a trusted claim; successful signed-token verification remains required.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Constant debug message replaces silent pass; no diagnostic exception payload.",
+      "evidence_tests": [
+        "tests/test_dependency_boundary_dispositions.py::test_optional_jwt_diagnostics_never_log_raw_failure_or_change_validation[base64]",
+        "tests/test_dependency_boundary_dispositions.py::test_real_jwks_provider_to_jwt_consumer_preserves_verification_and_cleanup[invalid_signature]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no authentication bypass or blanket decoder recovery.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "optional-unverified-claim-diagnostics",
+      "module_id": "dependencies",
+      "symbol": "validate_access_token",
+      "path": "src/dependencies.py",
+      "line": 517,
+      "handler_fingerprint": "a0aa12d0a67d63094075b16b6827a99389a458bfd8f41a80b298f2936080b798",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional unverified-claim debug reporting",
+      "reason": "Diagnostic reporting failure must not change the subsequent verified identity. Unverified claims remain diagnostic inputs, not authorization evidence.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Constant debug fallback without exception traceback. This proposal does not certify all successful debug claim fields as privacy-safe.",
+      "evidence_tests": [
+        "tests/test_dependency_boundary_dispositions.py::test_optional_jwt_diagnostics_never_log_raw_failure_or_change_validation[claims]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no role/claim trust-policy change.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "optional-graph-audience-preverification-hint",
+      "module_id": "dependencies",
+      "symbol": "validate_access_token",
+      "path": "src/dependencies.py",
+      "line": 542,
+      "handler_fingerprint": "3e10d727e579c5d5344760486bc44f3bdbf023ec69b31c60115bf7f6313003e4",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional Graph-audience client-configuration hint",
+      "reason": "The hint may fail to log, but a Graph-audience token must still fail API token validation. The real JWT case proves diagnostic failure does not convert that rejection to acceptance.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Constant debug fallback replaces silent pass; no provider message or token is exposed.",
+      "evidence_tests": [
+        "tests/test_dependency_boundary_dispositions.py::test_optional_jwt_diagnostics_never_log_raw_failure_or_change_validation[graph_hint]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; not an audience exception.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "optional-graph-audience-signature-hint",
+      "module_id": "dependencies",
+      "symbol": "validate_access_token",
+      "path": "src/dependencies.py",
+      "line": 660,
+      "handler_fingerprint": "d1cbf89f50704fae866aaed794e9240e27dc4392b290fcbd91202c981b44eea3",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional Graph-audience hint after invalid signature",
+      "reason": "Failure reporting the client hint must preserve the established invalid-token 401. It cannot repair or accept the signature and does not suppress the primary verification failure.",
+      "failure_outcome": "contractual-best-effort-side-effect",
+      "diagnostic_path": "Constant debug fallback; original invalid-token HTTP outcome remains.",
+      "evidence_tests": [
+        "tests/test_dependency_boundary_dispositions.py::test_optional_jwt_diagnostics_never_log_raw_failure_or_change_validation[signature_hint]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no signature-validation exemption.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "legacy-optional-graph-group-result",
+      "module_id": "dependencies",
+      "symbol": "get_user_groups_from_graph",
+      "path": "src/dependencies.py",
+      "line": 754,
+      "handler_fingerprint": "f73806ecedf1bef78be87f6125171d468c8575f5bdecc7774a7708c36c6eca77",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Legacy optional Graph display-name enrichment helper",
+      "reason": "The helper returns an empty group-name list on token/group HTTP, transport, JSON or unexpected request failures. Preserve this nullable-enrichment compatibility, not an ACL decision. No maintained caller was identified, so this evidence does not establish an authenticated primary consumer.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Existing bounded failure logging; real HTTPX transport evidence preserves POST/GET token forwarding, context closure and cancellation. Unexpected configuration reads now propagate outside this request boundary.",
+      "evidence_tests": [
+        "tests/test_dependency_boundary_dispositions.py::test_actual_graph_http_boundary_preserves_optional_result_and_cleanup[http-token]",
+        "tests/test_dependency_boundary_dispositions.py::test_actual_graph_http_boundary_preserves_optional_result_and_cleanup[json-groups]",
+        "tests/test_dependency_boundary_dispositions.py::test_actual_graph_http_boundary_preserves_optional_result_and_cleanup[unexpected-groups]",
+        "tests/test_dependency_boundary_dispositions.py::test_actual_graph_http_boundary_preserves_optional_result_and_cleanup[cancelled-token]",
+        "tests/test_dependency_boundary_dispositions.py::test_actual_graph_http_boundary_preserves_optional_result_and_cleanup[success-groups]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; empty-result compatibility is not approval of group authorization or fallback identity.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
       "id": "citation-storage-config-unsigned-compatibility",
       "module_id": "util.blob_sas",
       "symbol": "_storage_account_name",
@@ -1104,7 +1267,7 @@
       "symbol": "validate_access_token",
       "path": "src/dependencies.py",
       "line": 708,
-      "handler_fingerprint": "3f0415a57c163c90c43e8f5246c73847c22a9cd6f97c6ca241cb8f6fc67a8646",
+      "handler_fingerprint": "2a8b9b27cfa2a2a2424e25a4ad39afc70d5c5ed274ee3220afe45bf529043f34",
       "caught_types": ["Exception"],
       "status": "proposed",
       "boundary": "API JWT verification after required authentication configuration is resolved",
