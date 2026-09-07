@@ -95,8 +95,8 @@ class FoundryIQContextProvider(ContextProvider):
                     obo_token = await self._get_obo_token()
                 except Exception as e:
                     logger.warning(
-                        "[FoundryIQContextProvider] OBO token acquisition failed: %s",
-                        e,
+                        "[FoundryIQContextProvider] OBO token acquisition failed (%s)",
+                        type(e).__name__,
                     )
                     if mcp_enabled:
                         raise McpCredentialError(
@@ -156,8 +156,7 @@ class FoundryIQContextProvider(ContextProvider):
                 "%s Foundry IQ retrieval failed in %.2fs: %s",
                 marker,
                 time.time() - search_start,
-                e,
-                exc_info=True,
+                type(e).__name__,
                 extra={
                     "retrieval_credential_type": "obo" if obo_token else "managed_identity",
                 },

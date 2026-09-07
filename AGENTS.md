@@ -377,6 +377,16 @@ audience, cache and cancellation behavior; Graph and handle_exception have no
 identified maintained consumer, so their helper evidence is not an ACL or
 primary-HTTP integration claim. API-key fallback is explicitly retained but
 not approved under the parent's plan8b6c5c7 identity disposition.
+Nine inactive context-provider records preserve distinct keyword, empty-context,
+MCP-error, image-classification and image-download outcomes with bounded
+diagnostics. Their negative identity evidence is explicit: non-MCP strategy
+callbacks can force allow_anonymous=True despite a false setting; text/vision
+providers continue without delegated authorization after callback failure;
+multimodal retrieval can retry a failed delegated query after removing that
+header. These choices are retained, not newly approved or claimed as strict
+OBO enforcement. Correcting them requires a separate grounded identity
+decision. Cancellation, conversation filters and successful MCP-specific
+guards remain; image failures preserve text without logging Blob SAS URLs.
 Do not bulk-approve legacy fallbacks, baseline cycles, rewrite baselines in CI,
 or change auth/retrieval behavior to make the gate green. Preserve the existing
 best-effort audit side-effect contract without extending it to primary work.

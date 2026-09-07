@@ -309,7 +309,7 @@ class MultimodalSearchContextProvider(ContextProvider):
                 )
             except Exception as e:
                 logger.warning(
-                    "[MultimodalSearchContextProvider] Embedding failed, falling back to keyword: %s", e,
+                    "[MultimodalSearchContextProvider] Embedding failed, falling back to keyword (%s)", type(e).__name__,
                 )
 
         if self._semantic_config:
@@ -324,7 +324,7 @@ class MultimodalSearchContextProvider(ContextProvider):
                 try:
                     obo_token = await self._get_obo_token()
                 except Exception as e:
-                    logger.warning("[MultimodalSearchContextProvider] OBO token failed: %s", e)
+                    logger.warning("[MultimodalSearchContextProvider] OBO token failed (%s)", type(e).__name__)
 
             if obo_token:
                 search_params["x_ms_query_source_authorization"] = f"Bearer {obo_token}"
@@ -351,8 +351,7 @@ class MultimodalSearchContextProvider(ContextProvider):
                     "%s Search failed with OBO header in %.2fs: %s — retrying without permission filter",
                     marker,
                     time.time() - search_start,
-                    e,
-                    exc_info=True,
+                    type(e).__name__,
                     extra={
                         "retrieval_index": self._index_name,
                         "retrieval_credential_type": "obo",
@@ -381,8 +380,7 @@ class MultimodalSearchContextProvider(ContextProvider):
                         "%s Search retry without OBO also failed in %.2fs: %s",
                         marker,
                         time.time() - search_start,
-                        retry_e,
-                        exc_info=True,
+                        type(retry_e).__name__,
                         extra={
                             "retrieval_index": self._index_name,
                             "retrieval_credential_type": "managed_identity",
@@ -401,8 +399,7 @@ class MultimodalSearchContextProvider(ContextProvider):
                     "%s Search failed in %.2fs: %s",
                     marker,
                     time.time() - search_start,
-                    e,
-                    exc_info=True,
+                    type(e).__name__,
                     extra={
                         "retrieval_index": self._index_name,
                         "retrieval_credential_type": "managed_identity",
@@ -640,9 +637,8 @@ class MultimodalSearchContextProvider(ContextProvider):
                     decisions[fig_path] = await self._classify_images_fn(candidate)
                 except Exception as e:
                     logger.warning(
-                        "[MultimodalSearchContextProvider] Visual classification failed for %s: %s. Keeping image.",
-                        fig_path,
-                        e,
+                        "[MultimodalSearchContextProvider] Visual classification failed (%s). Keeping image.",
+                        type(e).__name__,
                     )
                     decisions[fig_path] = True
 
@@ -660,7 +656,7 @@ class MultimodalSearchContextProvider(ContextProvider):
             return base64.b64encode(data).decode("utf-8")
         except Exception as e:
             logger.warning(
-                "[MultimodalSearchContextProvider] Failed to download image %s: %s",
-                blob_url[:120], e,
+                "[MultimodalSearchContextProvider] Failed to download image (%s)",
+                type(e).__name__,
             )
             return None

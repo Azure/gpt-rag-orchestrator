@@ -804,6 +804,15 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("optional-graph-audience-preverification-hint", "contractual-best-effort-side-effect"),
     ("optional-graph-audience-signature-hint", "contractual-best-effort-side-effect"),
     ("legacy-optional-graph-group-result", "failure-translation"),
+    ("legacy-text-provider-obo-service-fallback", "failure-translation"),
+    ("foundry-context-obo-compatibility", "failure-translation"),
+    ("foundry-context-empty-result-translation", "failure-translation"),
+    ("multimodal-context-keyword-fallback", "failure-translation"),
+    ("legacy-multimodal-obo-service-fallback", "failure-translation"),
+    ("legacy-multimodal-retry-without-obo", "failure-translation"),
+    ("multimodal-retry-empty-context", "failure-translation"),
+    ("multimodal-optional-image-classification", "failure-translation"),
+    ("multimodal-optional-image-download", "failure-translation"),
 ])
 def test_compatibility_proposal_is_exact_and_not_self_authorized(record_id, outcome):
     root = Path(QUALITY["__file__"]).resolve().parents[2]

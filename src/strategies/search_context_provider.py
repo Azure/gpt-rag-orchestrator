@@ -127,7 +127,7 @@ class SearchContextProvider(ContextProvider):
                 try:
                     obo_token = await self._get_obo_token()
                 except Exception as e:
-                    logger.warning("[SearchContextProvider] OBO token acquisition failed: %s", e)
+                    logger.warning("[SearchContextProvider] OBO token acquisition failed (%s)", type(e).__name__)
 
             if obo_token:
                 search_params["x_ms_query_source_authorization"] = obo_token

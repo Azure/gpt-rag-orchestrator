@@ -54,7 +54,7 @@
       "symbol": "SearchContextProvider.invoking",
       "path": "src/strategies/search_context_provider.py",
       "line": 180,
-      "handler_fingerprint": "5983fe8c701bf55c33feaeb1b34ad228f197c1d3a4994ed5223c3d114b1beb4b",
+      "handler_fingerprint": "dc84d6f114065d561b599c0fb6a9f7301986bfbaac25ae2a8094365c50e0fda1",
       "caught_types": ["Exception"],
       "status": "proposed",
       "boundary": "Context-provider SDK search, asynchronous result iteration and context shaping",
@@ -1072,6 +1072,198 @@
         "tests/test_dependency_boundary_dispositions.py::test_actual_graph_http_boundary_preserves_optional_result_and_cleanup[success-groups]"
       ],
       "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; empty-result compatibility is not approval of group authorization or fallback identity.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "legacy-text-provider-obo-service-fallback",
+      "module_id": "strategies.search_context_provider",
+      "symbol": "SearchContextProvider.invoking",
+      "path": "src/strategies/search_context_provider.py",
+      "line": 129,
+      "handler_fingerprint": "5f9ca8059c5b50ab92f0ea5812cb5bea0ebe2f65e579ccb2a43b2f1460ae8a10",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Existing text-provider OBO callback failure fallback",
+      "reason": "Preserve the existing query without delegated query-source authorization after callback failure under parent plan8b6c5c7. Real strategy callbacks explicitly pass allow_anonymous=True outside MCP even when the setting is false. This is negative identity-compatibility evidence, not strict OBO enforcement.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Exception-class warning only; existing service-credential query and conversation filter remain. Cancellation is not swallowed.",
+      "evidence_tests": [
+        "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[obo-error-text]",
+        "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[cancelled-obo-text]",
+        "tests/test_context_provider_boundary_dispositions.py::test_actual_non_mcp_strategy_callback_does_not_enforce_strict_obo[True-lite]",
+        "tests/test_context_provider_boundary_dispositions.py::test_actual_non_mcp_strategy_callback_does_not_enforce_strict_obo[True-service]"
+      ],
+      "review": "Pending separate maintainer/security decision; inactive in Azure/gpt-rag-orchestrator#346. Do not approve service-identity fallback or claim ALLOW_ANONYMOUS=false enforces delegated retrieval here.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "foundry-context-obo-compatibility",
+      "module_id": "strategies.foundry_iq_context_provider",
+      "symbol": "FoundryIQContextProvider.invoking",
+      "path": "src/strategies/foundry_iq_context_provider.py",
+      "line": 96,
+      "handler_fingerprint": "30d7c1d3cf7b998b00be1385b154b9bdaa6e09aab4b8c1876b128e8d99824f44",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Foundry context OBO callback translation with MCP-specific requirement",
+      "reason": "An enabled MCP callback failure becomes the existing constant McpCredentialError and prevents retrieve. The non-MCP route still continues without the delegated token. Preserve and explicitly distinguish those outcomes rather than infer strict enforcement from the shared setting.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Exception class only; no callback payload. MCP credential error text remains constant; cancellation propagates.",
+      "evidence_tests": [
+        "tests/test_context_provider_boundary_dispositions.py::test_foundry_context_retains_mcp_specific_failure_rules[obo-error-strict-setting-True]",
+        "tests/test_context_provider_boundary_dispositions.py::test_foundry_context_retains_mcp_specific_failure_rules[obo-error-strict-setting-False]",
+        "tests/test_context_provider_boundary_dispositions.py::test_foundry_context_retains_mcp_specific_failure_rules[cancelled-strict-setting-True]"
+      ],
+      "review": "Pending independent maintainer/security review in Azure/gpt-rag-orchestrator#346. Non-MCP fallback is retained, not approved; no new access is introduced.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "foundry-context-empty-result-translation",
+      "module_id": "strategies.foundry_iq_context_provider",
+      "symbol": "FoundryIQContextProvider.invoking",
+      "path": "src/strategies/foundry_iq_context_provider.py",
+      "line": 147,
+      "handler_fingerprint": "be267ffc09212b83d23e2fba824ec20b859c5fdad366cbd8897bdef36ecddb8f",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Foundry context provider failure versus enabled MCP errors",
+      "reason": "Generic retrieve/mapping failures retain empty Context, while enabled MCP configuration/credential/source errors propagate. The setting alone does not make generic provider failures fatal. This is the existing context-provider contract, distinct from the Search connector's strict/anonymous JSON contract.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Classified marker/severity and credential type remain, with exception class and no traceback. No failed provider documents are fabricated.",
+      "evidence_tests": [
+        "tests/test_context_provider_boundary_dispositions.py::test_foundry_context_retains_mcp_specific_failure_rules[provider-error-strict-setting-True]",
+        "tests/test_context_provider_boundary_dispositions.py::test_foundry_context_retains_mcp_specific_failure_rules[configuration-strict-setting-True]",
+        "tests/test_context_provider_boundary_dispositions.py::test_foundry_context_retains_mcp_specific_failure_rules[malformed-anonymous-setting-False]",
+        "tests/test_context_provider_boundary_dispositions.py::test_foundry_context_retains_mcp_specific_failure_rules[obo-none-strict-setting-True]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active exception or global retrieval authorization claim.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "multimodal-context-keyword-fallback",
+      "module_id": "strategies.multimodal_search_context_provider",
+      "symbol": "MultimodalSearchContextProvider.invoking",
+      "path": "src/strategies/multimodal_search_context_provider.py",
+      "line": 310,
+      "handler_fingerprint": "0952d0f245acde03f04c4a6835c1768ca0486f89f5fc10a54f26849d10b44b2d",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Multimodal embedding failure to keyword retrieval",
+      "reason": "A failed embedding step retains the actual keyword query, conversation filter and selected credential path without vector queries. Preserve this documented provider fallback rather than turn an optional vector failure into empty or fabricated retrieval.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Bounded class-only warning; cancellation before search propagates without a request.",
+      "evidence_tests": [
+        "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[embedding-error-vision]",
+        "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[cancelled-embedding-vision]",
+        "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[success-vision]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no claim of equivalent term/vector grounding or identity-policy approval.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "legacy-multimodal-obo-service-fallback",
+      "module_id": "strategies.multimodal_search_context_provider",
+      "symbol": "MultimodalSearchContextProvider.invoking",
+      "path": "src/strategies/multimodal_search_context_provider.py",
+      "line": 326,
+      "handler_fingerprint": "7ecbec43556117106883f2de56c16a96207fbef23613c3e8f74650743f672303",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Existing multimodal OBO callback failure fallback",
+      "reason": "The callback failure currently continues without query-source authorization. Real non-MCP strategy evidence shows the explicit anonymous callback override despite a false setting. Preserve this identity choice for separate review, not as newly authorized fallback access.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Class-only warning, unchanged conversation filter and service-credential request; cancellation propagates.",
+      "evidence_tests": [
+        "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[obo-error-vision]",
+        "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[cancelled-obo-vision]",
+        "tests/test_context_provider_boundary_dispositions.py::test_actual_non_mcp_strategy_callback_does_not_enforce_strict_obo[True-vision]"
+      ],
+      "review": "Inactive pending separate maintainer/security decision under parent plan8b6c5c7; not strict OBO enforcement or approval of service-identity retrieval.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "legacy-multimodal-retry-without-obo",
+      "module_id": "strategies.multimodal_search_context_provider",
+      "symbol": "MultimodalSearchContextProvider.invoking",
+      "path": "src/strategies/multimodal_search_context_provider.py",
+      "line": 342,
+      "handler_fingerprint": "c06e69581f24d57913975fa8f5ff7917649a68a7db9fd2bd8792e6aa3db22225",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Existing failed multimodal Search query retried without delegated header",
+      "reason": "With an OBO header present, any caught query failure triggers one retry after removing that header; without it, failure returns empty Context. Negative evidence explicitly demonstrates the subsequent service-credential query. This retained behavior is not permission-filter enforcement.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Existing classified retry warning and credential metadata, class only/no traceback. Query/filter and context cleanup remain; primary cancellation does not trigger retry.",
+      "evidence_tests": [
+        "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[search-with-obo-vision]",
+        "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[search-no-obo-vision]",
+        "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[cancelled-search-vision]"
+      ],
+      "review": "Inactive pending separate maintainer/security decision. Do not approve dropping the permission header or claim ALLOW_ANONYMOUS=false prevents this legacy retry.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "multimodal-retry-empty-context",
+      "module_id": "strategies.multimodal_search_context_provider",
+      "symbol": "MultimodalSearchContextProvider.invoking",
+      "path": "src/strategies/multimodal_search_context_provider.py",
+      "line": 371,
+      "handler_fingerprint": "6436dc1f0c5f0490e15468f54c11129ec5eb9915638333b9981d38ea8520bcf0",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Failure of the existing second multimodal Search attempt",
+      "reason": "A failed second query emits source rejection and returns empty Context without further retries or invented documents. This exact result boundary does not justify the preceding removal of delegated authorization, which remains a separate unapproved compatibility record.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Classified class-only diagnostic and source rejection; both request contexts close. Retry cancellation propagates unchanged.",
+      "evidence_tests": [
+        "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[retry-error-vision]",
+        "tests/test_context_provider_boundary_dispositions.py::test_multimodal_retry_cancellation_propagates_without_empty_result"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no identity fallback approval or primary-answer success guarantee.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "multimodal-optional-image-classification",
+      "module_id": "strategies.multimodal_search_context_provider",
+      "symbol": "MultimodalSearchContextProvider._filter_downloaded_images._classify",
+      "path": "src/strategies/multimodal_search_context_provider.py",
+      "line": 638,
+      "handler_fingerprint": "5b3bb26721e4ecb287dc314ba94d6246a24be01ef7347c0782e527ba4601cf4e",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional visual relevance classifier after heuristic candidate selection",
+      "reason": "Classifier failure retains an already-selected image, while a successful false decision omits it. Preserve that relevance fallback and deduplication rather than silently convert classifier availability into image loss. It is not a content-safety or authorization guarantee.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Class-only keeping-image warning, no path/provider payload. Cancellation propagates instead of becoming an approval decision.",
+      "evidence_tests": [
+        "tests/test_context_provider_boundary_dispositions.py::test_multimodal_optional_images_keep_text_and_close_blob_context[classifier-error]",
+        "tests/test_context_provider_boundary_dispositions.py::test_multimodal_optional_images_keep_text_and_close_blob_context[rejected]",
+        "tests/test_context_provider_boundary_dispositions.py::test_multimodal_optional_images_keep_text_and_close_blob_context[cancelled-classifier]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no relevance/content-safety certification.",
+      "review_by_stage": "before-quality-gate-activation"
+    },
+    {
+      "id": "multimodal-optional-image-download",
+      "module_id": "strategies.multimodal_search_context_provider",
+      "symbol": "MultimodalSearchContextProvider._download_image_as_base64",
+      "path": "src/strategies/multimodal_search_context_provider.py",
+      "line": 657,
+      "handler_fingerprint": "fb378d4b43ed730c8484049229c1f56c838afd0d2dadb2c547e0b0b251da4099",
+      "caught_types": ["Exception"],
+      "status": "proposed",
+      "boundary": "Optional image download/encoding alongside retrieved text",
+      "reason": "Construction, download, read, cleanup or byte-conversion failure omits the unavailable image while retaining text. No failed image is added to image_data; successful data still passes through the existing classifier and rendering path.",
+      "failure_outcome": "failure-translation",
+      "diagnostic_path": "Exception class only, no blob URL/SAS or provider payload. Blob contexts close and cancellation propagates.",
+      "evidence_tests": [
+        "tests/test_context_provider_boundary_dispositions.py::test_multimodal_optional_images_keep_text_and_close_blob_context[construct]",
+        "tests/test_context_provider_boundary_dispositions.py::test_multimodal_optional_images_keep_text_and_close_blob_context[download]",
+        "tests/test_context_provider_boundary_dispositions.py::test_multimodal_optional_images_keep_text_and_close_blob_context[cleanup]",
+        "tests/test_context_provider_boundary_dispositions.py::test_multimodal_optional_images_keep_text_and_close_blob_context[invalid-bytes]",
+        "tests/test_context_provider_boundary_dispositions.py::test_multimodal_optional_images_keep_text_and_close_blob_context[cancelled-download]"
+      ],
+      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no new Blob credential policy or guarantee about stale data from other invocations.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
