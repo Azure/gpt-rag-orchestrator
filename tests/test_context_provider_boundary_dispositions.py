@@ -74,16 +74,15 @@ async def test_search_provider_keeps_legacy_service_identity_recovery(
         patch.object(module, "get_config", return_value=mock_config),
         patch.object(module, "SearchClient", return_value=sdk),
     ):
-        if mode.startswith("cancelled-"):
-            with pytest.raises(asyncio.CancelledError) as raised:
+        failed = mode in {"search-no-obo", "retry-error"} or (
+            mode == "search-with-obo" and provider_kind == "text")
+        if mode.startswith("cancelled-") or failed:
+            with pytest.raises(type(failure)) as raised:
                 await provider.invoking(ChatMessage(role=Role.USER, text="question"))
             assert raised.value is failure
         else:
             context = await provider.invoking(ChatMessage(role=Role.USER, text="question"))
-            empty = mode in {"search-no-obo", "retry-error"} or (mode == "search-with-obo" and provider_kind == "text")
-            assert bool(context.messages) is not empty
-            if not empty:
-                assert "service identity context" in context.messages[0].text
+            assert "service identity context" in context.messages[0].text
     if mode in {"cancelled-obo", "cancelled-embedding"}:
         sdk.search.assert_not_awaited()
     else:
@@ -169,13 +168,14 @@ async def test_foundry_context_retains_mcp_specific_failure_rules(mcp, anonymous
     )
     credential_failure = mcp and (mode == "obo-error" or (mode == "obo-none" and not anonymous))
     with patch.object(foundry, "get_foundry_iq_client", return_value=client):
-        if mode == "cancelled" or credential_failure or (mcp and mode == "configuration"):
-            expected = McpCredentialError if credential_failure else type(failure)
+        if mode == "cancelled" or credential_failure or mode in {"provider-error", "configuration", "malformed"}:
+            expected = McpCredentialError if credential_failure else (
+                AttributeError if mode == "malformed" else type(failure))
             with pytest.raises(expected) as raised:
                 await provider.invoking(ChatMessage(role=Role.USER, text="question"))
             if credential_failure:
                 assert marker not in str(raised.value)
-            else:
+            elif mode != "malformed":
                 assert raised.value is failure
         else:
             context = await provider.invoking(ChatMessage(role=Role.USER, text="question"))

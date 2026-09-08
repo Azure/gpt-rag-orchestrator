@@ -21,8 +21,8 @@ from typing import Any, Mapping, Optional
 
 from agent_framework import ChatMessage, Context, ContextProvider, Role
 
-from connectors.foundry_iq import McpSourceError, get_foundry_iq_client
-from connectors.foundry_iq_mcp import McpConfigurationError, McpCredentialError
+from connectors.foundry_iq import get_foundry_iq_client
+from connectors.foundry_iq_mcp import McpCredentialError
 from connectors.search import _classify_retrieval_error
 from telemetry import AuditEmitter, ReasonCode
 from util.blob_sas import sign_blob_url
@@ -161,11 +161,7 @@ class FoundryIQContextProvider(ContextProvider):
                     "retrieval_credential_type": "obo" if obo_token else "managed_identity",
                 },
             )
-            if isinstance(
-                e, (McpConfigurationError, McpCredentialError, McpSourceError)
-            ) and mcp_enabled:
-                raise
-            return Context()
+            raise
 
         logger.info(
             "[FoundryIQContextProvider] Retrieval returned %d documents in %.2fs",

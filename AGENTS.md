@@ -391,9 +391,14 @@ Eleven further inactive proposals cover Foundry service/query credentials and
 request translation plus the remaining MAF/multimodal helpers. Foundry HTTP
 errors retain status but no longer expose response bodies; failed credentials
 never issue a retrieve request, and MCP versus legacy propagation stays distinct.
-Real strategy consumers still answer without grounding after provider
-construction returns None: this limitation is retained and explicitly tested,
-not approved as successful retrieval. Intent-classification failure defaults
+The scoped required-retrieval follow-up replaces configured construction and
+retrieval failures with propagation through the existing failed-turn/audit/SSE
+contract, including required providers in CompositeContextProvider. Successful
+zero results, absent endpoint/index and Lite/multimodal greeting/no-retrieval
+intents remain supported; no new configuration flag or identity decision is
+introduced. Optional sibling context cannot mask required retrieval failure.
+Real strategy-to-HTTP evidence covers these outcomes and cancellation; updated
+exception proposals remain inactive. Intent-classification failure defaults
 to question, not a retrieval-skipping intent. Image-validation failures strip
 images while preserving answer text and cancellation; logs omit image URLs,
 SAS and raw results. Optional profile cleanup preserves flush-before-save and

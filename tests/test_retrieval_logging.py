@@ -188,8 +188,14 @@ async def test_real_search_provider_and_composite_preserve_distinct_failure_outc
         patch("strategies.search_context_provider.get_config", return_value=mock_config),
         patch("strategies.search_context_provider.SearchClient", return_value=sdk),
     ):
-        context = await CompositeContextProvider([provider, sibling]).invoking(
-            ChatMessage(role=Role.USER, text="policy"))
+        composite = CompositeContextProvider([provider, sibling], required_providers=[provider])
+        if failed_boundary == "search":
+            with pytest.raises(RuntimeError) as raised:
+                await composite.invoking(ChatMessage(role=Role.USER, text="policy"))
+            assert raised.value is failure
+            context = Context()
+        else:
+            context = await composite.invoking(ChatMessage(role=Role.USER, text="policy"))
     sent = sdk.search.await_args.kwargs
     assert sent["search_text"] == "policy"
     assert sent["filter"] == build_conversation_filter("conversation'quoted")
@@ -202,10 +208,10 @@ async def test_real_search_provider_and_composite_preserve_distinct_failure_outc
     if messages:
         assert "Grounded content" in messages[0]
     assert context.instructions == (
-        None if failed_boundary == "sibling" else "Independent provider context")
+        None if failed_boundary in {"sibling", "search"} else "Independent provider context")
     assert marker not in str(messages)
     assert token not in str(messages)
-    assert (marker in caplog.text) is (failed_boundary == "sibling")
+    assert marker not in caplog.text
     assert token not in caplog.text
 
 

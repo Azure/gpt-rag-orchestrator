@@ -195,7 +195,7 @@ class SearchContextProvider(ContextProvider):
                     "retrieval_credential_type": "obo" if obo_token else "managed_identity",
                 },
             )
-            return Context()
+            raise
 
         logger.info("[SearchContextProvider] Search returned %d documents in %.2fs", len(parts), time.time() - search_start)
 

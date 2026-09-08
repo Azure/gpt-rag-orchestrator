@@ -386,7 +386,7 @@ class MultimodalSearchContextProvider(ContextProvider):
                             "retrieval_credential_type": "managed_identity",
                         },
                     )
-                    return Context()
+                    raise
             else:
                 AuditEmitter.default().emit_source(
                     selected=False,
@@ -405,7 +405,7 @@ class MultimodalSearchContextProvider(ContextProvider):
                         "retrieval_credential_type": "managed_identity",
                     },
                 )
-                return Context()
+                raise
 
         logger.info(
             "[MultimodalSearchContextProvider] Search returned %d documents in %.2fs",

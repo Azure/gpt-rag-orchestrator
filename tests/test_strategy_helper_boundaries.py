@@ -36,7 +36,7 @@ def strategy(request, patch_dependencies, mock_config):
 
 @pytest.mark.parametrize("backend", ["ai_search", "foundry_iq"])
 @pytest.mark.parametrize("mode", ["failure", "cancelled", "success"])
-async def test_provider_construction_keeps_nullable_contract(strategy, backend, mode, caplog):
+async def test_provider_construction_propagates_configured_failure(strategy, backend, mode, caplog):
     module, instance = strategy
     marker = "synthetic-private-construction-detail"
     failure = asyncio.CancelledError(marker) if mode == "cancelled" else RuntimeError(marker)
@@ -49,20 +49,20 @@ async def test_provider_construction_keeps_nullable_contract(strategy, backend, 
         patch.object(module, name, return_value=provider,
                      side_effect=None if mode == "success" else failure) as construct,
     ):
-        if mode == "cancelled":
-            with pytest.raises(asyncio.CancelledError) as raised:
+        if mode != "success":
+            with pytest.raises(type(failure)) as raised:
                 await instance._create_search_provider()
             assert raised.value is failure
         else:
             result = await instance._create_search_provider()
-            assert result is (provider if mode == "success" else None)
+            assert result is provider
     assert construct.call_count == 1
     assert construct.call_args.kwargs["conversation_id"] == instance.conversation_id
     assert marker not in caplog.text
     assert not any(record.exc_info for record in caplog.records)
 
 
-async def test_real_flow_continues_without_grounding_after_constructor_failure(strategy, caplog):
+async def test_real_flow_interrupts_after_constructor_failure(strategy, caplog):
     module, instance = strategy
     marker = "synthetic-private-construction-detail"
     agent = MagicMock()
@@ -88,12 +88,12 @@ async def test_real_flow_continues_without_grounding_after_constructor_failure(s
         patch.object(service.agent_provider_v2, "get_provider", AsyncMock(return_value=provider)),
         patch.object(service.agent_provider_v2, "get_or_create_agent_details", AsyncMock(return_value=object())),
     ):
-        output = [chunk async for chunk in instance.initiate_agent_flow("question")]
+        with pytest.raises(RuntimeError):
+            _ = [chunk async for chunk in instance.initiate_agent_flow("question")]
         await asyncio.sleep(0)
-    assert output == ["ungrounded answer"]
     assert instance._search_provider is None
-    assert instance.conversation["messages"][-1] == {"role": "assistant", "text": "ungrounded answer"}
-    agent.__aexit__.assert_awaited_once()
+    assert instance.conversation["messages"] == []
+    agent.__aenter__.assert_not_awaited()
     assert marker not in caplog.text
 
 

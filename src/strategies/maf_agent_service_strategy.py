@@ -289,7 +289,7 @@ Guidelines:
 
         except Exception as e:
             logging.error("[MafAgentServiceStrategy] Failed to create search provider (%s)", type(e).__name__)
-            return None
+            raise
 
     def _build_session_summary(self, user_memory: UserProfileMemory) -> str:
         """Build a summary of loaded profiles for session start."""
@@ -374,7 +374,10 @@ Guidelines:
         async with provider.as_agent(
             details,
             context_provider=(
-                CompositeContextProvider(context_providers)
+                CompositeContextProvider(
+                    context_providers,
+                    required_providers=[self._search_provider] if self._search_provider else [],
+                )
                 if context_providers
                 else None
             ),

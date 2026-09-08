@@ -330,7 +330,7 @@ class MultimodalStrategy(BaseAgentStrategy):
             return provider
         except Exception as e:
             logging.error("[MultimodalStrategy] Failed to create search provider (%s)", type(e).__name__)
-            return None
+            raise
 
     async def _classify_image_relevance(self, candidate: dict[str, Any]) -> bool:
         client = self._get_or_create_chat_client()
@@ -562,21 +562,21 @@ class MultimodalStrategy(BaseAgentStrategy):
             )
             logging.info("[MultimodalStrategy] user_profile_load: %.2fs (user=%s)", time.time() - t0, user_id)
 
-        # Initialize search provider if not done
-        if self._search_provider is None:
-            t0 = time.time()
-            self._search_provider = await self._create_search_provider()
-            logging.info(
-                "[MultimodalStrategy] search_provider_init: %.2fs (hybrid=%s)",
-                time.time() - t0, bool(self.embedding_deployment),
-            )
-
         history = conv.get("messages", [])
 
         # Classify intent — skip search when retrieval is not needed.
         t0 = time.time()
         intent = await self._classify_intent(user_message, history=history)
         logging.info("[MultimodalStrategy] intent_classification: %.2fs", time.time() - t0)
+
+        # Only initialize retrieval for turns that need it.
+        if intent == "question" and self._search_provider is None:
+            t0 = time.time()
+            self._search_provider = await self._create_search_provider()
+            logging.info(
+                "[MultimodalStrategy] search_provider_init: %.2fs (hybrid=%s)",
+                time.time() - t0, bool(self.embedding_deployment),
+            )
 
         # Build context providers
         context_providers = [self._user_memory]
@@ -600,7 +600,10 @@ class MultimodalStrategy(BaseAgentStrategy):
         async with ChatAgent(
             chat_client=chat_client,
             instructions=instructions,
-            context_provider=CompositeContextProvider(context_providers),
+            context_provider=CompositeContextProvider(
+                context_providers,
+                required_providers=[self._search_provider] if intent == "question" and self._search_provider else [],
+            ),
         ) as agent:
 
             thread = agent.get_new_thread()

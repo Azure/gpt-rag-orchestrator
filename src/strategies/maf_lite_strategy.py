@@ -305,7 +305,7 @@ class MafLiteStrategy(BaseAgentStrategy):
             return provider
         except Exception as e:
             logging.error("[MafLiteStrategy] Failed to create search provider (%s)", type(e).__name__)
-            return None
+            raise
 
     # ------------------------------------------------------------------
     # Session summary
@@ -375,18 +375,18 @@ class MafLiteStrategy(BaseAgentStrategy):
         # Load or initialise user-profile memory
         await self._ensure_user_memory(user_id, chat_client)
 
-        # Initialize search provider if not done
-        if self._search_provider is None:
-            t0 = time.time()
-            self._search_provider = await self._create_search_provider()
-            logging.info("[MafLiteStrategy] search_provider_init: %.2fs (hybrid=%s)", time.time() - t0, bool(self.embedding_deployment))
-
         history = conv.get("messages", [])
 
         # Classify intent — skip search when retrieval is not needed.
         t0 = time.time()
         intent = await self._classify_intent(user_message, history=history)
         logging.info("[MafLiteStrategy] intent_classification: %.2fs", time.time() - t0)
+
+        # Only initialize retrieval for turns that need it.
+        if intent == "question" and self._search_provider is None:
+            t0 = time.time()
+            self._search_provider = await self._create_search_provider()
+            logging.info("[MafLiteStrategy] search_provider_init: %.2fs (hybrid=%s)", time.time() - t0, bool(self.embedding_deployment))
 
         # Build context providers
         context_providers = (
@@ -415,7 +415,10 @@ class MafLiteStrategy(BaseAgentStrategy):
             chat_client=chat_client,
             instructions=instructions,
             context_provider=(
-                CompositeContextProvider(context_providers)
+                CompositeContextProvider(
+                    context_providers,
+                    required_providers=[self._search_provider] if intent == "question" and self._search_provider else [],
+                )
                 if context_providers
                 else None
             ),
