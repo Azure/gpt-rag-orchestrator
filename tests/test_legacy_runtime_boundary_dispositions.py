@@ -69,29 +69,67 @@ async def test_provider_retry_keeps_input_thread_and_non_token_options(scenario,
     assert MARKER not in caplog.text
 
 
-@pytest.mark.parametrize("scenario", ["success", "confirmed", "different", "unavailable", "cancel_create", "cancel_read"])
+@pytest.mark.parametrize("scenario", [
+    "success", "confirmed", "different", "old_identical", "missing_id",
+    "unavailable", "malformed_data", "malformed_content", "unreadable_item",
+    "invalid_text", "empty_content", "none_data", "broken_iterator",
+    "cancel_create", "cancel_read", "cancel_parse", "exit_parse",
+])
 async def test_managed_persistence_only_reconciles_exact_tail(scenario, monkeypatch, caplog):
     failure = RuntimeError(MARKER)
     cancelled = asyncio.CancelledError(MARKER)
+    process_exit = GeneratorExit(MARKER)
+    monkeypatch.setattr(provider.uuid, "uuid4", lambda: SimpleNamespace(hex="current"))
     sdk = MagicMock()
     sdk.conversations.items.create = AsyncMock(side_effect=(
         None if scenario == "success" else cancelled if scenario == "cancel_create" else failure
     ))
     tail = [
-        SimpleNamespace(role="assistant", content=[SimpleNamespace(text="answer")]),
+        SimpleNamespace(id="msg_current", role="assistant", content=[SimpleNamespace(text="answer")]),
         SimpleNamespace(role="user", content=[SimpleNamespace(text="question")]),
     ]
     if scenario == "different":
         tail[0].content[0].text = "other answer"
+    if scenario == "old_identical":
+        tail[0].id = "msg_previous_turn"
+    if scenario == "missing_id":
+        del tail[0].id
+    if scenario == "malformed_content":
+        tail[0].content = 42
+    if scenario == "invalid_text":
+        tail[0].content[0].text = 42
+    if scenario == "empty_content":
+        tail[0].content = []
+
+    class UnreadableItem:
+        @property
+        def role(self):
+            raise RuntimeError(MARKER)
+
+    class UnreadableData:
+        def __iter__(self):
+            yield tail[0]
+            raise (
+                cancelled if scenario == "cancel_parse" else
+                process_exit if scenario == "exit_parse" else ValueError(MARKER)
+            )
+
+    if scenario == "unreadable_item":
+        tail[0] = UnreadableItem()
+    data = (
+        42 if scenario == "malformed_data" else
+        None if scenario == "none_data" else
+        UnreadableData() if scenario in {"cancel_parse", "exit_parse", "broken_iterator"} else tail
+    )
     sdk.conversations.items.list = AsyncMock(
-        return_value=SimpleNamespace(data=tail),
-        side_effect=failure if scenario == "unavailable" else cancelled if scenario == "cancel_read" else None,
+        return_value=SimpleNamespace(data=data),
+        side_effect=ValueError(MARKER) if scenario == "unavailable" else cancelled if scenario == "cancel_read" else None,
     )
     monkeypatch.setattr(provider, "_get_openai_client", AsyncMock(return_value=sdk))
     if scenario in {"success", "confirmed"}:
         await provider.persist_conversation_turn("conv", "question", "answer")
     else:
-        expected = cancelled if scenario.startswith("cancel") else failure
+        expected = cancelled if scenario.startswith("cancel") else process_exit if scenario == "exit_parse" else failure
         with pytest.raises(type(expected)) as caught:
             await provider.persist_conversation_turn("conv", "question", "answer")
         assert caught.value is expected
@@ -100,6 +138,13 @@ async def test_managed_persistence_only_reconciles_exact_tail(scenario, monkeypa
         sdk.conversations.items.list.assert_not_awaited()
     else:
         sdk.conversations.items.list.assert_awaited_once_with("conv", limit=2, order="desc")
+    if scenario in {
+        "unavailable", "malformed_data", "malformed_content", "unreadable_item",
+        "invalid_text", "empty_content", "none_data", "broken_iterator",
+    }:
+        assert "Failed to reconcile" in caplog.text
+    if scenario not in {"success", "confirmed"}:
+        assert "treating it as persisted" not in caplog.text
     assert MARKER not in caplog.text
 
 

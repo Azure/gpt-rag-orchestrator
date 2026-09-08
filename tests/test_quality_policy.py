@@ -828,6 +828,8 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("legacy-orchestrator-token-setter", "failure-translation"),
     ("optional-conversation-lifecycle-diagnostic", "contractual-best-effort-side-effect"),
     ("legacy-detached-conversation-persistence", "failure-translation"),
+    ("legacy-conversation-persistence-scheduling-cleanup", "failure-translation"),
+    ("legacy-conversation-persistence-cleanup-diagnostic", "contractual-best-effort-side-effect"),
     ("optional-feedback-question-resolution", "failure-translation"),
     ("agent-provider-pre-output-option-retry", "failure-translation"),
     ("managed-turn-ambiguous-write-reconciliation", "failure-translation"),

@@ -384,6 +384,7 @@ async def persist_conversation_turn(
     full managed history.
     """
     client = await _get_openai_client()
+    assistant_item_id = f"msg_{uuid.uuid4().hex}"
     items = [
         {
             "type": "message",
@@ -397,7 +398,7 @@ async def persist_conversation_turn(
         },
         {
             "type": "message",
-            "id": f"msg_{uuid.uuid4().hex}",
+            "id": assistant_item_id,
             "role": "assistant",
             "status": "completed",
             "content": [
@@ -420,6 +421,7 @@ async def persist_conversation_turn(
             conversation_id,
             user_message,
             assistant_message,
+            assistant_item_id=assistant_item_id,
         ):
             logging.warning(
                 "[AgentProviderV2] Conversation turn create returned an error "
@@ -437,13 +439,13 @@ async def persist_conversation_turn(
 def _conversation_item_text(item: Any) -> tuple[str | None, str]:
     """Return the role and concatenated text from a Conversation message."""
     role = getattr(item, "role", None)
-    content = getattr(item, "content", None) or []
-    text = "".join(
-        part_text
-        for part in content
-        if isinstance((part_text := getattr(part, "text", None)), str)
-    )
-    return role, text
+    content = getattr(item, "content", None)
+    if role not in ("user", "assistant") or not isinstance(content, list) or not content:
+        raise ValueError("Invalid conversation message evidence")
+    parts = [getattr(part, "text", None) for part in content]
+    if any(not isinstance(text, str) for text in parts):
+        raise ValueError("Invalid conversation text evidence")
+    return role, "".join(parts)
 
 
 async def _conversation_tail_matches(
@@ -451,13 +453,33 @@ async def _conversation_tail_matches(
     conversation_id: str,
     user_message: str,
     assistant_message: str,
+    *,
+    assistant_item_id: str,
 ) -> bool:
-    """Reconcile an ambiguous create failure against the persisted tail."""
+    """Require the actual submitted assistant identity, not repeated text.
+
+    The SDK accepts this id on ResponseOutputMessageParam and returns message
+    ids in the listed tail. Missing/rewritten ids remain unconfirmed; this is
+    not a remote idempotency guarantee.
+    """
     try:
         page = await client.conversations.items.list(
             conversation_id,
             limit=2,
             order="desc",
+        )
+        data = list(page.data)
+        if len(data) < 2:
+            return False
+        newest_role, newest_text = _conversation_item_text(data[0])
+        previous_role, previous_text = _conversation_item_text(data[1])
+        return (
+            bool(assistant_item_id)
+            and getattr(data[0], "id", None) == assistant_item_id
+            and newest_role == "assistant"
+            and newest_text == assistant_message
+            and previous_role == "user"
+            and previous_text == user_message
         )
     except Exception:
         logging.error(
@@ -465,18 +487,6 @@ async def _conversation_tail_matches(
             "persistence",
         )
         return False
-
-    data = list(getattr(page, "data", None) or [])
-    if len(data) < 2:
-        return False
-    newest_role, newest_text = _conversation_item_text(data[0])
-    previous_role, previous_text = _conversation_item_text(data[1])
-    return (
-        newest_role == "assistant"
-        and newest_text == assistant_message
-        and previous_role == "user"
-        and previous_text == user_message
-    )
 
 
 def reset_legacy_thread(conv: dict) -> None:
