@@ -226,7 +226,8 @@ class NL2SQLStrategy(BaseAgentStrategy):
         return {
             "table_candidates": table_candidates,
             "all_tables": all_tables,
-            "schemas": list(schemas),
+            "schemas": [schema for schema in schemas if not self._get_field(schema, "error")],
+            "unavailable_schemas": [schema for schema in schemas if self._get_field(schema, "error")],
             "similar_queries": similar_queries,
         }
 
@@ -318,6 +319,7 @@ class NL2SQLStrategy(BaseAgentStrategy):
             f"All tables:\n{self._to_json(schema_context['all_tables'])}\n\n"
             f"Relevant tables:\n{self._to_json(schema_context['table_candidates'])}\n\n"
             f"Schemas:\n{self._to_json(schema_context['schemas'])}\n\n"
+            f"Unavailable schemas:\n{self._to_json(schema_context['unavailable_schemas'])}\n\n"
             f"Similar historical queries:\n{self._to_json(schema_context['similar_queries'])}"
         )
         sql_response = await self._run_agent(

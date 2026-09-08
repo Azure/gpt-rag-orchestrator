@@ -301,9 +301,17 @@ class in error fields and logs; SQL inputs and full datasource configuration
 are no longer dumped by the execution helper. Table/query retrieval now
 escapes datasource quotes consistently with the other metadata lookups.
 Embedding failures still propagate before metadata-result translation.
-SchemaInfo's existing nullable-columns result has no serialized error field;
-that compatibility limitation is characterized, not silently changed or
-approved by this work.
+The scoped P6 follow-up adds an optional serialized SchemaInfo error field:
+missing tables and provider/validation failures are unavailable schemas,
+distinct from valid empty columns. The maintained collector supplies unavailable
+and usable schemas separately to SQL generation without a new terminal policy.
+SQL cleanup attempts cursor then connection closure for resources returned to
+the caller; ordinary close failures do not replace the primary typed result
+or propagating cancellation. Explicit validation/execution answers remain
+ordinary completed answers. This is not worker-thread cancellation redesign
+or a guarantee about resources not returned by connection acquisition.
+The two rebound proposals and subordinate cleanup proposal remain inactive;
+this correction grants no exception approval or identity/durability disposition.
 The legacy retrieval plugin narrows credential errors to AzureError and HTTP
 translation to aiohttp.ClientError/ValueError without logging response bodies
 or traceback payloads. Four inactive proposals retain explicit typed tool

@@ -131,7 +131,7 @@ class NL2SQLPlugin:
                 return SchemaInfo(
                     datasource=datasource,
                     table=table_name,
-                    error=f"Table '{table_name}' not found in '{datasource}'.",
+                    error="Table not found.",
                     columns=None
                 )
             doc = docs[0]
@@ -341,6 +341,8 @@ class NL2SQLPlugin:
     ) -> ExecuteQueryResult:
         # log entry and parameters
         logging.info("execute_sql_query called (datasource=%s)", datasource)
+        connection = None
+        cursor = None
         try:
             validation = validate_single_read_only_select(query)
             if not validation.is_valid:
@@ -402,3 +404,17 @@ class NL2SQLPlugin:
         except Exception as e:
             logging.error("execute_sql_query error (%s)", type(e).__name__)
             return ExecuteQueryResult(error=type(e).__name__)
+        finally:
+            # Closing an ODBC connection does not close the cursor explicitly.
+            # Attempt both releases, even when the first fails, without replacing
+            # the primary typed result or a propagating cancellation.
+            for resource_name, resource in (("cursor", cursor), ("connection", connection)):
+                if resource is not None:
+                    try:
+                        resource.close()
+                    except Exception as cleanup_error:
+                        logging.warning(
+                            "SQL %s cleanup failed (%s)",
+                            resource_name,
+                            type(cleanup_error).__name__,
+                        )

@@ -59,11 +59,13 @@ class SchemaInfo(BaseModel):
         table: The name of the table.
         description: An optional description of the table.
         columns: A dictionary mapping column names to their respective descriptions.
+        error: An optional bounded reason why the schema is unavailable.
     """
     datasource: str
     table: str
     description: Optional[str] = None
     columns: Optional[Dict[str, str]] = None  # Map column names to descriptions
+    error: Optional[str] = None
 
 class ValidateSQLQueryResult(BaseModel):
     """

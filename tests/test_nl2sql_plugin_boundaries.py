@@ -2,7 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -62,8 +62,8 @@ async def test_metadata_tools_keep_typed_partial_or_unavailable_results(
         result = await getattr(plugin, method)(*args)
         data = result.model_dump(mode="json")
         if method == "get_schema_info":
-            # SchemaInfo has no error field; retain its legacy unavailable shape.
-            assert set(data) == {"datasource", "table", "description", "columns"}
+            assert set(data) == {"datasource", "table", "description", "columns", "error"}
+            assert bool(data["error"]) is (outcome != "success")
             assert data["columns"] == ({"value": "column"} if outcome == "success" else None)
         else:
             assert len(data[collection]) == (0 if outcome == "provider" else 1)
@@ -78,6 +78,66 @@ async def test_metadata_tools_keep_typed_partial_or_unavailable_results(
     assert marker not in caplog.text
 
 
+@pytest.mark.parametrize("stage", ["cursor", "execute", "fetch", "mapping", "cancelled", "success", "empty"])
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+@pytest.mark.parametrize("datasource_type,client_name", [
+    ("sql_database", "SQLDBClient"), ("sql_endpoint", "SQLEndpointClient"),
+], ids=["database", "endpoint"])
+async def test_sql_acquired_resources_close_without_replacing_outcome(
+    plugin, stage, cleanup_fails, datasource_type, client_name, caplog,
+):
+    marker = "synthetic-private-driver-error"
+    plugin.cosmos.get_document.return_value = {
+        "id": "source", "description": "test", "type": datasource_type,
+        "server": "db.example.invalid", "database": "test",
+        "organization": "test", "tenant_id": "tenant", "client_id": "client",
+    }
+    cursor = MagicMock()
+    cursor.description = [("value",)]
+    cursor.fetchall.return_value = [] if stage == "empty" else [(1,)]
+    connection = MagicMock()
+    connection.cursor.return_value = cursor
+    releases = MagicMock()
+    releases.attach_mock(cursor.close, "cursor")
+    releases.attach_mock(connection.close, "connection")
+    failure = asyncio.CancelledError(marker) if stage == "cancelled" else ValueError(marker)
+    if stage == "cursor":
+        connection.cursor.side_effect = failure
+    elif stage in {"execute", "cancelled"}:
+        cursor.execute.side_effect = failure
+    elif stage == "fetch":
+        cursor.fetchall.side_effect = failure
+    elif stage == "mapping":
+        cursor.fetchall.return_value = [(object(),)]
+    if cleanup_fails:
+        cursor.close.side_effect = RuntimeError(marker)
+        connection.close.side_effect = RuntimeError(marker)
+    client = SimpleNamespace(create_connection=AsyncMock(return_value=connection))
+    with patch(f"plugins.nl2sql.plugin.{client_name}", return_value=client):
+        if stage == "cancelled":
+            with pytest.raises(asyncio.CancelledError) as raised:
+                await plugin.execute_sql_query("source", "SELECT 1")
+            assert raised.value is failure
+        else:
+            result = await plugin.execute_sql_query("source", "SELECT 1")
+            expected_error = "ValidationError" if stage == "mapping" else "ValueError"
+            assert result.model_dump() == (
+                {"results": [] if stage == "empty" else [{"value": 1}], "error": None}
+                if stage in {"success", "empty"} else {"results": None, "error": expected_error}
+            )
+    connection.close.assert_called_once_with()
+    if stage == "cursor":
+        cursor.close.assert_not_called()
+    else:
+        cursor.close.assert_called_once_with()
+    assert releases.mock_calls == (
+        [call.connection()] if stage == "cursor" else [call.cursor(), call.connection()]
+    )
+    assert marker not in caplog.text
+    if cleanup_fails:
+        assert "SQL connection cleanup failed (RuntimeError)" in caplog.text
+
+
 @pytest.mark.parametrize("method", ["tables_retrieval", "queries_retrieval"])
 @pytest.mark.parametrize("failure_type", [RuntimeError, asyncio.CancelledError])
 async def test_metadata_embedding_failure_still_propagates_before_search(plugin, method, failure_type):
@@ -88,6 +148,127 @@ async def test_metadata_embedding_failure_still_propagates_before_search(plugin,
             await getattr(plugin, method)("question", "source")
     assert raised.value is failure
     plugin.search.search.assert_not_awaited()
+
+
+@pytest.fixture
+def maintained_strategy(plugin, patch_dependencies):
+    from strategies.nl2sql_strategy import NL2SQLStrategy
+
+    with patch("strategies.nl2sql_strategy.NL2SQLPlugin", return_value=plugin):
+        strategy = NL2SQLStrategy()
+    strategy.conversation = {"messages": []}
+    strategy._load_prompts = AsyncMock()
+    plugin.get_all_datasources_info = AsyncMock(return_value={"datasources": []})
+    plugin.tables_retrieval = AsyncMock(return_value={"tables": [{"table": "Orders"}]})
+    plugin.get_all_tables_info = AsyncMock(return_value={"tables": [{"table": "Orders"}]})
+    plugin.queries_retrieval = AsyncMock(return_value={"queries": []})
+    strategy._run_agent = AsyncMock(side_effect=[
+        '{"datasource_name":"source","datasource_type":"sql_database"}',
+        '{"sql_query":"SELECT 1"}',
+    ])
+    return strategy
+
+
+@pytest.mark.parametrize("outcome", ["missing", "provider", "malformed", "empty", "success", "cancelled"])
+async def test_real_schema_collector_distinguishes_unavailable_from_empty(
+    plugin, maintained_strategy, outcome,
+):
+    failure = asyncio.CancelledError() if outcome == "cancelled" else RuntimeError("private schema")
+    if outcome in {"provider", "cancelled"}:
+        plugin.search.search.side_effect = failure
+    else:
+        columns = [] if outcome == "empty" else [{"name": "value", "description": "column"}]
+        if outcome == "malformed":
+            columns = [{"name": "value", "description": {"private": "schema"}}]
+        plugin.search.search.return_value = {
+            "value": [] if outcome == "missing" else [{"table": "Orders", "columns": columns}],
+        }
+    if outcome == "cancelled":
+        with pytest.raises(asyncio.CancelledError) as raised:
+            await maintained_strategy._collect_schema_context("source", "question")
+        assert raised.value is failure
+        return
+    context = await maintained_strategy._collect_schema_context("source", "question")
+    unavailable = outcome in {"missing", "provider", "malformed"}
+    assert len(context["schemas"]) == (0 if unavailable else 1)
+    assert len(context["unavailable_schemas"]) == (1 if unavailable else 0)
+    if unavailable:
+        schema = context["unavailable_schemas"][0]
+        assert schema.columns is None
+        assert schema.error == {
+            "missing": "Table not found.", "provider": "RuntimeError", "malformed": "ValidationError",
+        }[outcome]
+    else:
+        assert context["schemas"][0].columns == ({} if outcome == "empty" else {"value": "column"})
+
+
+async def test_real_schema_collector_preserves_usable_siblings(plugin, maintained_strategy):
+    plugin.get_all_tables_info.return_value = {"tables": [{"table": "Empty"}, {"table": "Usable"}]}
+    plugin.search.search.side_effect = [
+        {"value": []},
+        {"value": [{"table": "Empty", "columns": []}]},
+        {"value": [{"table": "Usable", "columns": [{"name": "value", "description": "column"}]}]},
+    ]
+    context = await maintained_strategy._collect_schema_context("source", "question")
+    assert [schema.table for schema in context["schemas"]] == ["Empty", "Usable"]
+    assert [schema.table for schema in context["unavailable_schemas"]] == ["Orders"]
+
+
+@pytest.mark.parametrize("outcome", ["validation", "execution", "success", "cancelled"])
+async def test_real_sql_flow_retains_ordinary_answers(plugin, maintained_strategy, outcome):
+    plugin.search.search.return_value = {"value": []}
+    if outcome == "validation":
+        maintained_strategy._run_agent.side_effect = [
+            '{"datasource_name":"source","datasource_type":"sql_database"}',
+            '{"sql_query":"DELETE FROM Orders"}',
+        ]
+    plugin.cosmos.get_document.return_value = {
+        "id": "source", "description": "test", "type": "sql_database",
+        "server": "db.example.invalid", "database": "test",
+    }
+    cursor = MagicMock()
+    cursor.description = [("value",)]
+    cursor.fetchall.return_value = []
+    if outcome == "execution":
+        cursor.execute.side_effect = ValueError("private SQL")
+    cancellation = asyncio.CancelledError("private cancellation")
+    if outcome == "cancelled":
+        cursor.execute.side_effect = cancellation
+    connection = MagicMock()
+    connection.cursor.return_value = cursor
+    # Cleanup double failure must not replace either an error answer or valid empty results.
+    cursor.close.side_effect = RuntimeError("private cleanup")
+    connection.close.side_effect = RuntimeError("private cleanup")
+    client = SimpleNamespace(create_connection=AsyncMock(return_value=connection))
+
+    async def synthesize(instructions, message, **kwargs):
+        assert '"results": []' in message
+        yield "No rows."
+
+    maintained_strategy._stream_agent = synthesize
+    with patch("plugins.nl2sql.plugin.SQLDBClient", return_value=client):
+        if outcome == "cancelled":
+            with pytest.raises(asyncio.CancelledError) as raised:
+                _ = [part async for part in maintained_strategy.initiate_agent_flow("question")]
+            assert raised.value is cancellation
+            assert maintained_strategy.conversation["messages"] == []
+            cursor.close.assert_called_once_with()
+            connection.close.assert_called_once_with()
+            return
+        answer = "".join([part async for part in maintained_strategy.initiate_agent_flow("question")])
+    sql_context = maintained_strategy._run_agent.await_args_list[1].args[1]
+    assert 'Unavailable schemas:' in sql_context
+    assert '"error": "Table not found."' in sql_context
+    if outcome == "validation":
+        assert "did not pass validation" in answer
+        plugin.cosmos.get_document.assert_not_awaited()
+        connection.close.assert_not_called()
+    else:
+        assert answer == ("The SQL query could not be executed: ValueError" if outcome == "execution" else "No rows.")
+        cursor.close.assert_called_once_with()
+        connection.close.assert_called_once_with()
+    assert maintained_strategy.conversation["messages"][-1] == {"role": "assistant", "text": answer}
+    assert "private" not in answer
 
 
 @pytest.mark.parametrize("stage", ["configuration", "connect", "execute", "fetch", "cancelled", "success"])
@@ -128,8 +309,12 @@ async def test_sql_tool_keeps_explicit_error_result_and_read_only_driver_inputs(
     plugin.cosmos.get_document.assert_awaited_once_with(plugin.container_name, "source")
     if stage not in {"configuration", "connect", "cancelled"}:
         cursor.execute.assert_called_once_with("SELECT 1")
+        cursor.close.assert_called_once_with()
+        connection.close.assert_called_once_with()
     else:
         cursor.execute.assert_not_called()
+        cursor.close.assert_not_called()
+        connection.close.assert_not_called()
     assert marker not in caplog.text
 
 

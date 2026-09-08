@@ -40,7 +40,8 @@ def sql_strategy(patch_dependencies):
         '{"sql_query":"SELECT 1"}',
     ])
     strategy._collect_schema_context = AsyncMock(return_value={
-        "all_tables": [], "table_candidates": [], "schemas": [], "similar_queries": [],
+        "all_tables": [], "table_candidates": [], "schemas": [], "unavailable_schemas": [],
+        "similar_queries": [],
     })
     return strategy
 
