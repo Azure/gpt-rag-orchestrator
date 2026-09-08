@@ -17,21 +17,31 @@ from test_primary_strategy_failure_boundaries import main_module, _run_http_turn
 MARKER = "synthetic-private-legacy-detail"
 
 
-@pytest.mark.parametrize("scenario", ["retry", "partial", "no_options", "unrelated", "retry_failure", "cancel"])
+@pytest.mark.parametrize("scenario", [
+    "retry", "partial", "metadata", "no_options", "no_token", "ambiguous",
+    "other_option", "mentioned_token", "unrelated", "retry_failure", "cancel",
+])
 async def test_provider_retry_keeps_input_thread_and_non_token_options(scenario, caplog):
     calls = []
     failure = asyncio.CancelledError(MARKER) if scenario == "cancel" else RuntimeError(
-        MARKER if scenario == "unrelated" else f"invalid_payload {MARKER}",
+        MARKER if scenario == "unrelated" else
+        f"invalid_payload {MARKER}" if scenario == "ambiguous" else
+        f"invalid_payload reasoning: Not allowed when agent is specified; request included max_tokens {MARKER}" if scenario == "mentioned_token" else
+        f"invalid_payload reasoning: Not allowed when agent is specified {MARKER}" if scenario == "other_option" else
+        f"invalid_payload max_output_tokens: Not allowed when agent is specified {MARKER}",
     )
     thread = object()
     message = [{"role": "user", "content": "test"}]
-    options = {} if scenario == "no_options" else {"max_tokens": 10, "store": False}
+    options = {} if scenario == "no_options" else {"max_tokens": 10, "store": False, "temperature": 0.3}
+    if scenario == "no_token":
+        options = {"store": False}
+    original_options = dict(options)
 
     async def run(user_message, **kwargs):
         calls.append((user_message, kwargs))
         if len(calls) == 1:
-            if scenario == "partial":
-                yield SimpleNamespace(text="partial")
+            if scenario in {"partial", "metadata"}:
+                yield SimpleNamespace(text="partial" if scenario == "partial" else "")
             raise failure
         if scenario == "retry_failure":
             raise failure
@@ -50,12 +60,12 @@ async def test_provider_retry_keeps_input_thread_and_non_token_options(scenario,
             ):
                 output.append(chunk.text)
         assert caught.value is failure
-    assert output == (["partial"] if scenario == "partial" else ["ok"] if scenario == "retry" else [])
+    assert output == (["partial"] if scenario == "partial" else [""] if scenario == "metadata" else ["ok"] if scenario == "retry" else [])
     assert len(calls) == (2 if scenario in {"retry", "retry_failure"} else 1)
     assert all(item[0] is message and item[1]["thread"] is thread for item in calls)
     if len(calls) == 2:
-        assert calls[1][1]["options"] == {"store": False}
-    assert options == ({} if scenario == "no_options" else {"max_tokens": 10, "store": False})
+        assert calls[1][1]["options"] == {"store": False, "temperature": 0.3}
+    assert options == original_options
     assert MARKER not in caplog.text
 
 
@@ -135,6 +145,63 @@ def test_search_initialization_failure_propagates_without_raw_log(
         single.SingleAgentRAGStrategyV2()
     assert caught.value is failure
     assert MARKER not in caplog.text
+
+
+@pytest.mark.parametrize("hosted", [False, True])
+@pytest.mark.parametrize("scenario", ["retry", "ambiguous", "other_option", "partial"])
+async def test_strategy_uses_bounded_provider_retry(strategy, monkeypatch, hosted, scenario):
+    strategy.hosted_runtime = hosted
+    strategy.project_endpoint = "https://example.invalid"
+    strategy.credential = MagicMock()
+    strategy.model_name = "chat"
+    agent = MagicMock()
+    agent.__aenter__ = AsyncMock(return_value=agent)
+    agent.__aexit__ = AsyncMock(return_value=False)
+    agent.get_new_thread.return_value = object()
+    calls = []
+    failure = RuntimeError(
+        "invalid_payload" if scenario == "ambiguous" else
+        "invalid_payload reasoning: Not allowed when agent is specified" if scenario == "other_option" else
+        "invalid_payload max_output_tokens: Not allowed when agent is specified"
+    )
+
+    async def run(message, **kwargs):
+        calls.append((message, kwargs))
+        if len(calls) == 1:
+            if scenario == "partial":
+                yield SimpleNamespace(text="partial")
+            raise failure
+        yield SimpleNamespace(text="answer")
+
+    agent.run_stream = run
+    monkeypatch.setattr(provider, "get_provider", AsyncMock(return_value=SimpleNamespace(
+        as_agent=MagicMock(return_value=agent),
+    )))
+    monkeypatch.setattr(provider, "get_or_create_agent_details", AsyncMock(return_value=object()))
+    monkeypatch.setattr(provider, "ensure_conversation_id", AsyncMock(return_value="conv"))
+    persist = AsyncMock()
+    monkeypatch.setattr(strategy, "_persist_managed_turn", persist)
+    output = []
+    if scenario == "retry":
+        output = [chunk async for chunk in strategy._stream_agent("question")]
+        assert output == ["answer"]
+    else:
+        with pytest.raises(RuntimeError) as caught:
+            async for chunk in strategy._stream_agent("question"):
+                output.append(chunk)
+        assert caught.value is failure
+        assert output == (["partial"] if scenario == "partial" else [])
+        persist.assert_not_awaited()
+    assert len(calls) == (2 if scenario == "retry" else 1)
+    initial = {"max_tokens": strategy.max_completion_tokens}
+    if hosted:
+        initial["store"] = False
+        persist.assert_not_awaited()
+    assert calls[0][1]["options"] == initial
+    if len(calls) == 2:
+        assert calls[1][0] is calls[0][0]
+        assert calls[1][1]["thread"] is calls[0][1]["thread"]
+        assert calls[1][1]["options"] == ({"store": False} if hosted else {})
 
 
 @pytest.mark.parametrize("cancelled", [False, True])

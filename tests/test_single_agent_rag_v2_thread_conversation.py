@@ -99,7 +99,7 @@ class TestStreamAgentRunFallback:
             async def run_stream(self, _message, *, thread, options):
                 self.options.append(options)
                 if len(self.options) == 1:
-                    raise RuntimeError("invalid_payload")
+                    raise RuntimeError("invalid_payload max_tokens: Not allowed when agent is specified")
                 yield types.SimpleNamespace(text="persisted")
 
         agent = FakeAgent()

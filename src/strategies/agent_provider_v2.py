@@ -19,6 +19,7 @@ resolved agent definitions) lives at module scope here.
 import asyncio
 import hashlib
 import logging
+import re
 import uuid
 from typing import Any, AsyncIterator, Optional, Sequence, Union
 
@@ -266,6 +267,9 @@ async def stream_agent_run(
     ``options`` as an invalid payload *before any output is produced*, retry once
     without the optional token limit.
 
+    Retry requires a field-scoped "Not allowed when agent is specified"
+    rejection of the supplied ``max_tokens`` option. Unrecognized or ambiguous
+    diagnostics propagate rather than risking a duplicate run.
     This guards against deployments/models where even ``max_tokens``
     (``max_output_tokens``) is not permitted alongside an agent reference. The
     common path (options accepted) never triggers the retry. The retry only fires
@@ -287,7 +291,18 @@ async def stream_agent_run(
             produced = True
             yield chunk
     except Exception as exc:
-        if produced or not options or not is_invalid_payload_error(exc):
+        message = str(getattr(exc, "message", "") or exc)
+        if (
+            produced
+            or not options
+            or "max_tokens" not in options
+            or not is_invalid_payload_error(exc)
+            or not re.search(
+                r"\b(?:max_tokens|max_output_tokens)\b['\"]?\s*:\s*['\"]?"
+                r"Not allowed when agent is specified",
+                message,
+            )
+        ):
             raise
         logging.warning(
             "[AgentProviderV2] Run rejected run-time options as invalid payload; "
