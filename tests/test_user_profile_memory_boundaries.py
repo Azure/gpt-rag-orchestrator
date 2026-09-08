@@ -135,3 +135,36 @@ async def test_current_direct_adapter_does_not_populate_extracted_profile_value(
     assert "response_format" not in sdk.chat.completions.create.await_args.kwargs
     assert memory.user_profile.name == "Original"
     assert marker not in caplog.text
+
+
+async def test_flush_does_not_clear_replacement_task():
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def response(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            started.set()
+            await asyncio.Event().wait()
+        await release.wait()
+        return SimpleNamespace(value=ExtractedUserInfo(name="Current"))
+
+    memory = UserProfileMemory(chat_client=SimpleNamespace(get_response=AsyncMock(side_effect=response)))
+    message = ChatMessage(role=Role.USER, text="profile")
+    await memory.invoked(message)
+    await started.wait()
+    flush = asyncio.create_task(memory.flush())
+    await asyncio.sleep(0)
+    await memory.invoked(message)
+    replacement = memory._pending_task
+    try:
+        await flush
+        assert memory._pending_task is replacement
+    finally:
+        release.set()
+        await replacement
+    await memory.flush()
+    assert memory.user_profile.name == "Current"
+    assert memory._pending_task is None

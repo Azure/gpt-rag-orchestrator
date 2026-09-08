@@ -165,8 +165,126 @@ async def test_optional_post_flow_cleanup_preserves_order_and_cancellation(
         flush.assert_awaited_once()
     else:
         instance._save_user_profile.assert_not_awaited()
+    if mode == "absent":
+        assert not caplog.records
     assert marker not in caplog.text
     assert not any(record.exc_info for record in caplog.records)
+
+
+@pytest.mark.parametrize("mode", ["completed-failure", "completed-success", "absent", "failure", "cancelled"])
+async def test_multimodal_flow_owns_optional_cleanup(
+    patch_dependencies, mock_config, monkeypatch, caplog, mode,
+):
+    """Exercise the actual flow's scheduling, with a real memory worker."""
+    marker = "synthetic-private-extraction-detail"
+    with patch.object(vision, "get_config", return_value=mock_config):
+        instance = vision.MultimodalStrategy()
+    chat = SimpleNamespace(get_response=AsyncMock(
+        side_effect=RuntimeError(marker) if mode == "completed-failure" else None,
+        return_value=SimpleNamespace(value=None),
+    ))
+    memory = UserProfileMemory(chat_client=chat)
+    instance._chat_client = chat
+    instance._user_memory = memory
+    instance._cached_instructions = "Test instructions"
+    instance.conversation = {"messages": [], "session_initialized": True, "user_id": "test-user"}
+    instance._classify_intent = AsyncMock(return_value="greeting")
+    instance._save_user_profile = AsyncMock()
+    warning = vision.logging.warning
+
+    def warn(message, *args, **kwargs):
+        if "Failed to extract user info" in message:
+            raise RuntimeError(marker)
+        return warning(message, *args, **kwargs)
+
+    monkeypatch.setattr(vision.logging, "warning", warn)
+    agent = MagicMock()
+    agent.__aenter__ = AsyncMock(return_value=agent)
+    agent.__aexit__ = AsyncMock(return_value=False)
+    primary = asyncio.CancelledError(marker) if mode == "cancelled" else RuntimeError(marker)
+    extraction = None
+
+    async def chunks(messages, **kwargs):
+        nonlocal extraction
+        if mode in {"failure", "cancelled"}:
+            raise primary
+        await memory.invoked(messages)
+        extraction = memory._pending_task
+        # Wait for completion without retrieving its result/exception.
+        await asyncio.wait({extraction})
+        yield SimpleNamespace(text="answer")
+
+    agent.run_stream = chunks
+    tasks = []
+    create_task = asyncio.create_task
+
+    def schedule(coroutine):
+        task = create_task(coroutine)
+        tasks.append(task)
+        return task
+
+    with patch.object(vision, "ChatAgent", return_value=agent), patch.object(vision.asyncio, "create_task", schedule):
+        flow = instance.initiate_agent_flow("hello")
+        if mode in {"failure", "cancelled"}:
+            with pytest.raises(type(primary)) as raised:
+                await anext(flow)
+            assert raised.value is primary
+            assert tasks == []
+            assert instance.conversation["messages"] == []
+        else:
+            assert await anext(flow) == "answer"
+            if mode == "absent":
+                # Session cleared between emitted answer and background cleanup.
+                await instance.clear_session()
+            with pytest.raises(StopAsyncIteration):
+                await anext(flow)
+            assert len(tasks) == 2
+            await tasks[-1]
+            assert extraction.done()
+            if mode == "absent":
+                instance._save_user_profile.assert_not_awaited()
+            else:
+                instance._save_user_profile.assert_awaited_once_with("test-user", memory.user_profile)
+                assert memory._pending_task is None
+    agent.__aexit__.assert_awaited_once()
+    if mode == "completed-failure":
+        assert "Failed to finish extraction (RuntimeError)" in caplog.text
+    else:
+        assert not any(
+            record.levelno >= vision.logging.WARNING
+            and (
+                "post_flow_cleanup failed" in record.getMessage()
+                or "Failed to finish extraction" in record.getMessage()
+            )
+            for record in caplog.records
+        )
+    assert marker not in caplog.text
+    assert not any(record.exc_info for record in caplog.records)
+
+
+async def test_real_profile_flush_cancellation_prevents_cleanup_save(patch_dependencies, mock_config):
+    started = asyncio.Event()
+
+    async def response(**kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    with patch.object(vision, "get_config", return_value=mock_config):
+        instance = vision.MultimodalStrategy()
+    memory = UserProfileMemory(chat_client=SimpleNamespace(get_response=AsyncMock(side_effect=response)))
+    instance._user_memory = memory
+    instance._save_user_profile = AsyncMock()
+    await memory.invoked(vision.ChatMessage(role="user", text="hello"))
+    extraction = memory._pending_task
+    await started.wait()
+    cleanup = asyncio.create_task(instance._post_flow_cleanup("test-user"))
+    await asyncio.sleep(0)
+    cleanup.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cleanup
+    assert extraction.done()
+    assert memory._pending_task is None
+    instance._save_user_profile.assert_not_awaited()
 
 
 @pytest.mark.parametrize("mode", ["failure", "cancelled", "success", "invalid", "empty", "missing", "timeout"])

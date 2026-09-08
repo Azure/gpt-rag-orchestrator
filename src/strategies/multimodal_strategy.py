@@ -685,10 +685,11 @@ class MultimodalStrategy(BaseAgentStrategy):
     # ------------------------------------------------------------------
     async def _post_flow_cleanup(self, user_id: str) -> None:
         """Flush profile extraction and save — runs as fire-and-forget task."""
+        if self._user_memory is None:
+            return
         t0 = time.time()
         try:
-            if self._user_memory:
-                await self._user_memory.flush()
+            await self._user_memory.flush()
             await self._save_user_profile(user_id, self._user_memory.user_profile)
             logging.info("[MultimodalStrategy] post_flow_profile_save: %.2fs", time.time() - t0)
         except Exception as e:

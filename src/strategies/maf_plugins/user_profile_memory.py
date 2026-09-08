@@ -140,12 +140,20 @@ class UserProfileMemory(ContextProvider):
 
     async def flush(self) -> None:
         """Await any pending profile extraction task. Call before saving the profile."""
-        if self._pending_task and not self._pending_task.done():
+        task = self._pending_task
+        if task is not None:
             try:
-                await self._pending_task
+                await task
             except Exception as exc:
                 logging.warning("[UserProfileMemory] Failed to finish extraction (%s)", type(exc).__name__)
-        self._pending_task = None
+            finally:
+                if self._pending_task is task:
+                    self._pending_task = None
+            # The worker suppresses deliberate supersession cancellation.
+            # It must not also suppress cancellation of this flush's caller.
+            caller = asyncio.current_task()
+            if caller is not None and caller.cancelling():
+                raise asyncio.CancelledError()
 
     async def invoking(
         self,
