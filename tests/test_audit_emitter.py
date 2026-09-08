@@ -148,6 +148,221 @@ def test_audit_warning_failure_also_preserves_primary_operation():
         warning_logger.handlers, warning_logger.propagate = previous
 
 
+async def test_real_tool_audit_sink_failure_preserves_primary_unwind(monkeypatch):
+    # One exact JUnit selector binds the entire matrix, not just a passing cell.
+    for sink in ("export", "failure_event", "warning"):
+        for error_type in (
+            RuntimeError, asyncio.CancelledError, KeyboardInterrupt, SystemExit,
+            GeneratorExit,
+        ):
+            for outcome in ("success", "failure", "timeout", "cancellation"):
+                for phase in ("started", "terminal"):
+                    with monkeypatch.context() as patch:
+                        await _assert_tool_audit_sink_outcome(
+                            patch, sink, error_type, outcome, phase,
+                        )
+
+
+async def test_successful_recovery_direct_await_propagates_audit_control(monkeypatch):
+    # Direct await retains the outer except's ambient exception state.
+    try:
+        raise ValueError("recovered-private")
+    except ValueError:
+        for sink in ("export", "failure_event", "warning"):
+            for error_type in (
+                RuntimeError, asyncio.CancelledError, KeyboardInterrupt,
+                SystemExit, GeneratorExit,
+            ):
+                for phase in ("started", "terminal"):
+                    with monkeypatch.context() as patch:
+                        await _assert_tool_audit_sink_outcome(
+                            patch, sink, error_type, "success", phase,
+                        )
+
+
+def test_recovery_direct_emit_failure_propagates_control(monkeypatch):
+    try:
+        raise ValueError("recovered-private")
+    except ValueError:
+        test_direct_failure_event_control_propagates_and_guard_recovers(monkeypatch)
+
+
+def test_recovery_direct_emit_propagates_control():
+    emitter = enabled_emitter()
+    for error_type in (
+        asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit,
+    ):
+        error = error_type("sink-private")
+
+        class ControlHandler(logging.Handler):
+            def emit(self, record):
+                raise error
+
+        try:
+            raise ValueError("recovered-private")
+        except ValueError:
+            with capture_audit_logs(ControlHandler()), pytest.raises(error_type) as raised:
+                emitter.emit(
+                    EventType.REQUEST_STARTED,
+                    operation="test",
+                    status=AuditStatus.STARTED,
+                    reason_code=ReasonCode.REQUEST_RECEIVED,
+                )
+            assert raised.value is error
+
+
+async def _assert_tool_audit_sink_outcome(
+    monkeypatch, sink, sink_error_type, outcome, phase,
+):
+    """A secondary control exception must not replace an unwinding primary."""
+    from telemetry import audit
+
+    emitter = enabled_emitter()
+    monkeypatch.setattr(AuditEmitter, "_default", emitter)
+    primary = (
+        asyncio.CancelledError("primary-private")
+        if outcome == "cancellation"
+        else TimeoutError("primary-private")
+        if outcome == "timeout"
+        else RuntimeError("primary-private")
+    )
+    sink_error = sink_error_type("sink-private")
+    attempts = []
+    invoked = False
+
+    class FailingTerminalHandler(logging.Handler):
+        def emit(self, record):
+            attempts.append(record)
+            if phase == "terminal" and record.event_type == EventType.TOOL_STARTED.value:
+                return
+            if sink == "export" or (
+                sink == "failure_event"
+                and record.event_type == EventType.EMISSION_FAILED.value
+            ):
+                raise sink_error
+            raise RuntimeError("first-export-private")
+
+    class WarningHandler(logging.Handler):
+        def emit(self, record):
+            attempts.append(record)
+            if sink == "warning":
+                raise sink_error
+
+    monkeypatch.setattr(audit._warning_logger, "handlers", [WarningHandler()])
+    monkeypatch.setattr(audit._warning_logger, "propagate", False)
+    monkeypatch.setattr(audit._warning_logger, "level", logging.WARNING)
+
+    async def invocation():
+        nonlocal invoked
+        invoked = True
+        if outcome != "success":
+            raise primary
+        return "result"
+
+    _, token = begin_audit_request()
+    try:
+        with capture_audit_logs(FailingTerminalHandler()):
+            if phase == "started" and sink_error_type is not RuntimeError:
+                with pytest.raises(sink_error_type) as raised:
+                    await invoke_audited_tool("test", invocation)
+                assert raised.value is sink_error
+                assert not invoked
+            elif outcome != "success":
+                with pytest.raises(type(primary)) as raised:
+                    await invoke_audited_tool("test", invocation)
+                assert raised.value is primary
+            elif sink_error_type is RuntimeError:
+                assert await invoke_audited_tool("test", invocation) == "result"
+            else:
+                with pytest.raises(sink_error_type) as raised:
+                    await invoke_audited_tool("test", invocation)
+                assert raised.value is sink_error
+    finally:
+        end_audit_request(token)
+
+    assert len(attempts) <= 4
+    assert sum(
+        getattr(record, "event_type", None) == EventType.EMISSION_FAILED.value
+        for record in attempts
+    ) <= 1
+    assert sum(record.levelno == logging.WARNING for record in attempts) <= 1
+    assert not audit._failure_emission_active.get()
+    serialized = str([record.__dict__ for record in attempts])
+    assert "primary-private" not in serialized
+    assert "sink-private" not in serialized
+    assert "first-export-private" not in serialized
+
+
+def test_direct_failure_event_control_propagates_and_guard_recovers(monkeypatch):
+    for sink in ("failure_event", "warning"):
+        for error_type in (
+            asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit,
+        ):
+            with monkeypatch.context() as patch:
+                _assert_direct_failure_control(patch, sink, error_type)
+
+
+def _assert_direct_failure_control(monkeypatch, sink, error_type):
+    from telemetry import audit
+
+    emitter = enabled_emitter()
+    error = error_type("sink-private")
+
+    class ControlHandler(logging.Handler):
+        def emit(self, record):
+            raise error
+
+    monkeypatch.setattr(audit._warning_logger, "handlers", [ControlHandler()])
+    monkeypatch.setattr(audit._warning_logger, "propagate", False)
+    monkeypatch.setattr(audit._warning_logger, "level", logging.WARNING)
+    handler = ControlHandler() if sink == "failure_event" else RaisingHandler()
+    with capture_audit_logs(handler), pytest.raises(error_type) as raised:
+        emitter.emit_failure(ReasonCode.EXPORT_FAILURE)
+    assert raised.value is error
+    assert not audit._failure_emission_active.get()
+    with capture_audit_logs() as capture:
+        emitter.emit_failure(ReasonCode.EXPORT_FAILURE)
+    assert event_types(capture) == [EventType.EMISSION_FAILED.value]
+
+
+async def test_real_tool_task_cancellation_survives_ordinary_audit_sink_failures(
+    monkeypatch,
+):
+    from telemetry import audit
+
+    monkeypatch.setattr(AuditEmitter, "_default", enabled_emitter())
+    monkeypatch.setattr(audit._warning_logger, "handlers", [RaisingHandler()])
+    monkeypatch.setattr(audit._warning_logger, "propagate", False)
+    entered = asyncio.Event()
+    cleaned = []
+
+    class TerminalFailureHandler(RaisingHandler):
+        def emit(self, record):
+            if record.event_type != EventType.TOOL_STARTED.value:
+                super().emit(record)
+
+    async def invocation():
+        try:
+            entered.set()
+            await asyncio.Event().wait()
+        finally:
+            cleaned.append(True)
+
+    _, token = begin_audit_request()
+    try:
+        with capture_audit_logs(TerminalFailureHandler()):
+            task = asyncio.create_task(invoke_audited_tool("test", invocation))
+            await entered.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert task.cancelled()
+            assert cleaned == [True]
+    finally:
+        end_audit_request(token)
+    assert not audit._failure_emission_active.get()
+
+
 def test_audit_environment_lookup_failure_is_metadata_only(monkeypatch):
     from unittest.mock import MagicMock
 
