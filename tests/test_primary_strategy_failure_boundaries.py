@@ -77,12 +77,14 @@ def main_module(patch_dependencies):
             sys.modules["main"] = previous
 
 
-async def _run_http_turn(main, strategy, cancellation=None):
+async def _run_http_turn(main, strategy, cancellation=None, *, profile_user_id=None):
     orchestrator = build_orchestrator(strategy)
-    if isinstance(strategy, MultimodalStrategy):
+    if profile_user_id is not None or isinstance(strategy, MultimodalStrategy):
         # This fixture explicitly exercises an existing profile/welcome path.
         # Missing user_id is covered separately as an ordinary no-memory turn.
-        orchestrator.database_client.get_document.return_value["user_id"] = "existing-profile-user"
+        orchestrator.database_client.get_document.return_value["user_id"] = (
+            profile_user_id if profile_user_id is not None else "existing-profile-user"
+        )
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))

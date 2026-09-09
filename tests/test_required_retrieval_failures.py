@@ -37,6 +37,8 @@ async def test_required_retrieval_reaches_safe_turn(
         instance.search_index_name = None
     instance._classify_intent = AsyncMock(
         return_value=mode if mode in {"greeting", "no_retrieval"} else "question")
+    # Unlike the shared helper fixture, this scenario includes optional memory.
+    instance.profile_memory_enabled = True
     instance._user_memory = UserProfileMemory(chat_client=instance._chat_client)
     instance._user_memory.invoking = AsyncMock(
         return_value=Context(instructions="Independent optional context"),
@@ -93,7 +95,9 @@ async def test_required_retrieval_reaches_safe_turn(
                      AsyncMock(return_value=object())),
     ):
         chunks, spans, _ = await _run_http_turn(
-            main_module, instance, failure if mode == "cancelled" else None)
+            main_module, instance, failure if mode == "cancelled" else None,
+            profile_user_id="existing-profile-user",
+        )
 
     failed = mode in {"construction", "retrieval", "cancelled"}
     if failed:
