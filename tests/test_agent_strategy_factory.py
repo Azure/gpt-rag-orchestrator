@@ -5,7 +5,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 
 
 class TestAgentStrategyFactory:
-    """Factory should return the correct strategy type for each key."""
+    """Factory selects registered strategies and rejects unknown or removed keys."""
 
     @pytest.fixture(autouse=True)
     def _patch_deps(self, patch_dependencies):
