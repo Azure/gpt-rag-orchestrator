@@ -5,6 +5,7 @@ import time
 import hashlib
 from typing import Optional, Any, Dict
 from pydantic import BaseModel, Field
+from azure.core.exceptions import AzureError
 
 from dependencies import get_config
 from util.metadata import format_custom_metadata, parse_allowed_keys
@@ -15,6 +16,10 @@ from opentelemetry.trace.propagation.tracecontext import (
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
 from connectors.foundry_iq import McpSourceError, get_foundry_iq_client
 from connectors.foundry_iq_mcp import McpConfigurationError, McpCredentialError
+from connectors.obo import (
+    acquire_obo_token as _acquire_obo_token,
+    classify_retrieval_error as _classify_retrieval_error,
+)
 
 # Standardized log markers for retrieval/auth failure paths. Operators can grep
 # these to spot swallowed errors that would otherwise return empty results
@@ -23,28 +28,8 @@ _RETRIEVAL_AUTH_FAILURE_MARKER = "[Retrieval][AUTH_FAILURE]"
 _RETRIEVAL_ERROR_MARKER = "[Retrieval][ERROR]"
 
 
-def _classify_retrieval_error(error: Any) -> tuple:
-    """Classify a retrieval/auth error for standardized logging.
-
-    Inspects ``str(error)`` for ``401`` or ``403`` substrings and returns
-    ``(level, marker)``. Auth-shaped failures are surfaced at ``ERROR`` so they
-    don't get lost; other failures are surfaced at ``WARNING`` because the
-    caller will fall back to empty results when ``ALLOW_ANONYMOUS=true``.
-
-    The error argument can be an exception, a status code, or any object that
-    str()'s to something useful. Tokens must never be passed in.
-    """
-    msg = str(error) if error is not None else ""
-    if "401" in msg or "403" in msg:
-        return logging.ERROR, _RETRIEVAL_AUTH_FAILURE_MARKER
-    return logging.WARNING, _RETRIEVAL_ERROR_MARKER
-
-
 _global_index_empty_cache: Dict[str, Dict[str, Any]] = {}
 
-# Module-level OBO token cache (shared across callers)
-_obo_cache: Dict[str, Any] = {}
-_MAX_OBO_CACHE_ENTRIES = 256
 _SEARCH_OBO_SCOPE = "https://search.azure.com/user_impersonation"
 
 
@@ -60,93 +45,7 @@ async def acquire_obo_token(
 
     Returns the Bearer token string (without 'Bearer ' prefix) or None.
     """
-    scope = (scope or "").strip()
-    if not scope:
-        raise ValueError("OBO scope must not be empty")
-    if not api_access_token:
-        if allow_anonymous:
-            return None
-        raise RuntimeError("Missing incoming user access token for OBO exchange")
-
-    # Check cache
-    fp = hashlib.sha256(api_access_token.encode()).hexdigest()
-    cache_key = f"{fp}:{scope}"
-    cached = _obo_cache.get(cache_key)
-    if cached and time.time() < cached.get("expires_at", 0):
-        return cached["token"]
-
-    cfg = get_config()
-    tenant_id = (cfg.get_value("OAUTH_AZURE_AD_TENANT_ID", default=None, allow_none=True) or "").strip() or None
-    client_id = (cfg.get_value("OAUTH_AZURE_AD_CLIENT_ID", default=None, allow_none=True) or "").strip() or None
-    client_secret = (cfg.get_value("OAUTH_AZURE_AD_CLIENT_SECRET", default=None, allow_none=True) or "").strip() or None
-
-    if not tenant_id or not client_id or not client_secret:
-        logging.warning("[OBO] Missing Entra config for OBO (tenant=%s client=%s secret=%s)",
-                        "set" if tenant_id else "missing", "set" if client_id else "missing", "set" if client_secret else "missing")
-        if allow_anonymous:
-            return None
-        raise RuntimeError("OBO configuration is incomplete")
-
-    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-    form = {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-        "requested_token_use": "on_behalf_of",
-        "scope": scope,
-        "assertion": api_access_token,
-    }
-
-    async with aiohttp.ClientSession() as session:
-        async with session.post(token_url, data=form) as resp:
-            raw = await resp.text()
-            if resp.status >= 400:
-                level, marker = _classify_retrieval_error(resp.status)
-                logging.log(
-                    level,
-                    "%s OBO token exchange failed (status=%d scope_fp=%s)",
-                    marker,
-                    resp.status,
-                    hashlib.sha256(scope.encode()).hexdigest()[:12],
-                    extra={
-                        "retrieval_status": resp.status,
-                        "retrieval_credential_type": "obo",
-                    },
-                )
-                if allow_anonymous:
-                    return None
-                raise RuntimeError(f"OBO token exchange failed: status={resp.status}")
-            try:
-                data = json.loads(raw)
-            except Exception as exc:
-                logging.error("[OBO] Non-JSON response from token endpoint")
-                if allow_anonymous:
-                    return None
-                raise RuntimeError(
-                    "OBO token endpoint returned an invalid response"
-                ) from exc
-            token = data.get("access_token")
-            if token:
-                ttl = int(data.get("expires_in", 0))
-                now = time.time()
-                expired_keys = [
-                    key
-                    for key, entry in _obo_cache.items()
-                    if now >= entry.get("expires_at", 0)
-                ]
-                for key in expired_keys:
-                    _obo_cache.pop(key, None)
-                while len(_obo_cache) >= _MAX_OBO_CACHE_ENTRIES:
-                    _obo_cache.pop(next(iter(_obo_cache)))
-                _obo_cache[cache_key] = {
-                    "token": token,
-                    "expires_at": now + max(0, ttl - 30),
-                }
-                logging.info("[OBO] Acquired delegated token")
-                return token
-            if allow_anonymous:
-                return None
-            raise RuntimeError("OBO token endpoint response missing access_token")
+    return await _acquire_obo_token(api_access_token, scope, allow_anonymous)
 
 
 async def acquire_obo_search_token(
@@ -258,7 +157,7 @@ class SearchClient:
                 self.aoai_client = get_genai_client()
                 logging.info("[SearchClient] ✅ GenAIModelClient initialized for embeddings")
             except Exception as e:
-                logging.warning("[SearchClient] ⚠️ Could not initialize GenAIModelClient for embeddings: %s", e)
+                logging.warning("[SearchClient] Could not initialize embeddings (%s)", type(e).__name__)
                 logging.warning("[SearchClient] ⚠️ Falling back to term search only")
                 self.search_approach = "term"
 
@@ -309,7 +208,7 @@ class SearchClient:
             return "<none>"
         try:
             return hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
-        except Exception:
+        except UnicodeError:
             return "<unknown>"
 
     async def _acquire_search_user_token_via_obo(self, api_access_token: str) -> Optional[str]:
@@ -317,23 +216,9 @@ class SearchClient:
 
         This exchanges the incoming API token (user assertion) for a Search-audience token.
         """
-        tenant_id = None
-        client_id = None
-        client_secret = None
-        try:
-            tenant_id = (self.cfg.get_value("OAUTH_AZURE_AD_TENANT_ID", default=None, allow_none=True) or "").strip() or None
-        except Exception:
-            tenant_id = None
-
-        try:
-            client_id = (self.cfg.get_value("OAUTH_AZURE_AD_CLIENT_ID", default=None, allow_none=True) or "").strip() or None
-        except Exception:
-            client_id = None
-
-        try:
-            client_secret = (self.cfg.get_value("OAUTH_AZURE_AD_CLIENT_SECRET", default=None, allow_none=True) or "").strip() or None
-        except Exception:
-            client_secret = None
+        tenant_id = (self.cfg.get_value("OAUTH_AZURE_AD_TENANT_ID", default=None, allow_none=True) or "").strip() or None
+        client_id = (self.cfg.get_value("OAUTH_AZURE_AD_CLIENT_ID", default=None, allow_none=True) or "").strip() or None
+        client_secret = (self.cfg.get_value("OAUTH_AZURE_AD_CLIENT_SECRET", default=None, allow_none=True) or "").strip() or None
 
         if not tenant_id or not client_id or not client_secret:
             logging.warning(
@@ -367,6 +252,9 @@ class SearchClient:
                     level, marker = _classify_retrieval_error(resp.status)
                     try:
                         err = json.loads(raw)
+                    except (ValueError, RecursionError):
+                        err = None
+                    if isinstance(err, dict):
                         error = err.get("error")
                         desc = err.get("error_description")
                         trace_id = err.get("trace_id")
@@ -391,7 +279,7 @@ class SearchClient:
                                 "retrieval_credential_type": "obo",
                             },
                         )
-                    except Exception:
+                    else:
                         self._last_obo_error = f"status={resp.status} body={raw[:200]}"
                         logging.log(
                             level,
@@ -410,7 +298,7 @@ class SearchClient:
                 data = {}
                 try:
                     data = json.loads(raw)
-                except Exception:
+                except (ValueError, RecursionError):
                     logging.error("[Retrieval][OBO] Token endpoint returned non-JSON response")
                     return None
 
@@ -424,7 +312,7 @@ class SearchClient:
                 # Cache for the remainder of the request.
                 try:
                     ttl = int(expires_in) if expires_in is not None else 0
-                except Exception:
+                except (TypeError, ValueError, OverflowError):
                     ttl = 0
                 self._cached_search_user_token = token
                 self._cached_search_user_token_expires_at = time.time() + max(0, ttl - 30)
@@ -496,8 +384,8 @@ class SearchClient:
         # get bearer token
         try:
             token = (await self.credential.get_token("https://search.azure.com/.default")).token
-        except Exception:
-            logging.exception("[search] failed to acquire token")
+        except AzureError as exc:
+            logging.error("[search] failed to acquire token (%s)", type(exc).__name__)
             raise
 
         headers = {
@@ -545,8 +433,11 @@ class SearchClient:
         # Get bearer token
         try:
             token = (await self.credential.get_token("https://search.azure.com/.default")).token
-        except Exception:
-            logging.exception("[search] failed to acquire token for get_document")
+        except AzureError as exc:
+            logging.error(
+                "[search] failed to acquire token for get_document (%s)",
+                type(exc).__name__,
+            )
             raise
 
         headers = {
@@ -556,13 +447,12 @@ class SearchClient:
 
         session = await self._get_session()
         async with session.get(url, headers=headers) as resp:
-                text = await resp.text()
                 if resp.status == 404:
                     logging.warning(f"[search] Document not found: {document_id}")
                     return None
                 if resp.status >= 400:
-                    logging.error(f"[search] {resp.status} {text}")
-                    raise RuntimeError(f"Get document failed: {resp.status} {text}")
+                    logging.error("[search] Get document failed (status=%s)", resp.status)
+                    raise RuntimeError(f"Get document failed: {resp.status}")
                 return await resp.json()
 
     async def is_index_empty(self):
@@ -631,7 +521,7 @@ class SearchClient:
             return is_empty_result
 
         except Exception as e:
-            logging.error(f"[Retrieval] Failed to check if index is empty: {e}", exc_info=True)
+            logging.error("[Retrieval] Failed to check if index is empty (%s)", type(e).__name__)
             # Default to not empty if we can't tell, to avoid false bypasses
             return False
 
@@ -652,6 +542,7 @@ class SearchClient:
         logging.info(f"[Retrieval] Search approach: {self.search_approach}")
         logging.info(f"[Retrieval] Executing search for query: {query}")
 
+        search_user_token = None
         try:
             logging.info("[Retrieval] Using Azure AI Search for document retrieval")
 
@@ -787,8 +678,7 @@ class SearchClient:
                 level,
                 "%s Azure AI Search failed: %s",
                 marker,
-                e,
-                exc_info=True,
+                type(e).__name__,
                 extra={
                     "retrieval_index": self.index_name,
                     "retrieval_credential_type": "obo" if search_user_token else "managed_identity",
@@ -895,10 +785,9 @@ class SearchClient:
             level, marker = _classify_retrieval_error(e)
             logging.log(
                 level,
-                "%s Foundry IQ retrieval failed: %s",
+                "%s Foundry IQ retrieval failed (%s)",
                 marker,
-                e,
-                exc_info=True,
+                type(e).__name__,
                 extra={
                     "retrieval_credential_type": "obo" if search_user_token else "managed_identity",
                 },
@@ -945,7 +834,7 @@ class SearchClient:
                 logging.warning("[Citations] ⚠️ Document not found with ID: %s", document_id)
 
         except Exception as e:
-            logging.error("[Citations] ❌ Error fetching document from index: %s", e, exc_info=True)
+            logging.error("[Citations] Error fetching document from index (%s)", type(e).__name__)
 
         return None
 

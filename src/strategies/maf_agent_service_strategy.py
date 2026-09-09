@@ -3,7 +3,7 @@ Microsoft Agent Framework (MAF) + Agent Service V2 Strategy.
 
 This strategy implements a conversational agent using Microsoft Agent Framework
 with Azure AI Foundry Agent Service V2 as the backend. It provides:
-- Memory persistence for user profile in the classic runtime (across sessions)
+- Ordinary conversation history; automatic profile access is suspended
 - Optional agentic search over documents via Agent Service V2
 - Extensible context providers for custom capabilities
 - Server-side thread management via Agent Service V2
@@ -42,6 +42,7 @@ from . import hosted_strategies
 from connectors.foundry_iq_mcp import is_mcp_enabled
 from connectors.openai_chat_client import OpenAIChatClient
 from connectors.search import acquire_obo_search_token
+from connectors.obo import resolve_retrieval_authorization
 from orchestration.agent_events import AgentEventTranslator
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
 from dependencies import get_config
@@ -56,7 +57,7 @@ class MafAgentServiceStrategy(BaseAgentStrategy):
     Agent strategy using Microsoft Agent Framework + Azure AI Foundry Agent Service V2.
 
     This strategy serves as a blank canvas for building custom agent capabilities:
-    1. Maintaining persistent memory of the user's profile
+    1. Maintaining ordinary conversation history without profile collection
     2. Optional agentic search over documents (via Agent Service V2)
     3. Extensible context providers for custom functionality
 
@@ -72,7 +73,7 @@ questions and tasks.
 
 Your capabilities:
 1. **Conversation**: Engage in helpful, informative conversations
-2. **Profile Awareness**: Remember user information to provide personalized assistance
+2. **Conversation Context**: Use this conversation; automatic profile personalization is disabled
 3. **Knowledge Search**: Search your knowledge base when relevant to answer questions
 
 Guidelines:
@@ -156,7 +157,7 @@ Guidelines:
             if doc and "profile_data" in doc:
                 return UserProfile.model_validate_json(doc["profile_data"])
         except Exception as e:
-            logging.debug(f"[MafAgentServiceStrategy] No existing user profile found: {e}")
+            logging.debug("[MafAgentServiceStrategy] User profile unavailable (%s)", type(e).__name__)
         return UserProfile()
 
     async def _save_user_profile(self, user_id: str, profile: UserProfile):
@@ -170,48 +171,31 @@ Guidelines:
             }
             existing = await self.cosmos.get_document(self.user_profile_container, profile_key)
             if existing:
-                await self.cosmos.update_document(self.user_profile_container, doc)
+                saved_doc = await self.cosmos.update_document(self.user_profile_container, doc)
             else:
-                await self.cosmos.create_document(self.user_profile_container, profile_key, body=doc)
-            logging.info(f"[MafAgentServiceStrategy] Saved user profile for {user_id}")
+                saved_doc = await self.cosmos.create_document(self.user_profile_container, profile_key, body=doc)
+            if saved_doc is None:
+                logging.warning("[MafAgentServiceStrategy] User profile write not confirmed for %s", user_id)
+            else:
+                logging.info("[MafAgentServiceStrategy] Saved user profile for %s", user_id)
         except Exception as e:
-            logging.error(f"[MafAgentServiceStrategy] Failed to save user profile: {e}")
+            logging.error("[MafAgentServiceStrategy] Failed to save user profile (%s)", type(e).__name__)
 
     async def _create_user_memory(
         self,
         user_id: Optional[str],
     ) -> Optional[UserProfileMemory]:
-        """Create classic profile memory only when trusted identity is available."""
-        if not self.profile_memory_enabled:
-            return None
-        if user_id is None:
-            raise RuntimeError("Profile memory requires a trusted user identity.")
-        t0 = time.time()
-        user_profile = await self._load_user_profile(user_id)
-        logging.info(
-            "[MafAgentServiceStrategy] user_profile_load: %.2fs (user=%s)",
-            time.time() - t0,
-            user_id,
-        )
-        return UserProfileMemory(
-            chat_client=self._get_or_create_memory_chat_client(),
-            user_profile=user_profile,
-        )
+        """Automatic profile access is suspended pending trusted key binding."""
+        self._eligible_profile_user_id()
+        return None
 
     async def _persist_user_memory(
         self,
         user_id: Optional[str],
         user_memory: Optional[UserProfileMemory],
     ) -> None:
-        """Persist classic profile memory; hosted mode is deliberately a no-op."""
-        if (
-            not self.profile_memory_enabled
-            or user_id is None
-            or user_memory is None
-        ):
-            return
-        await user_memory.flush()
-        await self._save_user_profile(user_id, user_memory.user_profile)
+        """Automatic profile writes are suspended, including cached profiles."""
+        self._eligible_profile_user_id()
 
     async def _create_search_provider(self) -> Optional[SearchContextProvider]:
         """Create the search context provider for retrieval."""
@@ -227,6 +211,8 @@ Guidelines:
                 "ALLOW_ANONYMOUS", default=True, type=bool
             )
             retrieval_backend = get_retrieval_backend()
+            token = getattr(self, "request_access_token", None)
+            authorization_mode = resolve_retrieval_authorization(token, allow_anonymous)
             mcp_enabled = (
                 retrieval_backend == RETRIEVAL_BACKEND_FOUNDRY_IQ
                 and is_mcp_enabled(
@@ -237,13 +223,10 @@ Guidelines:
             )
 
             async def _get_obo_token() -> str | None:
-                token = getattr(self, "request_access_token", None)
                 return (
                     await acquire_obo_search_token(
                         token,
-                        allow_anonymous=(
-                            allow_anonymous if mcp_enabled else True
-                        ),
+                        allow_anonymous=False,
                     )
                     if token
                     else None
@@ -254,6 +237,7 @@ Guidelines:
                     conversation_id=self.conversation_id,
                     top_k=self.search_top_k,
                     get_obo_token=_get_obo_token,
+                    authorization_mode=authorization_mode,
                     request_access_token=(
                         getattr(self, "request_access_token", None)
                         if mcp_enabled
@@ -277,6 +261,7 @@ Guidelines:
                 top_k=self.search_top_k,
                 semantic_configuration_name=self.semantic_search_config,
                 get_obo_token=_get_obo_token,
+                authorization_mode=authorization_mode,
             )
             logging.info(
                 "[MafAgentServiceStrategy] SearchContextProvider created (index=%s)",
@@ -285,32 +270,23 @@ Guidelines:
             return provider
 
         except Exception as e:
-            logging.error(f"[MafAgentServiceStrategy] Failed to create search provider: {e}")
-            return None
+            logging.error("[MafAgentServiceStrategy] Failed to create search provider (%s)", type(e).__name__)
+            raise
 
     def _build_session_summary(self, user_memory: UserProfileMemory) -> str:
-        """Build a summary of loaded profiles for session start."""
-        parts = []
-
-        # User profile summary
-        if user_memory.has_minimum_context():
-            parts.append("**Your Profile:**")
-            parts.append(user_memory._build_profile_summary())
-        else:
-            parts.append("**Your Profile:** Not yet configured.")
-
-        return "\n".join(parts)
+        """Do not imply that inaccessible legacy profiles were loaded or saved."""
+        return "Automatic profile personalization is disabled."
 
     async def initiate_agent_flow(self, user_message: str):
         """
         Initiate the agent flow for a conversational interaction.
 
         Steps:
-        1. Initialize/load memories for user profile
+        1. Clear automatic profile context (unverified legacy-key binding)
         2. Create agent with context providers
-        3. If first message, provide session summary
+        3. Preserve ordinary conversation context
         4. Process user message and stream response
-        5. Save updated profile
+        5. Preserve ordinary conversation history; profile writes remain disabled
         """
         flow_start = time.time()
         logging.debug(f"[MafAgentServiceStrategy] initiate_agent_flow called with: {user_message!r}")
@@ -319,152 +295,146 @@ Guidelines:
         is_new_session = not conv.get("session_initialized", False)
 
         # Get user ID from conversation context
-        user_id = (
-            conv.get("user_id", "default_user")
-            if self.profile_memory_enabled
-            else None
+        user_id = self._eligible_profile_user_id()
+
+        user_memory = await self._create_user_memory(user_id)
+
+        # Initialize search provider if not done
+        if self._search_provider is None:
+            self._search_provider = await self._create_search_provider()
+
+        # Read base instructions
+        base_instructions = await self._read_prompt("main")
+        instructions = base_instructions if base_instructions else self.AGENT_INSTRUCTIONS
+
+        # Resolve the shared, reusable Foundry prompt agent (created once via
+        # create_version, then reused on every request and across restarts).
+        provider = await agent_provider_v2.get_provider(self.project_endpoint, self.credential)
+        agent_name = agent_provider_v2.compute_agent_name(
+            "gptrag-maf-agent-service",
+            model=self.model_name,
+            instructions=instructions,
+            tool_names=[],
+            extra={"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else None,
+        )
+        details = await agent_provider_v2.get_or_create_agent_details(
+            provider=provider,
+            name=agent_name,
+            model=self.model_name,
+            instructions=instructions,
+            tools=None,
+            reasoning_effort=self.reasoning_effort,
         )
 
-        try:
-            user_memory = await self._create_user_memory(user_id)
+        # Legacy Assistants thread ids are not valid Responses conversation
+        # ids; drop them before reusing the server thread. Not applicable to
+        # the stateless hosted runtime, which never binds to a
+        # service-managed thread at all.
+        if not self.hosted_runtime:
+            agent_provider_v2.reset_legacy_thread(conv)
 
-            # Initialize search provider if not done
-            if self._search_provider is None:
-                self._search_provider = await self._create_search_provider()
+        context_providers = [user_memory] if user_memory is not None else []
+        if self._search_provider:
+            context_providers.append(self._search_provider)
 
-            # Read base instructions
-            base_instructions = await self._read_prompt("main")
-            instructions = base_instructions if base_instructions else self.AGENT_INSTRUCTIONS
+        # Wrap the cached agent version into a ChatAgent (no HTTP call). The
+        # underlying client reuses the shared project client and does NOT
+        # close it on exit, so the singleton survives across requests.
+        async with provider.as_agent(
+            details,
+            context_provider=(
+                CompositeContextProvider(
+                    context_providers,
+                    required_providers=[self._search_provider] if self._search_provider else [],
+                )
+                if context_providers
+                else None
+            ),
+        ) as agent:
 
-            # Resolve the shared, reusable Foundry prompt agent (created once via
-            # create_version, then reused on every request and across restarts).
-            provider = await agent_provider_v2.get_provider(self.project_endpoint, self.credential)
-            agent_name = agent_provider_v2.compute_agent_name(
-                "gptrag-maf-agent-service",
-                model=self.model_name,
-                instructions=instructions,
-                tool_names=[],
-                extra={"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else None,
-            )
-            details = await agent_provider_v2.get_or_create_agent_details(
-                provider=provider,
-                name=agent_name,
-                model=self.model_name,
-                instructions=instructions,
-                tools=None,
-                reasoning_effort=self.reasoning_effort,
-            )
-
-            # Legacy Assistants thread ids are not valid Responses conversation
-            # ids; drop them before reusing the server thread. Not applicable to
-            # the stateless hosted runtime, which never binds to a
-            # service-managed thread at all.
-            if not self.hosted_runtime:
-                agent_provider_v2.reset_legacy_thread(conv)
-
-            context_providers = [user_memory] if user_memory is not None else []
-            if self._search_provider:
-                context_providers.append(self._search_provider)
-
-            # Wrap the cached agent version into a ChatAgent (no HTTP call). The
-            # underlying client reuses the shared project client and does NOT
-            # close it on exit, so the singleton survives across requests.
-            async with provider.as_agent(
-                details,
-                context_provider=(
-                    CompositeContextProvider(context_providers)
-                    if context_providers
-                    else None
-                ),
-            ) as agent:
-
-                if self.hosted_runtime:
-                    # Stateless hosted path: zero managed-Conversations
-                    # data-plane operations. No service-managed thread is
-                    # created, read, or resumed -- there is no service
-                    # identity a caller-selected conversation id could
-                    # redirect. The complete ordered history already supplied
-                    # by the authenticated caller is replayed as plain input
-                    # messages on a purely local, ephemeral thread, and
-                    # ``store: False`` guarantees the turn is never persisted
-                    # server-side either.
-                    thread = agent.get_new_thread()
-                    run_input = hosted_strategies.build_stateless_messages(
-                        conv.get("messages", []), user_message,
-                    )
-                    run_options = {
-                        "max_tokens": self.max_completion_tokens,
-                        "store": False,
-                    }
+            if self.hosted_runtime:
+                # Stateless hosted path: zero managed-Conversations
+                # data-plane operations. No service-managed thread is
+                # created, read, or resumed -- there is no service
+                # identity a caller-selected conversation id could
+                # redirect. The complete ordered history already supplied
+                # by the authenticated caller is replayed as plain input
+                # messages on a purely local, ephemeral thread, and
+                # ``store: False`` guarantees the turn is never persisted
+                # server-side either.
+                thread = agent.get_new_thread()
+                run_input = hosted_strategies.build_stateless_messages(
+                    conv.get("messages", []), user_message,
+                )
+                run_options = {
+                    "max_tokens": self.max_completion_tokens,
+                    "store": False,
+                }
+            else:
+                # Get or create thread
+                thread_id = conv.get("thread_id")
+                if thread_id:
+                    # Resume existing thread
+                    thread = agent.get_new_thread(service_thread_id=thread_id)
                 else:
-                    # Get or create thread
-                    thread_id = conv.get("thread_id")
-                    if thread_id:
-                        # Resume existing thread
-                        thread = agent.get_new_thread(service_thread_id=thread_id)
-                    else:
-                        # Create new thread
-                        thread = agent.get_new_thread()
-                        # service_thread_id may be None until first run; we'll update after
-                        if thread.service_thread_id:
-                            conv["thread_id"] = thread.service_thread_id
-                    run_input = user_message
-                    run_options = {"max_tokens": self.max_completion_tokens}
+                    # Create new thread
+                    thread = agent.get_new_thread()
+                    # service_thread_id may be None until first run; we'll update after
+                    if thread.service_thread_id:
+                        conv["thread_id"] = thread.service_thread_id
+                run_input = user_message
+                run_options = {"max_tokens": self.max_completion_tokens}
 
-                # If new session with existing profile, provide summary
-                if (
-                    is_new_session
-                    and user_memory is not None
-                    and user_memory.has_minimum_context()
-                ):
-                    conv["session_initialized"] = True
-                    session_summary = self._build_session_summary(user_memory)
-                    yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
-                elif is_new_session:
-                    conv["session_initialized"] = True
+            # If new session with existing profile, provide summary
+            if (
+                is_new_session
+                and user_memory is not None
+                and user_memory.has_minimum_context()
+            ):
+                conv["session_initialized"] = True
+                session_summary = self._build_session_summary(user_memory)
+                yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
+            elif is_new_session:
+                conv["session_initialized"] = True
 
-                # Stream the agent response. ``reasoning`` is baked into the agent
-                # definition (definition-level setting, rejected as a per-run
-                # option); only ``max_tokens`` is passed per run, with a one-shot
-                # fallback to no options if the service ever rejects it too.
-                full_response = ""
-                event_translator = AgentEventTranslator()
-                async for chunk in agent_provider_v2.stream_agent_run(
-                    agent,
-                    run_input,
-                    thread=thread,
-                    options=run_options,
-                ):
-                    for event in event_translator.translate(chunk):
-                        yield event
-                    if chunk.text:
-                        full_response += chunk.text
-                        yield chunk.text
+            # Stream the agent response. ``reasoning`` is baked into the agent
+            # definition (definition-level setting, rejected as a per-run
+            # option); only ``max_tokens`` is passed per run, with a one-shot
+            # fallback to no options if the service ever rejects it too.
+            full_response = ""
+            event_translator = AgentEventTranslator()
+            async for chunk in agent_provider_v2.stream_agent_run(
+                agent,
+                run_input,
+                thread=thread,
+                options=run_options,
+            ):
+                for event in event_translator.translate(chunk):
+                    yield event
+                if chunk.text:
+                    full_response += chunk.text
+                    yield chunk.text
 
-                # Capture thread_id if it was set during the run (classic
-                # runtime only; the hosted runtime never persists one).
-                if (
-                    not self.hosted_runtime
-                    and not conv.get("thread_id")
-                    and thread.service_thread_id
-                ):
-                    conv["thread_id"] = thread.service_thread_id
+            # Capture thread_id if it was set during the run (classic
+            # runtime only; the hosted runtime never persists one).
+            if (
+                not self.hosted_runtime
+                and not conv.get("thread_id")
+                and thread.service_thread_id
+            ):
+                conv["thread_id"] = thread.service_thread_id
 
-                # Store in conversation history
-                if "messages" not in conv:
-                    conv["messages"] = []
-                conv["messages"].append({"role": "user", "text": user_message})
-                conv["messages"].append({"role": "assistant", "text": full_response})
+            # Store in conversation history
+            if "messages" not in conv:
+                conv["messages"] = []
+            conv["messages"].append({"role": "user", "text": user_message})
+            conv["messages"].append({"role": "assistant", "text": full_response})
 
-            # Flush any pending background profile extraction before persisting so
-            # the saved profile reflects this turn (parity with MafLiteStrategy).
-            await self._persist_user_memory(user_id, user_memory)
+        # Flush any pending background profile extraction before persisting so
+        # the saved profile reflects this turn (parity with MafLiteStrategy).
+        await self._persist_user_memory(user_id, user_memory)
 
-            logging.info(f"[MafAgentServiceStrategy] Flow completed in {round(time.time() - flow_start, 2)}s")
-
-        except Exception as e:
-            logging.error(f"[MafAgentServiceStrategy] Agent flow failed: {e}", exc_info=True)
-            yield f"I encountered an error processing your request: {str(e)}. Please try again."
+        logging.info(f"[MafAgentServiceStrategy] Flow completed in {round(time.time() - flow_start, 2)}s")
 
     async def clear_session(self):
         """Clear the current session state (but preserve persisted profile)."""

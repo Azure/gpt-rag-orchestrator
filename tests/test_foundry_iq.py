@@ -529,18 +529,18 @@ async def test_provider_no_user_message_returns_empty_context():
 
 
 @pytest.mark.asyncio
-async def test_provider_retrieval_failure_returns_empty_context():
+async def test_provider_retrieval_failure_propagates():
     from strategies.foundry_iq_context_provider import FoundryIQContextProvider
 
     fake_client = MagicMock()
     fake_client.retrieve = AsyncMock(side_effect=RuntimeError("boom"))
-    provider = FoundryIQContextProvider()
+    provider = FoundryIQContextProvider(get_obo_token=AsyncMock(return_value="synthetic-delegated"))
     with patch(
         "strategies.foundry_iq_context_provider.get_foundry_iq_client",
         return_value=fake_client,
     ):
-        ctx = await provider.invoking([ChatMessage(role=Role.USER, text="q")])
-    assert not ctx.messages
+        with pytest.raises(RuntimeError, match="boom"):
+            await provider.invoking([ChatMessage(role=Role.USER, text="q")])
 
 
 # ---------------------------------------------------------------------------

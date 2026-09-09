@@ -99,7 +99,7 @@ class TestStreamAgentRunFallback:
             async def run_stream(self, _message, *, thread, options):
                 self.options.append(options)
                 if len(self.options) == 1:
-                    raise RuntimeError("invalid_payload")
+                    raise RuntimeError("invalid_payload max_tokens: Not allowed when agent is specified")
                 yield types.SimpleNamespace(text="persisted")
 
         agent = FakeAgent()
@@ -385,6 +385,7 @@ class TestPersistConversationTurn:
             return_value=types.SimpleNamespace(
                 data=[
                     types.SimpleNamespace(
+                        id="msg_current",
                         role="assistant",
                         content=[types.SimpleNamespace(text="JADE-7394")],
                     ),
@@ -400,6 +401,8 @@ class TestPersistConversationTurn:
 
         with patch.object(
             agent_provider_v2, "_get_openai_client", AsyncMock(return_value=oai)
+        ), patch.object(
+            agent_provider_v2.uuid, "uuid4", return_value=types.SimpleNamespace(hex="current")
         ):
             await agent_provider_v2.persist_conversation_turn(
                 "conv_stable",
@@ -412,6 +415,7 @@ class TestPersistConversationTurn:
             limit=2,
             order="desc",
         )
+        oai.conversations.items.create.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_raises_ambiguous_failure_when_tail_does_not_match(self):

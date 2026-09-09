@@ -3,7 +3,7 @@ import logging
 import re
 from azure.identity.aio import ManagedIdentityCredential, AzureCliCredential, ChainedTokenCredential
 from azure.keyvault.secrets.aio import SecretClient as AsyncSecretClient
-from azure.core.exceptions import ResourceNotFoundError, ClientAuthenticationError
+from azure.core.exceptions import AzureError, ResourceNotFoundError, ClientAuthenticationError
 from dependencies import get_config
 
 ##########################################################
@@ -23,17 +23,17 @@ async def get_secret(name):
                 retrieved_secret = await client.get_secret(name)
                 value = retrieved_secret.value
         return value    
-    except KeyError:
-        logging.info("Environment variable AZURE_KEY_VAULT_NAME not found.")
+    except (KeyError, ValueError) as e:
+        logging.info("Key Vault configuration or request input unavailable (%s).", type(e).__name__)
         return None
     except ClientAuthenticationError:
         logging.info("Authentication failed. Please check your credentials.")
         return None
     except ResourceNotFoundError:
-        logging.info(f"Secret '{name}' not found in the Key Vault.")
+        logging.info("Requested secret not found in the Key Vault.")
         return None
-    except Exception as e:
-        logging.info(f"An unexpected error occurred: {e}")
+    except AzureError as e:
+        logging.info("Key Vault SDK request failed (%s).", type(e).__name__)
         return None
 
 def generate_valid_secret_name(base_name: str) -> str:

@@ -19,6 +19,7 @@ resolved agent definitions) lives at module scope here.
 import asyncio
 import hashlib
 import logging
+import re
 import uuid
 from typing import Any, AsyncIterator, Optional, Sequence, Union
 
@@ -34,10 +35,10 @@ from agent_framework.azure import AzureAIProjectAgentProvider
 # the pinned ``agent-framework-azure-ai`` beta; import defensively so a future
 # package reshuffle degrades loudly (fail-fast at create time) rather than
 # importing-time crashing the whole app.
-try:  # pragma: no cover - exercised implicitly by the create path
+try:
     from agent_framework_azure_ai._shared import to_azure_ai_tools
     _HAS_TOOL_CONVERTER = True
-except Exception:  # pragma: no cover - defensive against private API churn
+except ImportError:
     to_azure_ai_tools = None  # type: ignore[assignment]
     _HAS_TOOL_CONVERTER = False
 
@@ -266,6 +267,9 @@ async def stream_agent_run(
     ``options`` as an invalid payload *before any output is produced*, retry once
     without the optional token limit.
 
+    Retry requires a field-scoped "Not allowed when agent is specified"
+    rejection of the supplied ``max_tokens`` option. Unrecognized or ambiguous
+    diagnostics propagate rather than risking a duplicate run.
     This guards against deployments/models where even ``max_tokens``
     (``max_output_tokens``) is not permitted alongside an agent reference. The
     common path (options accepted) never triggers the retry. The retry only fires
@@ -286,13 +290,23 @@ async def stream_agent_run(
             # one-shot fallback below must not re-issue it.
             produced = True
             yield chunk
-    except Exception as exc:  # noqa: BLE001 - re-raised unless it's a known retryable payload error
-        if produced or not options or not is_invalid_payload_error(exc):
+    except Exception as exc:
+        message = str(getattr(exc, "message", "") or exc)
+        if (
+            produced
+            or not options
+            or "max_tokens" not in options
+            or not is_invalid_payload_error(exc)
+            or not re.search(
+                r"\b(?:max_tokens|max_output_tokens)\b['\"]?\s*:\s*['\"]?"
+                r"Not allowed when agent is specified",
+                message,
+            )
+        ):
             raise
         logging.warning(
-            "[AgentProviderV2] Run rejected run-time options %s as invalid payload; "
-            "retrying without the optional token limit: %s",
-            sorted(options.keys()), exc,
+            "[AgentProviderV2] Run rejected run-time options as invalid payload; "
+            "retrying without the optional token limit",
         )
         retry_options = dict(options)
         retry_options.pop("max_tokens", None)
@@ -370,6 +384,7 @@ async def persist_conversation_turn(
     full managed history.
     """
     client = await _get_openai_client()
+    assistant_item_id = f"msg_{uuid.uuid4().hex}"
     items = [
         {
             "type": "message",
@@ -383,7 +398,7 @@ async def persist_conversation_turn(
         },
         {
             "type": "message",
-            "id": f"msg_{uuid.uuid4().hex}",
+            "id": assistant_item_id,
             "role": "assistant",
             "status": "completed",
             "content": [
@@ -406,6 +421,7 @@ async def persist_conversation_turn(
             conversation_id,
             user_message,
             assistant_message,
+            assistant_item_id=assistant_item_id,
         ):
             logging.warning(
                 "[AgentProviderV2] Conversation turn create returned an error "
@@ -423,13 +439,13 @@ async def persist_conversation_turn(
 def _conversation_item_text(item: Any) -> tuple[str | None, str]:
     """Return the role and concatenated text from a Conversation message."""
     role = getattr(item, "role", None)
-    content = getattr(item, "content", None) or []
-    text = "".join(
-        part_text
-        for part in content
-        if isinstance((part_text := getattr(part, "text", None)), str)
-    )
-    return role, text
+    content = getattr(item, "content", None)
+    if role not in ("user", "assistant") or not isinstance(content, list) or not content:
+        raise ValueError("Invalid conversation message evidence")
+    parts = [getattr(part, "text", None) for part in content]
+    if any(not isinstance(text, str) for text in parts):
+        raise ValueError("Invalid conversation text evidence")
+    return role, "".join(parts)
 
 
 async def _conversation_tail_matches(
@@ -437,34 +453,40 @@ async def _conversation_tail_matches(
     conversation_id: str,
     user_message: str,
     assistant_message: str,
+    *,
+    assistant_item_id: str,
 ) -> bool:
-    """Reconcile an ambiguous create failure against the persisted tail."""
+    """Require the actual submitted assistant identity, not repeated text.
+
+    The SDK accepts this id on ResponseOutputMessageParam and returns message
+    ids in the listed tail. Missing/rewritten ids remain unconfirmed; this is
+    not a remote idempotency guarantee.
+    """
     try:
         page = await client.conversations.items.list(
             conversation_id,
             limit=2,
             order="desc",
         )
+        data = list(page.data)
+        if len(data) < 2:
+            return False
+        newest_role, newest_text = _conversation_item_text(data[0])
+        previous_role, previous_text = _conversation_item_text(data[1])
+        return (
+            bool(assistant_item_id)
+            and getattr(data[0], "id", None) == assistant_item_id
+            and newest_role == "assistant"
+            and newest_text == assistant_message
+            and previous_role == "user"
+            and previous_text == user_message
+        )
     except Exception:
         logging.error(
             "[AgentProviderV2] Failed to reconcile ambiguous Conversation "
-            "persistence for %s",
-            conversation_id,
-            exc_info=True,
+            "persistence",
         )
         return False
-
-    data = list(getattr(page, "data", None) or [])
-    if len(data) < 2:
-        return False
-    newest_role, newest_text = _conversation_item_text(data[0])
-    previous_role, previous_text = _conversation_item_text(data[1])
-    return (
-        newest_role == "assistant"
-        and newest_text == assistant_message
-        and previous_role == "user"
-        and previous_text == user_message
-    )
 
 
 def reset_legacy_thread(conv: dict) -> None:

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import httpx
 
 async def main():
@@ -11,10 +12,12 @@ async def main():
                 headers={"dapr-api-token": "dev-token"}
             ) as response:
                 print(f"Status: {response.status_code}")
+                response.raise_for_status()
                 async for chunk in response.aiter_text():
                     print(chunk, end="", flush=True)
-        except Exception as e:
-            print(f"\nStream failed: {e}")
+        except httpx.HTTPError as exc:
+            logging.error("Stream request failed (%s)", type(exc).__name__)
+            raise SystemExit(1) from None
 
 if __name__ == "__main__":
     asyncio.run(main())

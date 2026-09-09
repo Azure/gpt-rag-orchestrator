@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "source_revision": "c6d0ccb01a40071f82f30bd17c9fe566b3d0ad18",
+  "runtime_roots": ["src"],
+  "modules": [
+    "__init__", "constants", "dependencies", "main", "schemas", "startup_warmup", "upload_prompts",
+    "api", "api.config_settings", "api.dashboard", "api.dashboard_config", "api.hosted_entrypoint", "api.responses_adapter", "api.turn_sse",
+    "connectors", "connectors.aifoundry", "connectors.appconfig", "connectors.cosmosdb", "connectors.cosmosdb_admin", "connectors.fabric",
+    "connectors.foundry_iq", "connectors.foundry_iq_mcp", "connectors.identity_manager", "connectors.keyvault", "connectors.mcp_client",
+    "connectors.multimodal_chat_client", "connectors.obo", "connectors.openai_chat_client", "connectors.search", "connectors.sqldbs", "connectors.types",
+    "orchestration", "orchestration.agent_events", "orchestration.conversation_compaction", "orchestration.orchestrator", "orchestration.turn",
+    "plugins.common.plugin", "plugins.nl2sql.nl2sql_types", "plugins.nl2sql.plugin", "plugins.nl2sql.sql_validation",
+    "plugins.retrieval.plugin", "plugins.retrieval.retrieval_types",
+    "strategies", "strategies.agent_provider_v2", "strategies.agent_strategies", "strategies.agent_strategy_factory", "strategies.base_agent_strategy",
+    "strategies.composite_context_provider", "strategies.context_shaping", "strategies.foundry_iq_context_provider", "strategies.hosted_strategies",
+    "strategies.intent_utils", "strategies.maf_agent_service_strategy", "strategies.maf_lite_strategy", "strategies.mcp_strategy",
+    "strategies.multimodal_search_context_provider", "strategies.multimodal_strategy", "strategies.nl2sql_strategy", "strategies.retrieval_intent",
+    "strategies.search_context_provider", "strategies.single_agent_rag_strategy_v2", "strategies.maf_plugins", "strategies.maf_plugins.user_profile_memory",
+    "telemetry", "telemetry.audit", "telemetry.audit_contract", "telemetry.audit_sanitizer", "telemetry.telemetry",
+    "util", "util.blob_sas", "util.citations", "util.foundry_platform", "util.jwt_utils", "util.metadata", "util.otel_context_noise",
+    "util.retrieval_backend", "util.test_stream", "util.tools"
+  ],
+  "contracts": {
+    "forbidden": [
+      {"from": ["connectors", "plugins", "telemetry"], "to": ["api", "main"]}
+    ],
+    "public_surfaces": [
+      "schemas", "connectors.types", "plugins.retrieval.retrieval_types", "plugins.nl2sql.nl2sql_types",
+      "connectors.search.acquire_obo_token", "connectors.search.acquire_obo_search_token",
+      "connectors.obo.acquire_obo_token"
+    ],
+    "private_ownership": "Leading-underscore modules and members belong to their containing package; flat modules own themselves. Non-underscore exports of existing named modules remain public. Compatibility access is exact, not descendant-wide.",
+    "private_access": [
+      {"importer": "strategies.foundry_iq_context_provider", "target": "connectors.search._classify_retrieval_error"},
+      {"importer": "strategies.multimodal_search_context_provider", "target": "connectors.search._classify_retrieval_error"},
+      {"importer": "strategies.search_context_provider", "target": "connectors.search._classify_retrieval_error"}
+    ],
+    "dynamic_imports": []
+  },
+  "toolchain": {"ruff": "0.16.5", "mypy": "2.3.1", "import-linter": "2.14", "grimp": "3.16"},
+  "required_checks": ["lint", "typing", "architecture", "exceptions", "policy", "tests", "frontend"],
+  "review": {
+    "status": "active",
+    "reference": "https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634",
+    "rationale": "Explicit maintainer authorization for initial administrative adoption of this policy, its existing typing scope and module surfaces, and exactly 92 existing exception records at cb6e2f3a34f0123aeb39ceaaf0c0063078318ac6. Not independent review or proof of required-check enforcement; repository settings and reference/negative-control validation remain separate. No additional allowances or production deployment."
+  }
+}

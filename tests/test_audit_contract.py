@@ -415,6 +415,57 @@ def test_additional_redaction_keys_cannot_corrupt_required_identifiers():
     assert "redact-me" not in result.serialized
 
 
+def test_audit_config_lookup_failure_retains_disabled_defaults():
+    class UnavailableConfig:
+        def get(self, key, default=None):
+            raise RuntimeError("synthetic-private-config")
+
+    settings = AuditSettings.from_config(UnavailableConfig())
+    assert settings.enabled is False
+    assert settings.sensitive_content_enabled is False
+    assert settings.actor_pseudonym_enabled is False
+
+
+@pytest.mark.parametrize("failure_phase", ["items", "iteration"])
+def test_audit_mapping_failure_omits_unreadable_value_without_content(failure_phase):
+    class UnreadableMapping(dict):
+        def items(self):
+            if failure_phase == "items":
+                raise RuntimeError("synthetic-private-value")
+
+            def values():
+                yield "safe", 1
+                raise RuntimeError("synthetic-private-value")
+
+            return values()
+
+    event = _base_event()
+    event["tool_arguments"] = UnreadableMapping()
+    result = sanitize_event(event, additional_redacted_keys=frozenset())
+    assert "tool_arguments" in result.attributes["omitted_fields"]
+    assert "tool_arguments" not in result.attributes
+    assert "synthetic-private-value" not in json.dumps(result.attributes)
+
+
+@pytest.mark.parametrize("field", ["tool_arguments", "omitted_fields", "truncated_fields"])
+def test_audit_sequence_failure_is_omitted_and_never_serialized(field):
+    class UnreadableSequence(Sequence):
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            raise RuntimeError("synthetic-private-value")
+
+        def __iter__(self):
+            raise RuntimeError("synthetic-private-value")
+
+    event = _base_event()
+    event[field] = UnreadableSequence()
+    result = sanitize_event(event, additional_redacted_keys=frozenset())
+    assert field in result.attributes["omitted_fields"]
+    assert "synthetic-private-value" not in json.dumps(result.attributes)
+
+
 def test_sanitizer_uses_bounded_iteration_for_virtual_containers():
     class CountingSequence(Sequence):
         def __init__(self):
@@ -512,3 +563,49 @@ def test_oversized_nested_key_is_omitted_before_redaction_classification():
             + result.attributes["truncated_fields"]
         )
     )
+
+
+@pytest.mark.parametrize("container_kind", ["mapping", "sequence"])
+@pytest.mark.parametrize("failure_stage", ["preparation", "iteration"])
+def test_sanitizer_container_failure_discards_partial_data_and_releases_identity(
+    container_kind, failure_stage,
+):
+    def failing_iterator(item):
+        yield item
+        raise RuntimeError("synthetic-private-error")
+
+    class OnceFailingMapping(dict):
+        failed = False
+
+        def items(self):
+            if not self.failed:
+                self.failed = True
+                if failure_stage == "preparation":
+                    raise RuntimeError("synthetic-private-error")
+                return failing_iterator(("partial", "synthetic-private-value"))
+            return super().items()
+
+    class OnceFailingSequence(list):
+        failed = False
+
+        def __iter__(self):
+            if not self.failed:
+                self.failed = True
+                if failure_stage == "preparation":
+                    raise RuntimeError("synthetic-private-error")
+                return failing_iterator("synthetic-private-value")
+            return super().__iter__()
+
+    value = (
+        OnceFailingMapping(safe=True)
+        if container_kind == "mapping"
+        else OnceFailingSequence(["safe"])
+    )
+    event = _base_event()
+    event["tool_arguments"] = {"failed": value, "reused": value}
+    result = sanitize_event(event, additional_redacted_keys=frozenset())
+    assert json.loads(result.attributes["tool_arguments"]) == {
+        "reused": {"safe": True} if container_kind == "mapping" else ["safe"],
+    }
+    assert result.attributes["omitted_fields"] == ["tool_arguments.failed"]
+    assert "synthetic-private" not in result.serialized

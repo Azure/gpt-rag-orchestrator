@@ -351,11 +351,12 @@ async def test_mcp_strategy_cleans_up_after_stream_error(
             return_value=chat_client,
         ),
     ):
-        with pytest.raises(RuntimeError, match="model failed"):
+        with pytest.raises(RuntimeError, match="model failed") as raised:
             _ = [
                 chunk
                 async for chunk in strategy.initiate_agent_flow("prompt")
             ]
+        assert raised.value is fake_agent.error
 
     assert state["closed"] is True
     assert fake_agent.closed is True
@@ -409,15 +410,17 @@ async def test_mcp_strategy_cleans_up_after_cancellation(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_error_type", [RuntimeError, asyncio.CancelledError])
 async def test_mcp_strategy_preserves_agent_error_when_chat_cleanup_fails(
     patch_dependencies,
     mock_config,
     caplog,
+    cleanup_error_type,
 ):
     strategy = await _create_strategy(mock_config)
     strategy.conversation = {}
     state = {}
-    close_error = RuntimeError("chat close failed")
+    close_error = cleanup_error_type("chat close failed")
     chat_client = _FakeChatClient(close_error=close_error)
     fake_agent = _FakeAgent(error=RuntimeError("model failed"))
 
@@ -446,18 +449,23 @@ async def test_mcp_strategy_preserves_agent_error_when_chat_cleanup_fails(
     assert fake_agent.closed is True
     chat_client.client.close.assert_awaited_once_with()
     assert "Failed to close chat client" in caplog.text
+    assert "chat close failed" not in caplog.text
+    assert "model failed" not in caplog.text
+    assert "status=error" in caplog.text
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_error_type", [RuntimeError, asyncio.CancelledError])
 async def test_mcp_strategy_preserves_cancellation_when_chat_cleanup_fails(
     patch_dependencies,
     mock_config,
     caplog,
+    cleanup_error_type,
 ):
     strategy = await _create_strategy(mock_config)
     strategy.conversation = {}
     state = {}
-    chat_client = _FakeChatClient(close_error=RuntimeError("chat close failed"))
+    chat_client = _FakeChatClient(close_error=cleanup_error_type("chat close failed"))
     fake_agent = _FakeAgent(
         [AgentResponseUpdate(role="assistant", text="started")],
         block=True,
@@ -492,17 +500,23 @@ async def test_mcp_strategy_preserves_cancellation_when_chat_cleanup_fails(
     assert fake_agent.closed is True
     chat_client.client.close.assert_awaited_once_with()
     assert "Failed to close chat client" in caplog.text
+    assert "chat close failed" not in caplog.text
+    assert "status=cancelled" in caplog.text
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_error_type", [RuntimeError, asyncio.CancelledError])
 async def test_mcp_strategy_surfaces_chat_cleanup_error_without_primary_error(
     patch_dependencies,
     mock_config,
+    cleanup_error_type,
+    caplog,
 ):
     strategy = await _create_strategy(mock_config)
     strategy.conversation = {}
     state = {}
-    chat_client = _FakeChatClient(close_error=RuntimeError("chat close failed"))
+    close_error = cleanup_error_type("chat close failed")
+    chat_client = _FakeChatClient(close_error=close_error)
     fake_agent = _FakeAgent([AgentResponseUpdate(role="assistant", text="done")])
 
     with (
@@ -520,15 +534,17 @@ async def test_mcp_strategy_surfaces_chat_cleanup_error_without_primary_error(
             return_value=chat_client,
         ),
     ):
-        with pytest.raises(RuntimeError, match="chat close failed"):
+        with pytest.raises(cleanup_error_type, match="chat close failed") as raised:
             _ = [
                 chunk
                 async for chunk in strategy.initiate_agent_flow("prompt")
             ]
+        assert raised.value is close_error
 
     assert state["closed"] is True
     assert fake_agent.closed is True
     chat_client.client.close.assert_awaited_once_with()
+    assert "status=error" in caplog.text
 
 
 @pytest.mark.asyncio

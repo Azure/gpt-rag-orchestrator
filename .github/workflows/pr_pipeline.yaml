@@ -4,15 +4,24 @@ on:
   pull_request:
     branches:
       - develop
+      - main
+  merge_group:
+
+permissions:
+  contents: read
 
 jobs:
   tests:
     name: tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Setup Python 3.12
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -24,18 +33,31 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-mock
+          pip install pytest pytest-asyncio pytest-mock jsonschema
+          pip install -r requirements-quality.txt
 
       - name: Run unit tests
-        run: pytest -q
+        run: pytest -q --junitxml=.artifacts/pytest.xml
+
+      - name: Upload failure-boundary evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pytest-evidence
+          path: .artifacts/pytest.xml
+          if-no-files-found: error
 
   frontend:
     name: frontend build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       # Node 20 mirrors the `javascript-node:20-bookworm` base image used by the
       # frontend build stage in the root Dockerfile, so a green run here means
@@ -54,3 +76,116 @@ jobs:
       - name: Build dashboard
         working-directory: frontend
         run: npm run build
+
+  quality:
+    name: ${{ matrix.check }}
+    needs: tests
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [lint, typing, architecture, exceptions, policy]
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout trusted base policy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ env.BASE_SHA }}
+          path: .quality-base
+          persist-credentials: false
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Select policy evaluator
+        shell: bash
+        run: |
+          if test -f .quality-base/.github/scripts/check-quality.py; then
+            echo "POLICY_ROOT=.quality-base" >> "$GITHUB_ENV"
+          else
+            # Bootstrap results are diagnostic only: the policy check fails closed.
+            echo "POLICY_ROOT=." >> "$GITHUB_ENV"
+          fi
+
+      - name: Install runtime and protected development tools
+        shell: bash
+        run: |
+          # Static jobs never install the candidate runtime dependency manifest.
+          # Bootstrap tool pins remain diagnostic only until protected adoption.
+          RUNTIME_REQUIREMENTS="$GITHUB_WORKSPACE/.quality-base/requirements.txt"
+          TOOL_REQUIREMENTS="$GITHUB_WORKSPACE/$POLICY_ROOT/requirements-quality.txt"
+          cd "$RUNNER_TEMP"
+          python -I -m pip --isolated install -r "$RUNTIME_REQUIREMENTS"
+          python -I -m pip --isolated install -r "$TOOL_REQUIREMENTS"
+
+      - name: Download this run's behavioral evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pytest-evidence
+          path: .artifacts
+
+      - name: Run protected-base check against candidate source
+        run: >-
+          python -I -S "$POLICY_ROOT/.github/scripts/check-quality.py"
+          --check "${{ matrix.check }}" --base-ref "$BASE_SHA"
+          --test-results .artifacts/pytest.xml
+          --report ".artifacts/quality-${{ matrix.check }}.json"
+
+      - name: Upload bound quality report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: quality-${{ matrix.check }}
+          path: .artifacts/quality-${{ matrix.check }}.json
+          if-no-files-found: error
+
+  quality-gate:
+    name: quality-gate
+    needs: [tests, frontend, quality]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      JOB_RESULTS: ${{ toJSON(needs) }}
+    steps:
+      - name: Require actual successful dependencies
+        run: |
+          python - <<'PY'
+          import json, os
+          results = json.loads(os.environ["JOB_RESULTS"])
+          assert set(results) == {"tests", "frontend", "quality"}
+          assert all(job["result"] == "success" for job in results.values()), results
+          PY
+
+      - name: Checkout protected evaluator
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ env.BASE_SHA }}
+          persist-credentials: false
+
+      - name: Download this run's quality reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: quality-*
+          path: .artifacts
+
+      - name: Validate protected aggregate and report identities
+        run: >-
+          python -I -S .github/scripts/aggregate-quality.py
+          --reports .artifacts --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA"
+          --needs "$JOB_RESULTS" --repository "$GITHUB_REPOSITORY"
+          --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT"

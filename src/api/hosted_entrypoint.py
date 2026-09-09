@@ -307,7 +307,7 @@ def _sse_generator(
                     yield frame
 
         except Exception:
-            logger.exception("[hosted] Unhandled error in SSE generator")
+            logger.error("[hosted] Unhandled error in SSE generator (internal_error)")
             if not error_emitted:
                 for frame in serialize_responses_events(
                     TurnErrorEvent(

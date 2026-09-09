@@ -21,8 +21,8 @@ from typing import Any, Mapping, Optional
 
 from agent_framework import ChatMessage, Context, ContextProvider, Role
 
-from connectors.foundry_iq import McpSourceError, get_foundry_iq_client
-from connectors.foundry_iq_mcp import McpConfigurationError, McpCredentialError
+from connectors.foundry_iq import get_foundry_iq_client
+from connectors.obo import RetrievalAuthorizationMode, require_retrieval_token, resolve_retrieval_authorization
 from connectors.search import _classify_retrieval_error
 from telemetry import AuditEmitter, ReasonCode
 from util.blob_sas import sign_blob_url
@@ -41,6 +41,7 @@ class FoundryIQContextProvider(ContextProvider):
         top_k: int = 3,
         max_content_chars: int = 1500,
         get_obo_token: Callable[[], Awaitable[Optional[str]]] | None = None,
+        authorization_mode: RetrievalAuthorizationMode = RetrievalAuthorizationMode.USER_REQUIRED,
         request_access_token: Optional[str] = None,
         allow_anonymous: bool = True,
         mcp_enabled: bool = False,
@@ -50,6 +51,7 @@ class FoundryIQContextProvider(ContextProvider):
         self._top_k = top_k
         self._max_content_chars = max_content_chars
         self._get_obo_token = get_obo_token
+        self._authorization_mode = authorization_mode
         self._request_access_token = request_access_token
         self._allow_anonymous = allow_anonymous
         self._mcp_enabled = mcp_enabled
@@ -89,23 +91,31 @@ class FoundryIQContextProvider(ContextProvider):
                     getattr(client_mcp_config, "enabled", self._mcp_enabled)
                 )
 
-            # Acquire OBO token for per-user document-level security if configured.
-            if self._get_obo_token:
-                try:
-                    obo_token = await self._get_obo_token()
-                except Exception as e:
-                    logger.warning(
-                        "[FoundryIQContextProvider] OBO token acquisition failed: %s",
-                        e,
-                    )
-                    if mcp_enabled:
-                        raise McpCredentialError(
-                            "Failed to acquire the required Search OBO token"
-                        ) from None
-                if mcp_enabled and not obo_token and not self._allow_anonymous:
-                    raise McpCredentialError(
-                        "Search OBO token is required when ALLOW_ANONYMOUS=false"
-                    )
+            # Remote and mixed sources must not silently drop user-only members.
+            source_requires_user = any(
+                getattr(client, name, False) is True
+                for name in (
+                    "work_iq_enabled", "fabric_iq_enabled",
+                    "fabric_data_agent_enabled", "sharepoint_remote_enabled",
+                )
+            )
+            if mcp_enabled and client_mcp_config is not None:
+                source_requires_user = source_requires_user or any(
+                    header.value_from.kind == "obo"
+                    for source in client_mcp_config.sources
+                    for header in source.query_headers
+                )
+            required_mode = resolve_retrieval_authorization(
+                self._request_access_token, self._allow_anonymous, source_requires_user,
+            )
+            if not isinstance(self._authorization_mode, RetrievalAuthorizationMode):
+                raise ValueError("Invalid retrieval authorization mode")
+            mode = (
+                RetrievalAuthorizationMode.USER_REQUIRED
+                if required_mode is RetrievalAuthorizationMode.USER_REQUIRED
+                else self._authorization_mode
+            )
+            obo_token = await require_retrieval_token(mode, self._get_obo_token)
 
             retrieve_kwargs: dict[str, Any] = {
                 "obo_token": obo_token,
@@ -156,17 +166,12 @@ class FoundryIQContextProvider(ContextProvider):
                 "%s Foundry IQ retrieval failed in %.2fs: %s",
                 marker,
                 time.time() - search_start,
-                e,
-                exc_info=True,
+                type(e).__name__,
                 extra={
                     "retrieval_credential_type": "obo" if obo_token else "managed_identity",
                 },
             )
-            if isinstance(
-                e, (McpConfigurationError, McpCredentialError, McpSourceError)
-            ) and mcp_enabled:
-                raise
-            return Context()
+            raise
 
         logger.info(
             "[FoundryIQContextProvider] Retrieval returned %d documents in %.2fs",

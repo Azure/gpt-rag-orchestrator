@@ -113,7 +113,11 @@ async def sign_blob_url(url: str, expiry_hours: int = DEFAULT_EXPIRY_HOURS) -> s
     if not href:
         return url
 
-    split = urllib.parse.urlsplit(href)
+    try:
+        split = urllib.parse.urlsplit(href)
+    except ValueError:
+        logger.warning("Malformed citation link; leaving it unsigned")
+        return url
     if not split.scheme or not split.netloc:
         # Relative reference: the consuming surface resolves it against its own
         # origin, so there is nothing for us to sign here.
@@ -145,10 +149,7 @@ async def sign_blob_url(url: str, expiry_hours: int = DEFAULT_EXPIRY_HOURS) -> s
         )
     except Exception:
         logger.warning(
-            "Could not sign citation link for %s/%s; leaving it unsigned",
-            container,
-            blob,
-            exc_info=True,
+            "Could not sign citation link; leaving it unsigned",
         )
         return url
 

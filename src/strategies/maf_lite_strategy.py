@@ -3,7 +3,7 @@ Microsoft Agent Framework (MAF) Lite Strategy.
 
 This strategy uses Microsoft Agent Framework with a direct Azure OpenAI model
 connection — no Azure AI Foundry Agent Service V2 dependency.  It provides:
-- Memory persistence for user profile in the classic runtime (across sessions)
+- Ordinary conversation history; automatic profile access is suspended
 - Optional agentic search over documents
 - Extensible context providers for custom capabilities
 - Local conversation history (no server-side threads)
@@ -12,7 +12,6 @@ Hosted mode consumes Foundry-managed conversation history and disables profile
 memory until an authenticated Foundry identity contract is available.
 """
 
-import asyncio
 import logging
 import time
 from typing import Optional
@@ -46,6 +45,7 @@ from .retrieval_intent import (
 from connectors.foundry_iq_mcp import is_mcp_enabled
 from connectors.openai_chat_client import OpenAIChatClient
 from connectors.search import acquire_obo_search_token
+from connectors.obo import resolve_retrieval_authorization
 from orchestration.agent_events import AgentEventTranslator
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
 from dependencies import get_config
@@ -68,7 +68,7 @@ class MafLiteStrategy(BaseAgentStrategy):
         "questions and tasks.\n\n"
         "Your capabilities:\n"
         "1. **Conversation**: Engage in helpful, informative conversations\n"
-        "2. **Profile Awareness**: Remember user information to provide personalized assistance\n"
+        "2. **Conversation Context**: Use this conversation; automatic profile personalization is disabled\n"
         "3. **Knowledge Search**: Search your knowledge base when relevant to answer questions\n\n"
         "Guidelines:\n"
         "- Provide clear, helpful, and accurate responses\n"
@@ -173,7 +173,7 @@ class MafLiteStrategy(BaseAgentStrategy):
             if doc and "profile_data" in doc:
                 return UserProfile.model_validate_json(doc["profile_data"])
         except Exception as e:
-            logging.debug(f"[MafLiteStrategy] No existing user profile found: {e}")
+            logging.debug("[MafLiteStrategy] User profile unavailable (%s)", type(e).__name__)
         return UserProfile()
 
     async def _save_user_profile(self, user_id: str, profile: UserProfile):
@@ -186,35 +186,23 @@ class MafLiteStrategy(BaseAgentStrategy):
             }
             existing = await self.cosmos.get_document(self.user_profile_container, profile_key)
             if existing:
-                await self.cosmos.update_document(self.user_profile_container, doc)
+                saved_doc = await self.cosmos.update_document(self.user_profile_container, doc)
             else:
-                await self.cosmos.create_document(self.user_profile_container, profile_key, body=doc)
-            logging.info(f"[MafLiteStrategy] Saved user profile for {user_id}")
+                saved_doc = await self.cosmos.create_document(self.user_profile_container, profile_key, body=doc)
+            if saved_doc is None:
+                logging.warning("[MafLiteStrategy] User profile write not confirmed for %s", user_id)
+            else:
+                logging.info("[MafLiteStrategy] Saved user profile for %s", user_id)
         except Exception as e:
-            logging.error(f"[MafLiteStrategy] Failed to save user profile: {e}")
+            logging.error("[MafLiteStrategy] Failed to save user profile (%s)", type(e).__name__)
 
     async def _ensure_user_memory(
         self,
         user_id: Optional[str],
         chat_client: OpenAIChatClient,
     ) -> None:
-        """Initialize classic profile memory when authenticated storage is enabled."""
-        if not self.profile_memory_enabled:
-            return
-        if user_id is None:
-            raise RuntimeError("Profile memory requires a trusted user identity.")
-        if self._user_memory is None:
-            t0 = time.time()
-            user_profile = await self._load_user_profile(user_id)
-            self._user_memory = UserProfileMemory(
-                chat_client=chat_client,
-                user_profile=user_profile,
-            )
-            logging.info(
-                "[MafLiteStrategy] user_profile_load: %.2fs (user=%s)",
-                time.time() - t0,
-                user_id,
-            )
+        """Automatic profile access is suspended pending trusted key binding."""
+        self._eligible_profile_user_id()
 
     # ------------------------------------------------------------------
     # Search provider (optional agentic retrieval)
@@ -231,6 +219,8 @@ class MafLiteStrategy(BaseAgentStrategy):
                 "ALLOW_ANONYMOUS", default=True, type=bool
             )
             retrieval_backend = get_retrieval_backend()
+            token = getattr(self, "request_access_token", None)
+            authorization_mode = resolve_retrieval_authorization(token, allow_anonymous)
             mcp_enabled = (
                 retrieval_backend == RETRIEVAL_BACKEND_FOUNDRY_IQ
                 and is_mcp_enabled(
@@ -251,13 +241,10 @@ class MafLiteStrategy(BaseAgentStrategy):
                 embed_fn = _embed
 
             async def _get_obo_token() -> str | None:
-                token = getattr(self, "request_access_token", None)
                 return (
                     await acquire_obo_search_token(
                         token,
-                        allow_anonymous=(
-                            allow_anonymous if mcp_enabled else True
-                        ),
+                        allow_anonymous=False,
                     )
                     if token
                     else None
@@ -269,6 +256,7 @@ class MafLiteStrategy(BaseAgentStrategy):
                     top_k=self.search_top_k,
                     max_content_chars=self.max_content_chars,
                     get_obo_token=_get_obo_token,
+                    authorization_mode=authorization_mode,
                     request_access_token=(
                         getattr(self, "request_access_token", None)
                         if mcp_enabled
@@ -293,6 +281,7 @@ class MafLiteStrategy(BaseAgentStrategy):
                 semantic_configuration_name=self.semantic_search_config,
                 embed_fn=embed_fn,
                 get_obo_token=_get_obo_token,
+                authorization_mode=authorization_mode,
                 max_content_chars=self.max_content_chars,
             )
             logging.info(
@@ -301,20 +290,14 @@ class MafLiteStrategy(BaseAgentStrategy):
             )
             return provider
         except Exception as e:
-            logging.error(f"[MafLiteStrategy] Failed to create search provider: {e}")
-            return None
+            logging.error("[MafLiteStrategy] Failed to create search provider (%s)", type(e).__name__)
+            raise
 
     # ------------------------------------------------------------------
     # Session summary
     # ------------------------------------------------------------------
     def _build_session_summary(self) -> str:
-        parts = []
-        if self._user_memory and self._user_memory.has_minimum_context():
-            parts.append("**Your Profile:**")
-            parts.append(self._user_memory._build_profile_summary())
-        else:
-            parts.append("**Your Profile:** Not yet configured.")
-        return "\n".join(parts)
+        return "Automatic profile personalization is disabled."
 
     # ------------------------------------------------------------------
     # Intent classification (LLM-based)
@@ -348,7 +331,7 @@ class MafLiteStrategy(BaseAgentStrategy):
             logging.info("[MafLiteStrategy] intent=%s (raw=%r)", intent, result)
             return intent
         except Exception as e:
-            logging.warning("[MafLiteStrategy] Intent classification failed: %s — defaulting to question", e)
+            logging.warning("[MafLiteStrategy] Intent classification failed (%s); defaulting to question", type(e).__name__)
             return "question"
 
     # ------------------------------------------------------------------
@@ -361,136 +344,116 @@ class MafLiteStrategy(BaseAgentStrategy):
 
         conv = self.conversation
         is_new_session = not conv.get("session_initialized", False)
-        user_id = (
-            conv.get("user_id", "default_user")
-            if self.profile_memory_enabled
-            else None
-        )
+        user_id = self._eligible_profile_user_id()
 
-        try:
-            chat_client = self._get_or_create_chat_client()
+        chat_client = self._get_or_create_chat_client()
 
-            # Load or initialise user-profile memory
-            await self._ensure_user_memory(user_id, chat_client)
+        # Clear any cached profile; automatic access remains suspended.
+        await self._ensure_user_memory(user_id, chat_client)
 
-            # Initialize search provider if not done
-            if self._search_provider is None:
-                t0 = time.time()
-                self._search_provider = await self._create_search_provider()
-                logging.info("[MafLiteStrategy] search_provider_init: %.2fs (hybrid=%s)", time.time() - t0, bool(self.embedding_deployment))
+        history = conv.get("messages", [])
 
-            history = conv.get("messages", [])
+        # Classify intent — skip search when retrieval is not needed.
+        t0 = time.time()
+        intent = await self._classify_intent(user_message, history=history)
+        logging.info("[MafLiteStrategy] intent_classification: %.2fs", time.time() - t0)
 
-            # Classify intent — skip search when retrieval is not needed.
+        # Only initialize retrieval for turns that need it.
+        if intent == "question" and self._search_provider is None:
             t0 = time.time()
-            intent = await self._classify_intent(user_message, history=history)
-            logging.info("[MafLiteStrategy] intent_classification: %.2fs", time.time() - t0)
+            self._search_provider = await self._create_search_provider()
+            logging.info("[MafLiteStrategy] search_provider_init: %.2fs (hybrid=%s)", time.time() - t0, bool(self.embedding_deployment))
 
-            # Build context providers
-            context_providers = (
-                [self._user_memory]
-                if self._user_memory is not None
-                else []
-            )
-            if intent == "question" and self._search_provider:
-                context_providers.append(self._search_provider)
-            elif intent == "greeting":
-                logging.info("[MafLiteStrategy] Greeting detected — skipping search")
-            elif intent == "no_retrieval":
-                logging.info("[MafLiteStrategy] No-retrieval follow-up detected — skipping search")
-            else:
-                logging.warning("[MafLiteStrategy] No search provider — agent will answer without grounding")
-            logging.info("[MafLiteStrategy] context_providers: %d", len(context_providers))
+        # Build context providers
+        context_providers = (
+            [self._user_memory]
+            if self._user_memory is not None
+            else []
+        )
+        if intent == "question" and self._search_provider:
+            context_providers.append(self._search_provider)
+        elif intent == "greeting":
+            logging.info("[MafLiteStrategy] Greeting detected — skipping search")
+        elif intent == "no_retrieval":
+            logging.info("[MafLiteStrategy] No-retrieval follow-up detected — skipping search")
+        else:
+            logging.warning("[MafLiteStrategy] No search provider — agent will answer without grounding")
+        logging.info("[MafLiteStrategy] context_providers: %d", len(context_providers))
 
-            # Read base instructions (cached after first read)
-            if self._cached_instructions is None:
-                base_instructions = await self._read_prompt("main")
-                self._cached_instructions = base_instructions if base_instructions else self.AGENT_INSTRUCTIONS
-            instructions = self._cached_instructions
+        # Read base instructions (cached after first read)
+        if self._cached_instructions is None:
+            base_instructions = await self._read_prompt("main")
+            self._cached_instructions = base_instructions if base_instructions else self.AGENT_INSTRUCTIONS
+        instructions = self._cached_instructions
 
-            # Create agent and stream — no server-side thread needed
-            async with ChatAgent(
-                chat_client=chat_client,
-                instructions=instructions,
-                context_provider=(
-                    CompositeContextProvider(context_providers)
-                    if context_providers
-                    else None
-                ),
-            ) as agent:
+        # Create agent and stream — no server-side thread needed
+        async with ChatAgent(
+            chat_client=chat_client,
+            instructions=instructions,
+            context_provider=(
+                CompositeContextProvider(
+                    context_providers,
+                    required_providers=[self._search_provider] if intent == "question" and self._search_provider else [],
+                )
+                if context_providers
+                else None
+            ),
+        ) as agent:
 
-                thread = agent.get_new_thread()
+            thread = agent.get_new_thread()
 
-                # Session welcome with existing profile
-                if (
-                    is_new_session
-                    and self._user_memory is not None
-                    and self._user_memory.has_minimum_context()
-                ):
-                    conv["session_initialized"] = True
-                    session_summary = self._build_session_summary()
-                    yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
-                elif is_new_session:
-                    conv["session_initialized"] = True
+            # Session welcome with existing profile
+            if (
+                is_new_session
+                and self._user_memory is not None
+                and self._user_memory.has_minimum_context()
+            ):
+                conv["session_initialized"] = True
+                session_summary = self._build_session_summary()
+                yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
+            elif is_new_session:
+                conv["session_initialized"] = True
 
-                # Build message list with conversation history
-                input_messages: list[ChatMessage] = []
-                for msg in history[-self.history_max_messages:]:
-                    role = msg.get("role", "user")
-                    text = msg.get("text") or msg.get("content") or ""
-                    if text:
-                        input_messages.append(ChatMessage(role=role, text=text))
-                input_messages.append(ChatMessage(role="user", text=user_message))
-                logging.info("[MafLiteStrategy] history_messages: %d (total input: %d)", len(history), len(input_messages))
+            # Build message list with conversation history
+            input_messages: list[ChatMessage] = []
+            for msg in history[-self.history_max_messages:]:
+                role = msg.get("role", "user")
+                text = msg.get("text") or msg.get("content") or ""
+                if text:
+                    input_messages.append(ChatMessage(role=role, text=text))
+            input_messages.append(ChatMessage(role="user", text=user_message))
+            logging.info("[MafLiteStrategy] history_messages: %d (total input: %d)", len(history), len(input_messages))
 
-                # Stream the agent response
-                stream_start = time.time()
-                full_response = ""
-                event_translator = AgentEventTranslator()
-                async for chunk in agent.run_stream(
-                    input_messages,
-                    thread=thread,
-                    options={"max_completion_tokens": self.max_completion_tokens, "reasoning_effort": self.reasoning_effort},
-                ):
-                    for event in event_translator.translate(chunk):
-                        yield event
-                    if chunk.text:
-                        full_response += chunk.text
-                        yield chunk.text
-                logging.info("[MafLiteStrategy] agent_stream: %.2fs (response_len=%d)", time.time() - stream_start, len(full_response))
+            # Stream the agent response
+            stream_start = time.time()
+            full_response = ""
+            event_translator = AgentEventTranslator()
+            async for chunk in agent.run_stream(
+                input_messages,
+                thread=thread,
+                options={"max_completion_tokens": self.max_completion_tokens, "reasoning_effort": self.reasoning_effort},
+            ):
+                for event in event_translator.translate(chunk):
+                    yield event
+                if chunk.text:
+                    full_response += chunk.text
+                    yield chunk.text
+            logging.info("[MafLiteStrategy] agent_stream: %.2fs (response_len=%d)", time.time() - stream_start, len(full_response))
 
-                # Persist conversation history locally
-                if "messages" not in conv:
-                    conv["messages"] = []
-                conv["messages"].append({"role": "user", "text": user_message})
-                conv["messages"].append({"role": "assistant", "text": full_response})
+            # Persist conversation history locally
+            if "messages" not in conv:
+                conv["messages"] = []
+            conv["messages"].append({"role": "user", "text": user_message})
+            conv["messages"].append({"role": "assistant", "text": full_response})
 
-            logging.info("[MafLiteStrategy] === Flow done === total: %.2fs", time.time() - flow_start)
-
-            # Post-flow: flush + save as background task so SSE stream closes immediately
-            if self.profile_memory_enabled and user_id is not None:
-                asyncio.create_task(self._post_flow_cleanup(user_id))
-
-        except Exception as e:
-            logging.error(f"[MafLiteStrategy] Agent flow failed: {e}", exc_info=True)
-            yield f"I encountered an error processing your request: {str(e)}. Please try again."
+        logging.info("[MafLiteStrategy] === Flow done === total: %.2fs", time.time() - flow_start)
 
     # ------------------------------------------------------------------
     # Post-flow cleanup (runs as background task)
     # ------------------------------------------------------------------
     async def _post_flow_cleanup(self, user_id: str) -> None:
-        """Flush profile extraction and save — runs as fire-and-forget task."""
-        if not self.profile_memory_enabled:
-            return
-        t0 = time.time()
-        try:
-            if self._user_memory is None:
-                return
-            await self._user_memory.flush()
-            await self._save_user_profile(user_id, self._user_memory.user_profile)
-            logging.info("[MafLiteStrategy] post_flow_profile_save: %.2fs", time.time() - t0)
-        except Exception as e:
-            logging.error("[MafLiteStrategy] post_flow_cleanup failed: %s", e, exc_info=True)
+        """Compatibility no-op while automatic profile access is suspended."""
+        self._eligible_profile_user_id()
 
     # ------------------------------------------------------------------
     # Session management

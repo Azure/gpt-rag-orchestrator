@@ -457,8 +457,10 @@ class TestHostedStream:
     async def test_emits_error_event_on_exception(self):
         from api.hosted_entrypoint import _hosted_stream
 
+        failure = RuntimeError("strategy failure")
+
         async def broken_flow(_ask):
-            raise RuntimeError("strategy failure")
+            raise failure
             yield  # pragma: no cover
 
         strategy = MagicMock()
@@ -471,9 +473,10 @@ class TestHostedStream:
         ):
             stream = _hosted_stream(turn, "maf_lite")
             events = []
-            with pytest.raises(RuntimeError, match="strategy failure"):
+            with pytest.raises(RuntimeError, match="strategy failure") as raised:
                 async for e in stream:
                     events.append(e)
+            assert raised.value is failure
 
         assert any(isinstance(e, TurnErrorEvent) for e in events)
 
@@ -809,6 +812,69 @@ class TestSseGeneratorErrorClassification:
     bypassing the ``/invocations`` HTTP handler's precheck entirely, to
     simulate a hypothetical future/internal caller that reaches the
     generator without that HTTP-level 401 guard ever running."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("partial", [False, True])
+    @pytest.mark.parametrize("outcome", ["failure", "initialization", "cancelled", "success"])
+    async def test_real_hosted_stream_keeps_terminal_outcome_and_safe_transport_log(
+        self, partial, outcome, caplog,
+    ):
+        from api.hosted_entrypoint import _sse_generator
+
+        marker = "synthetic-private-hosted-failure"
+        failure = asyncio.CancelledError(marker) if outcome == "cancelled" else RuntimeError(marker)
+        closed = []
+
+        async def flow(_ask):
+            try:
+                if partial:
+                    yield "partial"
+                if outcome != "success":
+                    raise failure
+                yield "answer"
+            finally:
+                closed.append(True)
+
+        strategy = MagicMock()
+        strategy.initiate_agent_flow = flow
+        frames = []
+        with patch(
+            "api.hosted_entrypoint.AgentStrategyFactory.get_strategy",
+            new=AsyncMock(
+                return_value=strategy,
+                side_effect=failure if outcome == "initialization" else None,
+            ),
+        ):
+            stream = _sse_generator(
+                TurnRequest(ask="Hi", conversation_id="conv-1"),
+                "maf_lite", _RESP_ID, _ITEM_ID,
+            )
+            if outcome == "cancelled":
+                with pytest.raises(asyncio.CancelledError) as raised:
+                    async for frame in stream:
+                        frames.append(frame)
+                assert raised.value is failure
+            else:
+                frames = [frame async for frame in stream]
+        parsed = _parse_frames(frames)
+        errors = [frame for frame in parsed if frame["event"] == "error"]
+        completed = [frame for frame in parsed if frame["event"] == "response.completed"]
+        assert len(errors) == (outcome != "success")
+        assert len(completed) == (outcome == "success")
+        if outcome != "success":
+            assert errors[0]["data"]["code"] == (
+                "cancelled" if outcome == "cancelled" else "internal_error"
+            )
+        assert bool(closed) is (outcome != "initialization")
+        assert marker not in "".join(frames)
+        assert marker not in caplog.text
+        text = "".join(
+            frame["data"]["delta"]
+            for frame in parsed
+            if frame["event"] == "response.output_text.delta"
+        )
+        expected = "partial" if partial and outcome != "initialization" else ""
+        assert text == expected + ("answer" if outcome == "success" else "")
 
     @pytest.mark.asyncio
     async def test_missing_call_context_is_not_downgraded_to_internal_error(self):

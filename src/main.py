@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 import logging
 import os
 from pathlib import Path
@@ -84,8 +83,8 @@ def _startup_banner() -> None:
     try:
         if VERSION_FILE.exists():
             version = VERSION_FILE.read_text().strip() or None
-    except Exception:
-        version = None
+    except (OSError, UnicodeError):
+        logging.warning("[Startup] Could not read version file; omitting banner version")
 
     title = f"{name}{(' v' + version) if version else ''}"
     banner_lines = [
@@ -249,8 +248,8 @@ async def lifespan(app: FastAPI):
         try:
             logging.info("[Startup] Pre-fetching Azure Search Entra ID token...")
             await credential.get_token("https://search.azure.com/.default")
-        except Exception as te:
-            logging.warning(f"[Startup] Token pre-fetch failed: {te}")
+        except Exception:
+            logging.warning("[Startup] Token pre-fetch failed; continuing optional warmup")
 
         # 3. Warm up SearchClient singleton (reused across all requests)
         search_client = get_search_client()
@@ -264,12 +263,12 @@ async def lifespan(app: FastAPI):
         try:
             from startup_warmup import prewarm_agents_for_strategy
             await prewarm_agents_for_strategy(cfg)
-        except Exception as ae:
-            logging.warning(f"[Startup] ⚠️ AgentsClient pre-warm failed: {ae}")
+        except Exception:
+            logging.warning("[Startup] AgentsClient pre-warm failed; startup will proceed")
 
         logging.info(f"[Startup] ✅ Application pre-warming completed in {time.time() - warmup_start:.2f}s")
-    except Exception as e:
-        logging.warning(f"[Startup] ⚠️ Pre-warming encountered an issue, but startup will proceed: {e}", exc_info=True)
+    except Exception:
+        logging.warning("[Startup] Pre-warming encountered an issue, but startup will proceed")
 
     yield  # <-- application runs here
     # cleanup logic after shutdown
@@ -316,15 +315,12 @@ async def orchestrator_endpoint(
     # - If ALLOW_ANONYMOUS=true, requests without Authorization can proceed as anonymous.
     # - If ALLOW_ANONYMOUS=false, Authorization is required (401 when missing).
     # - If Entra auth isn't configured (tenant/client id missing), ALLOW_ANONYMOUS controls whether to proceed.
-    try:
-        _tenant_id = (cfg.get("OAUTH_AZURE_AD_TENANT_ID", default="") or "").strip()
-        _client_id = (
-            (cfg.get("OAUTH_AZURE_AD_CLIENT_ID", default="") or "").strip()
-            or (cfg.get("CLIENT_ID", default="") or "").strip()
-        )
-        auth_configured = bool(_tenant_id and _client_id)
-    except Exception:
-        auth_configured = False
+    _tenant_id = (cfg.get("OAUTH_AZURE_AD_TENANT_ID", default="") or "").strip()
+    _client_id = (
+        (cfg.get("OAUTH_AZURE_AD_CLIENT_ID", default="") or "").strip()
+        or (cfg.get("CLIENT_ID", default="") or "").strip()
+    )
+    auth_configured = bool(_tenant_id and _client_id)
 
     # Default to allowing anonymous access unless explicitly disabled.
     allow_anonymous = cfg.get("ALLOW_ANONYMOUS", default=True, type=bool)
@@ -346,7 +342,7 @@ async def orchestrator_endpoint(
             )
         except Exception:
             # Never fail the request due to logging
-            logging.debug("[Orchestrator] Failed to render request debug info", exc_info=True)
+            logging.debug("[Orchestrator] Failed to render request debug info")
 
     # If Authorization header is provided, validate the access token and apply authorization checks.
     # If Authorization header is missing, treat the request as anonymous only when ALLOW_ANONYMOUS=true.
@@ -436,19 +432,13 @@ async def orchestrator_endpoint(
 
                 auth_decision = "authenticated"
             except HTTPException as e:
-                # Always log the rejection reason (safe: no tokens). This makes 401/403 troubleshooting easier.
                 logging.warning(
-                    "[Orchestrator] Request rejected: status=%d detail=%s",
+                    "[Orchestrator] Request rejected: status=%d",
                     e.status_code,
-                    getattr(e, "detail", None),
                 )
                 raise
-            except Exception as e:
-                logging.error(
-                    "[Orchestrator] Error validating user token: %s: %s",
-                    type(e).__name__,
-                    str(e),
-                )
+            except Exception:
+                logging.error("[Orchestrator] Error validating user token")
                 raise HTTPException(status_code=401, detail="Invalid or expired token")
     else:
         # No Authorization header: allow anonymous only when explicitly enabled.
@@ -488,7 +478,7 @@ async def orchestrator_endpoint(
         )
     except Exception:
         # Never fail due to logging
-        pass
+        logging.warning("[Orchestrator] Failed to render request context")
 
     logging.debug(
         "[Orchestrator] Request identity resolved: principal_name=%s principal_id=%s",
@@ -501,7 +491,7 @@ async def orchestrator_endpoint(
         # Handle feedback submission
         conversation_id = body.conversation_id
         if not conversation_id:
-            logging.error(f"No 'conversation_id' provided in feedback body, and payload is {body}")
+            logging.error("No 'conversation_id' provided in feedback body")
             raise HTTPException(status_code=400, detail="No 'conversation_id' field in request body")
 
         # Create orchestrator instance and save feedback
@@ -551,7 +541,7 @@ async def orchestrator_endpoint(
                 if chunk is not None:
                     yield chunk
         except Exception:
-            logging.exception("Error in SSE generator")
+            logging.error("Error in SSE generator (internal_error)")
             if not error_event_emitted:
                 yield "event: error\ndata: An internal server error occurred.\n\n"
 
@@ -577,15 +567,12 @@ async def validate_user_access(authorization: Optional[str], endpoint_name: str)
         HTTPException: If authorization fails or is invalid.
     """
     # Check if auth is configured
-    try:
-        _tenant_id = (cfg.get("OAUTH_AZURE_AD_TENANT_ID", default="") or "").strip()
-        _client_id = (
-            (cfg.get("OAUTH_AZURE_AD_CLIENT_ID", default="") or "").strip()
-            or (cfg.get("CLIENT_ID", default="") or "").strip()
-        )
-        auth_configured = bool(_tenant_id and _client_id)
-    except Exception:
-        auth_configured = False
+    _tenant_id = (cfg.get("OAUTH_AZURE_AD_TENANT_ID", default="") or "").strip()
+    _client_id = (
+        (cfg.get("OAUTH_AZURE_AD_CLIENT_ID", default="") or "").strip()
+        or (cfg.get("CLIENT_ID", default="") or "").strip()
+    )
+    auth_configured = bool(_tenant_id and _client_id)
 
     if not auth_configured:
         logging.warning(f"{endpoint_name} Authentication required but Entra auth is not configured")
@@ -622,8 +609,8 @@ async def validate_user_access(authorization: Optional[str], endpoint_name: str)
 
     except HTTPException:
         raise
-    except Exception as e:
-        logging.error(f"{endpoint_name} Error validating user token: %s", e)
+    except Exception:
+        logging.error("%s Error validating user token", endpoint_name)
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
@@ -671,7 +658,7 @@ async def list_conversations(
             conversations=conversations, has_more=has_more, skip=skip, limit=limit,
         )
     except Exception as e:
-        logging.error("[ListConversations] Error retrieving conversations: %s", e)
+        logging.error("[ListConversations] Error retrieving conversations (%s)", type(e).__name__)
         raise HTTPException(status_code=500, detail="Error retrieving conversations")
 
 
@@ -716,7 +703,7 @@ async def get_conversation(
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("[GetConversation] Error retrieving conversation: %s", e)
+        logging.error("[GetConversation] Error retrieving conversation (%s)", type(e).__name__)
         raise HTTPException(status_code=500, detail="Error retrieving conversation")
 
 
@@ -766,7 +753,7 @@ async def update_conversation(
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("[UpdateConversation] Error updating conversation: %s", e)
+        logging.error("[UpdateConversation] Error updating conversation (%s)", type(e).__name__)
         raise HTTPException(status_code=500, detail="Error updating conversation")
 
 
@@ -808,7 +795,7 @@ async def delete_conversation(
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("[DeleteConversation] Error deleting conversation: %s", e)
+        logging.error("[DeleteConversation] Error deleting conversation (%s)", type(e).__name__)
         raise HTTPException(status_code=500, detail="Error deleting conversation")
 
 

@@ -90,6 +90,25 @@ class BaseAgentStrategy(ABC):
     @classmethod
     async def create(cls):
         return cls()
+
+    def _eligible_profile_user_id(self) -> Optional[str]:
+        """Automatic access is suspended: legacy keys have no trusted binding."""
+        logging.info("profile_access_disabled_unverified_binding")
+        self._user_memory = None
+        return None
+
+    def _get_profile_user_id(self) -> Optional[str]:
+        """Reject absent/synthetic profile keys without selecting another identity.
+
+        This is a negative eligibility guard, not authentication of legacy
+        conversation user_id values. Preserve an existing key verbatim.
+        """
+        if not self.profile_memory_enabled:
+            return None
+        user_id = self.conversation.get("user_id")
+        if not isinstance(user_id, str) or not user_id.strip() or user_id.strip() == "default_user":
+            return None
+        return user_id
     
     @abstractmethod
     async def initiate_agent_flow(self, user_message: str):

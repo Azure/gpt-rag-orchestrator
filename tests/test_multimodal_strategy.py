@@ -2,6 +2,7 @@
 
 import json
 import pytest
+from connectors.obo import RetrievalAuthorizationMode
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from strategies.agent_strategies import AgentStrategies
@@ -438,6 +439,7 @@ class TestMultimodalSearchContextProvider:
             credential=MagicMock(),
             blob_credential=MagicMock(),
             classify_images_fn=classify_images_fn,
+            authorization_mode=RetrievalAuthorizationMode.SERVICE_ONLY,
         )
         provider._download_image_as_base64 = AsyncMock(return_value="abc123")
 
@@ -478,6 +480,7 @@ class TestMultimodalSearchContextProvider:
             credential=MagicMock(),
             blob_credential=MagicMock(),
             classify_images_fn=AsyncMock(return_value=False),
+            authorization_mode=RetrievalAuthorizationMode.SERVICE_ONLY,
         )
         provider._download_image_as_base64 = AsyncMock(return_value="abc123")
 
@@ -504,6 +507,7 @@ class TestMultimodalSearchContextProvider:
             credential=MagicMock(),
             blob_credential=MagicMock(),
             classify_images_fn=classify_images_fn,
+            authorization_mode=RetrievalAuthorizationMode.SERVICE_ONLY,
         )
         provider._download_image_as_base64 = AsyncMock(return_value="abc123")
         doc = {
@@ -537,6 +541,7 @@ class TestMultimodalSearchContextProvider:
             credential=MagicMock(),
             blob_credential=MagicMock(),
             classify_images_fn=classify_images_fn,
+            authorization_mode=RetrievalAuthorizationMode.SERVICE_ONLY,
         )
         provider._download_image_as_base64 = AsyncMock(return_value="abc123")
         doc = {

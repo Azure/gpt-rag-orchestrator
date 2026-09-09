@@ -43,10 +43,7 @@ def _log_app_config_state(cfg: AppConfigClient, keys_to_check: Optional[List[str
 
     endpoint = os.getenv("APP_CONFIG_ENDPOINT")
     endpoint_set = bool(endpoint and str(endpoint).strip())
-    try:
-        endpoint_host = endpoint.replace("https://", "").replace("http://", "").split("/")[0] if endpoint else None
-    except Exception:
-        endpoint_host = None
+    endpoint_host = endpoint.replace("https://", "").replace("http://", "").split("/")[0] if endpoint else None
 
     disabled = bool(getattr(cfg, "disabled", False))
     auth_failed = bool(getattr(cfg, "auth_failed", False))
@@ -226,6 +223,7 @@ async def validate_auth(
     try:
         expected_api_key = get_config().get_value("ORCHESTRATOR_APP_APIKEY", default=os.getenv("ORCHESTRATOR_APP_APIKEY"))
     except Exception:
+        logging.warning("[Auth] API key configuration unavailable; using environment fallback")
         expected_api_key = os.getenv("ORCHESTRATOR_APP_APIKEY")
 
     if logging.getLogger().isEnabledFor(logging.DEBUG):
@@ -314,7 +312,7 @@ def _force_refresh_jwks_cache(tenant_id: str, jwks_url: Optional[str] = None) ->
             logging.debug("[Auth] Forced JWKS cache refresh for tenant")
     except Exception:
         # Never fail auth due to cache cleanup
-        logging.debug("[Auth] Failed to clear JWKS cache", exc_info=True)
+        logging.debug("[Auth] Failed to clear JWKS cache")
 
 async def validate_access_token(token: str) -> Dict:
     """Validate an API access token and return its trusted identity and role claims."""
@@ -338,7 +336,7 @@ async def validate_access_token(token: str) -> Dict:
             seg_lens = [len(p) for p in token_parts]
             logging.debug("[Auth] Token segment lengths: %s", seg_lens)
         except Exception:
-            logging.debug("[Auth] Failed to compute token segment lengths", exc_info=True)
+            logging.debug("[Auth] Failed to compute token segment lengths")
 
     # We expect JWS: header.payload.signature (3 segments).
     # If this is a JWE (5 segments) or malformed, fail with a clearer message.
@@ -383,7 +381,7 @@ async def validate_access_token(token: str) -> Dict:
                     _pl_len,
                     _sig_len,
                 )
-        except Exception:
+        except ValueError:
             # If signature segment isn't decodable, that's a strong indicator the token was mutated.
             logging.warning(
                 "[Auth] Token base64url decode failed for at least one segment (fp=%s). "
@@ -392,23 +390,14 @@ async def validate_access_token(token: str) -> Dict:
             )
     except Exception:
         # Never fail auth due to extra diagnostics.
-        pass
+        logging.debug("[Auth] Failed to collect token diagnostics")
 
     # NOTE:
     # AppConfigClient.get() raises when key is missing. For auth configuration we want:
     # - a deterministic 500 (server misconfiguration) when required settings are absent
     # - a clear log message for troubleshooting
-    tenant_id = None
-    try:
-        tenant_id = cfg.get_value("OAUTH_AZURE_AD_TENANT_ID", default=None, allow_none=True)
-    except Exception:
-        tenant_id = None
-
-    client_id = None
-    try:
-        client_id = cfg.get_value("OAUTH_AZURE_AD_CLIENT_ID", default=None, allow_none=True)
-    except Exception:
-        client_id = None
+    tenant_id = cfg.get_value("OAUTH_AZURE_AD_TENANT_ID", default=None, allow_none=True)
+    client_id = cfg.get_value("OAUTH_AZURE_AD_CLIENT_ID", default=None, allow_none=True)
 
     if not tenant_id:
         _log_app_config_state(cfg, keys_to_check=["OAUTH_AZURE_AD_TENANT_ID"], prefix="[Auth]")
@@ -526,7 +515,7 @@ async def validate_access_token(token: str) -> Dict:
                     _truncate(_aud, 180),
                 )
             except Exception:
-                logging.debug("[Auth] Failed to read unverified token claims for diagnostics", exc_info=True)
+                logging.debug("[Auth] Failed to read unverified token claims for diagnostics")
 
         # High-signal client misconfiguration hint.
         # Even though the claim is unverified, it's consistently useful to explain 401s caused by requesting Graph tokens.
@@ -551,7 +540,7 @@ async def validate_access_token(token: str) -> Dict:
                         token_fp,
                     )
         except Exception:
-            pass
+            logging.debug("[Auth] Failed to emit Graph audience hint")
 
         # Extra guardrail: log tid mismatch clearly (usually indicates wrong tenant config).
         token_tid = unverified.get("tid")
@@ -606,7 +595,7 @@ async def validate_access_token(token: str) -> Dict:
                 except jwt.exceptions.InvalidIssuerError as e:
                     last_error = e
                     continue
-                except Exception as e:
+                except jwt.exceptions.PyJWTError as e:
                     last_error = e
                     break
             return None, last_error
@@ -669,7 +658,7 @@ async def validate_access_token(token: str) -> Dict:
                                 _unverified_aud,
                             )
                 except Exception:
-                    pass
+                    logging.debug("[Auth] Failed to emit Graph audience hint")
             else:
                 logging.warning("[Auth] Token validation error: %s", type(last_err).__name__ if last_err else "Unknown")
             raise HTTPException(status_code=401, detail="Invalid token")
@@ -709,7 +698,7 @@ async def validate_access_token(token: str) -> Dict:
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("[Auth] Token validation failed: %s: %s", type(e).__name__, str(e))
+        logging.error("[Auth] Token validation failed: %s", type(e).__name__)
         raise HTTPException(status_code=401, detail="Invalid token")
 
 async def get_user_groups_from_graph(user_oid: str) -> List[str]:
@@ -718,28 +707,11 @@ async def get_user_groups_from_graph(user_oid: str) -> List[str]:
 
     # These settings are optional: if not configured, we skip group enrichment.
     # Use allow_none to avoid raising when keys are missing from App Configuration.
-    client_id = None
-    client_secret = None
-    tenant_id = None
-    try:
-        client_id = cfg.get_value("OAUTH_AZURE_AD_CLIENT_ID", default=None, allow_none=True)
-    except Exception:
-        client_id = None
+    client_id = cfg.get_value("OAUTH_AZURE_AD_CLIENT_ID", default=None, allow_none=True)
     if not client_id:
-        try:
-            client_id = cfg.get_value("CLIENT_ID", default=None, allow_none=True)
-        except Exception:
-            client_id = None
-
-    try:
-        client_secret = cfg.get_value("OAUTH_AZURE_AD_CLIENT_SECRET", default=None, allow_none=True)
-    except Exception:
-        client_secret = None
-
-    try:
-        tenant_id = cfg.get_value("OAUTH_AZURE_AD_TENANT_ID", default=None, allow_none=True)
-    except Exception:
-        tenant_id = None
+        client_id = cfg.get_value("CLIENT_ID", default=None, allow_none=True)
+    client_secret = cfg.get_value("OAUTH_AZURE_AD_CLIENT_SECRET", default=None, allow_none=True)
+    tenant_id = cfg.get_value("OAUTH_AZURE_AD_TENANT_ID", default=None, allow_none=True)
 
     if not all([client_id, client_secret, tenant_id]):
         logging.warning("Graph API credentials not fully configured; skipping group lookup")
@@ -784,8 +756,8 @@ async def get_user_groups_from_graph(user_oid: str) -> List[str]:
         return []
 
 def handle_exception(exception: Exception, status_code: int = 500):
-    logging.error(exception, stack_info=True, exc_info=True)
+    logging.error("[API] Operation failed (status=%d)", status_code)
     raise HTTPException(
         status_code=status_code,
-        detail=str(exception)
+        detail="An internal server error occurred."
     ) from exception

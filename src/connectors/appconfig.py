@@ -54,10 +54,7 @@ class AppConfigClient:
             return
 
         # Safe endpoint info for troubleshooting
-        try:
-            _endpoint_host = endpoint.replace("https://", "").replace("http://", "").split("/")[0]
-        except Exception:
-            _endpoint_host = "<unknown>"
+        _endpoint_host = endpoint.replace("https://", "").replace("http://", "").split("/")[0]
 
         # Prepare credentials for endpoint-based access
         identity_manager = get_identity_manager()
@@ -104,7 +101,7 @@ class AppConfigClient:
             # Any other error: disable and keep running without remote config.
             logging.warning(
                 "Azure App Configuration unavailable (%s). Skipping remote configuration and not fetching any keys.",
-                str(e)
+                type(e).__name__
             )
             self.disabled = True
             self.client = {}
@@ -130,7 +127,7 @@ class AppConfigClient:
         if value is None and not self.disabled:
             try:
                 value = self.get_config_with_retry(name=key)
-            except Exception:
+            except RetryError:
                 value = None
 
         if value is not None:
@@ -150,7 +147,8 @@ class AppConfigClient:
             
             raise Exception(f'The configuration variable {key} not found.')
         
-    def retry_before_sleep(self, retry_state):
+    @staticmethod
+    def retry_before_sleep(retry_state):
         # Log the outcome of each retry attempt.
         message = f"""Retrying {retry_state.fn}:
                         attempt {retry_state.attempt_number}
@@ -174,8 +172,6 @@ class AppConfigClient:
         try:
             return self.client[name]
         except KeyError:
-            return None
-        except RetryError:
             return None
 
     # Helper functions for reading environment variables

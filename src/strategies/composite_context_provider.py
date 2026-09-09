@@ -18,8 +18,16 @@ logger = logging.getLogger(__name__)
 class CompositeContextProvider(ContextProvider):
     """Delegates to multiple child providers and merges their contexts."""
 
-    def __init__(self, providers: Sequence[ContextProvider]) -> None:
+    def __init__(
+        self,
+        providers: Sequence[ContextProvider],
+        *,
+        required_providers: Sequence[ContextProvider] = (),
+    ) -> None:
         self._providers = list(providers)
+        # Requiredness belongs to the strategy's selected operation, not the
+        # optional memory/enrichment providers that share this container.
+        self._required_providers = tuple(required_providers)
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -48,14 +56,18 @@ class CompositeContextProvider(ContextProvider):
         all_instructions: list[str] = []
 
         # Run all providers in parallel for lower latency
-        contexts = await asyncio.gather(
-            *(p.invoking(messages, **kwargs) for p in self._providers),
-            return_exceptions=True,
-        )
+        tasks = [asyncio.ensure_future(p.invoking(messages, **kwargs)) for p in self._providers]
+        contexts = await asyncio.gather(*tasks, return_exceptions=True)
 
         for i, ctx in enumerate(contexts):
+            if isinstance(ctx, asyncio.CancelledError):
+                # gather manufactures cancellation results; result() preserves
+                # the child's original cancellation rather than translating it.
+                tasks[i].result()
             if isinstance(ctx, Exception):
-                logger.warning("[CompositeContextProvider] Provider %d failed: %s", i, ctx)
+                if any(self._providers[i] is p for p in self._required_providers):
+                    raise ctx
+                logger.warning("[CompositeContextProvider] Optional provider %d failed (%s)", i, type(ctx).__name__)
                 continue
             if ctx:
                 if ctx.messages:

@@ -6,10 +6,12 @@ Covers:
 - orchestration/orchestrator.py: principal_id + partition key logic
 """
 
+import asyncio
 import uuid
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +254,9 @@ class TestCosmosDBStandaloneFunctions:
     async def test_read_user_conversation_not_found(self):
         from connectors.cosmosdb import read_user_conversation
 
-        self.mock_container.read_item = AsyncMock(side_effect=Exception("Not found"))
+        self.mock_container.read_item = AsyncMock(
+            side_effect=CosmosResourceNotFoundError(status_code=404, message="Not found")
+        )
 
         with patch("connectors.cosmosdb.get_cosmosdb_client", return_value=self.mock_client):
             result = await read_user_conversation("conv-1", "user-1")
@@ -298,7 +302,9 @@ class TestCosmosDBStandaloneFunctions:
     async def test_soft_delete_conversation_not_found(self):
         from connectors.cosmosdb import soft_delete_conversation
 
-        self.mock_container.read_item = AsyncMock(side_effect=Exception("Not found"))
+        self.mock_container.read_item = AsyncMock(
+            side_effect=CosmosResourceNotFoundError(status_code=404, message="Not found")
+        )
 
         with patch("connectors.cosmosdb.get_cosmosdb_client", return_value=self.mock_client):
             result = await soft_delete_conversation("conv-1", "user-1")
@@ -311,12 +317,24 @@ class TestCosmosDBStandaloneFunctions:
 
 class TestOrchestratorConversationHistory:
     @pytest.fixture(autouse=True)
-    def _patch(self, patch_dependencies, mock_cosmos, mock_config):
+    async def _patch(self, patch_dependencies, mock_cosmos, mock_config):
+        from orchestration.orchestrator import _persistence_tasks
+
         self.mock_cosmos = mock_cosmos
         self.mock_config = mock_config
+        initial_tasks = set(_persistence_tasks)
+
+        async def observe_persistence():
+            # Observe this test's detached work, not a durable SSE guarantee.
+            await asyncio.gather(*(_persistence_tasks - initial_tasks))
+
+        self.observe_persistence = observe_persistence
         # Also patch get_cosmosdb_client where the orchestrator imports it
         with patch("orchestration.orchestrator.get_cosmosdb_client", return_value=mock_cosmos):
-            yield
+            try:
+                yield
+            finally:
+                await observe_persistence()
 
     async def test_create_with_principal_id(self):
         """Orchestrator.create should set principal_id from user_context."""
@@ -364,8 +382,9 @@ class TestOrchestratorConversationHistory:
             async for chunk in orchestrator.stream_response("Hello"):
                 chunks.append(chunk)
 
+            await self.observe_persistence()
             # Should have called create_document with partition_key=principal_id
-            self.mock_cosmos.create_document.assert_called_once()
+            self.mock_cosmos.create_document.assert_awaited_once()
             call_kwargs = self.mock_cosmos.create_document.call_args.kwargs
             assert call_kwargs.get("partition_key") == "user-xyz"
 
@@ -392,7 +411,9 @@ class TestOrchestratorConversationHistory:
             async for chunk in orchestrator.stream_response("Hello"):
                 chunks.append(chunk)
 
+            await self.observe_persistence()
             # Verify partition_key starts with "anonymous-"
+            self.mock_cosmos.create_document.assert_awaited_once()
             call_kwargs = self.mock_cosmos.create_document.call_args.kwargs
             pk = call_kwargs.get("partition_key", "")
             assert pk.startswith("anonymous-")

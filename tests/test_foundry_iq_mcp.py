@@ -508,7 +508,7 @@ async def test_retrieve_keeps_search_and_mcp_authorization_separate():
 
     with (
         patch(
-            "connectors.search.acquire_obo_token",
+            "connectors.obo.acquire_obo_token",
             new=AsyncMock(return_value="mcp-obo-token"),
         ) as exchange,
         patch(
@@ -1202,8 +1202,9 @@ def test_mcp_reference_normalization_supports_flat_json_text_and_drops_empty():
 @pytest.mark.asyncio
 async def test_scope_aware_obo_cache_does_not_reuse_token_across_scopes():
     from connectors import search
+    from connectors import obo
 
-    search._obo_cache.clear()
+    obo._obo_cache.clear()
     cfg = MagicMock()
     cfg.get_value.side_effect = lambda key, default=None, allow_none=True: {
         "OAUTH_AZURE_AD_TENANT_ID": "tenant",
@@ -1229,8 +1230,8 @@ async def test_scope_aware_obo_cache_does_not_reuse_token_across_scopes():
             )
 
     with (
-        patch("connectors.search.get_config", return_value=cfg),
-        patch("connectors.search.aiohttp.ClientSession", _TokenSession),
+        patch("connectors.obo.get_config", return_value=cfg),
+        patch("connectors.obo.aiohttp.ClientSession", _TokenSession),
     ):
         first = await search.acquire_obo_token("incoming", "api://one/.default")
         cached = await search.acquire_obo_token("incoming", "api://one/.default")
@@ -1246,7 +1247,7 @@ async def test_scope_aware_obo_cache_does_not_reuse_token_across_scopes():
     ]
     expected_fingerprint = hashlib.sha256(b"incoming").hexdigest()
     assert {
-        cache_key.partition(":")[0] for cache_key in search._obo_cache
+        cache_key.partition(":")[0] for cache_key in obo._obo_cache
     } == {expected_fingerprint}
 
 
@@ -1371,18 +1372,11 @@ async def test_context_provider_logs_and_continues_after_disabled_search_obo_fai
         "strategies.foundry_iq_context_provider.get_foundry_iq_client",
         return_value=foundry_client,
     ):
-        context = await provider.invoking(
-            [ChatMessage(role=Role.USER, text="question")]
-        )
+        with pytest.raises(RuntimeError, match="OBO unavailable"):
+            await provider.invoking([ChatMessage(role=Role.USER, text="question")])
 
-    assert not context.messages
-    assert "OBO token acquisition failed" in caplog.text
-    foundry_client.retrieve.assert_awaited_once_with(
-        "question",
-        obo_token=None,
-        conversation_id=None,
-        user_context={},
-    )
+    assert "OBO unavailable" not in caplog.text
+    foundry_client.retrieve.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1401,7 +1395,7 @@ async def test_context_provider_fails_closed_for_enabled_mcp_obo_requirements(
     else:
         get_token.return_value = token_result
     foundry_client = MagicMock()
-    foundry_client.mcp_config = SimpleNamespace(enabled=True)
+    foundry_client.mcp_config = SimpleNamespace(enabled=True, sources=())
     foundry_client.retrieve = AsyncMock()
     provider = FoundryIQContextProvider(
         get_obo_token=get_token,
@@ -1414,7 +1408,7 @@ async def test_context_provider_fails_closed_for_enabled_mcp_obo_requirements(
         "strategies.foundry_iq_context_provider.get_foundry_iq_client",
         return_value=foundry_client,
     ):
-        with pytest.raises(McpCredentialError, match="OBO token"):
+        with pytest.raises(RuntimeError):
             await provider.invoking(
                 [ChatMessage(role=Role.USER, text="question")]
             )
@@ -1428,11 +1422,12 @@ async def test_context_provider_propagates_enabled_mcp_source_failure():
     from strategies.foundry_iq_context_provider import FoundryIQContextProvider
 
     foundry_client = MagicMock()
-    foundry_client.mcp_config = SimpleNamespace(enabled=True)
+    foundry_client.mcp_config = SimpleNamespace(enabled=True, sources=())
     foundry_client.retrieve = AsyncMock(side_effect=McpSourceError("source failed"))
     provider = FoundryIQContextProvider(
         mcp_enabled=True,
         request_access_token="incoming",
+        get_obo_token=AsyncMock(return_value="synthetic-delegated"),
     )
 
     with patch(
@@ -1446,7 +1441,7 @@ async def test_context_provider_propagates_enabled_mcp_source_failure():
 
     foundry_client.retrieve.assert_awaited_once_with(
         "question",
-        obo_token=None,
+        obo_token="synthetic-delegated",
         incoming_token="incoming",
         conversation_id=None,
         user_context={},
@@ -1456,8 +1451,9 @@ async def test_context_provider_propagates_enabled_mcp_source_failure():
 @pytest.mark.asyncio
 async def test_generic_obo_fails_when_token_response_has_no_access_token():
     from connectors import search
+    from connectors import obo
 
-    search._obo_cache.clear()
+    obo._obo_cache.clear()
     cfg = MagicMock()
     cfg.get_value.side_effect = lambda key, default=None, allow_none=True: {
         "OAUTH_AZURE_AD_TENANT_ID": "tenant",
@@ -1476,8 +1472,69 @@ async def test_generic_obo_fails_when_token_response_has_no_access_token():
             return _FakeResponse({"expires_in": 3600})
 
     with (
-        patch("connectors.search.get_config", return_value=cfg),
-        patch("connectors.search.aiohttp.ClientSession", _MissingTokenSession),
+        patch("connectors.obo.get_config", return_value=cfg),
+        patch("connectors.obo.aiohttp.ClientSession", _MissingTokenSession),
     ):
         with pytest.raises(RuntimeError, match="missing access_token"):
             await search.acquire_obo_token("incoming", "api://mcp/.default")
+
+
+@pytest.mark.parametrize(
+    "status,body,error",
+    [
+        (403, "private-upstream-body", "status=403"),
+        (200, "not-json", "invalid response"),
+        (200, '{"expires_in": 3600}', "missing access_token"),
+    ],
+)
+@pytest.mark.parametrize("allow_anonymous", [False, True])
+async def test_obo_failure_contract_and_safe_diagnostics(
+    status, body, error, allow_anonymous, caplog,
+):
+    from connectors import obo, search
+
+    obo._obo_cache.clear()
+    cfg = MagicMock()
+    cfg.get_value.side_effect = lambda key, **kwargs: {
+        "OAUTH_AZURE_AD_TENANT_ID": "tenant",
+        "OAUTH_AZURE_AD_CLIENT_ID": "client",
+        "OAUTH_AZURE_AD_CLIENT_SECRET": "synthetic-client-secret",
+    }[key]
+
+    response = MagicMock(status=status)
+    response.text = AsyncMock(return_value=body)
+    response.__aenter__ = AsyncMock(return_value=response)
+    response.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.post.return_value = response
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("connectors.obo.get_config", return_value=cfg),
+        patch("connectors.obo.aiohttp.ClientSession", return_value=session),
+    ):
+        if allow_anonymous:
+            assert await search.acquire_obo_token(
+                "synthetic-user-assertion", "api://downstream/.default", True,
+            ) is None
+        else:
+            with pytest.raises(RuntimeError, match=error):
+                await search.acquire_obo_token(
+                    "synthetic-user-assertion", "api://downstream/.default", False,
+                )
+    assert not obo._obo_cache
+    assert "synthetic-user-assertion" not in caplog.text
+    assert "synthetic-client-secret" not in caplog.text
+    assert body not in caplog.text
+
+
+async def test_search_compatibility_wrapper_retains_scope_and_anonymous_default():
+    from connectors import search
+
+    exchange = AsyncMock(return_value="delegated")
+    with patch("connectors.search._acquire_obo_token", exchange):
+        assert await search.acquire_obo_search_token("incoming") == "delegated"
+    exchange.assert_awaited_once_with(
+        "incoming", "https://search.azure.com/user_impersonation", True,
+    )

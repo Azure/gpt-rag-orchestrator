@@ -56,6 +56,8 @@ Notice: the image is placed IN THE MIDDLE of the steps, right after the paragrap
 
 8. **Maintain context**: Remember and reference earlier parts of our conversation when relevant.
 
+9. **Profile privacy**: Automatic profile collection and personalization are disabled. Do not claim to learn, save, or recall a persistent user profile.
+
 ## Response Format
 
 - Provide a clear, concise answer based on the retrieved content and images

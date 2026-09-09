@@ -5,7 +5,7 @@ This strategy extends the MAF Lite approach with multimodal capabilities:
 - Retrieves both text documents and related images from Azure AI Search
 - Downloads images from Azure Blob Storage
 - Sends multimodal content (text + images) to a vision-capable model (e.g. GPT-4o)
-- Includes memory persistence for user profile (across sessions)
+- Preserves ordinary history; automatic profile access/extraction is suspended
 - Uses dual vector search (contentVector + captionVector)
 """
 
@@ -44,6 +44,7 @@ from .retrieval_intent import (
 from connectors.foundry_iq_mcp import is_mcp_enabled
 from connectors.multimodal_chat_client import MultimodalChatClient
 from connectors.search import acquire_obo_search_token
+from connectors.obo import resolve_retrieval_authorization
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
 from dependencies import get_config
 from openai import BadRequestError
@@ -209,7 +210,7 @@ class MultimodalStrategy(BaseAgentStrategy):
             if doc and "profile_data" in doc:
                 return UserProfile.model_validate_json(doc["profile_data"])
         except Exception as e:
-            logging.debug(f"[MultimodalStrategy] No existing user profile found: {e}")
+            logging.debug("[MultimodalStrategy] User profile unavailable (%s)", type(e).__name__)
         return UserProfile()
 
     async def _save_user_profile(self, user_id: str, profile: UserProfile):
@@ -222,12 +223,15 @@ class MultimodalStrategy(BaseAgentStrategy):
             }
             existing = await self.cosmos.get_document(self.user_profile_container, profile_key)
             if existing:
-                await self.cosmos.update_document(self.user_profile_container, doc)
+                saved_doc = await self.cosmos.update_document(self.user_profile_container, doc)
             else:
-                await self.cosmos.create_document(self.user_profile_container, profile_key, body=doc)
-            logging.info(f"[MultimodalStrategy] Saved user profile for {user_id}")
+                saved_doc = await self.cosmos.create_document(self.user_profile_container, profile_key, body=doc)
+            if saved_doc is None:
+                logging.warning("[MultimodalStrategy] User profile write not confirmed for %s", user_id)
+            else:
+                logging.info("[MultimodalStrategy] Saved user profile for %s", user_id)
         except Exception as e:
-            logging.error(f"[MultimodalStrategy] Failed to save user profile: {e}")
+            logging.error("[MultimodalStrategy] Failed to save user profile (%s)", type(e).__name__)
 
     # ------------------------------------------------------------------
     # Search provider (multimodal retrieval)
@@ -244,6 +248,8 @@ class MultimodalStrategy(BaseAgentStrategy):
                 "ALLOW_ANONYMOUS", default=True, type=bool
             )
             retrieval_backend = get_retrieval_backend()
+            token = getattr(self, "request_access_token", None)
+            authorization_mode = resolve_retrieval_authorization(token, allow_anonymous)
             mcp_enabled = (
                 retrieval_backend == RETRIEVAL_BACKEND_FOUNDRY_IQ
                 and is_mcp_enabled(
@@ -264,13 +270,10 @@ class MultimodalStrategy(BaseAgentStrategy):
                 embed_fn = _embed
 
             async def _get_obo_token() -> str | None:
-                token = getattr(self, "request_access_token", None)
                 return (
                     await acquire_obo_search_token(
                         token,
-                        allow_anonymous=(
-                            allow_anonymous if mcp_enabled else True
-                        ),
+                        allow_anonymous=False,
                     )
                     if token
                     else None
@@ -287,6 +290,7 @@ class MultimodalStrategy(BaseAgentStrategy):
                     top_k=self.search_top_k,
                     max_content_chars=self.max_content_chars,
                     get_obo_token=_get_obo_token,
+                    authorization_mode=authorization_mode,
                     request_access_token=(
                         getattr(self, "request_access_token", None)
                         if mcp_enabled
@@ -316,6 +320,7 @@ class MultimodalStrategy(BaseAgentStrategy):
                 semantic_configuration_name=self.semantic_search_config,
                 embed_fn=embed_fn,
                 get_obo_token=_get_obo_token,
+                authorization_mode=authorization_mode,
                 classify_images_fn=self._classify_image_relevance if self.classify_images else None,
                 classify_images_concurrency=self.image_classification_concurrency,
             )
@@ -326,8 +331,8 @@ class MultimodalStrategy(BaseAgentStrategy):
             )
             return provider
         except Exception as e:
-            logging.error(f"[MultimodalStrategy] Failed to create search provider: {e}")
-            return None
+            logging.error("[MultimodalStrategy] Failed to create search provider (%s)", type(e).__name__)
+            raise
 
     async def _classify_image_relevance(self, candidate: dict[str, Any]) -> bool:
         client = self._get_or_create_chat_client()
@@ -423,8 +428,7 @@ class MultimodalStrategy(BaseAgentStrategy):
                 # No base64 available — cannot validate, strip to be safe
                 invalid_paths.add(path)
                 logging.warning(
-                    "[MultimodalStrategy] image_validation fig=%s result=NO_DATA (stripping)",
-                    path,
+                    "[MultimodalStrategy] image_validation result=NO_DATA (stripping)",
                 )
                 return
 
@@ -461,19 +465,17 @@ class MultimodalStrategy(BaseAgentStrategy):
                             timeout=self.image_validation_timeout_seconds,
                         )
                     result = (resp.choices[0].message.content or "").strip().upper()
-                    finish = getattr(resp.choices[0], "finish_reason", "?")
-                    tokens = getattr(getattr(resp, "usage", None), "completion_tokens", "?")
                     logging.info(
-                        "[MultimodalStrategy] image_validation fig=%s result=%r finish=%s tokens=%s",
-                        path, result, finish, tokens,
+                        "[MultimodalStrategy] image_validation valid=%s",
+                        bool(result and result.startswith("VALID")),
                     )
                     # Fail-closed: anything other than explicit VALID is stripped
                     if not result or not result.startswith("VALID"):
                         invalid_paths.add(path)
                 except Exception as e:
                     logging.warning(
-                        "[MultimodalStrategy] image_validation fig=%s error=%s (stripping)",
-                        path, e,
+                        "[MultimodalStrategy] image_validation failed (%s); stripping",
+                        type(e).__name__,
                     )
                     invalid_paths.add(path)
 
@@ -495,13 +497,7 @@ class MultimodalStrategy(BaseAgentStrategy):
     # Session summary
     # ------------------------------------------------------------------
     def _build_session_summary(self) -> str:
-        parts = []
-        if self._user_memory and self._user_memory.has_minimum_context():
-            parts.append("**Your Profile:**")
-            parts.append(self._user_memory._build_profile_summary())
-        else:
-            parts.append("**Your Profile:** Not yet configured.")
-        return "\n".join(parts)
+        return "Automatic profile personalization is disabled."
 
     # ------------------------------------------------------------------
     # Intent classification (LLM-based)
@@ -535,7 +531,7 @@ class MultimodalStrategy(BaseAgentStrategy):
             logging.info("[MultimodalStrategy] intent=%s (raw=%r)", intent, result)
             return intent
         except Exception as e:
-            logging.warning("[MultimodalStrategy] Intent classification failed: %s — defaulting to question", e)
+            logging.warning("[MultimodalStrategy] Intent classification failed (%s); defaulting to question", type(e).__name__)
             return "question"
 
     # ------------------------------------------------------------------
@@ -548,153 +544,138 @@ class MultimodalStrategy(BaseAgentStrategy):
 
         conv = self.conversation
         is_new_session = not conv.get("session_initialized", False)
-        user_id = conv.get("user_id", "default_user")
+        self._eligible_profile_user_id()
 
-        try:
-            chat_client = self._get_or_create_chat_client()
+        chat_client = self._get_or_create_chat_client()
 
-            # Load or initialise user-profile memory
-            if self._user_memory is None:
-                t0 = time.time()
-                user_profile = await self._load_user_profile(user_id)
-                self._user_memory = UserProfileMemory(
-                    chat_client=chat_client,
-                    user_profile=user_profile,
-                )
-                logging.info("[MultimodalStrategy] user_profile_load: %.2fs (user=%s)", time.time() - t0, user_id)
+        # No legacy-key binding is trusted for automatic personalization.
+        self._user_memory = None
 
-            # Initialize search provider if not done
-            if self._search_provider is None:
-                t0 = time.time()
-                self._search_provider = await self._create_search_provider()
-                logging.info(
-                    "[MultimodalStrategy] search_provider_init: %.2fs (hybrid=%s)",
-                    time.time() - t0, bool(self.embedding_deployment),
-                )
+        history = conv.get("messages", [])
 
-            history = conv.get("messages", [])
+        # Classify intent — skip search when retrieval is not needed.
+        t0 = time.time()
+        intent = await self._classify_intent(user_message, history=history)
+        logging.info("[MultimodalStrategy] intent_classification: %.2fs", time.time() - t0)
 
-            # Classify intent — skip search when retrieval is not needed.
+        # Only initialize retrieval for turns that need it.
+        if intent == "question" and self._search_provider is None:
             t0 = time.time()
-            intent = await self._classify_intent(user_message, history=history)
-            logging.info("[MultimodalStrategy] intent_classification: %.2fs", time.time() - t0)
+            self._search_provider = await self._create_search_provider()
+            logging.info(
+                "[MultimodalStrategy] search_provider_init: %.2fs (hybrid=%s)",
+                time.time() - t0, bool(self.embedding_deployment),
+            )
 
-            # Build context providers
-            context_providers = [self._user_memory]
-            if intent == "question" and self._search_provider:
-                context_providers.append(self._search_provider)
-            elif intent == "greeting":
-                logging.info("[MultimodalStrategy] Greeting detected — skipping search")
-            elif intent == "no_retrieval":
-                logging.info("[MultimodalStrategy] No-retrieval follow-up detected — skipping search")
-            else:
-                logging.warning("[MultimodalStrategy] No search provider — agent will answer without grounding")
-            logging.info("[MultimodalStrategy] context_providers: %d", len(context_providers))
+        # Build context providers
+        context_providers = [self._user_memory] if self._user_memory is not None else []
+        if intent == "question" and self._search_provider:
+            context_providers.append(self._search_provider)
+        elif intent == "greeting":
+            logging.info("[MultimodalStrategy] Greeting detected — skipping search")
+        elif intent == "no_retrieval":
+            logging.info("[MultimodalStrategy] No-retrieval follow-up detected — skipping search")
+        else:
+            logging.warning("[MultimodalStrategy] No search provider — agent will answer without grounding")
+        logging.info("[MultimodalStrategy] context_providers: %d", len(context_providers))
 
-            # Read base instructions (cached after first read)
-            if self._cached_instructions is None:
-                base_instructions = await self._read_prompt("main")
-                self._cached_instructions = base_instructions if base_instructions else self.AGENT_INSTRUCTIONS
-            instructions = self._cached_instructions
+        # Read base instructions (cached after first read)
+        if self._cached_instructions is None:
+            base_instructions = await self._read_prompt("main")
+            self._cached_instructions = base_instructions if base_instructions else self.AGENT_INSTRUCTIONS
+        instructions = self._cached_instructions
 
-            # Create agent and stream
-            async with ChatAgent(
-                chat_client=chat_client,
-                instructions=instructions,
-                context_provider=CompositeContextProvider(context_providers),
-            ) as agent:
+        # Create agent and stream
+        async with ChatAgent(
+            chat_client=chat_client,
+            instructions=instructions,
+            context_provider=CompositeContextProvider(
+                context_providers,
+                required_providers=[self._search_provider] if intent == "question" and self._search_provider else [],
+            ),
+        ) as agent:
 
-                thread = agent.get_new_thread()
+            thread = agent.get_new_thread()
 
-                # Session welcome with existing profile
-                if is_new_session and self._user_memory.has_minimum_context():
-                    conv["session_initialized"] = True
-                    session_summary = self._build_session_summary()
-                    yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
-                elif is_new_session:
-                    conv["session_initialized"] = True
+            # Session welcome with existing profile
+            if (
+                is_new_session
+                and self._user_memory is not None
+                and self._user_memory.has_minimum_context()
+            ):
+                conv["session_initialized"] = True
+                session_summary = self._build_session_summary()
+                yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
+            elif is_new_session:
+                conv["session_initialized"] = True
 
-                # Build message list with conversation history
-                input_messages: list[ChatMessage] = []
-                for msg in history[-self.history_max_messages:]:
-                    role = msg.get("role", "user")
-                    text = msg.get("text") or msg.get("content") or ""
+            # Build message list with conversation history
+            input_messages: list[ChatMessage] = []
+            for msg in history[-self.history_max_messages:]:
+                role = msg.get("role", "user")
+                text = msg.get("text") or msg.get("content") or ""
+                if text:
+                    # Strip image markdown from assistant history so old
+                    # ![...](path) references don't act as few-shot examples
+                    # that teach the model to mention figures by name only
+                    # (without embedding them), and to prevent stale image
+                    # paths that aren't in the current search context.
+                    if role == "assistant":
+                        text = _IMAGE_RE.sub("", text)
+                        text = re.sub(r'\n{3,}', '\n\n', text).strip()
                     if text:
-                        # Strip image markdown from assistant history so old
-                        # ![...](path) references don't act as few-shot examples
-                        # that teach the model to mention figures by name only
-                        # (without embedding them), and to prevent stale image
-                        # paths that aren't in the current search context.
-                        if role == "assistant":
-                            text = _IMAGE_RE.sub("", text)
-                            text = re.sub(r'\n{3,}', '\n\n', text).strip()
-                        if text:
-                            input_messages.append(ChatMessage(role=role, text=text))
-                input_messages.append(ChatMessage(role="user", text=user_message))
+                        input_messages.append(ChatMessage(role=role, text=text))
+            input_messages.append(ChatMessage(role="user", text=user_message))
+            logging.info(
+                "[MultimodalStrategy] history_messages: %d (total input: %d)",
+                len(history), len(input_messages),
+            )
+
+            # Buffer the full response so we can post-process before yielding.
+            # This ensures duplicate image references are removed regardless
+            # of model instruction-following reliability.
+            stream_start = time.time()
+            full_response = ""
+            async for chunk in agent.run_stream(
+                input_messages,
+                thread=thread,
+                options={"max_completion_tokens": self.max_completion_tokens, "reasoning_effort": self.reasoning_effort},
+            ):
+                if chunk.text:
+                    full_response += chunk.text
+            logging.info(
+                "[MultimodalStrategy] agent_stream: %.2fs (response_len=%d)",
+                time.time() - stream_start, len(full_response),
+            )
+
+            # Post-process: remove duplicate ![...]() image references (keep first)
+            full_response = _dedup_markdown_images(full_response)
+
+            # Post-response guardrail: validate each embedded image
+            if self.validate_response_images and "![" in full_response:
+                t0 = time.time()
+                full_response = await self._validate_response_images(full_response, user_message)
                 logging.info(
-                    "[MultimodalStrategy] history_messages: %d (total input: %d)",
-                    len(history), len(input_messages),
+                    "[MultimodalStrategy] image_validation: %.2fs",
+                    time.time() - t0,
                 )
 
-                # Buffer the full response so we can post-process before yielding.
-                # This ensures duplicate image references are removed regardless
-                # of model instruction-following reliability.
-                stream_start = time.time()
-                full_response = ""
-                async for chunk in agent.run_stream(
-                    input_messages,
-                    thread=thread,
-                    options={"max_completion_tokens": self.max_completion_tokens, "reasoning_effort": self.reasoning_effort},
-                ):
-                    if chunk.text:
-                        full_response += chunk.text
-                logging.info(
-                    "[MultimodalStrategy] agent_stream: %.2fs (response_len=%d)",
-                    time.time() - stream_start, len(full_response),
-                )
+            yield full_response
 
-                # Post-process: remove duplicate ![...]() image references (keep first)
-                full_response = _dedup_markdown_images(full_response)
+            # Persist conversation history locally
+            if "messages" not in conv:
+                conv["messages"] = []
+            conv["messages"].append({"role": "user", "text": user_message})
+            conv["messages"].append({"role": "assistant", "text": full_response})
 
-                # Post-response guardrail: validate each embedded image
-                if self.validate_response_images and "![" in full_response:
-                    t0 = time.time()
-                    full_response = await self._validate_response_images(full_response, user_message)
-                    logging.info(
-                        "[MultimodalStrategy] image_validation: %.2fs",
-                        time.time() - t0,
-                    )
-
-                yield full_response
-
-                # Persist conversation history locally
-                if "messages" not in conv:
-                    conv["messages"] = []
-                conv["messages"].append({"role": "user", "text": user_message})
-                conv["messages"].append({"role": "assistant", "text": full_response})
-
-            logging.info("[MultimodalStrategy] === Flow done === total: %.2fs", time.time() - flow_start)
-
-            # Post-flow: flush + save as background task so SSE stream closes immediately
-            asyncio.create_task(self._post_flow_cleanup(user_id))
-
-        except Exception as e:
-            logging.error(f"[MultimodalStrategy] Agent flow failed: {e}", exc_info=True)
-            yield f"I encountered an error processing your request: {str(e)}. Please try again."
+        logging.info("[MultimodalStrategy] === Flow done === total: %.2fs", time.time() - flow_start)
 
     # ------------------------------------------------------------------
     # Post-flow cleanup (runs as background task)
     # ------------------------------------------------------------------
     async def _post_flow_cleanup(self, user_id: str) -> None:
-        """Flush profile extraction and save — runs as fire-and-forget task."""
-        t0 = time.time()
-        try:
-            if self._user_memory:
-                await self._user_memory.flush()
-            await self._save_user_profile(user_id, self._user_memory.user_profile)
-            logging.info("[MultimodalStrategy] post_flow_profile_save: %.2fs", time.time() - t0)
-        except Exception as e:
-            logging.error("[MultimodalStrategy] post_flow_cleanup failed: %s", e, exc_info=True)
+        """Compatibility no-op while automatic profile access is suspended."""
+        self._eligible_profile_user_id()
 
     # ------------------------------------------------------------------
     # Session management

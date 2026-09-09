@@ -3,6 +3,7 @@ import uuid
 import logging
 import time
 
+from copy import deepcopy
 from datetime import datetime, timezone
 from collections.abc import AsyncIterator, Callable
 from typing import Dict, Optional
@@ -24,7 +25,7 @@ from orchestration.turn import (
 from strategies.agent_strategy_factory import AgentStrategyFactory
 from strategies.base_agent_strategy import BaseAgentStrategy
 from dependencies import get_config
-from opentelemetry.trace import SpanKind
+from opentelemetry.trace import SpanKind, Status, StatusCode
 from telemetry import (
     AuditEmitter,
     AuditStatus,
@@ -36,6 +37,10 @@ from telemetry import (
 )
 
 tracer = Telemetry.get_tracer(__name__)
+
+# Strong ownership only while these best-effort writes are pending. This is not
+# a queue, a shutdown drain, or serialization between requests.
+_persistence_tasks: set[asyncio.Task[bool]] = set()
 
 class Orchestrator:
     agentic_strategy = BaseAgentStrategy
@@ -99,10 +104,7 @@ class Orchestrator:
 
         # Provide the incoming API token to strategies that can use it for OBO.
         # This is intentionally separate from user_context to avoid persisting tokens.
-        try:
-            setattr(instance.agentic_strategy, "request_access_token", request_access_token)
-        except Exception:
-            pass
+        setattr(instance.agentic_strategy, "request_access_token", request_access_token)
 
         return instance
 
@@ -171,7 +173,14 @@ class Orchestrator:
         *,
         _event_sink: Callable[[TurnOutputEvent], None] | None = None,
     ):
-        with tracer.start_as_current_span('stream_response', kind=SpanKind.SERVER) as span:
+        # Exceptions reach the transport, but provider details must not be
+        # exported automatically in exception events or status descriptions.
+        with tracer.start_as_current_span(
+            'stream_response',
+            kind=SpanKind.SERVER,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
             emitter = AuditEmitter.default()
             span_conversation_id = (
                 emitter.pseudonymize("conversation", self.conversation_id)
@@ -183,6 +192,7 @@ class Orchestrator:
             audit_context = None
             audit_token = None
             conversation = None
+            conversation_create = None
             response_capture = ""
             started_monotonic = time.monotonic()
             if emitter.enabled:
@@ -240,9 +250,9 @@ class Orchestrator:
                         "principal_id": partition_key,
                         "lastUpdated": datetime.now(timezone.utc).isoformat(),
                     }
-                    asyncio.create_task(self.database_client.create_document(
-                        self.database_container, self.conversation_id, conversation, partition_key=partition_key
-                    ))
+                    conversation_create = self._start_conversation_persistence(
+                        conversation, create=True
+                    )
                 else:
                     partition_key = f"anonymous-{self.conversation_id}" if self.principal_id == "anonymous" else self.principal_id
                     conversation = await self.database_client.get_document(
@@ -257,9 +267,9 @@ class Orchestrator:
                             "principal_id": partition_key,
                             "lastUpdated": datetime.now(timezone.utc).isoformat(),
                         }
-                        asyncio.create_task(self.database_client.create_document(
-                            self.database_container, self.conversation_id, conversation, partition_key=partition_key
-                        ))
+                        conversation_create = self._start_conversation_persistence(
+                            conversation, create=True
+                        )
 
                 # Search/RAG scoping: conversation_id is finalized here when the client omitted it on create().
                 # Keep strategy in sync so retrieval filters by this id (not None).
@@ -282,8 +292,7 @@ class Orchestrator:
                         principal,
                     )
                 except Exception:
-                    # Never fail due to logging.
-                    pass
+                    logging.warning("[Orchestrator] Failed to render conversation lifecycle diagnostic")
 
                 # Optionally record the incoming question (id + text) for traceability
                 if question_id:
@@ -388,6 +397,7 @@ class Orchestrator:
                     )
                 raise
             except Exception:
+                span.set_status(Status(StatusCode.ERROR, "internal_error"))
                 if audit_context is not None:
                     emitter.emit(
                         EventType.OUTCOME_REJECTED,
@@ -419,23 +429,85 @@ class Orchestrator:
                     )
                 raise
             finally:
-                if isinstance(conversation, dict):
-                    # 4) Persist whatever the strategy has updated (e.g. thread_id)
-                    async def persist_conversation():
-                        start_time = time.time()
+                try:
+                    if isinstance(conversation, dict):
+                        # 4) Persist whatever the strategy has updated (e.g. thread_id)
                         try:
-                            conversation_to_persist = self._prepare_conversation_for_persistence(
-                                self.agentic_strategy.conversation
+                            self._start_conversation_persistence(
+                                self.agentic_strategy.conversation,
+                                after=conversation_create,
                             )
-                            self.agentic_strategy.conversation = conversation_to_persist
-                            await self.database_client.update_document(self.database_container, conversation_to_persist)
-                            logging.info(f"[Orchestrator][Timing] conversation_persist_async_done: {time.time() - start_time:.2f}s")
-                        except Exception as e:
-                            logging.error(f"[Orchestrator] Error asynchronously persisting conversation: {e}")
+                        except Exception:
+                            try:
+                                logging.error("[Orchestrator] Could not schedule conversation persistence")
+                            except Exception:
+                                # A broken diagnostic sink cannot replace the
+                                # primary outcome; do not retry that same sink.
+                                pass
+                finally:
+                    if audit_token is not None:
+                        end_audit_request(audit_token)
 
-                    asyncio.create_task(persist_conversation())
-                if audit_token is not None:
-                    end_audit_request(audit_token)
+    def _start_conversation_persistence(
+        self,
+        conversation: Dict,
+        *,
+        create: bool = False,
+        after: asyncio.Task[bool] | None = None,
+    ) -> asyncio.Task[bool]:
+        # Copy before yielding control; neither Cosmos mutation nor later
+        # strategy mutations may alter another write's input.
+        snapshot = deepcopy(conversation)
+        work = self._persist_conversation(snapshot, create=create, after=after)
+        scheduled = False
+        try:
+            task = asyncio.create_task(work)
+            scheduled = True
+        finally:
+            if not scheduled:
+                work.close()
+        _persistence_tasks.add(task)
+        task.add_done_callback(_persistence_tasks.discard)
+        return task
+
+    async def _persist_conversation(
+        self,
+        snapshot: Dict,
+        *,
+        create: bool,
+        after: asyncio.Task[bool] | None,
+    ) -> bool:
+        start_time = time.time()
+        try:
+            if after is not None and not await after:
+                logging.warning("[Orchestrator] Conversation update skipped: create unconfirmed")
+                return False
+            if create:
+                result = await self.database_client.create_document(
+                    self.database_container,
+                    snapshot["id"],
+                    snapshot,
+                    partition_key=snapshot["principal_id"],
+                )
+            else:
+                snapshot = self._prepare_conversation_for_persistence(snapshot)
+                result = await self.database_client.update_document(
+                    self.database_container, snapshot
+                )
+            if result is None:
+                logging.warning(
+                    "[Orchestrator] Conversation %s unconfirmed",
+                    "create" if create else "update",
+                )
+                return False
+            if not create:
+                logging.info(f"[Orchestrator][Timing] conversation_persist_async_done: {time.time() - start_time:.2f}s")
+            return True
+        except Exception:
+            # Observe ordinary failures here; cancellation remains a cancelled
+            # task. At most a create and dependent update are owned per turn.
+            logging.error("[Orchestrator] Error asynchronously persisting conversation")
+            return False
 
     async def save_feedback(self, feedback: Dict):
         """
@@ -480,9 +552,9 @@ class Orchestrator:
                     logging.warning(
                         f"Could not resolve question_id for feedback in conversation {self.conversation_id}; saving with question_id=null"
                     )
-        except Exception as e:
+        except Exception:
             # Do not fail feedback saving if resolution logic errors; just log
-            logging.exception("Error attempting to resolve question_id from conversation questions: %s", e)
+            logging.warning("Error attempting to resolve question_id from conversation questions")
 
         if "feedback" not in conversation:
             conversation["feedback"] = []
