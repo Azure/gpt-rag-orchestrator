@@ -1,4 +1,4 @@
-from pydantic import BaseModel  # noqa: F821
+from pydantic import BaseModel
 from typing import Optional
 
 class DataSourceConfig(BaseModel):
