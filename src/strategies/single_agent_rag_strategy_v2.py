@@ -227,6 +227,7 @@ class SingleAgentRAGStrategyV2(BaseAgentStrategy):
             )
         except Exception:
             logging.warning("[Agent Flow V2] Failed to apply legacy search request context")
+            raise
 
     def _build_search_tool(self):
         """Build the per-request retrieval tool bound to this request's context.

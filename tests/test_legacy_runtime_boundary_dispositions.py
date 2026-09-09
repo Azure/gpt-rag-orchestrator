@@ -250,21 +250,73 @@ async def test_strategy_uses_bounded_provider_retry(strategy, monkeypatch, hoste
 
 
 @pytest.mark.parametrize("cancelled", [False, True])
-async def test_legacy_search_context_failure_is_explicit_not_new_identity_enforcement(strategy, caplog, cancelled):
+@pytest.mark.parametrize("allow_anonymous", [False, True])
+async def test_legacy_search_context_failure_is_explicit_not_new_identity_enforcement(
+    strategy, caplog, cancelled, allow_anonymous,
+):
     failure = asyncio.CancelledError(MARKER) if cancelled else RuntimeError(MARKER)
+    original_get = strategy.cfg.get
+    strategy.cfg = SimpleNamespace(get=lambda key, *a, **k: (
+        allow_anonymous if key == "ALLOW_ANONYMOUS" else original_get(key, *a, **k)
+    ))
     strategy.search_client.set_request_context.side_effect = failure
     strategy.search_client.search_knowledge_base = AsyncMock(return_value={"documents": []})
     tool = strategy._build_search_tool()
-    if cancelled:
-        with pytest.raises(asyncio.CancelledError) as caught:
-            await tool("question")
-        assert caught.value is failure
-        strategy.search_client.search_knowledge_base.assert_not_awaited()
-    else:
+    with pytest.raises(type(failure)) as caught:
         await tool("question")
-        strategy.search_client.search_knowledge_base.assert_awaited_once()
+    assert caught.value is failure
+    strategy.search_client.search_knowledge_base.assert_not_awaited()
+    kwargs = strategy.search_client.set_request_context.call_args.kwargs
+    assert kwargs["allow_anonymous"] is allow_anonymous
+    assert kwargs["conversation_id"] == "conversation"
+    assert kwargs["user_context"] is strategy.user_context
+    if not cancelled:
         assert "request context" in caplog.text
     assert MARKER not in caplog.text
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+@pytest.mark.parametrize("partial", [False, True])
+async def test_unapplied_search_context_fails_real_agent_turn(
+    strategy, main_module, audit_capture, monkeypatch, caplog, cancelled, partial,
+):
+    failure = asyncio.CancelledError(MARKER) if cancelled else RuntimeError(MARKER)
+    strategy.search_client.is_index_empty = AsyncMock(return_value=False)
+    strategy.search_client.set_request_context.side_effect = failure
+    strategy.search_client.search_knowledge_base = AsyncMock(return_value={"documents": []})
+    strategy.project_endpoint = "https://example.invalid"
+    strategy.credential = MagicMock()
+    strategy.model_name = "chat"
+    agent = MagicMock()
+    agent.__aenter__ = AsyncMock(return_value=agent)
+    agent.__aexit__ = AsyncMock(return_value=False)
+    agent.get_new_thread.return_value = object()
+    shared = SimpleNamespace(as_agent=MagicMock(return_value=agent))
+    monkeypatch.setattr(provider, "get_provider", AsyncMock(return_value=shared))
+    monkeypatch.setattr(provider, "get_or_create_agent_details", AsyncMock(return_value=object()))
+    monkeypatch.setattr(provider, "ensure_conversation_id", AsyncMock(return_value="managed"))
+    persist = AsyncMock()
+    monkeypatch.setattr(strategy, "_persist_managed_turn", persist)
+
+    async def stream(_agent, message, **kwargs):
+        if partial:
+            yield SimpleNamespace(text="partial")
+        tools = shared.as_agent.call_args.kwargs["tools"]
+        assert len(tools) == 1
+        await tools[0]("question")
+        yield SimpleNamespace(text="must not answer with stale context")
+
+    monkeypatch.setattr(provider, "stream_agent_run", stream)
+    output, _, _ = await _run_http_turn(
+        main_module, strategy, failure if cancelled else None,
+    )
+    strategy.search_client.search_knowledge_base.assert_not_awaited()
+    persist.assert_not_awaited()
+    rendered = "".join(output)
+    assert "must not answer with stale context" not in rendered
+    assert MARKER not in rendered + caplog.text
+    if not cancelled:
+        assert "event: error" in rendered
 
 
 @pytest.mark.parametrize("cancelled", [False, True])

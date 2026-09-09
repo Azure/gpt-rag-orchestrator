@@ -548,12 +548,14 @@ class MultimodalStrategy(BaseAgentStrategy):
 
         conv = self.conversation
         is_new_session = not conv.get("session_initialized", False)
-        user_id = conv.get("user_id", "default_user")
+        user_id = self._get_profile_user_id()
 
         chat_client = self._get_or_create_chat_client()
 
         # Load or initialise user-profile memory
-        if self._user_memory is None:
+        if user_id is None:
+            self._user_memory = None
+        elif self._user_memory is None:
             t0 = time.time()
             user_profile = await self._load_user_profile(user_id)
             self._user_memory = UserProfileMemory(
@@ -579,7 +581,7 @@ class MultimodalStrategy(BaseAgentStrategy):
             )
 
         # Build context providers
-        context_providers = [self._user_memory]
+        context_providers = [self._user_memory] if self._user_memory is not None else []
         if intent == "question" and self._search_provider:
             context_providers.append(self._search_provider)
         elif intent == "greeting":
@@ -609,7 +611,11 @@ class MultimodalStrategy(BaseAgentStrategy):
             thread = agent.get_new_thread()
 
             # Session welcome with existing profile
-            if is_new_session and self._user_memory.has_minimum_context():
+            if (
+                is_new_session
+                and self._user_memory is not None
+                and self._user_memory.has_minimum_context()
+            ):
                 conv["session_initialized"] = True
                 session_summary = self._build_session_summary()
                 yield f"Welcome back! Here's what I remember:\n\n{session_summary}\n\n---\n\n"
@@ -678,20 +684,19 @@ class MultimodalStrategy(BaseAgentStrategy):
         logging.info("[MultimodalStrategy] === Flow done === total: %.2fs", time.time() - flow_start)
 
         # Post-flow: flush + save as background task so SSE stream closes immediately
-        asyncio.create_task(self._post_flow_cleanup(user_id))
+        if user_id is not None:
+            asyncio.create_task(self._post_flow_cleanup(user_id))
 
     # ------------------------------------------------------------------
     # Post-flow cleanup (runs as background task)
     # ------------------------------------------------------------------
     async def _post_flow_cleanup(self, user_id: str) -> None:
         """Flush profile extraction and save — runs as fire-and-forget task."""
-        if self._user_memory is None:
+        if not self.profile_memory_enabled or self._user_memory is None:
             return
-        t0 = time.time()
         try:
             await self._user_memory.flush()
             await self._save_user_profile(user_id, self._user_memory.user_profile)
-            logging.info("[MultimodalStrategy] post_flow_profile_save: %.2fs", time.time() - t0)
         except Exception as e:
             logging.error("[MultimodalStrategy] post_flow_cleanup failed (%s)", type(e).__name__)
 

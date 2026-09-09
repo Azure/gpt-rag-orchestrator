@@ -201,11 +201,10 @@ class MafLiteStrategy(BaseAgentStrategy):
         user_id: Optional[str],
         chat_client: OpenAIChatClient,
     ) -> None:
-        """Initialize classic profile memory when authenticated storage is enabled."""
-        if not self.profile_memory_enabled:
+        """Initialize optional classic memory only with an existing profile key."""
+        if not self.profile_memory_enabled or user_id is None:
+            self._user_memory = None
             return
-        if user_id is None:
-            raise RuntimeError("Profile memory requires a trusted user identity.")
         if self._user_memory is None:
             t0 = time.time()
             user_profile = await self._load_user_profile(user_id)
@@ -364,11 +363,7 @@ class MafLiteStrategy(BaseAgentStrategy):
 
         conv = self.conversation
         is_new_session = not conv.get("session_initialized", False)
-        user_id = (
-            conv.get("user_id", "default_user")
-            if self.profile_memory_enabled
-            else None
-        )
+        user_id = self._get_profile_user_id()
 
         chat_client = self._get_or_create_chat_client()
 
@@ -483,13 +478,11 @@ class MafLiteStrategy(BaseAgentStrategy):
         """Flush profile extraction and save — runs as fire-and-forget task."""
         if not self.profile_memory_enabled:
             return
-        t0 = time.time()
         try:
             if self._user_memory is None:
                 return
             await self._user_memory.flush()
             await self._save_user_profile(user_id, self._user_memory.user_profile)
-            logging.info("[MafLiteStrategy] post_flow_profile_save: %.2fs", time.time() - t0)
         except Exception as e:
             logging.error("[MafLiteStrategy] post_flow_cleanup failed (%s)", type(e).__name__)
 

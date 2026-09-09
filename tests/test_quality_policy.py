@@ -835,7 +835,7 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("managed-turn-ambiguous-write-reconciliation", "failure-translation"),
     ("managed-tail-lookup-unconfirmed", "failure-translation"),
     ("optional-reusable-agent-prewarm", "contractual-best-effort-side-effect"),
-    ("legacy-single-search-context-continuation", "failure-translation"),
+    ("legacy-single-search-context-continuation", "propagation"),
     ("single-direct-stream-contextual-propagation", "propagation"),
     ("single-agent-stream-contextual-propagation", "propagation"),
 ])

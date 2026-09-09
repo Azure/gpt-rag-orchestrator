@@ -90,6 +90,19 @@ class BaseAgentStrategy(ABC):
     @classmethod
     async def create(cls):
         return cls()
+
+    def _get_profile_user_id(self) -> Optional[str]:
+        """Reject absent/synthetic profile keys without selecting another identity.
+
+        This is a negative eligibility guard, not authentication of legacy
+        conversation user_id values. Preserve an existing key verbatim.
+        """
+        if not self.profile_memory_enabled:
+            return None
+        user_id = self.conversation.get("user_id")
+        if not isinstance(user_id, str) or not user_id.strip() or user_id.strip() == "default_user":
+            return None
+        return user_id
     
     @abstractmethod
     async def initiate_agent_flow(self, user_message: str):

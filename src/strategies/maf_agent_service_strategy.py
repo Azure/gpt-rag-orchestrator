@@ -184,11 +184,9 @@ Guidelines:
         self,
         user_id: Optional[str],
     ) -> Optional[UserProfileMemory]:
-        """Create classic profile memory only when trusted identity is available."""
-        if not self.profile_memory_enabled:
+        """Create optional classic memory only with an existing profile key."""
+        if not self.profile_memory_enabled or user_id is None:
             return None
-        if user_id is None:
-            raise RuntimeError("Profile memory requires a trusted user identity.")
         t0 = time.time()
         user_profile = await self._load_user_profile(user_id)
         logging.info(
@@ -322,11 +320,7 @@ Guidelines:
         is_new_session = not conv.get("session_initialized", False)
 
         # Get user ID from conversation context
-        user_id = (
-            conv.get("user_id", "default_user")
-            if self.profile_memory_enabled
-            else None
-        )
+        user_id = self._get_profile_user_id()
 
         user_memory = await self._create_user_memory(user_id)
 
