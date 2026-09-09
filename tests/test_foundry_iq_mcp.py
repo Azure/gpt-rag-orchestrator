@@ -1372,18 +1372,11 @@ async def test_context_provider_logs_and_continues_after_disabled_search_obo_fai
         "strategies.foundry_iq_context_provider.get_foundry_iq_client",
         return_value=foundry_client,
     ):
-        context = await provider.invoking(
-            [ChatMessage(role=Role.USER, text="question")]
-        )
+        with pytest.raises(RuntimeError, match="OBO unavailable"):
+            await provider.invoking([ChatMessage(role=Role.USER, text="question")])
 
-    assert not context.messages
-    assert "OBO token acquisition failed" in caplog.text
-    foundry_client.retrieve.assert_awaited_once_with(
-        "question",
-        obo_token=None,
-        conversation_id=None,
-        user_context={},
-    )
+    assert "OBO unavailable" not in caplog.text
+    foundry_client.retrieve.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1402,7 +1395,7 @@ async def test_context_provider_fails_closed_for_enabled_mcp_obo_requirements(
     else:
         get_token.return_value = token_result
     foundry_client = MagicMock()
-    foundry_client.mcp_config = SimpleNamespace(enabled=True)
+    foundry_client.mcp_config = SimpleNamespace(enabled=True, sources=())
     foundry_client.retrieve = AsyncMock()
     provider = FoundryIQContextProvider(
         get_obo_token=get_token,
@@ -1415,7 +1408,7 @@ async def test_context_provider_fails_closed_for_enabled_mcp_obo_requirements(
         "strategies.foundry_iq_context_provider.get_foundry_iq_client",
         return_value=foundry_client,
     ):
-        with pytest.raises(McpCredentialError, match="OBO token"):
+        with pytest.raises(RuntimeError):
             await provider.invoking(
                 [ChatMessage(role=Role.USER, text="question")]
             )
@@ -1429,11 +1422,12 @@ async def test_context_provider_propagates_enabled_mcp_source_failure():
     from strategies.foundry_iq_context_provider import FoundryIQContextProvider
 
     foundry_client = MagicMock()
-    foundry_client.mcp_config = SimpleNamespace(enabled=True)
+    foundry_client.mcp_config = SimpleNamespace(enabled=True, sources=())
     foundry_client.retrieve = AsyncMock(side_effect=McpSourceError("source failed"))
     provider = FoundryIQContextProvider(
         mcp_enabled=True,
         request_access_token="incoming",
+        get_obo_token=AsyncMock(return_value="synthetic-delegated"),
     )
 
     with patch(
@@ -1447,7 +1441,7 @@ async def test_context_provider_propagates_enabled_mcp_source_failure():
 
     foundry_client.retrieve.assert_awaited_once_with(
         "question",
-        obo_token=None,
+        obo_token="synthetic-delegated",
         incoming_token="incoming",
         conversation_id=None,
         user_context={},

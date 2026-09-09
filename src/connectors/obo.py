@@ -4,6 +4,8 @@ import hashlib
 import json
 import logging
 import time
+from enum import Enum
+from collections.abc import Awaitable, Callable
 from typing import Any, Optional
 
 import aiohttp
@@ -13,6 +15,41 @@ from dependencies import get_config
 
 _obo_cache: dict[str, Any] = {}
 _MAX_OBO_CACHE_ENTRIES = 256
+
+
+class RetrievalAuthorizationMode(str, Enum):
+    """Internal request policy; service identity never substitutes for a user."""
+
+    USER_REQUIRED = "user_required"
+    SERVICE_ONLY = "service_only"
+
+
+def resolve_retrieval_authorization(
+    assertion: Optional[str], allow_anonymous: bool, source_requires_user: bool = False,
+) -> RetrievalAuthorizationMode:
+    if not isinstance(allow_anonymous, bool) or not isinstance(source_requires_user, bool):
+        raise ValueError("Invalid retrieval authorization policy")
+    if assertion is not None and not isinstance(assertion, str):
+        raise ValueError("Invalid retrieval assertion")
+    if (assertion and assertion.strip()) or not allow_anonymous or source_requires_user:
+        return RetrievalAuthorizationMode.USER_REQUIRED
+    return RetrievalAuthorizationMode.SERVICE_ONLY
+
+
+async def require_retrieval_token(
+    mode: RetrievalAuthorizationMode,
+    callback: Optional[Callable[[], Awaitable[Optional[str]]]],
+) -> Optional[str]:
+    """Preflight before document access; errors and cancellation propagate."""
+    if not isinstance(mode, RetrievalAuthorizationMode):
+        raise ValueError("Invalid retrieval authorization mode")
+    logging.info("retrieval_authorization_mode=%s", mode.value)
+    if mode is RetrievalAuthorizationMode.SERVICE_ONLY:
+        return None
+    token = await callback() if callback is not None else None
+    if not isinstance(token, str) or not token.strip():
+        raise RuntimeError("Required retrieval authorization unavailable")
+    return token
 
 
 def classify_retrieval_error(error: Any) -> tuple[int, str]:

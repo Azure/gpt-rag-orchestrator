@@ -104,10 +104,7 @@ class Orchestrator:
 
         # Provide the incoming API token to strategies that can use it for OBO.
         # This is intentionally separate from user_context to avoid persisting tokens.
-        try:
-            setattr(instance.agentic_strategy, "request_access_token", request_access_token)
-        except Exception:
-            logging.warning("[Orchestrator] Failed to apply legacy strategy token context")
+        setattr(instance.agentic_strategy, "request_access_token", request_access_token)
 
         return instance
 

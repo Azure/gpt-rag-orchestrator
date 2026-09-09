@@ -410,13 +410,9 @@ async def test_legacy_strategy_token_setter_failure_has_bounded_diagnostic(
         patch("orchestration.orchestrator.get_config", return_value=mock_config),
         patch("orchestration.orchestrator.get_cosmosdb_client", return_value=mock_cosmos),
     ):
-        if cancelled:
-            with pytest.raises(asyncio.CancelledError):
-                await Orchestrator.create(user_context={"principal_id": "principal"}, request_access_token="token")
-        else:
-            value = await Orchestrator.create(user_context={"principal_id": "principal"}, request_access_token="token")
-            assert value.request_access_token == "token"
-            assert "strategy token context" in caplog.text
+        with pytest.raises(type(failure)) as caught:
+            await Orchestrator.create(user_context={"principal_id": "principal"}, request_access_token="token")
+        assert caught.value is failure
     assert MARKER not in caplog.text
 
 

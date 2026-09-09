@@ -534,7 +534,7 @@ async def test_provider_retrieval_failure_propagates():
 
     fake_client = MagicMock()
     fake_client.retrieve = AsyncMock(side_effect=RuntimeError("boom"))
-    provider = FoundryIQContextProvider()
+    provider = FoundryIQContextProvider(get_obo_token=AsyncMock(return_value="synthetic-delegated"))
     with patch(
         "strategies.foundry_iq_context_provider.get_foundry_iq_client",
         return_value=fake_client,

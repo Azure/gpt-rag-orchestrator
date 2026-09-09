@@ -227,6 +227,7 @@ async def test_search_provider_cancellation_is_not_empty_context(
     provider = SearchContextProvider(
         endpoint="https://search.example.invalid", index_name="test-index",
         credential=MagicMock(), conversation_id="conversation",
+        get_obo_token=AsyncMock(return_value="synthetic-delegated"),
         embed_fn=embed)
     sdk = MagicMock()
     sdk.__aenter__ = AsyncMock(return_value=sdk)

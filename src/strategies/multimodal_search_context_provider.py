@@ -32,6 +32,7 @@ from azure.storage.blob.aio import BlobClient as AzureBlobClient
 
 from connectors.multimodal_chat_client import MULTIMODAL_PREFIX
 from connectors.search import _classify_retrieval_error, build_conversation_filter
+from connectors.obo import RetrievalAuthorizationMode, require_retrieval_token
 from dependencies import get_config
 from telemetry import AuditEmitter, ReasonCode
 from util.metadata import format_custom_metadata, parse_allowed_keys
@@ -216,6 +217,7 @@ class MultimodalSearchContextProvider(ContextProvider):
         embed_fn: Callable[[str], Awaitable[list[float]]] | None = None,
         max_content_chars: int = 1500,
         get_obo_token: Callable[[], Awaitable[Optional[str]]] | None = None,
+        authorization_mode: RetrievalAuthorizationMode = RetrievalAuthorizationMode.USER_REQUIRED,
         classify_images_fn: Callable[[dict[str, Any]], Awaitable[bool]] | None = None,
         classify_images_concurrency: int = 2,
     ) -> None:
@@ -231,6 +233,7 @@ class MultimodalSearchContextProvider(ContextProvider):
         self._embed_fn = embed_fn
         self._max_content_chars = max_content_chars
         self._get_obo_token = get_obo_token
+        self._authorization_mode = authorization_mode
         self._classify_images_fn = classify_images_fn
         self._classify_images_concurrency = max(1, classify_images_concurrency)
         # Populated during get_context — maps fig_path → base64 for post-response validation
@@ -247,6 +250,7 @@ class MultimodalSearchContextProvider(ContextProvider):
         messages: ChatMessage | MutableSequence[ChatMessage],
         **kwargs: Any,
     ) -> Context:
+        self.image_data.clear()
         msgs = [messages] if isinstance(messages, ChatMessage) else list(messages)
         user_texts = [
             m.text for m in msgs
@@ -320,11 +324,7 @@ class MultimodalSearchContextProvider(ContextProvider):
         # ---- Execute search ----
         try:
             obo_token: Optional[str] = None
-            if self._get_obo_token:
-                try:
-                    obo_token = await self._get_obo_token()
-                except Exception as e:
-                    logger.warning("[MultimodalSearchContextProvider] OBO token failed (%s)", type(e).__name__)
+            obo_token = await require_retrieval_token(self._authorization_mode, self._get_obo_token)
 
             if obo_token:
                 search_params["x_ms_query_source_authorization"] = f"Bearer {obo_token}"
@@ -340,72 +340,17 @@ class MultimodalSearchContextProvider(ContextProvider):
                     docs.append(doc)
 
         except Exception as e:
-            # If the search failed and we had an OBO header, retry without it.
-            # This handles "permissionFilterOption: enabled" indexes where the
-            # OBO token exchange succeeded but the resulting token is invalid
-            # or lacks the required consent, causing the search to be rejected.
-            if "x_ms_query_source_authorization" in search_params:
-                level, marker = _classify_retrieval_error(e)
-                logger.log(
-                    level,
-                    "%s Search failed with OBO header in %.2fs: %s — retrying without permission filter",
-                    marker,
-                    time.time() - search_start,
-                    type(e).__name__,
-                    extra={
-                        "retrieval_index": self._index_name,
-                        "retrieval_credential_type": "obo",
-                    },
-                )
-                search_params.pop("x_ms_query_source_authorization")
-                try:
-                    async with SearchClient(
-                        endpoint=self._endpoint,
-                        index_name=self._index_name,
-                        credential=self._credential,
-                    ) as client:
-                        results = await client.search(**search_params)
-                        docs = []
-                        async for doc in results:
-                            docs.append(doc)
-                except Exception as retry_e:
-                    AuditEmitter.default().emit_source(
-                        selected=False,
-                        source_type="azure_ai_search_multimodal",
-                        reason_code=ReasonCode.SOURCE_REJECTED,
-                    )
-                    level, marker = _classify_retrieval_error(retry_e)
-                    logger.log(
-                        level,
-                        "%s Search retry without OBO also failed in %.2fs: %s",
-                        marker,
-                        time.time() - search_start,
-                        type(retry_e).__name__,
-                        extra={
-                            "retrieval_index": self._index_name,
-                            "retrieval_credential_type": "managed_identity",
-                        },
-                    )
-                    raise
-            else:
-                AuditEmitter.default().emit_source(
-                    selected=False,
-                    source_type="azure_ai_search_multimodal",
-                    reason_code=ReasonCode.SOURCE_REJECTED,
-                )
-                level, marker = _classify_retrieval_error(e)
-                logger.log(
-                    level,
-                    "%s Search failed in %.2fs: %s",
-                    marker,
-                    time.time() - search_start,
-                    type(e).__name__,
-                    extra={
-                        "retrieval_index": self._index_name,
-                        "retrieval_credential_type": "managed_identity",
-                    },
-                )
-                raise
+            AuditEmitter.default().emit_source(
+                selected=False,
+                source_type="azure_ai_search_multimodal",
+                reason_code=ReasonCode.SOURCE_REJECTED,
+            )
+            level, marker = _classify_retrieval_error(e)
+            logger.log(
+                level, "%s Search failed: %s", marker, type(e).__name__,
+                extra={"retrieval_credential_type": "obo" if obo_token else "managed_identity"},
+            )
+            raise
 
         logger.info(
             "[MultimodalSearchContextProvider] Search returned %d documents in %.2fs",

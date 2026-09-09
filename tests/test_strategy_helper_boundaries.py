@@ -154,19 +154,10 @@ async def test_optional_post_flow_cleanup_preserves_order_and_cancellation(
     flush = AsyncMock(side_effect=failure if mode in {"flush-failure", "cancelled"} else None)
     instance._user_memory = None if mode == "absent" else SimpleNamespace(flush=flush, user_profile=profile)
     instance._save_user_profile = AsyncMock(side_effect=failure if mode == "save-failure" else None)
-    if mode == "cancelled":
-        with pytest.raises(asyncio.CancelledError) as raised:
-            await instance._post_flow_cleanup("test-user")
-        assert raised.value is failure
-    else:
-        await instance._post_flow_cleanup("test-user")
-    if mode in {"success", "save-failure"}:
-        instance._save_user_profile.assert_awaited_once_with("test-user", profile)
-        flush.assert_awaited_once()
-    else:
-        instance._save_user_profile.assert_not_awaited()
-    if mode == "absent":
-        assert not caplog.records
+    await instance._post_flow_cleanup("test-user")
+    instance._save_user_profile.assert_not_awaited()
+    flush.assert_not_awaited()
+    assert instance._user_memory is None
     assert marker not in caplog.text
     assert not any(record.exc_info for record in caplog.records)
 
@@ -210,8 +201,7 @@ async def test_multimodal_flow_owns_optional_cleanup(
             raise primary
         await memory.invoked(messages)
         extraction = memory._pending_task
-        # Wait for completion without retrieving its result/exception.
-        await asyncio.wait({extraction})
+        assert extraction is None
         yield SimpleNamespace(text="answer")
 
     agent.run_stream = chunks
@@ -238,24 +228,17 @@ async def test_multimodal_flow_owns_optional_cleanup(
                 await instance.clear_session()
             with pytest.raises(StopAsyncIteration):
                 await anext(flow)
-            assert len(tasks) == 2
-            await tasks[-1]
-            assert extraction.done()
-            if mode == "absent":
-                instance._save_user_profile.assert_not_awaited()
-            else:
-                instance._save_user_profile.assert_awaited_once_with("test-user", memory.user_profile)
-                assert memory._pending_task is None
+            assert tasks == []
+            instance._save_user_profile.assert_not_awaited()
+            assert memory._pending_task is None
     agent.__aexit__.assert_awaited_once()
-    if mode == "completed-failure":
-        assert "Failed to finish extraction (RuntimeError)" in caplog.text
-    else:
-        assert not any(
+    chat.get_response.assert_not_awaited()
+    assert not any(
             record.levelno >= vision.logging.WARNING
             and (
                 "post_flow_cleanup failed" in record.getMessage()
                 or "Failed to finish extraction" in record.getMessage()
-            )
+    )
             for record in caplog.records
         )
     assert marker not in caplog.text
@@ -275,14 +258,9 @@ async def test_real_profile_flush_cancellation_prevents_cleanup_save(patch_depen
     instance._user_memory = memory
     instance._save_user_profile = AsyncMock()
     await memory.invoked(vision.ChatMessage(role="user", text="hello"))
-    extraction = memory._pending_task
-    await started.wait()
-    cleanup = asyncio.create_task(instance._post_flow_cleanup("test-user"))
-    await asyncio.sleep(0)
-    cleanup.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await cleanup
-    assert extraction.done()
+    await instance._post_flow_cleanup("test-user")
+    assert not started.is_set()
+    memory._chat_client.get_response.assert_not_awaited()
     assert memory._pending_task is None
     instance._save_user_profile.assert_not_awaited()
 

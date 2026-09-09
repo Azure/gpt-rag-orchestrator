@@ -137,7 +137,8 @@ async def test_primary_failure_chain_preserves_buffering_prefix_history_and_audi
     welcome = ""
     if variant == "vision-welcome":
         strategy._user_memory.user_profile = UserProfile(name="Test User")
-        welcome = f"Welcome back! Here's what I remember:\n\n{strategy._build_session_summary()}\n\n---\n\n"
+        # Cached legacy profile must not produce a welcome without owner binding.
+        welcome = ""
     if outcome == "initialization":
         if variant == "sql":
             strategy._load_prompts = AsyncMock(side_effect=failure)
@@ -201,7 +202,7 @@ async def test_primary_failure_chain_preserves_buffering_prefix_history_and_audi
         if outcome != "success":
             assert agent.__aexit__.await_args.args[1] is failure
     if variant != "sql":
-        assert strategy._post_flow_cleanup.await_count == (outcome == "success")
+        strategy._post_flow_cleanup.assert_not_awaited()
 
 
 @pytest.mark.parametrize("branch,answer", [

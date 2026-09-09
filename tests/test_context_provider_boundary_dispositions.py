@@ -9,6 +9,7 @@ from agent_framework import ChatMessage, Role
 
 from connectors.foundry_iq_mcp import McpConfigurationError, McpCredentialError
 from connectors.search import build_conversation_filter
+from connectors.obo import RetrievalAuthorizationMode
 from strategies import foundry_iq_context_provider as foundry
 from strategies import maf_agent_service_strategy as service
 from strategies import maf_lite_strategy as lite
@@ -74,16 +75,16 @@ async def test_search_provider_keeps_legacy_service_identity_recovery(
         patch.object(module, "get_config", return_value=mock_config),
         patch.object(module, "SearchClient", return_value=sdk),
     ):
-        failed = mode in {"search-no-obo", "retry-error"} or (
-            mode == "search-with-obo" and provider_kind == "text")
+        failed = mode in {"obo-error", "obo-none", "search-no-obo", "retry-error", "search-with-obo"}
         if mode.startswith("cancelled-") or failed:
             with pytest.raises(type(failure)) as raised:
                 await provider.invoking(ChatMessage(role=Role.USER, text="question"))
-            assert raised.value is failure
+            if mode not in {"obo-none", "search-no-obo"}:
+                assert raised.value is failure
         else:
             context = await provider.invoking(ChatMessage(role=Role.USER, text="question"))
             assert "service identity context" in context.messages[0].text
-    if mode in {"cancelled-obo", "cancelled-embedding"}:
+    if mode in {"obo-error", "obo-none", "search-no-obo", "cancelled-obo", "cancelled-embedding"}:
         sdk.search.assert_not_awaited()
     else:
         first = sdk.search.await_args_list[0].kwargs
@@ -95,7 +96,7 @@ async def test_search_provider_keeps_legacy_service_identity_recovery(
             assert first["x_ms_query_source_authorization"] == (
                 "synthetic-delegated" if provider_kind == "text" else "Bearer synthetic-delegated"
             )
-        retries = provider_kind == "vision" and mode in {"search-with-obo", "retry-error"}
+        retries = False
         assert sdk.search.await_count == (2 if retries else 1)
         if retries:
             assert "x_ms_query_source_authorization" not in sdk.search.await_args_list[1].kwargs
@@ -133,10 +134,10 @@ async def test_actual_non_mcp_strategy_callback_does_not_enforce_strict_obo(
         strategy.request_access_token = "synthetic-incoming"
         provider = await strategy._create_search_provider()
         assert provider is not None
-        context = await provider.invoking(ChatMessage(role=Role.USER, text="question"))
-    obo.assert_awaited_once_with("synthetic-incoming", allow_anonymous=True)
-    assert "x_ms_query_source_authorization" not in sdk.search.await_args.kwargs
-    assert "service identity context" in context.messages[0].text
+        with pytest.raises(RuntimeError):
+            await provider.invoking(ChatMessage(role=Role.USER, text="question"))
+    obo.assert_awaited_once_with("synthetic-incoming", allow_anonymous=False)
+    sdk.search.assert_not_awaited()
     assert marker not in caplog.text
     assert not any(record.exc_info for record in caplog.records)
 
@@ -156,7 +157,7 @@ async def test_foundry_context_retains_mcp_specific_failure_rules(mcp, anonymous
         side_effect=failure if mode in {"obo-error", "cancelled"} else None,
     )
     client = SimpleNamespace(
-        mcp_config=SimpleNamespace(enabled=mcp),
+        mcp_config=SimpleNamespace(enabled=mcp, sources=()),
         retrieve=AsyncMock(
             return_value=[None] if mode == "malformed" else [{"title": "Document", "link": "file.pdf", "content": "grounding"}],
             side_effect=failure if mode in {"provider-error", "configuration"} else None,
@@ -166,14 +167,14 @@ async def test_foundry_context_retains_mcp_specific_failure_rules(mcp, anonymous
         get_obo_token=obo, conversation_id="chat", request_access_token="synthetic-incoming",
         allow_anonymous=anonymous, mcp_enabled=mcp, user_context={"principal_id": "principal"},
     )
-    credential_failure = mcp and (mode == "obo-error" or (mode == "obo-none" and not anonymous))
+    credential_failure = mode in {"obo-error", "obo-none"}
     with patch.object(foundry, "get_foundry_iq_client", return_value=client):
         if mode == "cancelled" or credential_failure or mode in {"provider-error", "configuration", "malformed"}:
-            expected = McpCredentialError if credential_failure else (
+            expected = RuntimeError if credential_failure else (
                 AttributeError if mode == "malformed" else type(failure))
             with pytest.raises(expected) as raised:
                 await provider.invoking(ChatMessage(role=Role.USER, text="question"))
-            if credential_failure:
+            if mode == "obo-none":
                 assert marker not in str(raised.value)
             elif mode != "malformed":
                 assert raised.value is failure
@@ -209,6 +210,7 @@ async def test_multimodal_optional_images_keep_text_and_close_blob_context(mock_
     provider = vision.MultimodalSearchContextProvider(
         endpoint="https://search.invalid", index_name="documents", credential=MagicMock(),
         blob_credential=MagicMock(), conversation_id="chat",
+        authorization_mode=RetrievalAuthorizationMode.SERVICE_ONLY,
         classify_images_fn=None if mode == "no-classifier" else classify,
     )
     sdk = _sdk_search([{
@@ -258,8 +260,8 @@ async def test_multimodal_optional_images_keep_text_and_close_blob_context(mock_
 
 async def test_multimodal_retry_cancellation_propagates_without_empty_result(mock_config, caplog):
     marker = "synthetic-private-retry-cancellation"
-    cancellation = asyncio.CancelledError(marker)
-    sdk = _sdk_search([], lambda attempt: RuntimeError(marker) if attempt == 1 else cancellation)
+    failure = RuntimeError(marker)
+    sdk = _sdk_search([], lambda attempt: failure if attempt == 1 else asyncio.CancelledError(marker))
     provider = vision.MultimodalSearchContextProvider(
         endpoint="https://search.invalid", index_name="documents",
         credential=MagicMock(), blob_credential=MagicMock(),
@@ -269,9 +271,9 @@ async def test_multimodal_retry_cancellation_propagates_without_empty_result(moc
         patch.object(vision, "get_config", return_value=mock_config),
         patch.object(vision, "SearchClient", return_value=sdk),
     ):
-        with pytest.raises(asyncio.CancelledError) as raised:
+        with pytest.raises(RuntimeError) as raised:
             await provider.invoking(ChatMessage(role=Role.USER, text="question"))
-    assert raised.value is cancellation
-    assert sdk.search.await_count == sdk.__aexit__.await_count == 2
-    assert "x_ms_query_source_authorization" not in sdk.search.await_args.kwargs
+    assert raised.value is failure
+    assert sdk.search.await_count == sdk.__aexit__.await_count == 1
+    assert "x_ms_query_source_authorization" in sdk.search.await_args.kwargs
     assert marker not in caplog.text

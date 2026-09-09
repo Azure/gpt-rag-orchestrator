@@ -3,7 +3,7 @@ Microsoft Agent Framework (MAF) Lite Strategy.
 
 This strategy uses Microsoft Agent Framework with a direct Azure OpenAI model
 connection — no Azure AI Foundry Agent Service V2 dependency.  It provides:
-- Memory persistence for user profile in the classic runtime (across sessions)
+- Ordinary conversation history; automatic profile access is suspended
 - Optional agentic search over documents
 - Extensible context providers for custom capabilities
 - Local conversation history (no server-side threads)
@@ -12,7 +12,6 @@ Hosted mode consumes Foundry-managed conversation history and disables profile
 memory until an authenticated Foundry identity contract is available.
 """
 
-import asyncio
 import logging
 import time
 from typing import Optional
@@ -46,6 +45,7 @@ from .retrieval_intent import (
 from connectors.foundry_iq_mcp import is_mcp_enabled
 from connectors.openai_chat_client import OpenAIChatClient
 from connectors.search import acquire_obo_search_token
+from connectors.obo import resolve_retrieval_authorization
 from orchestration.agent_events import AgentEventTranslator
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
 from dependencies import get_config
@@ -68,7 +68,7 @@ class MafLiteStrategy(BaseAgentStrategy):
         "questions and tasks.\n\n"
         "Your capabilities:\n"
         "1. **Conversation**: Engage in helpful, informative conversations\n"
-        "2. **Profile Awareness**: Remember user information to provide personalized assistance\n"
+        "2. **Conversation Context**: Use this conversation; automatic profile personalization is disabled\n"
         "3. **Knowledge Search**: Search your knowledge base when relevant to answer questions\n\n"
         "Guidelines:\n"
         "- Provide clear, helpful, and accurate responses\n"
@@ -201,22 +201,8 @@ class MafLiteStrategy(BaseAgentStrategy):
         user_id: Optional[str],
         chat_client: OpenAIChatClient,
     ) -> None:
-        """Initialize optional classic memory only with an existing profile key."""
-        if not self.profile_memory_enabled or user_id is None:
-            self._user_memory = None
-            return
-        if self._user_memory is None:
-            t0 = time.time()
-            user_profile = await self._load_user_profile(user_id)
-            self._user_memory = UserProfileMemory(
-                chat_client=chat_client,
-                user_profile=user_profile,
-            )
-            logging.info(
-                "[MafLiteStrategy] user_profile_load: %.2fs (user=%s)",
-                time.time() - t0,
-                user_id,
-            )
+        """Automatic profile access is suspended pending trusted key binding."""
+        self._eligible_profile_user_id()
 
     # ------------------------------------------------------------------
     # Search provider (optional agentic retrieval)
@@ -233,6 +219,8 @@ class MafLiteStrategy(BaseAgentStrategy):
                 "ALLOW_ANONYMOUS", default=True, type=bool
             )
             retrieval_backend = get_retrieval_backend()
+            token = getattr(self, "request_access_token", None)
+            authorization_mode = resolve_retrieval_authorization(token, allow_anonymous)
             mcp_enabled = (
                 retrieval_backend == RETRIEVAL_BACKEND_FOUNDRY_IQ
                 and is_mcp_enabled(
@@ -253,13 +241,10 @@ class MafLiteStrategy(BaseAgentStrategy):
                 embed_fn = _embed
 
             async def _get_obo_token() -> str | None:
-                token = getattr(self, "request_access_token", None)
                 return (
                     await acquire_obo_search_token(
                         token,
-                        allow_anonymous=(
-                            allow_anonymous if mcp_enabled else True
-                        ),
+                        allow_anonymous=False,
                     )
                     if token
                     else None
@@ -271,6 +256,7 @@ class MafLiteStrategy(BaseAgentStrategy):
                     top_k=self.search_top_k,
                     max_content_chars=self.max_content_chars,
                     get_obo_token=_get_obo_token,
+                    authorization_mode=authorization_mode,
                     request_access_token=(
                         getattr(self, "request_access_token", None)
                         if mcp_enabled
@@ -295,6 +281,7 @@ class MafLiteStrategy(BaseAgentStrategy):
                 semantic_configuration_name=self.semantic_search_config,
                 embed_fn=embed_fn,
                 get_obo_token=_get_obo_token,
+                authorization_mode=authorization_mode,
                 max_content_chars=self.max_content_chars,
             )
             logging.info(
@@ -310,13 +297,7 @@ class MafLiteStrategy(BaseAgentStrategy):
     # Session summary
     # ------------------------------------------------------------------
     def _build_session_summary(self) -> str:
-        parts = []
-        if self._user_memory and self._user_memory.has_minimum_context():
-            parts.append("**Your Profile:**")
-            parts.append(self._user_memory._build_profile_summary())
-        else:
-            parts.append("**Your Profile:** Not yet configured.")
-        return "\n".join(parts)
+        return "Automatic profile personalization is disabled."
 
     # ------------------------------------------------------------------
     # Intent classification (LLM-based)
@@ -363,11 +344,11 @@ class MafLiteStrategy(BaseAgentStrategy):
 
         conv = self.conversation
         is_new_session = not conv.get("session_initialized", False)
-        user_id = self._get_profile_user_id()
+        user_id = self._eligible_profile_user_id()
 
         chat_client = self._get_or_create_chat_client()
 
-        # Load or initialise user-profile memory
+        # Clear any cached profile; automatic access remains suspended.
         await self._ensure_user_memory(user_id, chat_client)
 
         history = conv.get("messages", [])
@@ -467,24 +448,12 @@ class MafLiteStrategy(BaseAgentStrategy):
 
         logging.info("[MafLiteStrategy] === Flow done === total: %.2fs", time.time() - flow_start)
 
-        # Post-flow: flush + save as background task so SSE stream closes immediately
-        if self.profile_memory_enabled and user_id is not None:
-            asyncio.create_task(self._post_flow_cleanup(user_id))
-
     # ------------------------------------------------------------------
     # Post-flow cleanup (runs as background task)
     # ------------------------------------------------------------------
     async def _post_flow_cleanup(self, user_id: str) -> None:
-        """Flush profile extraction and save — runs as fire-and-forget task."""
-        if not self.profile_memory_enabled:
-            return
-        try:
-            if self._user_memory is None:
-                return
-            await self._user_memory.flush()
-            await self._save_user_profile(user_id, self._user_memory.user_profile)
-        except Exception as e:
-            logging.error("[MafLiteStrategy] post_flow_cleanup failed (%s)", type(e).__name__)
+        """Compatibility no-op while automatic profile access is suspended."""
+        self._eligible_profile_user_id()
 
     # ------------------------------------------------------------------
     # Session management

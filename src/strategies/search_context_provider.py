@@ -20,6 +20,7 @@ from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizedQuery, QueryType, QueryCaptionType
 
 from connectors.search import _classify_retrieval_error, build_conversation_filter
+from connectors.obo import RetrievalAuthorizationMode, require_retrieval_token
 from dependencies import get_config
 from util.metadata import format_custom_metadata, parse_allowed_keys
 from telemetry import AuditEmitter, ReasonCode
@@ -43,6 +44,7 @@ class SearchContextProvider(ContextProvider):
         vector_field: str = "contentVector",
         max_content_chars: int = 1500,
         get_obo_token: Callable[[], Awaitable[Optional[str]]] | None = None,
+        authorization_mode: RetrievalAuthorizationMode = RetrievalAuthorizationMode.USER_REQUIRED,
     ) -> None:
         self._endpoint = endpoint
         self._index_name = index_name
@@ -54,6 +56,7 @@ class SearchContextProvider(ContextProvider):
         self._vector_field = vector_field
         self._max_content_chars = max_content_chars
         self._get_obo_token = get_obo_token
+        self._authorization_mode = authorization_mode
 
     async def __aenter__(self):
         return self
@@ -123,11 +126,7 @@ class SearchContextProvider(ContextProvider):
         try:
             # Acquire OBO token for permission trimming if configured
             obo_token: Optional[str] = None
-            if self._get_obo_token:
-                try:
-                    obo_token = await self._get_obo_token()
-                except Exception as e:
-                    logger.warning("[SearchContextProvider] OBO token acquisition failed (%s)", type(e).__name__)
+            obo_token = await require_retrieval_token(self._authorization_mode, self._get_obo_token)
 
             if obo_token:
                 search_params["x_ms_query_source_authorization"] = obo_token

@@ -795,8 +795,6 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("search-filepath-nullable-compatibility", "failure-translation"),
     ("optional-log-level-diagnostic-reporting", "contractual-best-effort-side-effect"),
     ("context-noise-filter-retains-unformattable-record", "contractual-best-effort-side-effect"),
-    ("optional-profile-background-extraction", "contractual-best-effort-side-effect"),
-    ("optional-profile-pending-task-flush", "contractual-best-effort-side-effect"),
     ("legacy-api-key-environment-fallback", "failure-translation"),
     ("optional-jwks-cache-refresh-diagnostics", "contractual-best-effort-side-effect"),
     ("optional-jwt-segment-length-diagnostics", "contractual-best-effort-side-effect"),
@@ -805,13 +803,9 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("optional-graph-audience-preverification-hint", "contractual-best-effort-side-effect"),
     ("optional-graph-audience-signature-hint", "contractual-best-effort-side-effect"),
     ("legacy-optional-graph-group-result", "failure-translation"),
-    ("legacy-text-provider-obo-service-fallback", "failure-translation"),
-    ("foundry-context-obo-compatibility", "failure-translation"),
     ("foundry-context-empty-result-translation", "failure-translation"),
     ("multimodal-context-keyword-fallback", "failure-translation"),
-    ("legacy-multimodal-obo-service-fallback", "failure-translation"),
     ("legacy-multimodal-retry-without-obo", "failure-translation"),
-    ("multimodal-retry-empty-context", "failure-translation"),
     ("multimodal-optional-image-classification", "failure-translation"),
     ("multimodal-optional-image-download", "failure-translation"),
     ("foundry-service-token-failure", "failure-translation"),
@@ -820,12 +814,9 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("legacy-maf-service-nullable-provider", "failure-translation"),
     ("legacy-maf-lite-nullable-provider", "failure-translation"),
     ("maf-lite-intent-question-fallback", "failure-translation"),
-    ("maf-lite-optional-profile-cleanup", "contractual-best-effort-side-effect"),
     ("legacy-multimodal-nullable-provider", "failure-translation"),
     ("multimodal-image-validation-strip", "failure-translation"),
     ("multimodal-intent-question-fallback", "failure-translation"),
-    ("multimodal-optional-profile-cleanup", "contractual-best-effort-side-effect"),
-    ("legacy-orchestrator-token-setter", "failure-translation"),
     ("optional-conversation-lifecycle-diagnostic", "contractual-best-effort-side-effect"),
     ("legacy-detached-conversation-persistence", "failure-translation"),
     ("legacy-conversation-persistence-scheduling-cleanup", "failure-translation"),
@@ -870,6 +861,24 @@ def test_non_audit_turn_proposal_binds_propagation_without_granting_approval():
     assert QUALITY["check_exceptions"](current, [record], passed)
     assert not QUALITY["check_exceptions"](current, [{**record, "status": "active"}], passed)
     assert QUALITY["check_exceptions"](current, [{**record, "status": "active"}], set())
+
+
+def test_adr0006_retires_only_removed_handlers_and_keeps_all_proposals_inactive():
+    root = Path(QUALITY["__file__"]).resolve().parents[2]
+    records = QUALITY["load_records"](root)["exceptions.json"]["entries"]
+    retired = {
+        "legacy-orchestrator-token-setter", "legacy-text-provider-obo-service-fallback",
+        "foundry-context-obo-compatibility", "legacy-multimodal-obo-service-fallback",
+        "multimodal-retry-empty-context", "optional-profile-background-extraction",
+        "optional-profile-pending-task-flush", "maf-lite-optional-profile-cleanup",
+        "multimodal-optional-profile-cleanup",
+    }
+    assert not retired.intersection(record["id"] for record in records)
+    assert len(records) == 92
+    assert all(record["status"] == "proposed" for record in records)
+    current = QUALITY["handlers"](QUALITY["collect"](root, ["src"]))
+    key = lambda item: (item["module_id"], item["symbol"], item["handler_fingerprint"])
+    assert {key(record) for record in records} == {key(handler) for handler in current}
 
 
 @pytest.mark.parametrize("file,mutate", [

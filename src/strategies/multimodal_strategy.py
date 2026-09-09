@@ -5,7 +5,7 @@ This strategy extends the MAF Lite approach with multimodal capabilities:
 - Retrieves both text documents and related images from Azure AI Search
 - Downloads images from Azure Blob Storage
 - Sends multimodal content (text + images) to a vision-capable model (e.g. GPT-4o)
-- Includes memory persistence for user profile (across sessions)
+- Preserves ordinary history; automatic profile access/extraction is suspended
 - Uses dual vector search (contentVector + captionVector)
 """
 
@@ -44,6 +44,7 @@ from .retrieval_intent import (
 from connectors.foundry_iq_mcp import is_mcp_enabled
 from connectors.multimodal_chat_client import MultimodalChatClient
 from connectors.search import acquire_obo_search_token
+from connectors.obo import resolve_retrieval_authorization
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
 from dependencies import get_config
 from openai import BadRequestError
@@ -247,6 +248,8 @@ class MultimodalStrategy(BaseAgentStrategy):
                 "ALLOW_ANONYMOUS", default=True, type=bool
             )
             retrieval_backend = get_retrieval_backend()
+            token = getattr(self, "request_access_token", None)
+            authorization_mode = resolve_retrieval_authorization(token, allow_anonymous)
             mcp_enabled = (
                 retrieval_backend == RETRIEVAL_BACKEND_FOUNDRY_IQ
                 and is_mcp_enabled(
@@ -267,13 +270,10 @@ class MultimodalStrategy(BaseAgentStrategy):
                 embed_fn = _embed
 
             async def _get_obo_token() -> str | None:
-                token = getattr(self, "request_access_token", None)
                 return (
                     await acquire_obo_search_token(
                         token,
-                        allow_anonymous=(
-                            allow_anonymous if mcp_enabled else True
-                        ),
+                        allow_anonymous=False,
                     )
                     if token
                     else None
@@ -290,6 +290,7 @@ class MultimodalStrategy(BaseAgentStrategy):
                     top_k=self.search_top_k,
                     max_content_chars=self.max_content_chars,
                     get_obo_token=_get_obo_token,
+                    authorization_mode=authorization_mode,
                     request_access_token=(
                         getattr(self, "request_access_token", None)
                         if mcp_enabled
@@ -319,6 +320,7 @@ class MultimodalStrategy(BaseAgentStrategy):
                 semantic_configuration_name=self.semantic_search_config,
                 embed_fn=embed_fn,
                 get_obo_token=_get_obo_token,
+                authorization_mode=authorization_mode,
                 classify_images_fn=self._classify_image_relevance if self.classify_images else None,
                 classify_images_concurrency=self.image_classification_concurrency,
             )
@@ -495,13 +497,7 @@ class MultimodalStrategy(BaseAgentStrategy):
     # Session summary
     # ------------------------------------------------------------------
     def _build_session_summary(self) -> str:
-        parts = []
-        if self._user_memory and self._user_memory.has_minimum_context():
-            parts.append("**Your Profile:**")
-            parts.append(self._user_memory._build_profile_summary())
-        else:
-            parts.append("**Your Profile:** Not yet configured.")
-        return "\n".join(parts)
+        return "Automatic profile personalization is disabled."
 
     # ------------------------------------------------------------------
     # Intent classification (LLM-based)
@@ -548,21 +544,12 @@ class MultimodalStrategy(BaseAgentStrategy):
 
         conv = self.conversation
         is_new_session = not conv.get("session_initialized", False)
-        user_id = self._get_profile_user_id()
+        self._eligible_profile_user_id()
 
         chat_client = self._get_or_create_chat_client()
 
-        # Load or initialise user-profile memory
-        if user_id is None:
-            self._user_memory = None
-        elif self._user_memory is None:
-            t0 = time.time()
-            user_profile = await self._load_user_profile(user_id)
-            self._user_memory = UserProfileMemory(
-                chat_client=chat_client,
-                user_profile=user_profile,
-            )
-            logging.info("[MultimodalStrategy] user_profile_load: %.2fs (user=%s)", time.time() - t0, user_id)
+        # No legacy-key binding is trusted for automatic personalization.
+        self._user_memory = None
 
         history = conv.get("messages", [])
 
@@ -683,22 +670,12 @@ class MultimodalStrategy(BaseAgentStrategy):
 
         logging.info("[MultimodalStrategy] === Flow done === total: %.2fs", time.time() - flow_start)
 
-        # Post-flow: flush + save as background task so SSE stream closes immediately
-        if user_id is not None:
-            asyncio.create_task(self._post_flow_cleanup(user_id))
-
     # ------------------------------------------------------------------
     # Post-flow cleanup (runs as background task)
     # ------------------------------------------------------------------
     async def _post_flow_cleanup(self, user_id: str) -> None:
-        """Flush profile extraction and save — runs as fire-and-forget task."""
-        if not self.profile_memory_enabled or self._user_memory is None:
-            return
-        try:
-            await self._user_memory.flush()
-            await self._save_user_profile(user_id, self._user_memory.user_profile)
-        except Exception as e:
-            logging.error("[MultimodalStrategy] post_flow_cleanup failed (%s)", type(e).__name__)
+        """Compatibility no-op while automatic profile access is suspended."""
+        self._eligible_profile_user_id()
 
     # ------------------------------------------------------------------
     # Session management

@@ -91,6 +91,12 @@ class BaseAgentStrategy(ABC):
     async def create(cls):
         return cls()
 
+    def _eligible_profile_user_id(self) -> Optional[str]:
+        """Automatic access is suspended: legacy keys have no trusted binding."""
+        logging.info("profile_access_disabled_unverified_binding")
+        self._user_memory = None
+        return None
+
     def _get_profile_user_id(self) -> Optional[str]:
         """Reject absent/synthetic profile keys without selecting another identity.
 

@@ -21,15 +21,17 @@ from test_strategy_helper_boundaries import lite, service, strategy, vision
 @pytest.mark.parametrize("mode", [
     "construction", "retrieval", "cancelled", "empty", "success", "optional",
     "disabled-endpoint", "disabled-index", "greeting", "no_retrieval",
+    "obo-none", "obo-error", "obo-cancelled", "service-only",
 ])
 async def test_required_retrieval_reaches_safe_turn(
     strategy, backend, mode, main_module, audit_capture, caplog,
 ):
     module, instance = strategy
+    instance.request_access_token = None if mode == "service-only" else "synthetic-incoming"
     if module is service and mode in {"greeting", "no_retrieval"}:
         pytest.skip("Agent Service has no intent-based retrieval opt-out")
     marker = "synthetic-private-retrieval-failure"
-    failure = asyncio.CancelledError(marker) if mode == "cancelled" else RuntimeError(marker)
+    failure = asyncio.CancelledError(marker) if mode in {"cancelled", "obo-cancelled"} else RuntimeError(marker)
     bypass = mode.startswith("disabled-") or mode in {"greeting", "no_retrieval"}
     if mode == "disabled-endpoint":
         instance.search_endpoint = None
@@ -44,6 +46,7 @@ async def test_required_retrieval_reaches_safe_turn(
         return_value=Context(instructions="Independent optional context"),
         side_effect=RuntimeError(marker) if mode == "optional" else None,
     )
+    optional_memory = instance._user_memory
     if module is service:
         instance._create_user_memory = AsyncMock(return_value=instance._user_memory)
     instance._post_flow_cleanup = AsyncMock()
@@ -81,6 +84,10 @@ async def test_required_retrieval_reaches_safe_turn(
     real_provider = getattr(module, provider_name)
     with (
         patch.object(module, "get_retrieval_backend", return_value=backend),
+        patch.object(module, "acquire_obo_search_token", AsyncMock(
+            return_value=None if mode == "obo-none" else "synthetic-delegated",
+            side_effect=failure if mode in {"obo-error", "obo-cancelled"} else None,
+        )) as acquire,
         patch.object(module, provider_name, side_effect=(
             failure if mode == "construction" or bypass else real_provider)) as construct,
         patch.object(search, "SearchClient", return_value=sdk),
@@ -95,19 +102,20 @@ async def test_required_retrieval_reaches_safe_turn(
                      AsyncMock(return_value=object())),
     ):
         chunks, spans, _ = await _run_http_turn(
-            main_module, instance, failure if mode == "cancelled" else None,
+            main_module, instance, failure if mode in {"cancelled", "obo-cancelled"} else None,
             profile_user_id="existing-profile-user",
         )
 
-    failed = mode in {"construction", "retrieval", "cancelled"}
+    cancelled = mode in {"cancelled", "obo-cancelled"}
+    failed = mode in {"construction", "retrieval", "cancelled", "obo-none", "obo-error", "obo-cancelled"}
     if failed:
         assert not model_calls
         assert chunks == ["conversation "] + (
-            [] if mode == "cancelled"
+            [] if cancelled
             else ["event: error\ndata: An internal server error occurred.\n\n"])
         assert not instance.conversation.get("messages")
         assert audit_types(audit_capture)[-1] == (
-            "request.cancelled" if mode == "cancelled" else "request.failed")
+            "request.cancelled" if cancelled else "request.failed")
         assert "request.completed" not in audit_types(audit_capture)
     else:
         assert model_calls == [True]
@@ -116,11 +124,20 @@ async def test_required_retrieval_reaches_safe_turn(
         if mode in {"success", "optional"}:
             assert "grounding" in "".join(message.text for message in captured["result"].messages)
     if mode == "optional":
-        instance._user_memory.invoking.assert_awaited_once()
+        if module is service:
+            optional_memory.invoking.assert_awaited_once()
+        else:
+            optional_memory.invoking.assert_not_awaited()
+            assert instance._user_memory is None
     if bypass:
         construct.assert_not_called()
         sdk.search.assert_not_awaited()
         retrieve.assert_not_awaited()
+    if mode.startswith("obo-"):
+        sdk.search.assert_not_awaited()
+        retrieve.assert_not_awaited()
+    if mode == "service-only":
+        acquire.assert_not_awaited()
     assert marker not in caplog.text
     assert marker not in str([record.__dict__ for record in audit_capture.records])
     assert all(marker not in span.to_json() for span in spans)

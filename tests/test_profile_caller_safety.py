@@ -126,7 +126,7 @@ async def test_strategy_skips_unusable_profile_identity_without_rekeying(caller_
         strategy.conversation["user_id"] = values[identity]
     original = UserProfile(name="Existing", notes=["retained"])
     caller.cosmos.get_document.return_value = {"profile_data": original.model_dump_json()}
-    if caller.module is not service and identity != "existing":
+    if caller.module is not service:
         # Ineligible turns must not reuse a previously cached profile provider.
         strategy._user_memory = UserProfileMemory(
             chat_client=MagicMock(), user_profile=original,
@@ -138,29 +138,15 @@ async def test_strategy_skips_unusable_profile_identity_without_rekeying(caller_
         {"role": "user", "text": "hello"},
         {"role": "assistant", "text": "ordinary answer"},
     ]
-    if identity == "existing":
-        assert output[0].startswith("Welcome back!")
-        assert all(call.args[1] == "user_profile_ legacy-user " for call in caller.cosmos.get_document.await_args_list)
-        saved = caller.cosmos.update_document.await_args.args[1]
-        assert saved["id"] == "user_profile_ legacy-user "
-        assert UserProfile.model_validate_json(saved["profile_data"]) == original
-        # The current adapter mismatch must remain ineffective, even when the
-        # underlying model returns JSON that could populate a profile.
-        extraction_calls = [
-            call for call in caller.sdk.chat.completions.create.await_args_list
-            if not call.kwargs.get("stream")
-        ]
-        assert len(extraction_calls) == 1
-        assert "response_format" not in extraction_calls[0].kwargs
-    else:
-        assert output == ["ordinary answer"]
-        caller.cosmos.get_document.assert_not_awaited()
-        caller.cosmos.create_document.assert_not_awaited()
-        caller.cosmos.update_document.assert_not_awaited()
-        assert not any(name in {"_extract_and_update_profile", "_post_flow_cleanup"} for name, _ in caller.tasks)
-        assert all(call.kwargs.get("stream") for call in caller.sdk.chat.completions.create.await_args_list)
-        if caller.module is service:
-            assert strategy._memory_chat_client is None
+    assert output == ["ordinary answer"]
+    caller.cosmos.get_document.assert_not_awaited()
+    caller.cosmos.create_document.assert_not_awaited()
+    caller.cosmos.update_document.assert_not_awaited()
+    assert not any(name in {"_extract_and_update_profile", "_post_flow_cleanup"} for name, _ in caller.tasks)
+    assert all(call.kwargs.get("stream") for call in caller.sdk.chat.completions.create.await_args_list)
+    assert strategy._user_memory is None
+    if caller.module is service:
+        assert strategy._memory_chat_client is None
 
 
 async def test_classic_request_principal_does_not_become_profile_identity(
@@ -216,16 +202,12 @@ async def test_profile_save_truth_reaches_strategy_caller(caller_factory, existi
         caller.cosmos.get_document.side_effect = RuntimeError(MARKER)
     assert [chunk async for chunk in caller.strategy.initiate_agent_flow("hello")] == ["ordinary answer"]
     await drain(caller)
-    assert ("Saved user profile" in caplog.text) is (outcome == "confirmed")
+    assert "Saved user profile" not in caplog.text
     assert "post_flow_profile_save" not in caplog.text
-    if outcome == "none":
-        assert "write not confirmed" in caplog.text
-    if outcome == "read_failure":
-        write.assert_not_awaited()
-    else:
-        write.assert_awaited_once()
-        doc = write.await_args.args[1] if existing else write.await_args.kwargs["body"]
-        assert UserProfile.model_validate_json(doc["profile_data"]) == (old_profile if existing else UserProfile())
+    caller.cosmos.get_document.assert_not_awaited()
+    caller.cosmos.create_document.assert_not_awaited()
+    caller.cosmos.update_document.assert_not_awaited()
+    assert "profile_access_disabled_unverified_binding" in caplog.text
     assert MARKER not in caplog.text
 
 
@@ -258,17 +240,9 @@ async def test_profile_flush_cancellation_from_strategy_caller_prevents_save(cal
     async def consume():
         return [chunk async for chunk in caller.strategy.initiate_agent_flow("hello")]
 
-    primary = asyncio.create_task(consume())
-    await asyncio.wait_for(started.wait(), timeout=2)
-    if caller.module is service:
-        cleanup = primary
-    else:
-        assert await primary == ["ordinary answer"]
-        cleanup = next(task for name, task in caller.tasks if name == "_post_flow_cleanup")
-    await asyncio.sleep(0)
-    cleanup.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await cleanup
+    assert await asyncio.wait_for(consume(), timeout=2) == ["ordinary answer"]
+    assert not started.is_set()
+    assert not any(name in {"_extract_and_update_profile", "_post_flow_cleanup"} for name, _ in caller.tasks)
     await drain(caller)
     caller.cosmos.create_document.assert_not_awaited()
     caller.cosmos.update_document.assert_not_awaited()
@@ -283,23 +257,11 @@ async def test_profile_io_cancellation_keeps_existing_caller_semantics(caller_fa
         caller.cosmos.get_document.side_effect = failure
     else:
         caller.cosmos.create_document.side_effect = failure
-    if boundary == "load" or caller.module is service:
-        with pytest.raises(asyncio.CancelledError) as caught:
-            _ = [chunk async for chunk in caller.strategy.initiate_agent_flow("hello")]
-        assert caught.value is failure
-    else:
-        assert [chunk async for chunk in caller.strategy.initiate_agent_flow("hello")] == ["ordinary answer"]
-        cleanup = next(task for name, task in caller.tasks if name == "_post_flow_cleanup")
-        with pytest.raises(asyncio.CancelledError) as caught:
-            await cleanup
-        assert caught.value is failure
+    assert [chunk async for chunk in caller.strategy.initiate_agent_flow("hello")] == ["ordinary answer"]
     await drain(caller)
-    if boundary == "load":
-        caller.cosmos.create_document.assert_not_awaited()
-        assert not caller.strategy.conversation.get("messages")
-    else:
-        caller.cosmos.create_document.assert_awaited_once()
-        assert caller.strategy.conversation["messages"][-1]["text"] == "ordinary answer"
+    caller.cosmos.get_document.assert_not_awaited()
+    caller.cosmos.create_document.assert_not_awaited()
+    assert caller.strategy.conversation["messages"][-1]["text"] == "ordinary answer"
     caller.cosmos.update_document.assert_not_awaited()
     assert "Saved user profile" not in caplog.text
     assert MARKER not in caplog.text
