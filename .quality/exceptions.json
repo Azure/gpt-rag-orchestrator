@@ -9,7 +9,7 @@
       "line": 294,
       "handler_fingerprint": "93027b6b3e90389f5ea0fb8fb54bc77cfca6872fa973b4dbcde65f27a1380cdf",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional conversation-start diagnostic during orchestration",
       "reason": "Failure to render an ancillary lifecycle log does not replace the primary response. Keep existing conversation/persistence ordering; the handler now reports its own diagnostic failure rather than silently passing.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -17,7 +17,7 @@
       "evidence_tests": [
         "tests/test_legacy_runtime_boundary_dispositions.py::test_orchestrator_background_and_optional_logs_remain_bounded[lifecycle]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -28,7 +28,7 @@
       "line": 506,
       "handler_fingerprint": "52a646387e96b1726e101c4072d64e700e8ca779e82653b699151b410c7de044",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Owned best-effort Cosmos create and dependent conversation update",
       "reason": "ADR-0006 explicitly selects existing best-effort detached SSE persistence: response completion acknowledges streaming, not durable history. Each write has an independent pre-scheduling snapshot and retained task; update waits for confirmed create. Failed, cancelled or None create suppresses update, and None update is unconfirmed. Primary errors/cancellation remain unchanged. Process loss and concurrent-write races remain accepted limits, with no global pending bound, shutdown drain, serialization, retry, rollback, queue or recovery guarantee.",
       "failure_outcome": "failure-translation",
@@ -53,7 +53,7 @@
         "tests/test_conversation_persistence_boundaries.py::test_classic_primary_failure_does_not_abandon_pending_create[error]",
         "tests/test_conversation_persistence_boundaries.py::test_classic_primary_failure_does_not_abandon_pending_create[cancel]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this compatibility proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -64,7 +64,7 @@
       "line": 440,
       "handler_fingerprint": "148a369d394ba6d62ea327549db0c002efce60a338c3a7a7d21a79e6cc4e30e7",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "P5 final snapshot and scheduling of the existing detached conversation update",
       "reason": "Moving snapshot capture before task scheduling is necessary to isolate mutable strategy state. Its ordinary failure must not replace an already propagating stream error/cancellation or redefine best-effort streaming success. This tightly coupled cleanup reports that no update was scheduled; it does not certify persistence. Scheduling failure closes the unsubmitted coroutine. ADR-0006 selects best-effort classic SSE history: response completion acknowledges streaming, not durable persistence. Independent adoption review and live acceptance remain pending.",
       "failure_outcome": "failure-translation",
@@ -79,7 +79,7 @@
         "tests/test_conversation_persistence_boundaries.py::test_classic_cleanup_preserves_primary_outcome[schedule-cancel]",
         "tests/test_conversation_persistence_boundaries.py::test_classic_cleanup_preserves_primary_outcome[schedule-close]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; subordinate P5 cleanup proposal only, no activation or durability decision.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -90,7 +90,7 @@
       "line": 443,
       "handler_fingerprint": "b406110acf5b223839baece440ae035d60e64ab3cc31d363dae731f6a365cc64",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Final diagnostic after conversation snapshot or scheduling cleanup fails",
       "reason": "A logging handler can itself fail while a stream exception, cancellation or close is already propagating. Suppress only ordinary diagnostic errors without recursively calling the broken sink. Preserve the primary stream outcome and independently reset audit context. New process-control exceptions still propagate after audit cleanup. ADR-0006 selects best-effort classic SSE history; this cleanup neither certifies durable persistence nor adds a recovery queue. Independent adoption review and live acceptance remain pending.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -105,7 +105,7 @@
         "tests/test_conversation_persistence_boundaries.py::test_cleanup_diagnostic_failure_always_resets_audit_context[cancel-cancel]",
         "tests/test_conversation_persistence_boundaries.py::test_cleanup_diagnostic_failure_always_resets_audit_context[cancel-close]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; subordinate diagnostic proposal only, no activation.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -116,7 +116,7 @@
       "line": 555,
       "handler_fingerprint": "28976993937ffd97ee0265471fe07842432fe1ad4a1ddf88cefa0e5429c01c38",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional feedback-to-question correlation before feedback persistence",
       "reason": "Existing feedback can be saved without resolved question_id. Failure of that enrichment must not be mistaken for failure of the subsequent feedback write; preserve principal partitioning and cancellation without hiding persistence errors.",
       "failure_outcome": "failure-translation",
@@ -125,7 +125,7 @@
         "tests/test_legacy_runtime_boundary_dispositions.py::test_feedback_resolution_failure_preserves_partition_and_optional_write[False]",
         "tests/test_legacy_runtime_boundary_dispositions.py::test_feedback_resolution_failure_preserves_partition_and_optional_write[True]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -136,7 +136,7 @@
       "line": 293,
       "handler_fingerprint": "76fd4ce0acc6e93ba215252e7c936c0aff3a0ae49c97dbc14fd4f40f9c5bd576",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Agent Framework invalid-payload compatibility retry before any output",
       "reason": "Stage 2 P2: require a supplied removable max_tokens and a field-scoped Not allowed when agent is specified rejection of max_tokens or its wire name max_output_tokens. Never retry unchanged options, mere mentions of the token field or ambiguous/other-option rejections. Unrecognized diagnostic formats propagate without retry. At most one retry removes only max_tokens; any emitted chunk, cancellation or retry failure propagates. Input/thread identity, remaining options and store=False stay unchanged. Evidence includes real managed/hosted strategy callers with controlled provider errors, not live service acceptance.",
       "failure_outcome": "failure-translation",
@@ -162,7 +162,7 @@
         "tests/test_legacy_runtime_boundary_dispositions.py::test_strategy_uses_bounded_provider_retry[partial-False]",
         "tests/test_legacy_runtime_boundary_dispositions.py::test_strategy_uses_bounded_provider_retry[partial-True]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission or new retry policy.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -173,7 +173,7 @@
       "line": 418,
       "handler_fingerprint": "6375bf0979486fab5c7610861b96498043f591c0c844315c68dec070e32d2dca",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Managed Conversation create whose remote completion is ambiguous",
       "reason": "Bounded P5 correction: after one failed create require the exact assistant item id actually submitted by this invocation as well as the adjacent user/assistant roles and texts. Installed openai 2.41.1 accepts ResponseOutputMessageParam.id and lists Message.id; real SDK transport evidence verifies those shapes through the maintained strategy caller. Repeated text from an older turn, missing/rewritten ids, concurrent tails or malformed evidence cannot confirm this write. Never retry the write; rethrow the original create error when unconfirmed and preserve process-control propagation. This is not a remote idempotency or service identity-retention guarantee; an actual commit can remain unconfirmed.",
       "failure_outcome": "failure-translation",
@@ -192,7 +192,7 @@
         "tests/test_conversation_persistence_boundaries.py::test_managed_strategy_reconciliation_uses_submitted_sdk_identity[concurrent]",
         "tests/test_conversation_persistence_boundaries.py::test_managed_strategy_reconciliation_uses_submitted_sdk_identity[missing_id]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -203,7 +203,7 @@
       "line": 484,
       "handler_fingerprint": "7d84c190cf3f1f74b662b6efc202faef3f5598f3171526fcb421a3089d0a3a41",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Tail lookup used only to reconcile an already failed managed write",
       "reason": "Bounded P5 correction: query, page conversion, item/text parsing and identity comparison share the unconfirmed-evidence boundary. Ordinary lookup or malformed/unreadable evidence failures return False so the caller rethrows its original create failure, not a secondary lookup/parse error. Invalid content cannot become matching empty text. Process-control exceptions during query or parsing still propagate; the original remote mutation may exist despite an unconfirmed result.",
       "failure_outcome": "failure-translation",
@@ -226,7 +226,7 @@
         "tests/test_conversation_persistence_boundaries.py::test_managed_empty_text_requires_readable_evidence[content1]",
         "tests/test_conversation_persistence_boundaries.py::test_managed_empty_text_requires_readable_evidence[content2]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -237,7 +237,7 @@
       "line": 131,
       "handler_fingerprint": "8860cc418cfdd7441f1ae2b96def129b383707d522ca23bd6e07e86eae7ba09a",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional eager reusable prompt-agent creation at startup",
       "reason": "Failure of eager precreation leaves first-request creation responsible for primary work. Keep warmup optional without pretending the agent exists; cancellation propagates.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -246,7 +246,7 @@
         "tests/test_legacy_runtime_boundary_dispositions.py::test_prewarm_creation_is_optional_without_raw_diagnostics[False]",
         "tests/test_legacy_runtime_boundary_dispositions.py::test_prewarm_creation_is_optional_without_raw_diagnostics[True]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -257,7 +257,7 @@
       "line": 228,
       "handler_fingerprint": "87f023ac97365a115a499f073e2c35b04bf4e571507245a81df97cc78cbb2b03",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Legacy request-context setter before the single-agent retrieval tool",
       "reason": "The existing conversation-scoping contract requires context application before the bound retrieval tool runs. Setter failure now propagates and prevents Search rather than using stale or unapplied context. Existing token, anonymous-mode and user-context selection are unchanged; this does not authorize retained identity fallbacks or enforce strict OBO.",
       "failure_outcome": "propagation",
@@ -275,7 +275,7 @@
         "tests/test_single_agent_rag_v2_conversation_scope.py::TestSingleAgentRagV2ConversationScope::test_build_search_tool_returns_none_without_search_client",
         "tests/test_single_agent_rag_v2_conversation_scope.py::TestSingleAgentRagV2ConversationScope::test_apply_context_noop_without_search_client"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; retained identity behavior is not newly approved.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -286,7 +286,7 @@
       "line": 388,
       "handler_fingerprint": "c7c350cd4f4052e57a75a3746fde013005579f8ef9eaaf1a57213e11c86cc626",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Single-agent direct-model stream before managed persistence",
       "reason": "Retain contextual failure logging and bare propagation to the established turn/SSE error channel. Early and partial failures must not append completed-answer history or persist a completed turn. Cancellation stays distinct.",
       "failure_outcome": "propagation",
@@ -297,7 +297,7 @@
         "tests/test_legacy_runtime_boundary_dispositions.py::test_real_direct_stream_failure_reaches_safe_turn_chain[True-False]",
         "tests/test_legacy_runtime_boundary_dispositions.py::test_real_direct_stream_failure_reaches_safe_turn_chain[True-True]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -308,7 +308,7 @@
       "line": 559,
       "handler_fingerprint": "2f247ec9a89d3b3565a24eedeb2c905b60102cb0c8d58a56e58c98bf7e29bda3",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Single-agent managed/hosted Agent Framework stream",
       "reason": "Retain contextual diagnostics and original propagation after stream failure, without replaying partial output. Hosted mode remains store=False with no managed-conversation access; managed persistence failures now propagate without a redundant nested logging wrapper.",
       "failure_outcome": "propagation",
@@ -323,7 +323,7 @@
         "tests/test_legacy_runtime_boundary_dispositions.py::test_agent_stream_and_persistence_preserve_hosted_separation[True-True-stream]",
         "tests/test_legacy_runtime_boundary_dispositions.py::test_agent_stream_and_persistence_preserve_hosted_separation[True-True-persist]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -334,7 +334,7 @@
       "line": 1804,
       "handler_fingerprint": "b74b5cb48b3fc40557b94ca59639c1252c69b711cdb9fa66b6e4f9479b20e44c",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Service bearer acquisition before any Foundry retrieve request",
       "reason": "MCP-enabled retrieval translates provider failures to its established credential error; legacy retrieval rethrows the original failure. Neither branch may proceed to HTTP without a service token. Cancellation remains outside the handler.",
       "failure_outcome": "failure-translation",
@@ -347,7 +347,7 @@
         "tests/test_foundry_connector_boundaries.py::test_service_token_failure_never_reaches_http[cancelled-legacy]",
         "tests/test_foundry_connector_boundaries.py::test_service_token_failure_never_reaches_http[cancelled-mcp]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -358,7 +358,7 @@
       "line": 1859,
       "handler_fingerprint": "34da812e9290386ad74b0ffa5aaf1c6d05d779b56253a6442cb7740bcc50059d",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "MCP query-header credential resolution before HTTP access",
       "reason": "The real resolver invokes configured Key Vault, managed-identity and OBO providers. Unknown provider failures must retain the existing generic McpCredentialError contract rather than issue unauthenticated requests. Existing credential errors and cancellation propagate unchanged.",
       "failure_outcome": "failure-translation",
@@ -369,7 +369,7 @@
         "tests/test_foundry_connector_boundaries.py::test_actual_mcp_header_resolution_keeps_credential_failure_boundary[cancelled]",
         "tests/test_foundry_connector_boundaries.py::test_actual_mcp_header_resolution_keeps_credential_failure_boundary[success]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -380,7 +380,7 @@
       "line": 2010,
       "handler_fingerprint": "d3b84eba030edfa3ddac0227c1116b877e19e64dc38e597078dd08bc2430a3c9",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Foundry retrieve HTTP context, response read, decoding and cleanup",
       "reason": "MCP exposes a generic source error for request/response failures; legacy mode rethrows its original transport/decoding failure. Neither becomes an empty successful connector result. HTTP errors keep status while omitting provider bodies. Context cleanup and cancellation retain their existing semantics.",
       "failure_outcome": "failure-translation",
@@ -401,7 +401,7 @@
         "tests/test_foundry_connector_boundaries.py::test_foundry_request_translation_keeps_cleanup_and_error_identity[success-legacy]",
         "tests/test_foundry_connector_boundaries.py::test_foundry_request_translation_keeps_cleanup_and_error_identity[success-mcp]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -412,7 +412,7 @@
       "line": 272,
       "handler_fingerprint": "5bd41ccd024f1f741781a02774fb54a260a1d7a202bce157ea6e6085e0a0eec8",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "MAF Agent Service configured Search/Foundry context-provider construction",
       "reason": "Configured construction failure propagates to the existing failed-turn/audit/generic-SSE boundary. Absent endpoint/index retains the existing unavailable-provider contract; this is not a new identity policy.",
       "failure_outcome": "failure-translation",
@@ -425,7 +425,7 @@
         "tests/test_strategy_helper_boundaries.py::test_provider_construction_propagates_configured_failure[service-cancelled-ai_search]",
         "tests/test_strategy_helper_boundaries.py::test_provider_construction_propagates_configured_failure[service-cancelled-foundry_iq]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this compatibility proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -436,7 +436,7 @@
       "line": 292,
       "handler_fingerprint": "4da5bd6d3dab42d35b48531d62ad4c0c0c11dcb1da29e007638a51656d505176",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "MafLite configured Search/Foundry context-provider construction",
       "reason": "Configured construction failure on a retrieval-needed turn propagates to the existing failed-turn/audit/generic-SSE boundary. Absent endpoint/index and explicit greeting/no-retrieval intents remain supported; no new configuration or identity policy.",
       "failure_outcome": "failure-translation",
@@ -450,7 +450,7 @@
         "tests/test_strategy_helper_boundaries.py::test_provider_construction_propagates_configured_failure[lite-cancelled-ai_search]",
         "tests/test_strategy_helper_boundaries.py::test_provider_construction_propagates_configured_failure[lite-cancelled-foundry_iq]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this compatibility proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -461,7 +461,7 @@
       "line": 333,
       "handler_fingerprint": "2bff62ff3c34c620f76d0b5a60c9ca3444353567dbb52694c6bc20c1bc64f76d",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional MafLite retrieval-skipping intent classifier",
       "reason": "The established failure result is question, which requests retrieval instead of suppressing it as a greeting/follow-up. Preserve the existing one-shot BadRequest retry without reasoning_effort and the distinct cancellation path. This is not an answer-model failure translation.",
       "failure_outcome": "failure-translation",
@@ -474,7 +474,7 @@
         "tests/test_strategy_helper_boundaries.py::test_intent_failure_defaults_to_retrieval_not_skipping_it[empty-lite]",
         "tests/test_strategy_helper_boundaries.py::test_intent_failure_defaults_to_retrieval_not_skipping_it[success-lite]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -485,7 +485,7 @@
       "line": 333,
       "handler_fingerprint": "8f3c1a63f05b1617445020e2d1bf1dcde52839a0f1e867e76119d64faf813052",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Multimodal configured Search/Foundry context-provider construction",
       "reason": "Configured construction failure on a retrieval-needed turn interrupts via the existing failed-turn/audit/generic-SSE boundary. Absent endpoint/index and explicit greeting/no-retrieval intents remain supported. Optional image/profile and identity decisions are separate.",
       "failure_outcome": "failure-translation",
@@ -499,7 +499,7 @@
         "tests/test_strategy_helper_boundaries.py::test_provider_construction_propagates_configured_failure[vision-cancelled-ai_search]",
         "tests/test_strategy_helper_boundaries.py::test_provider_construction_propagates_configured_failure[vision-cancelled-foundry_iq]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this compatibility proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -510,7 +510,7 @@
       "line": 475,
       "handler_fingerprint": "e953273ee0a46fc67fdf17f81b6e864f4c2f11a00566f539f3297735597d1057",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Post-answer per-image validation before multimodal buffer emission",
       "reason": "The existing guardrail removes an image whose validation fails while retaining surrounding answer text. Preserve success/invalid/empty/no-data decisions and cancellation without substituting an error answer or broadening the existing VALID-prefix criterion.",
       "failure_outcome": "failure-translation",
@@ -524,7 +524,7 @@
         "tests/test_strategy_helper_boundaries.py::test_image_validation_failure_strips_only_image_not_answer[empty]",
         "tests/test_strategy_helper_boundaries.py::test_image_validation_failure_strips_only_image_not_answer[missing]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission or general image-safety guarantee.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -535,7 +535,7 @@
       "line": 533,
       "handler_fingerprint": "23d298a64b69112afe4b46a73b289254a90c3e66ccb8707df370d966ef5aa7a8",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional multimodal retrieval-skipping intent classifier",
       "reason": "Classification failures retain question so available retrieval is not bypassed as a greeting/follow-up. Preserve the provider's one-shot BadRequest max_tokens compatibility retry and cancellation. Primary model errors remain owned by the turn error channel.",
       "failure_outcome": "failure-translation",
@@ -548,7 +548,7 @@
         "tests/test_strategy_helper_boundaries.py::test_intent_failure_defaults_to_retrieval_not_skipping_it[empty-vision]",
         "tests/test_strategy_helper_boundaries.py::test_intent_failure_defaults_to_retrieval_not_skipping_it[success-vision]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -559,7 +559,7 @@
       "line": 100,
       "handler_fingerprint": "e79ea9726a8c3b5d8d23543136c17e8986e17adc46a0576fc27abb4c95d2f86e",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Bulk App Configuration provider load, before optional versus required consumers",
       "reason": "Existing startup distinguishes remote availability from required-value validity: load failures disable remote keys while explicit environment/default consumers may proceed and missing required values still fail. The SDK/provider/key-vault pipeline is not confined to one Azure transport exception type. Authentication remains a preceding distinct fatal-startup classification, not this recovery path.",
       "failure_outcome": "failure-translation",
@@ -574,7 +574,7 @@
         "tests/test_appconfig_failure_boundaries.py::test_real_appconfig_provider_to_startup_and_required_strategy_consumers[True-unavailable]",
         "tests/test_appconfig_failure_boundaries.py::test_real_appconfig_provider_to_startup_and_required_strategy_consumers[True-loaded]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; exact compatibility evidence and necessity do not grant an exemption.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -585,7 +585,7 @@
       "line": 118,
       "handler_fingerprint": "9655d09bceb1c223e4acc7a5b170e69172a1faf536c42d16a9fe461a46abc26d",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional vector enrichment before the existing keyword retrieval request",
       "reason": "The injected async embedding callable has no provider-specific exception restriction. Existing retrieval remains usable as keyword search when embedding fails, retaining query, conversation filter and delegated authorization. This does not convert a failed Search request into success.",
       "failure_outcome": "failure-translation",
@@ -595,7 +595,7 @@
         "tests/test_retrieval_logging.py::test_real_search_provider_and_composite_preserve_distinct_failure_outcomes[search]",
         "tests/test_retrieval_logging.py::test_search_provider_cancellation_is_not_empty_context[embedding]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact optional-enrichment proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -606,7 +606,7 @@
       "line": 179,
       "handler_fingerprint": "232eab6d6803ec1de1ca6d1ac2d3521f035d0d38761a8d20618b1a3315c1b830",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Context-provider SDK search, asynchronous result iteration and context shaping",
       "reason": "SDK, iterator and shaping failures propagate instead of masquerading as empty grounding. Strategies mark selected retrieval required in CompositeContextProvider; optional siblings retain their own best-effort behavior. Successful zero results remain normal, distinct from the connector's strict/anonymous JSON contract.",
       "failure_outcome": "failure-translation",
@@ -624,7 +624,7 @@
         "tests/test_retrieval_logging.py::test_real_search_provider_and_composite_preserve_distinct_failure_outcomes[sibling]",
         "tests/test_retrieval_logging.py::test_search_provider_cancellation_is_not_empty_context[search]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; inner OBO recovery is a separate unapproved site, not covered by this proposal.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -635,7 +635,7 @@
       "line": 670,
       "handler_fingerprint": "327e79e98b68df6006a3462cdaf55c9543bc5d8a463b626effaf8064f2e7fc5e",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Classic Search connector retrieval result envelope, after delegated request inputs",
       "reason": "Existing strict mode must propagate the identical failure; explicit anonymous mode returns results=[], original query and error=search_failed. Configuration, embedding, authentication, HTTP and shaping failures are not confined to an SDK exception type. This is primary-work failure translation, not best-effort audit or an error-free empty result.",
       "failure_outcome": "failure-translation",
@@ -650,7 +650,7 @@
         "tests/test_search_boundary_dispositions.py::test_failure_before_token_assignment_preserves_original_retrieval_contract[obo-strict]",
         "tests/test_search_boundary_dispositions.py::test_failure_before_token_assignment_preserves_original_retrieval_contract[obo-anonymous]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; narrower OBO diagnostics and other connector entrypoints remain separate review work.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -661,13 +661,13 @@
       "line": 146,
       "handler_fingerprint": "36b3a9f0a98ef8c9b8a963c883c83a380a8e4773a1c01543102814a8b0450b88",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Audit environment metadata lookup, after AuditSettings configuration",
       "reason": "A failed optional environment label must not change the primary operation or audit settings.",
       "failure_outcome": "contractual-best-effort-side-effect",
       "diagnostic_path": "Audit event environment is the constant unknown; no configuration value is exposed.",
       "evidence_tests": ["tests/test_audit_emitter.py::test_audit_environment_lookup_failure_is_metadata_only"],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -678,13 +678,13 @@
       "line": 411,
       "handler_fingerprint": "1023d81374212693e4c57dd77a82e4b1991989aee3fde66ae215f34719f4e969",
       "caught_types": ["BaseException"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Audit event exporter and logging handlers",
       "reason": "Ordinary exporter failures remain best-effort. Process-control exceptions propagate by default, including inside recovery handlers. Only the internal per-call preservation signal from a tool boundary immediately re-raising its primary failure or cancellation permits suppression; the signal is carried into fallback without ambient exception inference or shared state.",
       "failure_outcome": "contractual-best-effort-side-effect",
       "diagnostic_path": "AuditEmitter._emit_failure(EXPORT_FAILURE), bounded omitted-event accounting and fixed warning fallback.",
       "evidence_tests": ["tests/test_audit_emitter.py::test_emitter_failure_never_escapes_to_user_operation", "tests/test_audit_emitter.py::test_failure_event_uses_only_constant_safe_metadata", "tests/test_audit_emitter.py::test_real_tool_audit_sink_failure_preserves_primary_unwind", "tests/test_audit_emitter.py::test_real_tool_task_cancellation_survives_ordinary_audit_sink_failures", "tests/test_audit_emitter.py::test_successful_recovery_direct_await_propagates_audit_control", "tests/test_audit_emitter.py::test_recovery_direct_emit_propagates_control"],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -695,13 +695,13 @@
       "line": 482,
       "handler_fingerprint": "9f594af07b347c1c9490c9a8fb902dc9d811e265b1cff4759c1f5b628b6a8686",
       "caught_types": ["BaseException"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Export of the reserved audit-emission-failed event",
       "reason": "An ordinary secondary exporter failure degrades only audit. Process-control exceptions propagate unless the internal per-call signal identifies a tool boundary immediately re-raising its primary failure or cancellation. Direct emit_failure never requests preservation, including in recovery handlers. Recursion remains guarded, and the guard resets even when control propagates.",
       "failure_outcome": "contractual-best-effort-side-effect",
       "diagnostic_path": "A fixed warning without source payloads; failure-emission context guard is always reset.",
       "evidence_tests": ["tests/test_audit_emitter.py::test_emitter_failure_never_escapes_to_user_operation", "tests/test_audit_emitter.py::test_audit_warning_failure_also_preserves_primary_operation", "tests/test_audit_emitter.py::test_real_tool_audit_sink_failure_preserves_primary_unwind", "tests/test_audit_emitter.py::test_direct_failure_event_control_propagates_and_guard_recovers", "tests/test_audit_emitter.py::test_real_tool_task_cancellation_survives_ordinary_audit_sink_failures", "tests/test_audit_emitter.py::test_successful_recovery_direct_await_propagates_audit_control", "tests/test_audit_emitter.py::test_recovery_direct_emit_failure_propagates_control"],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -712,13 +712,13 @@
       "line": 489,
       "handler_fingerprint": "de71e080def197223686d480a1965767c791e256d8874971fcfa0cc1000ef341",
       "caught_types": ["BaseException"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Last-resort warning sink after both audit exports fail",
       "reason": "There is no further safe diagnostic sink for ordinary warning failures. Process-control exceptions propagate unless the internal per-call signal identifies a tool boundary immediately re-raising its primary failure or cancellation. Ambient recovery handlers do not authorize suppression. No recursive logging or shared preservation state is added.",
       "failure_outcome": "contractual-best-effort-side-effect",
       "diagnostic_path": "The fixed warning is attempted once; no recursive export or fallback payload is created.",
       "evidence_tests": ["tests/test_audit_emitter.py::test_audit_warning_failure_also_preserves_primary_operation", "tests/test_audit_emitter.py::test_real_tool_audit_sink_failure_preserves_primary_unwind", "tests/test_audit_emitter.py::test_direct_failure_event_control_propagates_and_guard_recovers", "tests/test_audit_emitter.py::test_real_tool_task_cancellation_survives_ordinary_audit_sink_failures", "tests/test_audit_emitter.py::test_successful_recovery_direct_await_propagates_audit_control", "tests/test_audit_emitter.py::test_recovery_direct_emit_failure_propagates_control"],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -729,13 +729,13 @@
       "line": 641,
       "handler_fingerprint": "62472680dd1fcdc1f43c12bc167c843216f908435d0bccbfbafb519ca8d51896",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Audited tool invocation",
       "reason": "Record a failed tool event for any tool exception while preserving the original exception; this is not a best-effort primary operation.",
       "failure_outcome": "propagation",
       "diagnostic_path": "TOOL_FAILED audit event with constant failure classification followed by a bare re-raise.",
       "evidence_tests": ["tests/test_audit_emitter.py::test_tool_success_failure_timeout_and_cancellation_events"],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -746,13 +746,13 @@
       "line": 231,
       "handler_fingerprint": "83df0ca5163703438bbf064253b9a7024a753975c819e9649830f665cc7a8e5c",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Audit-only configuration reads",
       "reason": "An unavailable optional audit configuration provider retains disabled audit and sensitive-content defaults; it does not change application authentication or configuration.",
       "failure_outcome": "contractual-best-effort-side-effect",
       "diagnostic_path": "AuditSettings disabled defaults; no exception content is copied into exported metadata.",
       "evidence_tests": ["tests/test_audit_contract.py::test_audit_config_lookup_failure_retains_disabled_defaults"],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -763,7 +763,7 @@
       "line": 217,
       "handler_fingerprint": "0843fc53769787a3836e77d92d1ba2f8d405ba6c0b74479d631d5c7ac45424cf",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Preparing and consuming a bounded custom container in audit content",
       "reason": "Arbitrary custom mappings/sequences may fail during iteration setup or after partial progress. Discard the failed container without exposing partial data; the existing finally releases cycle-detection state. Redundant inner recovery was removed without weakening the single enclosing boundary.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -777,7 +777,7 @@
         "tests/test_audit_contract.py::test_sanitizer_container_failure_discards_partial_data_and_releases_identity[iteration-mapping]",
         "tests/test_audit_contract.py::test_sanitizer_container_failure_discards_partial_data_and_releases_identity[iteration-sequence]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -788,13 +788,13 @@
       "line": 245,
       "handler_fingerprint": "ed81f598215146ee1c6d1818ded99aa6a682dd09d152ed2104f7ed6db89d1795",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Reading existing omitted/truncated-field bookkeeping",
       "reason": "Malformed bookkeeping containers must not bypass sanitization or turn optional audit processing into a primary-operation failure.",
       "failure_outcome": "contractual-best-effort-side-effect",
       "diagnostic_path": "Record the bookkeeping field itself as omitted; serialize only rebuilt bounded metadata.",
       "evidence_tests": ["tests/test_audit_contract.py::test_audit_sequence_failure_is_omitted_and_never_serialized[omitted_fields]", "tests/test_audit_contract.py::test_audit_sequence_failure_is_omitted_and_never_serialized[truncated_fields]"],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -805,7 +805,7 @@
       "line": 163,
       "handler_fingerprint": "4d786aa433d11afeadf4b60adf6aefd403b911f1b22a6ba13a0475962701d2f0",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Runtime-neutral turn stream consuming the classic strategy stream",
       "reason": "Unknown strategy exceptions must emit the existing generic typed error after pending events and then propagate unchanged. Narrowing to a fixed exception list would omit the required terminal error for other strategy failures; this is not successful recovery.",
       "failure_outcome": "propagation",
@@ -820,7 +820,7 @@
         "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[cancelled-True-sql]",
         "tests/test_primary_strategy_failure_boundaries.py::test_primary_failure_chain_preserves_buffering_prefix_history_and_audit[cancelled-True-vision-welcome]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -831,7 +831,7 @@
       "line": 399,
       "handler_fingerprint": "93347bc170c08f989cc3f4233096aeb02f7e1c3a14c27e841a5706391ceef774",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Orchestration terminal outcome across runtime strategy implementations",
       "reason": "Arbitrary strategy failures require failed audit outcome and safe span status before unchanged propagation. A provider-specific tuple cannot cover all strategy failures. Cancellation remains a distinct preceding handler.",
       "failure_outcome": "propagation",
@@ -854,7 +854,7 @@
         "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[cancellation-True-MafLiteStrategy]",
         "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[cancellation-True-MafAgentServiceStrategy]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; parent implemented the bounded runtime correction, not an active handler exemption.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -865,7 +865,7 @@
       "line": 97,
       "handler_fingerprint": "4a0cb295512d5626fe4152e0b0076bb84843a43a00734449fc1cbc18f303c5f9",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Typed datasource table-list tool result",
       "reason": "Search and item validation failures retain the tool's explicit TablesList error alongside any accumulated valid tables. An empty list preserves the existing no-datasource message prefix. This result translation is not a successful primary query or permission bypass.",
       "failure_outcome": "failure-translation",
@@ -875,7 +875,7 @@
         "tests/test_nl2sql_plugin_boundaries.py::test_metadata_tools_keep_typed_partial_or_unavailable_results[malformed-get_all_tables_info]",
         "tests/test_nl2sql_plugin_boundaries.py::test_metadata_tools_keep_typed_partial_or_unavailable_results[cancelled-get_all_tables_info]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; exact typed-result compatibility, not active recovery permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -886,7 +886,7 @@
       "line": 149,
       "handler_fingerprint": "b8601052da1e00a0220cd13609ee231b6037b3b936c17eecdf282a633cd0e30c",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Compatible explicit unavailable SchemaInfo tool outcome",
       "reason": "Lookup and schema validation failures return nullable columns plus an optional error field. The maintained schema collector separates unavailable schemas from usable schemas, including valid empty columns, and supplies both to SQL generation without imposing a new terminal failure policy.",
       "failure_outcome": "failure-translation",
@@ -904,7 +904,7 @@
         "tests/test_nl2sql_plugin_boundaries.py::test_real_schema_collector_preserves_usable_siblings",
         "tests/test_nl2sql_plugin_boundaries.py::test_real_sql_flow_retains_ordinary_answers[success]"
       ],
-      "review": "P6 implementation evidence only; pending independent maintainer approval in Azure/gpt-rag-orchestrator#346. No exception activation, identity/durability or H6 disposition.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -915,7 +915,7 @@
       "line": 204,
       "handler_fingerprint": "bdde2b08b572bb87de475d750021db4e276ff8815394f3ef87d8701ec10e43f5",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Typed table retrieval after successful embedding acquisition",
       "reason": "The tool translates search/metadata mapping failures to TablesRetrievalResult.error while retaining valid accumulated items. Embeddings remain outside this recovery boundary and propagate; a blanket all-operation fallback would change that contract.",
       "failure_outcome": "failure-translation",
@@ -926,7 +926,7 @@
         "tests/test_nl2sql_plugin_boundaries.py::test_metadata_tools_keep_typed_partial_or_unavailable_results[cancelled-tables_retrieval]",
         "tests/test_nl2sql_plugin_boundaries.py::test_metadata_embedding_failure_still_propagates_before_search[RuntimeError-tables_retrieval]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no primary-work success fallback or active exception approval.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -937,7 +937,7 @@
       "line": 240,
       "handler_fingerprint": "3c35c364f5e15170a2c451e190cb1f789363f497c03bc8f1a63f2d3d16876018",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Typed datasource measure-list tool result",
       "reason": "Search and measure-model failures preserve accumulated items with an explicit MeasuresList error; an empty result retains the existing no-measures prefix. These independent provider and mapping failure sources require result translation rather than a provider-only recovery assumption.",
       "failure_outcome": "failure-translation",
@@ -947,7 +947,7 @@
         "tests/test_nl2sql_plugin_boundaries.py::test_metadata_tools_keep_typed_partial_or_unavailable_results[malformed-measures_retrieval]",
         "tests/test_nl2sql_plugin_boundaries.py::test_metadata_tools_keep_typed_partial_or_unavailable_results[cancelled-measures_retrieval]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this record is not active.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -958,7 +958,7 @@
       "line": 295,
       "handler_fingerprint": "e0e227b4ad11b81ec25a3ac0a001e39ec19b05ced302f2c82be4099724d3bc5f",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Typed historical-query retrieval after embedding acquisition",
       "reason": "Search or QueryItem mapping failures retain the existing partial query list and explicit error. Embedding acquisition still propagates before this handler. The historical-query error result is separate from SQL execution and does not claim a query succeeded.",
       "failure_outcome": "failure-translation",
@@ -969,7 +969,7 @@
         "tests/test_nl2sql_plugin_boundaries.py::test_metadata_tools_keep_typed_partial_or_unavailable_results[cancelled-queries_retrieval]",
         "tests/test_nl2sql_plugin_boundaries.py::test_metadata_embedding_failure_still_propagates_before_search[RuntimeError-queries_retrieval]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; exact result boundary only.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -980,7 +980,7 @@
       "line": 333,
       "handler_fingerprint": "c061eff5f2c8193a2cd929f33787d1e119b548e3fc1e4a351dc878c6e483a42f",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Explicit DAX execution tool error result",
       "reason": "Datasource/model construction and DAX provider failures are translated to ExecuteQueryResult.error, never fabricated rows. Preserve that typed error contract and user-token forwarding across independent failure sources; cancellation is not a successful result.",
       "failure_outcome": "failure-translation",
@@ -991,7 +991,7 @@
         "tests/test_nl2sql_plugin_boundaries.py::test_dax_tool_retains_user_token_and_explicit_error_result[cancelled]",
         "tests/test_nl2sql_plugin_boundaries.py::test_dax_tool_retains_user_token_and_explicit_error_result[success]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active exception or authorization change.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1002,7 +1002,7 @@
       "line": 404,
       "handler_fingerprint": "afcae1e3ad0237e97c371681db33342012b1d2dba3218086553292ad136e8207",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Read-only SQL execution tool error result",
       "reason": "Validation precedes datasource/driver access. Configuration, connection, execution or row-mapping failures preserve ExecuteQueryResult with no results and an explicit error. This typed result remains distinct from thrown primary strategy failures under the parent's grounded disposition.",
       "failure_outcome": "failure-translation",
@@ -1020,7 +1020,7 @@
         "tests/test_nl2sql_plugin_boundaries.py::test_sql_acquired_resources_close_without_replacing_outcome[database-True-cursor]",
         "tests/test_nl2sql_plugin_boundaries.py::test_sql_acquired_resources_close_without_replacing_outcome[endpoint-True-mapping]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; typed-error compatibility is not blanket recovery permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1031,7 +1031,7 @@
       "line": 415,
       "handler_fingerprint": "c80d4353cfa505610015bf462efd06cc9f87dc5ef19b64e1e4ad77a0cc7abed7",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "P6 SQL cursor/connection cleanup subordinate to nl2sql-sql-result-translation",
       "reason": "Attempt both acquired resource closes exactly once. A secondary close failure must not replace the primary typed execution result or propagating cancellation, and must not prevent the other close attempt. This is resource cleanup, not permission to recover primary work or retry writes.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1046,7 +1046,7 @@
         "tests/test_nl2sql_plugin_boundaries.py::test_real_sql_flow_retains_ordinary_answers[execution]",
         "tests/test_nl2sql_plugin_boundaries.py::test_real_sql_flow_retains_ordinary_answers[success]"
       ],
-      "review": "Exact subordinate P6 cleanup proposal only; pending independent maintainer review in Azure/gpt-rag-orchestrator#346. Not active or approved.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1057,7 +1057,7 @@
       "line": 119,
       "handler_fingerprint": "0c81dc7297c8ee37d877abacf0657433cdb0c048e22aeea41d4d5a7ab7c00d73",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Legacy vector retrieval typed result",
       "reason": "The plugin translates embedding, credential, HTTP and document conversion failures into an explicit VectorIndexRetrievalResult.error, retaining already converted documents. Its SDK and HTTP helpers separately narrow their catches; unexpected failures still reach this declared result boundary rather than becoming unmarked empty retrieval.",
       "failure_outcome": "failure-translation",
@@ -1069,7 +1069,7 @@
         "tests/test_retrieval_plugin_boundaries.py::test_real_retrieval_chain_keeps_failed_credentials_off_the_network[credential-vector]",
         "tests/test_retrieval_plugin_boundaries.py::test_real_retrieval_chain_keeps_failed_credentials_off_the_network[http-vector]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; distinct from SearchContextProvider keyword fallback and connector strict/anonymous behavior.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1080,7 +1080,7 @@
       "line": 156,
       "handler_fingerprint": "9c2eedfc5e8fa5e27f5a3ad59dfe57b9ec1ca41db37cefe868ff8514fc983569",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Legacy multimodal embedding failure result",
       "reason": "Embedding failure returns empty typed collections with an explicit error before token or search access. Preserve this existing tool result, not a keyword fallback or ordinary primary answer, across model-provider failure types.",
       "failure_outcome": "failure-translation",
@@ -1089,7 +1089,7 @@
         "tests/test_retrieval_plugin_boundaries.py::test_retrieval_tools_preserve_filtered_partial_results_and_explicit_errors[embedding-multimodal]",
         "tests/test_retrieval_plugin_boundaries.py::test_retrieval_tools_preserve_filtered_partial_results_and_explicit_errors[cancelled-embedding-multimodal]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active exception or authorization change.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1100,7 +1100,7 @@
       "line": 168,
       "handler_fingerprint": "3696e5c2ba8dbf7c4a2ffb24e525e17ce1195945a44790ef319c01d4a5188abc",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Legacy multimodal credential failure result",
       "reason": "Both the credential helper's SDK translation and unexpected credential acquisition failures produce an explicit tool error with empty collections, before any HTTP request. No anonymous retry or managed-identity substitution is introduced.",
       "failure_outcome": "failure-translation",
@@ -1110,7 +1110,7 @@
         "tests/test_retrieval_plugin_boundaries.py::test_real_retrieval_chain_keeps_failed_credentials_off_the_network[unexpected-credential-multimodal]",
         "tests/test_retrieval_plugin_boundaries.py::test_retrieval_tools_preserve_filtered_partial_results_and_explicit_errors[cancelled-token-multimodal]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; fail-closed result compatibility, not active approval.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1121,7 +1121,7 @@
       "line": 231,
       "handler_fingerprint": "ae82680785f57996702f15be3af73f3aa600e8862d2ed4869cc6d5f92c885a63",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Legacy multimodal search and document conversion result",
       "reason": "HTTP and document conversion failures retain only valid accumulated documents and mark the result with an error. Caption groups now satisfy the existing List[List[str]] model instead of raising a post-handler ValidationError; text, image and caption accumulation occurs together after conversion.",
       "failure_outcome": "failure-translation",
@@ -1132,7 +1132,7 @@
         "tests/test_retrieval_plugin_boundaries.py::test_retrieval_tools_preserve_filtered_partial_results_and_explicit_errors[cancelled-search-multimodal]",
         "tests/test_retrieval_plugin_boundaries.py::test_real_retrieval_chain_keeps_failed_credentials_off_the_network[http-multimodal]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; correcting construction of the declared result does not approve primary-operation recovery.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1143,7 +1143,7 @@
       "line": 99,
       "handler_fingerprint": "242e186111f5277b5a155a62e36b31db4e43c992f4b5335a122f37637a0863c4",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Dashboard token-validation HTTP boundary",
       "reason": "Unexpected verifier failures remain fail-closed generic 401 responses. Existing HTTPException status/detail and cancellation propagate unchanged; no claims or administrator role checks are bypassed.",
       "failure_outcome": "failure-translation",
@@ -1154,7 +1154,7 @@
         "tests/test_http_boundary_dispositions.py::test_auth_translation_is_fail_closed_bounded_and_preserves_cancellation[CancelledError-admin]",
         "tests/test_http_boundary_dispositions.py::test_known_auth_http_status_is_preserved[403-admin]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active exception or role-policy change.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1165,7 +1165,7 @@
       "line": 262,
       "handler_fingerprint": "1643f8e3fa1d3bc415f33454fc576b8a045ce0deac8332872104c6f24f111854",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Sequential dashboard configuration writes with per-key errors",
       "reason": "Each failed set_value is collected while later validated keys are still attempted, then the request returns 500 and skips refresh. Preserve this existing partial-write contract across SDK and unexpected failures, not a transaction or rollback guarantee.",
       "failure_outcome": "failure-translation",
@@ -1177,7 +1177,7 @@
         "tests/test_http_boundary_dispositions.py::test_actual_appconfig_write_consumer_never_reports_failed_update_as_applied[write]",
         "tests/test_http_boundary_dispositions.py::test_actual_appconfig_write_consumer_never_reports_failed_update_as_applied[refresh]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no approval of successful partial HTTP responses or rollback claims.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1188,7 +1188,7 @@
       "line": 251,
       "handler_fingerprint": "0e0fafabc8fb4d2cf91e060e11eb0d42010e21dfa3e8614c6ae41026e8d7b082",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional startup Search-token prefetch",
       "reason": "Prefetch is a latency warmup, not a primary request or proof of authorization. Its failure does not prevent later warmup/application startup; real requests must still acquire their required credentials. Cancellation remains startup cancellation.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1197,7 +1197,7 @@
         "tests/test_http_boundary_dispositions.py::test_optional_prewarm_stays_nonfatal_bounded_but_cancellable[RuntimeError-token]",
         "tests/test_http_boundary_dispositions.py::test_optional_prewarm_stays_nonfatal_bounded_but_cancellable[CancelledError-token]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no credential fallback or authorization decision is approved.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1208,7 +1208,7 @@
       "line": 266,
       "handler_fingerprint": "7ebb06d1a54ab002b3219a65c3a62a341f5583883e45e9eefc678020d7798d16",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional strategy-agent startup warmup",
       "reason": "The startup prewarm helper is an optional optimization for configured strategies. Preserve continued startup after its failure rather than conflating prewarm with a completed user turn; required startup configuration validation is outside this boundary.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1217,7 +1217,7 @@
         "tests/test_http_boundary_dispositions.py::test_optional_prewarm_stays_nonfatal_bounded_but_cancellable[RuntimeError-agent]",
         "tests/test_http_boundary_dispositions.py::test_optional_prewarm_stays_nonfatal_bounded_but_cancellable[CancelledError-agent]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; not primary strategy recovery permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1228,7 +1228,7 @@
       "line": 270,
       "handler_fingerprint": "ab84934a6c6b83db52299d29f19daefd338e927276d75d957597d3e0d370177e",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional identity/Search/Cosmos provider startup warmup",
       "reason": "Failures constructing warmup providers or probing the index leave application startup available under the existing optional-prewarm contract. This does not alter required AppConfig authentication failure handling or convert later request failures into success.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1239,7 +1239,7 @@
         "tests/test_http_boundary_dispositions.py::test_optional_prewarm_stays_nonfatal_bounded_but_cancellable[CancelledError-identity]",
         "tests/test_http_boundary_dispositions.py::test_optional_prewarm_stays_nonfatal_bounded_but_cancellable[CancelledError-search]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; optional warmup does not certify readiness of unavailable dependencies.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1250,7 +1250,7 @@
       "line": 343,
       "handler_fingerprint": "2e763e9609314b483a218ced55762aedff0887ba5ca06349927fed1e30c9622d",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional DEBUG request diagnostic rendering",
       "reason": "Failure to render debug information must not replace request orchestration. Preserve that auxiliary logging contract; request authentication and orchestration remain outside this handler.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1258,7 +1258,7 @@
       "evidence_tests": [
         "tests/test_http_boundary_dispositions.py::test_request_debug_failure_is_optional_without_raw_diagnostic"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; diagnostic side effect only, not primary-work recovery.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1269,7 +1269,7 @@
       "line": 440,
       "handler_fingerprint": "78e59d4dd69fdf605f19b8aa84fba79ad46157ade5f2abf187221f96829b480b",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Orchestration request token-verification HTTP boundary",
       "reason": "Unexpected verifier failures retain generic 401 rather than entering an anonymous turn. Existing HTTPException outcomes and cancellation propagate unchanged. Configuration lookup is outside this recovery and an unexpected lookup failure cannot set auth_configured=False.",
       "failure_outcome": "failure-translation",
@@ -1281,7 +1281,7 @@
         "tests/test_http_boundary_dispositions.py::test_unexpected_auth_configuration_failure_never_downgrades_to_anonymous[orchestrator]",
         "tests/test_http_boundary_dispositions.py::test_known_auth_http_status_is_preserved[500-orchestrator]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no change to issuer/audience/OBO/allowlist policy.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1292,7 +1292,7 @@
       "line": 479,
       "handler_fingerprint": "e4a31b911012c624e3e45edb9ecaabb6a2ff7242ea932bcda6cf736822d81b3a",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional resolved-request context diagnostic",
       "reason": "Rendering/logging the already resolved request context is an auxiliary side effect; failure does not invalidate the turn. The handler does not select identity, modify principal context or perform the primary orchestration.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1300,7 +1300,7 @@
       "evidence_tests": [
         "tests/test_http_boundary_dispositions.py::test_request_context_logging_failure_is_reported_without_breaking_turn"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no blanket guarantee about logging infrastructure or every diagnostic field.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1311,7 +1311,7 @@
       "line": 612,
       "handler_fingerprint": "4e03a7f0a0c3beb2a152eac1efc41452187f6af95b0654fa07418bf98e127d3b",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Authenticated history token-verification HTTP boundary",
       "reason": "Unexpected token-validation failures remain generic 401, never anonymous history access. Known HTTPException statuses and cancellation propagate; required auth configuration is read outside this handler with actual missing/retry semantics preserved.",
       "failure_outcome": "failure-translation",
@@ -1323,7 +1323,7 @@
         "tests/test_http_boundary_dispositions.py::test_unexpected_auth_configuration_failure_never_downgrades_to_anonymous[history]",
         "tests/test_http_boundary_dispositions.py::test_known_auth_http_status_is_preserved[403-history]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; principal partitioning and role checks are not relaxed.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1334,7 +1334,7 @@
       "line": 159,
       "handler_fingerprint": "6ac1d4ffa50e939771cdb5eab84725a90372bee67d1f1c343c67c1c68394fa09",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Existing term-search fallback when optional embedding client initialization fails",
       "reason": "The constructor intentionally retains a usable term-search client when the embedding provider cannot initialize. Actual constructor-to-search evidence proves the question, conversation filter and delegated token still reach Search, with no vector query after this fallback. This is retrieval-mode compatibility, not a best-effort audit side effect.",
       "failure_outcome": "failure-translation",
@@ -1344,7 +1344,7 @@
         "tests/test_search_boundary_dispositions.py::test_model_initialization_fallback_keeps_real_term_retrieval[cancelled]",
         "tests/test_search_boundary_dispositions.py::test_model_initialization_fallback_keeps_real_term_retrieval[success]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active approval or guarantee that term and vector grounding are equivalent.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1355,7 +1355,7 @@
       "line": 523,
       "handler_fingerprint": "3423933e84ae4e013c70070b463e6c8f11f63d71eda5e8691ffd9e69711b4770",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Empty-index optimization probe",
       "reason": "Unknown probe results return False without caching an empty-index result. The maintained single-agent caller uses True to bypass retrieval, so failure must not create a false empty bypass. Provider, token and malformed-response failures share this conservative probe contract; it is not evidence that retrieval itself succeeded.",
       "failure_outcome": "failure-translation",
@@ -1367,7 +1367,7 @@
         "tests/test_search_boundary_dispositions.py::test_index_probe_failure_never_caches_a_false_empty_bypass[empty]",
         "tests/test_search_boundary_dispositions.py::test_index_probe_failure_never_caches_a_false_empty_bypass[populated]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this does not approve or redesign legacy global index-cache scope.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1378,7 +1378,7 @@
       "line": 779,
       "handler_fingerprint": "ce2d376962cca89fcbd1fd58d05be30e3b7bfce07fb1f3b822ccb81029d987af",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Foundry IQ adapter to the Search JSON result contract",
       "reason": "Strict failures propagate; anonymous generic failures retain an explicit search_failed result with no fabricated or partial documents. MCP configuration errors always propagate, and enabled MCP credential/source errors propagate even in anonymous mode. Preserve those distinctions across provider and result-mapping failures, not a unified empty-context fallback.",
       "failure_outcome": "failure-translation",
@@ -1392,7 +1392,7 @@
         "tests/test_search_boundary_dispositions.py::test_foundry_wrapper_keeps_exact_failure_and_credential_contract[malformed-anonymous-True]",
         "tests/test_search_boundary_dispositions.py::test_foundry_wrapper_keeps_exact_failure_and_credential_contract[cancelled-anonymous-True]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active exception or OBO/MCP permission change.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1403,7 +1403,7 @@
       "line": 836,
       "handler_fingerprint": "4ab68ef9e9c01179d47897ede04d0c262a39a90e38d9a57c19a90be03949b846",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Legacy nullable filepath lookup helper",
       "reason": "Retain the existing helper's None-on-unavailable result as well as missing/empty-field outcomes. No maintained source caller was found, so the evidence establishes this public helper's compatibility only, not a primary citation-consumer contract. Removing or redesigning its nullable failure signal requires separate review.",
       "failure_outcome": "failure-translation",
@@ -1415,7 +1415,7 @@
         "tests/test_search_boundary_dispositions.py::test_real_filepath_http_failure_never_logs_provider_body[403]",
         "tests/test_search_boundary_dispositions.py::test_real_filepath_http_failure_never_logs_provider_body[500]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346. Unavailability remains indistinguishable from missing in the returned value; this limitation is not approved.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1426,7 +1426,7 @@
       "line": 364,
       "handler_fingerprint": "f91650fc68fc070e402c357516db16838ad8c4b626d5cea1d5f8e192bd143b91",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional reporting of already configured logging state",
       "reason": "Reporting the resolved/effective log level is auxiliary diagnostics, not configuration application. Its provider/rendering failure must not replace primary startup work. Actual missing/retry defaults and environment precedence remain, while unexpected errors no longer emit a false successful INFO/default resolution.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1438,7 +1438,7 @@
         "tests/test_optional_logging_boundaries.py::test_log_level_diagnostics_preserve_sources_without_false_default[retry]",
         "tests/test_optional_logging_boundaries.py::test_log_level_diagnostics_preserve_sources_without_false_default[cancelled]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active exception or fallback for required configuration.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1449,7 +1449,7 @@
       "line": 37,
       "handler_fingerprint": "006bf111796020c73db89525fa175e5eba8765468e766018d70ed2a2a7e6c16b",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional suppression of one known OpenTelemetry context-detach message",
       "reason": "LogRecord.getMessage performs arbitrary message conversion as well as percent formatting. If inspection fails, retain the original record rather than dropping an unknown error or raising from the optional filter. Emitting another log here could recurse through the same filter.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1460,7 +1460,7 @@
         "tests/test_otel_context_noise.py::TestAsyncGeneratorContextDetachFilter::test_retains_original_record_when_message_conversion_fails[ValueError]",
         "tests/test_otel_context_noise.py::TestSilenceContextDetachNoise::test_suppresses_the_record_end_to_end"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; exact filter side effect, not generic logging-error suppression.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1471,7 +1471,7 @@
       "line": 225,
       "handler_fingerprint": "04398c1e635e66e5d4a9697546be771d6a4590801bcff315af8ddf8ae84b3ab1",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Existing API-key configuration failure fallback to the environment",
       "reason": "Preserve the demonstrated fallback to ORCHESTRATOR_APP_APIKEY when provider lookup fails: a matching environment key can still authenticate. This is explicitly negative compatibility evidence under parent plan8b6c5c7, not approval of this retained identity choice or a new fallback.",
       "failure_outcome": "failure-translation",
@@ -1483,7 +1483,7 @@
         "tests/test_dependency_boundary_dispositions.py::test_api_key_provider_failure_preserves_legacy_env_fallback[cancelled]",
         "tests/test_dependency_boundary_dispositions.py::test_api_key_and_dapr_precedence_is_unchanged[False]"
       ],
-      "review": "Pending independent maintainer/security approval in Azure/gpt-rag-orchestrator#346. Do not claim this compatibility proposal approves fallback credentials or strict provider availability.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1494,7 +1494,7 @@
       "line": 313,
       "handler_fingerprint": "24c9e6377d66a9f8cacbeaa2ed4d4ca0fe83df621660b839ac05da4982efe76d",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional tenant-scoped JWKS cache cleanup",
       "reason": "Cache cleanup/reporting failure does not itself authenticate a token or replace signature verification. Real signed-token evidence exercises cleanup-log failure followed by new-key validation; HTTP cache evidence separately requires successful fetch before caching.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1504,7 +1504,7 @@
         "tests/test_dependency_boundary_dispositions.py::test_actual_jwks_http_cache_only_stores_successful_fetches[http]",
         "tests/test_dependency_boundary_dispositions.py::test_actual_jwks_http_cache_only_stores_successful_fetches[success]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active exception or cache/issuer policy change.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1515,7 +1515,7 @@
       "line": 338,
       "handler_fingerprint": "d6c5bd6795ce1075d529fa2f6775f61faf075ac34cc50c30ff5050c3a0877d2f",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional token segment-length debug reporting",
       "reason": "Failure rendering diagnostic lengths must not substitute for the actual JWT validation that follows. The test injects a logging failure and still verifies the real signed token and trusted identity.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1523,7 +1523,7 @@
       "evidence_tests": [
         "tests/test_dependency_boundary_dispositions.py::test_optional_jwt_diagnostics_never_log_raw_failure_or_change_validation[segment_lengths]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; diagnostic side effect only.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1534,7 +1534,7 @@
       "line": 391,
       "handler_fingerprint": "d1e49827f845f2e5b7a2ac6571017847276a95b8477b1adf796e48f574674c9c",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional JWT structural/base64 diagnostics before verification",
       "reason": "Diagnostic decoding is not the signature-validation path. Its unexpected failure must not preempt the real verifier or be treated as a trusted claim; successful signed-token verification remains required.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1543,7 +1543,7 @@
         "tests/test_dependency_boundary_dispositions.py::test_optional_jwt_diagnostics_never_log_raw_failure_or_change_validation[base64]",
         "tests/test_dependency_boundary_dispositions.py::test_real_jwks_provider_to_jwt_consumer_preserves_verification_and_cleanup[invalid_signature]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no authentication bypass or blanket decoder recovery.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1554,7 +1554,7 @@
       "line": 517,
       "handler_fingerprint": "a0aa12d0a67d63094075b16b6827a99389a458bfd8f41a80b298f2936080b798",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional unverified-claim debug reporting",
       "reason": "Diagnostic reporting failure must not change the subsequent verified identity. Unverified claims remain diagnostic inputs, not authorization evidence.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1562,7 +1562,7 @@
       "evidence_tests": [
         "tests/test_dependency_boundary_dispositions.py::test_optional_jwt_diagnostics_never_log_raw_failure_or_change_validation[claims]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no role/claim trust-policy change.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1573,7 +1573,7 @@
       "line": 542,
       "handler_fingerprint": "3e10d727e579c5d5344760486bc44f3bdbf023ec69b31c60115bf7f6313003e4",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional Graph-audience client-configuration hint",
       "reason": "The hint may fail to log, but a Graph-audience token must still fail API token validation. The real JWT case proves diagnostic failure does not convert that rejection to acceptance.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1581,7 +1581,7 @@
       "evidence_tests": [
         "tests/test_dependency_boundary_dispositions.py::test_optional_jwt_diagnostics_never_log_raw_failure_or_change_validation[graph_hint]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; not an audience exception.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1592,7 +1592,7 @@
       "line": 660,
       "handler_fingerprint": "d1cbf89f50704fae866aaed794e9240e27dc4392b290fcbd91202c981b44eea3",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional Graph-audience hint after invalid signature",
       "reason": "Failure reporting the client hint must preserve the established invalid-token 401. It cannot repair or accept the signature and does not suppress the primary verification failure.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1600,7 +1600,7 @@
       "evidence_tests": [
         "tests/test_dependency_boundary_dispositions.py::test_optional_jwt_diagnostics_never_log_raw_failure_or_change_validation[signature_hint]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no signature-validation exemption.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1611,7 +1611,7 @@
       "line": 754,
       "handler_fingerprint": "f73806ecedf1bef78be87f6125171d468c8575f5bdecc7774a7708c36c6eca77",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Legacy optional Graph display-name enrichment helper",
       "reason": "The helper returns an empty group-name list on token/group HTTP, transport, JSON or unexpected request failures. Preserve this nullable-enrichment compatibility, not an ACL decision. No maintained caller was identified, so this evidence does not establish an authenticated primary consumer.",
       "failure_outcome": "failure-translation",
@@ -1623,7 +1623,7 @@
         "tests/test_dependency_boundary_dispositions.py::test_actual_graph_http_boundary_preserves_optional_result_and_cleanup[cancelled-token]",
         "tests/test_dependency_boundary_dispositions.py::test_actual_graph_http_boundary_preserves_optional_result_and_cleanup[success-groups]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; empty-result compatibility is not approval of group authorization or fallback identity.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1634,7 +1634,7 @@
       "line": 157,
       "handler_fingerprint": "1bad1e028aba79be93961c45b4be6a161513fdd7f6d3495ae900556f4278cdb7",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Foundry context provider retrieval/mapping failure propagation",
       "reason": "Generic and typed MCP retrieve/mapping failures propagate through required CompositeContextProvider to failed turn/generic SSE, never empty successful grounding. ADR-0006 also requires fail-closed authorization preflight for MCP, non-MCP and mixed sources; no application fallback is enabled. Legitimate empty results remain normal.",
       "failure_outcome": "failure-translation",
@@ -1655,7 +1655,7 @@
         "tests/test_context_provider_boundary_dispositions.py::test_foundry_context_retains_mcp_specific_failure_rules[malformed-anonymous-setting-False]",
         "tests/test_context_provider_boundary_dispositions.py::test_foundry_context_retains_mcp_specific_failure_rules[obo-none-strict-setting-True]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no active exception or global retrieval authorization claim.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1666,7 +1666,7 @@
       "line": 314,
       "handler_fingerprint": "0952d0f245acde03f04c4a6835c1768ca0486f89f5fc10a54f26849d10b44b2d",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Multimodal embedding failure to keyword retrieval",
       "reason": "A failed embedding step retains the actual keyword query, conversation filter and selected credential path without vector queries. Preserve this documented provider fallback rather than turn an optional vector failure into empty or fabricated retrieval.",
       "failure_outcome": "failure-translation",
@@ -1676,7 +1676,7 @@
         "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[cancelled-embedding-vision]",
         "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[success-vision]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no claim of equivalent term/vector grounding or identity-policy approval.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1687,7 +1687,7 @@
       "line": 342,
       "handler_fingerprint": "b984b030e9edbd71cfc246e4184f0931ee3b8321608833ac1b21940e57df7cac",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Multimodal authorization/search/iteration failure propagation; historical ID retained",
       "reason": "ADR-0006 removes the stripped-header retry. This surviving outer rejection boundary propagates authorization, query and iterator failures, without alternate service access or empty-result substitution. The obsolete inner retry handler and its exact proposal are retired.",
       "failure_outcome": "failure-translation",
@@ -1703,7 +1703,7 @@
         "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[search-no-obo-vision]",
         "tests/test_context_provider_boundary_dispositions.py::test_search_provider_keeps_legacy_service_identity_recovery[cancelled-search-vision]"
       ],
-      "review": "Pending independent maintainer review in Azure/gpt-rag-orchestrator#346. ADR-0006 selects fail-closed behavior but grants no exception approval; no stripped-header retry remains.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1714,7 +1714,7 @@
       "line": 583,
       "handler_fingerprint": "5b3bb26721e4ecb287dc314ba94d6246a24be01ef7347c0782e527ba4601cf4e",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional visual relevance classifier after heuristic candidate selection",
       "reason": "Classifier failure retains an already-selected image, while a successful false decision omits it. Preserve that relevance fallback and deduplication rather than silently convert classifier availability into image loss. It is not a content-safety or authorization guarantee.",
       "failure_outcome": "failure-translation",
@@ -1724,7 +1724,7 @@
         "tests/test_context_provider_boundary_dispositions.py::test_multimodal_optional_images_keep_text_and_close_blob_context[rejected]",
         "tests/test_context_provider_boundary_dispositions.py::test_multimodal_optional_images_keep_text_and_close_blob_context[cancelled-classifier]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no relevance/content-safety certification.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1735,7 +1735,7 @@
       "line": 602,
       "handler_fingerprint": "fb378d4b43ed730c8484049229c1f56c838afd0d2dadb2c547e0b0b251da4099",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional image download/encoding alongside retrieved text",
       "reason": "Construction, download, read, cleanup or byte-conversion failure omits the unavailable image while retaining text. No failed image is added to image_data; successful data still passes through the existing classifier and rendering path.",
       "failure_outcome": "failure-translation",
@@ -1747,7 +1747,7 @@
         "tests/test_context_provider_boundary_dispositions.py::test_multimodal_optional_images_keep_text_and_close_blob_context[invalid-bytes]",
         "tests/test_context_provider_boundary_dispositions.py::test_multimodal_optional_images_keep_text_and_close_blob_context[cancelled-download]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; no new Blob credential policy or guarantee about stale data from other invocations.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1758,7 +1758,7 @@
       "line": 52,
       "handler_fingerprint": "c196f264c45aa48936d37421a7a61b934ac65c0320e8090d4fa6f16726072217",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional storage-account lookup for transparent citation signing",
       "reason": "The signing helper explicitly preserves an otherwise valid citation when configuration or account lookup is unavailable. It must not guess an account or make optional link enrichment fail primary retrieval. Failures from configuration acquisition and account resolution have independent sources.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1767,7 +1767,7 @@
         "tests/test_blob_sas_failure_boundaries.py::test_unavailable_configuration_preserves_unsigned_citation[config]",
         "tests/test_blob_sas_failure_boundaries.py::test_unavailable_configuration_preserves_unsigned_citation[account]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346. Parent confirmed the existing transparent signing contract, not an active exception approval.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1778,7 +1778,7 @@
       "line": 150,
       "handler_fingerprint": "c1ad86321f8e5adab4da26098a8c3e03e10dcedb5e3428f5829169a97e924127",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Optional read-only SAS enrichment of same-account citation URLs",
       "reason": "The existing public helper promises the original URL on signing failure. Delegation acquisition, signing and client cleanup can fail independently; all ordinary failures preserve the citation rather than drop it or fail the answer. Cancellation must still propagate and an unconfirmed delegation key must not be cached.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1796,7 +1796,7 @@
         "tests/test_blob_sas_failure_boundaries.py::test_cache_never_reuses_another_account_or_near_expiry_key[False]",
         "tests/test_blob_sas_failure_boundaries.py::test_cache_never_reuses_another_account_or_near_expiry_key[True]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; parent implementation and passing contract evidence do not activate this exception.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1807,7 +1807,7 @@
       "line": 175,
       "handler_fingerprint": "096b48e46b983086e608ba125d3b46ccc533b0ec5bef59a4154941343773d26d",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "MafLite optional profile lookup and deserialization",
       "reason": "Compatibility load helper retains empty UserProfile for storage/decoding failures. ADR-0006 suspends all maintained automatic profile access, including valid legacy keys, and clears cached providers because owner binding is unverified. Ordinary chat continues. Guard rejection/verbatim semantics and serialized records remain unchanged; no principal substitution, normalization, migration or hosted memory is introduced.",
       "failure_outcome": "failure-translation",
@@ -1830,7 +1830,7 @@
         "tests/test_profile_caller_safety.py::test_profile_io_cancellation_keeps_existing_caller_semantics[lite-load]",
         "tests/test_profile_caller_safety.py::test_ineligible_profile_preserves_primary_stream_failure[lite-cancelled]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346. Helper-level evidence is not approval of memory eligibility, identity or all strategy outcomes.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1841,7 +1841,7 @@
       "line": 196,
       "handler_fingerprint": "82444701e10c35bbbb9d955274a35d6a2a04c67c9bd8d074872f1b8743ab8012",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "MafLite best-effort profile persistence helper",
       "reason": "Profile enrichment persistence is an existing secondary side effect, distinct from the conversation document. Serialization, lookup and write failures retain the helper's no-result contract; provider-specific catches cannot cover all these failure sources. Failed or unconfirmed writes must not be reported as saved.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1864,7 +1864,7 @@
         "tests/test_profile_caller_safety.py::test_profile_io_cancellation_keeps_existing_caller_semantics[lite-save]",
         "tests/test_profile_caller_safety.py::test_profile_flush_cancellation_from_strategy_caller_prevents_save[lite]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; exact existing helper contract, not a primary-work fallback permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1875,7 +1875,7 @@
       "line": 159,
       "handler_fingerprint": "ecdcefabd5be82ef46d47aedb5322cb514e222da677220c30e3567e6a17593ba",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "MAF Agent Service optional classic profile lookup and deserialization",
       "reason": "Compatibility helper retains empty profile for unavailable storage or unreadable data. ADR-0006 suspends automatic profile access for every maintained caller and every legacy key pending trusted owner binding; no memory-only model client is allocated. Guard rejection/verbatim semantics, ordinary chat and Foundry ownership remain unchanged. No hosted memory, principal substitution or migration.",
       "failure_outcome": "failure-translation",
@@ -1898,7 +1898,7 @@
         "tests/test_profile_caller_safety.py::test_profile_io_cancellation_keeps_existing_caller_semantics[service-load]",
         "tests/test_profile_caller_safety.py::test_ineligible_profile_preserves_primary_stream_failure[service-cancelled]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; helper evidence grants no identity, hosted-memory or global strategy approval.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1909,7 +1909,7 @@
       "line": 181,
       "handler_fingerprint": "f98b6c3181b4dce86c60e8512374a6f77038f14fef074c54169e9798db89c092",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "MAF Agent Service best-effort classic profile persistence helper",
       "reason": "The existing profile side effect retains its no-result outcome for serialization, lookup or write failure, separately from primary agent execution and managed conversations. Narrow provider catches would change that secondary-helper failure contract. Store None is unconfirmed, not evidence that persistence succeeded.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -1932,7 +1932,7 @@
         "tests/test_profile_caller_safety.py::test_profile_io_cancellation_keeps_existing_caller_semantics[service-save]",
         "tests/test_profile_caller_safety.py::test_profile_flush_cancellation_from_strategy_caller_prevents_save[service]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; exact helper scope only, no primary-work recovery permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1943,7 +1943,7 @@
       "line": 212,
       "handler_fingerprint": "fded3a7e9349db12fa505a46fee864ed8c1ec5dc1c34fc0041bb40a8f318f00f",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Legacy multimodal personalization-profile lookup and deserialization",
       "reason": "Compatibility helper retains empty profile for unreadable content and storage failure. ADR-0006 suspends automatic profile access/extraction for all maintained callers, including valid legacy keys, and clears cached profile/welcome context. Guard verbatim semantics and ordinary history remain; no principal substitution, normalization, migration or hosted eligibility is introduced.",
       "failure_outcome": "failure-translation",
@@ -1966,7 +1966,7 @@
         "tests/test_profile_caller_safety.py::test_profile_io_cancellation_keeps_existing_caller_semantics[vision-load]",
         "tests/test_profile_caller_safety.py::test_ineligible_profile_preserves_primary_stream_failure[vision-cancelled]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346. No approval of profile eligibility, default-user behavior, identity or terminal outcome.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -1977,7 +1977,7 @@
       "line": 233,
       "handler_fingerprint": "cfb0b75d6f4a65cb4cbf5087786aa928a06888cb062da3bb666e30f54b88fde6",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Legacy multimodal secondary profile persistence helper",
       "reason": "The existing helper does not propagate serialization/read/write failures from this personalization side effect. Preserving that bounded no-result contract requires covering independent failure sources; it is not approval of primary retrieval or agent failure recovery. The existing create/update choice and document fields remain unchanged.",
       "failure_outcome": "contractual-best-effort-side-effect",
@@ -2000,7 +2000,7 @@
         "tests/test_profile_caller_safety.py::test_profile_io_cancellation_keeps_existing_caller_semantics[vision-save]",
         "tests/test_profile_caller_safety.py::test_profile_flush_cancellation_from_strategy_caller_prevents_save[vision]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; identity/default-user and primary-agent contracts remain outside this exact helper proposal.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -2011,7 +2011,7 @@
       "line": 700,
       "handler_fingerprint": "2a8b9b27cfa2a2a2424e25a4ad39afc70d5c5ed274ee3220afe45bf529043f34",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "API JWT verification after required authentication configuration is resolved",
       "reason": "Unexpected JWKS transport, key construction or verifier failures must deny access under the existing generic 401 contract, never trust unverified roles or continue with service identity. Required configuration remains a separate 500 before this handler; cancellation and explicit HTTP errors propagate separately. One provider-specific exception tuple cannot cover these independent verification boundaries.",
       "failure_outcome": "failure-translation",
@@ -2030,7 +2030,7 @@
         "tests/test_auth_failure_boundaries.py::test_real_jwt_required_config_remains_server_error[OAUTH_AZURE_AD_TENANT_ID]",
         "tests/test_auth_failure_boundaries.py::test_real_jwt_required_config_remains_server_error[OAUTH_AZURE_AD_CLIENT_ID]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact fail-closed boundary proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -2041,7 +2041,7 @@
       "line": 660,
       "handler_fingerprint": "67f09acc0d2804f3ca0ca38788ea04273b288e91ca6b8acca85bfd8fb45d1201",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Conversation-list HTTP response after authenticated principal resolution",
       "reason": "Query and response construction can fail outside one provider exception family. The established HTTP contract translates all such primary failures to a generic 500, never an empty successful list. Authorization is resolved before this handler and cancellation is not caught.",
       "failure_outcome": "failure-translation",
@@ -2053,7 +2053,7 @@
         "tests/test_cosmos_failure_boundaries.py::test_real_cosmos_to_http_failure_translation[unexpected-list]",
         "tests/test_cosmos_failure_boundaries.py::test_real_cosmos_to_http_failure_translation[cancelled-list]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact HTTP boundary proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -2064,7 +2064,7 @@
       "line": 705,
       "handler_fingerprint": "a7ab1289c3646b1e428512d79ca1cbb623489e3087ee194ad5541aae96cfa7b2",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Conversation-detail HTTP response after authenticated principal resolution",
       "reason": "Unexpected connector or response-construction failures require the existing generic 500. Explicit not-found and foreign-principal HTTP errors retain their separate preceding propagation handler. This does not approve or redesign the connector's legacy SDK-error-to-unavailable mapping.",
       "failure_outcome": "failure-translation",
@@ -2076,7 +2076,7 @@
         "tests/test_cosmos_failure_boundaries.py::test_real_cosmos_to_http_failure_translation[cancelled-read]",
         "tests/test_cosmos_failure_boundaries.py::test_real_conversation_http_rejects_foreign_principal[read]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact HTTP boundary proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -2087,7 +2087,7 @@
       "line": 755,
       "handler_fingerprint": "818fdd13e433897de8a460c2405da2f397f52b89e800fe94ea0a95389e73abac",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Conversation-rename HTTP response after authenticated principal resolution",
       "reason": "Unexpected read, mutation or response-construction failures require the existing generic 500 rather than success. Explicit 400/403/404/500 domain HTTP errors remain unchanged in the preceding handler. A provider-only tuple cannot cover response construction failures.",
       "failure_outcome": "failure-translation",
@@ -2102,7 +2102,7 @@
         "tests/test_cosmos_failure_boundaries.py::test_real_conversation_http_mutation_outcome[cancelled-rename]",
         "tests/test_cosmos_failure_boundaries.py::test_real_conversation_http_mutation_outcome[success-rename]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact HTTP boundary proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -2113,7 +2113,7 @@
       "line": 797,
       "handler_fingerprint": "323a067df29dde5671a126521de7408d78d6e2471a977bb51f0085adccbd5440",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Conversation-soft-delete HTTP response after authenticated principal resolution",
       "reason": "Unexpected read or soft-delete failures require the existing generic 500 rather than a successful deletion response. Explicit principal/not-found/mutation HTTP errors retain their preceding handler. Cleanup cancellation is not converted to success.",
       "failure_outcome": "failure-translation",
@@ -2128,7 +2128,7 @@
         "tests/test_cosmos_failure_boundaries.py::test_real_conversation_http_mutation_outcome[cancelled-delete]",
         "tests/test_cosmos_failure_boundaries.py::test_real_conversation_http_mutation_outcome[success-delete]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact HTTP boundary proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -2139,7 +2139,7 @@
       "line": 214,
       "handler_fingerprint": "ffda26fac26a2c21905ab003e8a1fd9df02538ff0b9641ee543a2c740a616b1c",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Hosted typed turn stream consuming a selected runtime strategy",
       "reason": "Unknown strategy failures must emit the existing generic typed terminal error before unchanged propagation. A provider-specific exception tuple cannot cover all selected strategies. Cancellation remains a separate typed event and unchanged propagation, not success.",
       "failure_outcome": "propagation",
@@ -2151,7 +2151,7 @@
         "tests/test_hosted_responses.py::TestSseGeneratorErrorClassification::test_real_hosted_stream_keeps_terminal_outcome_and_safe_transport_log[failure-True]",
         "tests/test_hosted_responses.py::TestSseGeneratorErrorClassification::test_real_hosted_stream_keeps_terminal_outcome_and_safe_transport_log[cancelled-True]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact boundary proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -2162,7 +2162,7 @@
       "line": 309,
       "handler_fingerprint": "7d933e1e98ec42712bb1feb09de815692f79e39580feee6a1d59a1dee4dec26f",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Already-started hosted Responses API SSE transport",
       "reason": "HTTP status cannot change once streaming begins. Arbitrary strategy initialization or stream failures require the existing generic terminal error frame, deduplicated when the typed stream already emitted it. Successful closing frames must not follow failure; missing call context and cancellation retain their separate outcomes.",
       "failure_outcome": "failure-translation",
@@ -2175,7 +2175,7 @@
         "tests/test_hosted_responses.py::TestSseGeneratorErrorClassification::test_real_hosted_stream_keeps_terminal_outcome_and_safe_transport_log[success-True]",
         "tests/test_hosted_responses.py::TestSseGeneratorErrorClassification::test_missing_call_context_is_not_downgraded_to_internal_error"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact boundary proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -2186,7 +2186,7 @@
       "line": 229,
       "handler_fingerprint": "cfd7f834e39c4328d8a48dc2617296476a3c86980daacdf4540854deccb2fd49",
       "caught_types": ["BaseException"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Chat-client cleanup after MCP strategy execution",
       "reason": "Cleanup must not replace an existing model failure or task cancellation, including when cleanup itself is cancelled. Without a primary exception, the identical cleanup failure must propagate after request-status telemetry. Catching only Exception would let cleanup cancellation mask the primary outcome. This is cleanup priority, not successful primary-work recovery.",
       "failure_outcome": "propagation",
@@ -2199,7 +2199,7 @@
         "tests/test_mcp_strategy.py::test_mcp_strategy_surfaces_chat_cleanup_error_without_primary_error[RuntimeError]",
         "tests/test_mcp_strategy.py::test_mcp_strategy_surfaces_chat_cleanup_error_without_primary_error[CancelledError]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact cleanup proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     },
     {
@@ -2210,7 +2210,7 @@
       "line": 543,
       "handler_fingerprint": "425ec5f38cdaa5fef635a7b9bed767bec4fad5f2d674700b04bdb9e68e46df4a",
       "caught_types": ["Exception"],
-      "status": "proposed",
+      "status": "active",
       "boundary": "Already-started classic SSE response consuming typed orchestration events",
       "reason": "HTTP status cannot be replaced once streaming begins. Unknown failures must terminate with the existing generic error frame, deduplicated when stream_turn already emitted it, rather than raw assistant text or an unframed transport failure.",
       "failure_outcome": "failure-translation",
@@ -2231,7 +2231,7 @@
         "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[cancellation-True-MafLiteStrategy]",
         "tests/test_audit_lifecycle.py::test_real_maf_turn_sse_chain_preserves_safe_terminal_outcomes[cancellation-True-MafAgentServiceStrategy]"
       ],
-      "review": "Pending independent maintainer approval in Azure/gpt-rag-orchestrator#346; this exact boundary proposal grants no permission.",
+      "review": "Initial administrative adoption authorized by maintainer: https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634. Exact existing exception only; not independent review, additional allowances, or approval of broader identity, durability or runtime behavior.",
       "review_by_stage": "before-quality-gate-activation"
     }
   ]

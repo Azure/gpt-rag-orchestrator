@@ -40,8 +40,8 @@
   "toolchain": {"ruff": "0.16.5", "mypy": "2.3.1", "import-linter": "2.14", "grimp": "3.16"},
   "required_checks": ["lint", "typing", "architecture", "exceptions", "policy", "tests", "frontend"],
   "review": {
-    "status": "proposed",
-    "reference": "https://github.com/Azure/GPT-RAG/pull/689",
-    "rationale": "ADR-0005 authorizes implementation, not approval of individual handler exemptions or activation of required checks."
+    "status": "active",
+    "reference": "https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634",
+    "rationale": "Explicit maintainer authorization for initial administrative adoption of this policy, its existing typing scope and module surfaces, and exactly 92 existing exception records at cb6e2f3a34f0123aeb39ceaaf0c0063078318ac6. Not independent review or proof of required-check enforcement; repository settings and reference/negative-control validation remain separate. No additional allowances or production deployment."
   }
 }

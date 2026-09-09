@@ -733,7 +733,7 @@ def test_local_variables_are_not_public_module_exports(tmp_path):
     assert any(f["rule"] == "unresolved-import" for f in findings)
 
 
-def test_audit_proposals_bind_source_without_authorizing_themselves():
+def test_adopted_audit_records_bind_source_and_proposals_still_fail():
     root = Path(QUALITY["__file__"]).resolve().parents[2]
     records = QUALITY["load_records"](root)["exceptions.json"]["entries"]
     records = [r for r in records if r["module_id"].startswith("telemetry.audit")]
@@ -742,9 +742,11 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
         "telemetry.audit", "telemetry.audit_contract", "telemetry.audit_sanitizer")]
     assert len(current) == len(records) == 8
     passed = {test for record in records for test in record["evidence_tests"]}
-    assert QUALITY["check_exceptions"](current, records, passed)
+    proposed_fixture = [{**record, "status": "proposed"} for record in records]
+    assert QUALITY["check_exceptions"](current, proposed_fixture, passed)
     reviewed_fixture = [{**record, "status": "active"} for record in records]
     assert not QUALITY["check_exceptions"](current, reviewed_fixture, passed)
+    assert QUALITY["check_exceptions"](current, reviewed_fixture, set())
 
 
 @pytest.mark.parametrize("record_id,outcome", [
@@ -830,7 +832,7 @@ def test_audit_proposals_bind_source_without_authorizing_themselves():
     ("single-direct-stream-contextual-propagation", "propagation"),
     ("single-agent-stream-contextual-propagation", "propagation"),
 ])
-def test_compatibility_proposal_is_exact_and_not_self_authorized(record_id, outcome):
+def test_adopted_compatibility_record_is_exact_and_proposals_still_fail(record_id, outcome):
     root = Path(QUALITY["__file__"]).resolve().parents[2]
     records = QUALITY["load_records"](root)["exceptions.json"]["entries"]
     record = next(r for r in records if r["id"] == record_id)
@@ -839,16 +841,16 @@ def test_compatibility_proposal_is_exact_and_not_self_authorized(record_id, outc
                and h["symbol"] == record["symbol"]
                and h["handler_fingerprint"] == record["handler_fingerprint"]]
     assert len(current) == 1
-    assert record["status"] == "proposed"
+    assert record["status"] == "active"
     assert record["failure_outcome"] == outcome
     passed = set(record["evidence_tests"])
-    assert QUALITY["check_exceptions"](current, [record], passed)
+    assert QUALITY["check_exceptions"](current, [{**record, "status": "proposed"}], passed)
     reviewed_fixture = [{**record, "status": "active"}]
     assert not QUALITY["check_exceptions"](current, reviewed_fixture, passed)
     assert QUALITY["check_exceptions"](current, reviewed_fixture, set())
 
 
-def test_non_audit_turn_proposal_binds_propagation_without_granting_approval():
+def test_adopted_non_audit_turn_record_still_requires_approval_and_evidence():
     root = Path(QUALITY["__file__"]).resolve().parents[2]
     records = QUALITY["load_records"](root)["exceptions.json"]["entries"]
     record = next(r for r in records if r["id"] == "turn-error-event-before-propagation")
@@ -856,14 +858,14 @@ def test_non_audit_turn_proposal_binds_propagation_without_granting_approval():
                if h["module_id"] == record["module_id"] and h["symbol"] == record["symbol"]]
     assert len(current) == 1
     assert record["failure_outcome"] == "propagation"
-    assert record["status"] == "proposed"
+    assert record["status"] == "active"
     passed = set(record["evidence_tests"])
-    assert QUALITY["check_exceptions"](current, [record], passed)
+    assert QUALITY["check_exceptions"](current, [{**record, "status": "proposed"}], passed)
     assert not QUALITY["check_exceptions"](current, [{**record, "status": "active"}], passed)
     assert QUALITY["check_exceptions"](current, [{**record, "status": "active"}], set())
 
 
-def test_adr0006_retires_only_removed_handlers_and_keeps_all_proposals_inactive():
+def test_initial_adoption_activates_only_existing_records_and_preserves_retirements():
     root = Path(QUALITY["__file__"]).resolve().parents[2]
     records = QUALITY["load_records"](root)["exceptions.json"]["entries"]
     retired = {
@@ -875,7 +877,12 @@ def test_adr0006_retires_only_removed_handlers_and_keeps_all_proposals_inactive(
     }
     assert not retired.intersection(record["id"] for record in records)
     assert len(records) == 92
-    assert all(record["status"] == "proposed" for record in records)
+    approval = "https://github.com/Azure/GPT-RAG/issues/681#issuecomment-5601804634"
+    assert all(record["status"] == "active" for record in records)
+    assert all(approval in record["review"] for record in records)
+    policy = QUALITY["load_records"](root)["policy.json"]
+    assert policy["review"]["status"] == "active"
+    assert policy["review"]["reference"] == approval
     current = QUALITY["handlers"](QUALITY["collect"](root, ["src"]))
     key = lambda item: (item["module_id"], item["symbol"], item["handler_fingerprint"])
     assert {key(record) for record in records} == {key(handler) for handler in current}
