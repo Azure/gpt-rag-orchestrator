@@ -5,7 +5,7 @@
 FROM mcr.microsoft.com/devcontainers/javascript-node:20-bookworm AS frontend-build
 WORKDIR /build
 COPY frontend/package*.json ./frontend/
-RUN cd frontend && npm install --no-audit --no-fund
+RUN cd frontend && npm ci --include=dev --no-audit --no-fund
 COPY frontend/ ./frontend/
 # Vite outDir is configured to '../src/static' so the bundle lands here:
 RUN cd frontend && npm run build
