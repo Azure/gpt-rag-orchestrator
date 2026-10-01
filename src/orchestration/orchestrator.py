@@ -237,6 +237,26 @@ class Orchestrator:
                     },
                 )
 
+            # Never adopt an id owned by another partition: the id also
+            # scopes conversation-level retrieval filters.
+            if self.conversation_id:
+                owner_partition_key = (
+                    f"anonymous-{self.conversation_id}"
+                    if self.principal_id == "anonymous"
+                    else self.principal_id
+                )
+                existing_conversation = await self.database_client.get_document(
+                    self.database_container, self.conversation_id, partition_key=owner_partition_key
+                )
+                if existing_conversation is None and await self._conversation_id_owned_elsewhere(
+                    self.conversation_id
+                ):
+                    logging.warning(
+                        "Supplied conversation_id belongs to another principal; "
+                        "starting a new conversation instead"
+                    )
+                    self.conversation_id = str(uuid.uuid4())
+
             try:
                 # 1) Load or create our conversation document in Cosmos
                 # For anonymous users, use anonymous-{conversation_id} as partition key to avoid hot partitions
@@ -260,19 +280,6 @@ class Orchestrator:
                         self.database_container, self.conversation_id, partition_key=partition_key
                     )
                     if conversation is None:
-                        # Never adopt an id owned by another partition: the id also
-                        # scopes conversation-level retrieval filters.
-                        if await self._conversation_id_owned_elsewhere(self.conversation_id):
-                            logging.warning(
-                                "Supplied conversation_id belongs to another principal; "
-                                "starting a new conversation instead"
-                            )
-                            self.conversation_id = str(uuid.uuid4())
-                            partition_key = (
-                                f"anonymous-{self.conversation_id}"
-                                if self.principal_id == "anonymous"
-                                else self.principal_id
-                            )
                         logging.info(f"Conversation {self.conversation_id} not found; creating new conversation")
                         default_name = ask[:50] if ask else "Untitled Conversation"
                         conversation = {

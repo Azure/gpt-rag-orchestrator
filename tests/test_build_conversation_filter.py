@@ -13,8 +13,8 @@ returned by any RAG strategy (they all funnel through this single helper).
 These tests pin the behaviour that both representations count as shared.
 """
 
-from connectors.search import build_conversation_filter
-from util.conversation_scope import (
+from connectors.search import (
+    build_conversation_filter,
     build_conversation_owner_clause,
     resolve_conversation_owner_id,
 )

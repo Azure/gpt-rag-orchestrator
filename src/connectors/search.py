@@ -3,16 +3,14 @@ import logging
 import json
 import time
 import hashlib
+import functools
+from collections.abc import Mapping
 from typing import Optional, Any, Dict
 from pydantic import BaseModel, Field
 from azure.core.exceptions import AzureError
 
 from dependencies import get_config
 from util.metadata import format_custom_metadata, parse_allowed_keys
-from util.conversation_scope import (
-    build_conversation_filter,
-    resolve_conversation_owner_id,
-)
 from telemetry import AuditEmitter, ReasonCode
 from opentelemetry.trace.propagation.tracecontext import (
     TraceContextTextMapPropagator,
@@ -75,6 +73,83 @@ class SearchResult(BaseModel):
     # SEARCH_INCLUDE_METADATA_IN_CONTEXT flag is off this stays None and the
     # serialized output is byte-for-byte unchanged.
     custom_metadata: Optional[Any] = Field(default=None, exclude=True)
+
+
+ANONYMOUS_PRINCIPAL_ID = "anonymous"
+CONVERSATION_OWNER_FIELD = "metadata_security_user_ids"
+
+
+def _odata_escape_string(value: Optional[str]) -> str:
+    """Escape a string for embedding in single-quoted OData literals."""
+    return (value or "").replace("'", "''")
+
+
+def resolve_conversation_owner_id(user_context: Any) -> Optional[str]:
+    """Return the server-derived principal that owns conversation uploads."""
+    if not isinstance(user_context, Mapping):
+        return None
+    for key in ("principal_id", "oid"):
+        value = str(user_context.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def build_conversation_owner_clause(
+    conversation_id: Optional[str],
+    owner_id: Optional[str],
+    *,
+    field_name: str = "conversationId",
+    owner_field: str = CONVERSATION_OWNER_FIELD,
+) -> Optional[str]:
+    """Build the clause matching conversation uploads stamped for ``owner_id``."""
+    cid = (conversation_id or "").strip()
+    owner = (owner_id or "").strip()
+    if not cid or not owner:
+        return None
+    safe_field = (field_name or "").strip() or "conversationId"
+    safe_owner_field = (owner_field or "").strip() or CONVERSATION_OWNER_FIELD
+    if owner == ANONYMOUS_PRINCIPAL_ID:
+        owner_clause = f"not {safe_owner_field}/any()"
+    else:
+        owner_clause = (
+            f"{safe_owner_field}/any(u: u eq '{_odata_escape_string(owner)}')"
+        )
+    return f"({safe_field} eq '{_odata_escape_string(cid)}' and {owner_clause})"
+
+
+def build_conversation_filter(
+    conversation_id: Optional[str],
+    *,
+    field_name: str = "conversationId",
+    owner_id: Optional[str] = None,
+    owner_field: str = CONVERSATION_OWNER_FIELD,
+) -> str:
+    """Build OData filter for conversation-scoped retrieval.
+
+    Includes:
+    - conversation-specific chunks (conversationId == <cid>) only when they
+      are stamped for ``owner_id``; without an owner they are excluded so a
+      reused conversation id cannot expose another principal's uploads
+    - shared/global chunks always. A chunk is treated as shared when its
+      conversationId is the 'NaN' sentinel OR null/unset. Ingestion has used
+      both representations for global corpora, so both must match here,
+      otherwise globally-ingested documents become invisible to retrieval.
+    """
+    safe_field = (field_name or "").strip() or "conversationId"
+    shared_clause = f"({safe_field} eq 'NaN' or {safe_field} eq null)"
+    owned_clause = build_conversation_owner_clause(
+        conversation_id,
+        owner_id,
+        field_name=safe_field,
+        owner_field=owner_field,
+    )
+    if owned_clause:
+        return f"{owned_clause} or {shared_clause}"
+    return shared_clause
+
+
+_module_build_conversation_filter = build_conversation_filter
 
 
 class SearchClient:
@@ -524,6 +599,11 @@ class SearchClient:
         logging.info(f"[Retrieval] Search approach: {self.search_approach}")
         logging.info(f"[Retrieval] Executing search for query: {query}")
 
+        # Bind the server-derived owner so conversation uploads stay principal-scoped.
+        build_conversation_filter = functools.partial(
+            _module_build_conversation_filter,
+            owner_id=resolve_conversation_owner_id(getattr(self, "_user_context", None)),
+        )
         search_user_token = None
         try:
             logging.info("[Retrieval] Using Azure AI Search for document retrieval")
@@ -541,11 +621,7 @@ class SearchClient:
 
             # Filter by conversation scope: this chat + shared corpora (general/global).
             # Never query without a filter: an unset id would return every chunk in the index.
-            search_body["filter"] = build_conversation_filter(
-                self._conversation_id,
-                owner_id=resolve_conversation_owner_id(getattr(self, "_user_context", None)),
-                field_name="conversationId",
-            )
+            search_body["filter"] = build_conversation_filter(self._conversation_id, field_name="conversationId")
 
             # Generate embeddings for vector/hybrid search
             if self.search_approach in ["vector", "hybrid"] and self.aoai_client:

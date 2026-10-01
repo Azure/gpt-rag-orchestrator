@@ -10,9 +10,11 @@ This strategy extends the MAF Lite approach with multimodal capabilities:
 """
 
 import asyncio
+import functools
 import logging
 import re
 import time
+from collections.abc import Mapping
 from typing import Any, Optional
 
 # Suppress Azure SDK HTTP logging BEFORE importing azure packages
@@ -46,9 +48,25 @@ from connectors.multimodal_chat_client import MultimodalChatClient
 from connectors.search import acquire_obo_search_token
 from connectors.obo import resolve_retrieval_authorization
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
-from util.conversation_scope import resolve_conversation_owner_id
 from dependencies import get_config
 from openai import BadRequestError
+
+
+def _resolve_conversation_owner_id(user_context) -> Optional[str]:
+    """Return the server-derived principal that owns conversation-scoped chunks."""
+    if not isinstance(user_context, Mapping):
+        return None
+    for key in ("principal_id", "oid"):
+        value = user_context.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _scoped_search_provider_factory(owner_id: Optional[str]):
+    """Bind the conversation owner to the search provider constructor."""
+    return functools.partial(MultimodalSearchContextProvider, owner_id=owner_id)
+
 
 _IMAGE_RE = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
 _IMAGE_CLASSIFIER_PROMPT = (
@@ -244,6 +262,10 @@ class MultimodalStrategy(BaseAgentStrategy):
         if not self.search_index_name:
             logging.warning("[MultimodalStrategy] No search index name configured, skipping search")
             return None
+
+        MultimodalSearchContextProvider = _scoped_search_provider_factory(
+            _resolve_conversation_owner_id(self.user_context)
+        )
         try:
             allow_anonymous = self.cfg.get(
                 "ALLOW_ANONYMOUS", default=True, type=bool
@@ -324,7 +346,6 @@ class MultimodalStrategy(BaseAgentStrategy):
                 authorization_mode=authorization_mode,
                 classify_images_fn=self._classify_image_relevance if self.classify_images else None,
                 classify_images_concurrency=self.image_classification_concurrency,
-                owner_id=resolve_conversation_owner_id(self.user_context),
             )
             logging.info(
                 "[MultimodalStrategy] MultimodalSearchContextProvider created "

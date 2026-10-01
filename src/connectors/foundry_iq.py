@@ -47,12 +47,6 @@ from telemetry.audit_contract import (
     new_event_id,
     utc_now,
 )
-from util.conversation_scope import (
-    build_conversation_filter,
-    build_conversation_owner_clause,
-    odata_escape_string as _odata_escape_string,
-    resolve_conversation_owner_id,
-)
 from connectors.foundry_iq_mcp import (
     McpCredentialError,
     McpRuntimeConfig,
@@ -229,6 +223,54 @@ class McpSourceError(RuntimeError):
     """Raised when a required MCP source fails during Foundry IQ retrieval."""
 
 
+def _odata_escape_string(value: Optional[str]) -> str:
+    """Escape a string for embedding in a single-quoted OData literal."""
+    return (value or "").replace("'", "''")
+
+
+_ANONYMOUS_PRINCIPAL_ID = "anonymous"
+_CONVERSATION_OWNER_FIELD = "metadata_security_user_ids"
+
+
+def _resolve_conversation_owner_id(user_context: Any) -> Optional[str]:
+    """Return the server-derived principal that owns conversation uploads."""
+    if not isinstance(user_context, Mapping):
+        return None
+    for key in ("principal_id", "oid"):
+        value = str(user_context.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _build_conversation_owner_clause(
+    conversation_id: Optional[str], owner_id: Optional[str]
+) -> Optional[str]:
+    """Build the clause matching conversation uploads stamped for ``owner_id``."""
+    cid = (conversation_id or "").strip()
+    owner = (owner_id or "").strip()
+    if not cid or not owner:
+        return None
+    if owner == _ANONYMOUS_PRINCIPAL_ID:
+        owner_clause = f"not {_CONVERSATION_OWNER_FIELD}/any()"
+    else:
+        owner_clause = (
+            f"{_CONVERSATION_OWNER_FIELD}/any(u: u eq '{_odata_escape_string(owner)}')"
+        )
+    return f"(conversationId eq '{_odata_escape_string(cid)}' and {owner_clause})"
+
+
+def _build_conversation_filter(
+    conversation_id: Optional[str], owner_id: Optional[str]
+) -> str:
+    """Owner-scoped conversation uploads plus the shared corpus."""
+    shared_clause = "(conversationId eq 'NaN' or conversationId eq null)"
+    owned_clause = _build_conversation_owner_clause(conversation_id, owner_id)
+    if owned_clause:
+        return f"{owned_clause} or {shared_clause}"
+    return shared_clause
+
+
 def _normalize_security_ids(values: Iterable[Any]) -> List[str]:
     """Return stable, non-empty security IDs without broadening the filter."""
     normalized: List[str] = []
@@ -343,8 +385,8 @@ def build_pattern_b_filter_add_on(
     if cid:
         conversation_clause = (
             "("
-            + build_conversation_filter(
-                cid, owner_id=resolve_conversation_owner_id(context)
+            + _build_conversation_filter(
+                cid, _resolve_conversation_owner_id(context)
             )
             + ")"
         )
@@ -364,7 +406,7 @@ def build_conversation_upload_filter_add_on(
     clause is emitted without outer parentheses to stay as close as possible to
     the simple ``conversationId eq`` form Foundry IQ accepts for this source.
     """
-    clause = build_conversation_owner_clause(conversation_id, owner_id)
+    clause = _build_conversation_owner_clause(conversation_id, owner_id)
     if clause is None:
         return None
     return clause[1:-1]
@@ -1252,7 +1294,7 @@ class FoundryIQClient:
                 f"FOUNDRY_IQ_API_VERSION={self.api_version}."
             )
         filter_add_on = build_conversation_upload_filter_add_on(
-            cid, resolve_conversation_owner_id(user_context)
+            cid, _resolve_conversation_owner_id(user_context)
         )
         if not filter_add_on:
             logging.warning(
