@@ -463,17 +463,13 @@ class Orchestrator:
                         end_audit_request(audit_token)
 
     async def _conversation_id_owned_elsewhere(self, conversation_id: str) -> bool:
-        """Return True when the id already belongs to another principal's partition."""
-        try:
-            return await self.database_client.document_id_exists(
-                self.database_container, conversation_id
-            )
-        except Exception:
-            # Fail closed: an unverifiable id is never reused.
-            logging.warning(
-                "[Orchestrator] Conversation ownership check failed; issuing a new conversation id"
-            )
-            return True
+        """Return True when the id already belongs to another principal's partition.
+
+        Lookup failures propagate so an unverifiable id fails the request closed.
+        """
+        return await self.database_client.document_id_exists(
+            self.database_container, conversation_id
+        )
 
     def _start_conversation_persistence(
         self,

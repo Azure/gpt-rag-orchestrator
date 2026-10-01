@@ -107,6 +107,8 @@ async def test_ownership_lookup_failure_fails_closed(
     mock_cosmos.document_id_exists = AsyncMock(side_effect=RuntimeError("cosmos down"))
     instance = await make_orchestrator()
 
-    [c async for c in instance.stream_response("question")]
+    with pytest.raises(RuntimeError, match="cosmos down"):
+        [c async for c in instance.stream_response("question")]
 
-    assert instance.conversation_id != FOREIGN_ID
+    mock_cosmos.create_document.assert_not_awaited()
+    instance.agentic_strategy.set_context.assert_called_once_with(None)
