@@ -443,10 +443,12 @@ class TestOrchestratorConversationHistory:
             async for chunk in orchestrator.stream_response("Continue"):
                 chunks.append(chunk)
 
-            # Should have called get_document with partition_key
-            self.mock_cosmos.get_document.assert_called_once()
-            call_kwargs = self.mock_cosmos.get_document.call_args.kwargs
-            assert call_kwargs.get("partition_key") == "user-xyz"
+            # Ownership pre-check and conversation load both read the owner's partition.
+            assert self.mock_cosmos.get_document.await_count >= 1
+            for call in self.mock_cosmos.get_document.await_args_list:
+                assert call.args[:2] == ("conversations", "conv-123")
+                assert call.kwargs.get("partition_key") == "user-xyz"
+            assert orchestrator.conversation_id == "conv-123"
 
     async def test_save_feedback_with_partition_key(self):
         """save_feedback should use partition key when reading conversation."""
