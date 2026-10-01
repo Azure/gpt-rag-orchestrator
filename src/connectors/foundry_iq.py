@@ -160,9 +160,8 @@ SHAREPOINT_REMOTE_FILTER_EXPRESSION_ADD_ON_KEY = (
 # IQ managed identity on the target Fabric workspace) and by the operator
 # docs. Because content is stored in AI Search, ``indexedOneLake`` is a
 # native (not remote) kind: no OBO requirement and no maxRuntimeInSeconds
-# bump. If the service MI token is forwarded
-# (``FOUNDRY_IQ_FORWARD_SOURCE_AUTH=true``), Foundry IQ evaluates any
-# permission filters against the bound source using that identity.
+# bump. Permission filters are evaluated only with a per-user OBO token;
+# the service identity is never forwarded as query source authorization.
 ONELAKE_KS_ENABLED_KEY = "ONELAKE_KS_ENABLED"
 ONELAKE_KNOWLEDGE_SOURCE_NAME_KEY = "ONELAKE_KNOWLEDGE_SOURCE_NAME"
 ONELAKE_WORKSPACE_ID_KEY = "ONELAKE_WORKSPACE_ID"
@@ -390,17 +389,17 @@ class FoundryIQClient:
         self.max_output_documents = _as_optional_int(
             self.cfg.get(FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS_KEY, None)
         )
-        # When true (default), and no per-user OBO token is available, the
-        # service managed-identity Search-audience token is forwarded as
-        # ``x-ms-query-source-authorization`` so Foundry IQ can evaluate
-        # RBAC-scoped permission filters on the bound knowledge source. This
-        # is required by knowledge bases whose index has
-        # ``permissionFilterOption=enabled`` and whose knowledge source uses
-        # ``ingestionPermissionOptions=["rbacScope"]`` - without it the
-        # retrieve action returns 502 ("Failed to query search index").
-        self.forward_source_auth = _as_bool(
-            self.cfg.get(FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY, True, type=bool)
-        )
+        # Deprecated and ignored: the service managed-identity token is never
+        # forwarded as ``x-ms-query-source-authorization``. Only a per-user OBO
+        # token is forwarded, so permission-trimmed sources fail closed for
+        # anonymous requests instead of returning service-identity results.
+        self.forward_source_auth = False
+        if _as_bool(self.cfg.get(FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY, False, type=bool)):
+            logging.warning(
+                "[FoundryIQClient] %s is deprecated and ignored; the service "
+                "identity is never forwarded as query source authorization",
+                FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY,
+            )
         # Hybrid file-upload sidecar. Only meaningful for Pattern A (azureBlob
         # primary); Pattern B already carries a conversationId filterAddOn on its
         # single searchIndex source, so it needs no second source.
@@ -1822,22 +1821,13 @@ class FoundryIQClient:
                 "token_audience=%s source=obo",
                 _SEARCH_SCOPE,
             )
-        elif self.forward_source_auth:
-            # Anonymous/unauth chat path: forward the service MI Search-audience
-            # token so Foundry IQ can evaluate RBAC-scope permission filters on
-            # the bound knowledge source. The MI itself must hold the relevant
-            # data-plane role on the storage container (or other source) for
-            # the filter to admit documents.
-            headers["x-ms-query-source-authorization"] = token
-            logging.info(
-                "[FoundryIQClient][Trimming] x-ms-query-source-authorization=present "
-                "token_audience=%s source=managed_identity",
-                _SEARCH_SCOPE,
-            )
         else:
+            # Never substitute the service managed identity for the caller's
+            # identity: permission-trimmed sources must fail closed without a
+            # user token. Callers gate anonymous retrieval via ALLOW_ANONYMOUS.
             logging.info(
                 "[FoundryIQClient][Trimming] x-ms-query-source-authorization=absent "
-                "reason=FOUNDRY_IQ_FORWARD_SOURCE_AUTH=false and no OBO token"
+                "reason=no OBO token"
             )
 
         if self.mcp_config.enabled:

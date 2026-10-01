@@ -276,16 +276,16 @@ async def test_retrieve_omits_obo_header_when_no_token():
 
 
 @pytest.mark.asyncio
-async def test_retrieve_forwards_managed_identity_token_when_no_obo():
-    """Anonymous chat path: the service MI Search-audience token must be
-    forwarded as ``x-ms-query-source-authorization`` so RBAC-scoped permission
-    filters on the bound knowledge source can be evaluated."""
+async def test_retrieve_never_forwards_managed_identity_as_source_auth():
+    """The service identity must never be substituted for the end user in
+    ``x-ms-query-source-authorization``, even when the deprecated
+    ``FOUNDRY_IQ_FORWARD_SOURCE_AUTH`` flag is enabled."""
     client, session = _build_client(_SAMPLE_PAYLOAD)
+    assert client.forward_source_auth is False
     await client.retrieve("hello")
     headers = session.captured["headers"]
     assert headers["Authorization"] == "Bearer svc-token"
-    # MI token reused as the source-auth token when no OBO token is present.
-    assert headers["x-ms-query-source-authorization"] == "svc-token"
+    assert "x-ms-query-source-authorization" not in headers
 
 
 @pytest.mark.asyncio

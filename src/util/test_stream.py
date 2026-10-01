@@ -1,4 +1,5 @@
 import asyncio
+import os
 import logging
 import httpx
 
@@ -9,7 +10,7 @@ async def main():
                 "POST",
                 "http://127.0.0.1:9000/orchestrator",
                 json={"ask":"Segun el documento, cual es la diferencia entre model family, model version y model variant?", "conversation_id":None},
-                headers={"dapr-api-token": "dev-token"}
+                headers={"X-API-KEY": api_key} if (api_key := os.environ.get("ORCHESTRATOR_APP_APIKEY")) else {}
             ) as response:
                 print(f"Status: {response.status_code}")
                 response.raise_for_status()

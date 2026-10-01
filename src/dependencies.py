@@ -233,7 +233,9 @@ async def validate_auth(
         # Missing credentials -> 401
         raise HTTPException(status_code=401, detail="Missing credentials. Provide dapr-api-token or X-API-KEY")
 
-    if not expected_api_key or x_api_key != expected_api_key:
+    if not expected_api_key or not hmac.compare_digest(
+        x_api_key.encode("utf-8"), str(expected_api_key).encode("utf-8")
+    ):
         logging.error("Invalid API key")
         raise HTTPException(status_code=401, detail="Invalid API key")
 

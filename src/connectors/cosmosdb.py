@@ -64,6 +64,20 @@ class CosmosDBClient:
             logging.debug("[cosmosdb] document %s unavailable (%s)", key, type(e).__name__)
         return document
 
+    async def document_id_exists(self, container, key) -> bool:
+        """Return True if any partition holds a document with this id.
+
+        Raises AzureError on failure so callers can fail closed.
+        """
+        container_client = self._get_container(container)
+        items = container_client.query_items(
+            query="SELECT VALUE c.id FROM c WHERE c.id = @id",
+            parameters=[{"name": "@id", "value": key}],
+        )
+        async for _ in items:
+            return True
+        return False
+
     async def create_document(self, container, key, body=None, partition_key=None) -> dict:
         """Create a new document with optional partition key.
         
