@@ -9,12 +9,8 @@ from azure.core.exceptions import AzureError
 
 from dependencies import get_config
 from util.metadata import format_custom_metadata, parse_allowed_keys
-from util.conversation_scope import (  # noqa: F401  (re-exported)
-    ANONYMOUS_PRINCIPAL_ID,
-    CONVERSATION_OWNER_FIELD,
+from util.conversation_scope import (
     build_conversation_filter,
-    build_conversation_owner_clause,
-    odata_escape_string as _odata_escape_string,
     resolve_conversation_owner_id,
 )
 from telemetry import AuditEmitter, ReasonCode
