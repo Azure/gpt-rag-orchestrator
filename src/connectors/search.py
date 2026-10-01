@@ -9,6 +9,14 @@ from azure.core.exceptions import AzureError
 
 from dependencies import get_config
 from util.metadata import format_custom_metadata, parse_allowed_keys
+from util.conversation_scope import (  # noqa: F401  (re-exported)
+    ANONYMOUS_PRINCIPAL_ID,
+    CONVERSATION_OWNER_FIELD,
+    build_conversation_filter,
+    build_conversation_owner_clause,
+    odata_escape_string as _odata_escape_string,
+    resolve_conversation_owner_id,
+)
 from telemetry import AuditEmitter, ReasonCode
 from opentelemetry.trace.propagation.tracecontext import (
     TraceContextTextMapPropagator,
@@ -72,28 +80,6 @@ class SearchResult(BaseModel):
     # serialized output is byte-for-byte unchanged.
     custom_metadata: Optional[Any] = Field(default=None, exclude=True)
 
-
-def _odata_escape_string(value: Optional[str]) -> str:
-    """Escape a string for embedding in single-quoted OData literals."""
-    return (value or "").replace("'", "''")
-
-
-def build_conversation_filter(conversation_id: Optional[str], *, field_name: str = "conversationId") -> str:
-    """Build OData filter for conversation-scoped retrieval.
-
-    Includes:
-    - conversation-specific chunks (conversationId == <cid>) when cid is set
-    - shared/global chunks always. A chunk is treated as shared when its
-      conversationId is the 'NaN' sentinel OR null/unset. Ingestion has used
-      both representations for global corpora, so both must match here,
-      otherwise globally-ingested documents become invisible to retrieval.
-    """
-    safe_field = (field_name or "").strip() or "conversationId"
-    shared_clause = f"({safe_field} eq 'NaN' or {safe_field} eq null)"
-    cid = (conversation_id or "").strip() or None
-    if cid:
-        return f"{safe_field} eq '{_odata_escape_string(cid)}' or {shared_clause}"
-    return shared_clause
 
 class SearchClient:
     """
@@ -559,7 +545,11 @@ class SearchClient:
 
             # Filter by conversation scope: this chat + shared corpora (general/global).
             # Never query without a filter: an unset id would return every chunk in the index.
-            search_body["filter"] = build_conversation_filter(self._conversation_id, field_name="conversationId")
+            search_body["filter"] = build_conversation_filter(
+                self._conversation_id,
+                owner_id=resolve_conversation_owner_id(getattr(self, "_user_context", None)),
+                field_name="conversationId",
+            )
 
             # Generate embeddings for vector/hybrid search
             if self.search_approach in ["vector", "hybrid"] and self.aoai_client:

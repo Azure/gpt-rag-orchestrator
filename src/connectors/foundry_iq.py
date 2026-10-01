@@ -47,6 +47,12 @@ from telemetry.audit_contract import (
     new_event_id,
     utc_now,
 )
+from util.conversation_scope import (
+    build_conversation_filter,
+    build_conversation_owner_clause,
+    odata_escape_string as _odata_escape_string,
+    resolve_conversation_owner_id,
+)
 from connectors.foundry_iq_mcp import (
     McpCredentialError,
     McpRuntimeConfig,
@@ -81,8 +87,9 @@ FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY = "FOUNDRY_IQ_FORWARD_SOURCE_AUTH"
 # primary knowledge source is the native azureBlob corpus, the retrieve action
 # also queries a second searchIndex knowledge source built over the existing
 # GPT-RAG index (SEARCH_RAG_INDEX_NAME). That second source carries the runtime
-# uploads and is trimmed by a conversationId filterAddOn so uploaded files are
-# only visible inside the conversation that created them. Off by default.
+# uploads and is trimmed by a conversationId plus caller-ownership filterAddOn
+# so uploaded files are only visible to their uploader inside the conversation
+# that created them. Off by default.
 FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED_KEY = "FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED"
 FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME_KEY = (
     "FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME"
@@ -222,11 +229,6 @@ class McpSourceError(RuntimeError):
     """Raised when a required MCP source fails during Foundry IQ retrieval."""
 
 
-def _odata_escape_string(value: Optional[str]) -> str:
-    """Escape a string for embedding in a single-quoted OData literal."""
-    return (value or "").replace("'", "''")
-
-
 def _normalize_security_ids(values: Iterable[Any]) -> List[str]:
     """Return stable, non-empty security IDs without broadening the filter."""
     normalized: List[str] = []
@@ -333,13 +335,18 @@ def build_pattern_b_filter_add_on(
         escaped_ids = ",".join(_odata_escape_string(value) for value in security_ids)
         security_clause = f"({safe_field}/any(g:search.in(g, '{escaped_ids}')) or {public_clause})"
 
-    # Keep runtime uploads conversation-scoped while allowing the shared corpus.
+    # Keep runtime uploads conversation- and owner-scoped while allowing the
+    # shared corpus. The conversation id is client-chosen, so it must be paired
+    # with the server-derived uploader identity.
     conversation_clause = None
     cid = (conversation_id or "").strip() or None
     if cid:
         conversation_clause = (
-            f"(conversationId eq '{_odata_escape_string(cid)}' "
-            "or (conversationId eq 'NaN' or conversationId eq null))"
+            "("
+            + build_conversation_filter(
+                cid, owner_id=resolve_conversation_owner_id(context)
+            )
+            + ")"
         )
 
     if conversation_clause:
@@ -347,9 +354,20 @@ def build_pattern_b_filter_add_on(
     return security_clause
 
 
-def build_conversation_upload_filter_add_on(conversation_id: str) -> str:
-    """Build the Foundry IQ sidecar filter for runtime conversation uploads."""
-    return f"conversationId eq '{_odata_escape_string(conversation_id)}'"
+def build_conversation_upload_filter_add_on(
+    conversation_id: Optional[str], owner_id: Optional[str]
+) -> Optional[str]:
+    """Build the Foundry IQ sidecar filter for runtime conversation uploads.
+
+    Returns ``None`` when the conversation id or the server-derived owner is
+    missing; callers must then skip the sidecar instead of widening it. The
+    clause is emitted without outer parentheses to stay as close as possible to
+    the simple ``conversationId eq`` form Foundry IQ accepts for this source.
+    """
+    clause = build_conversation_owner_clause(conversation_id, owner_id)
+    if clause is None:
+        return None
+    return clause[1:-1]
 
 
 class FoundryIQClient:
@@ -1201,8 +1219,9 @@ class FoundryIQClient:
         - no conversation knowledge source name was provisioned.
 
         When it does apply, the source is a ``searchIndex`` knowledge source over
-        the existing GPT-RAG index, always trimmed by a simple conversationId
-        ``filterAddOn`` accepted by Foundry IQ. ``failOnError`` is ``false`` so
+        the existing GPT-RAG index, always trimmed by a conversationId plus
+        caller-ownership ``filterAddOn``; it is skipped when the caller
+        principal is unknown. ``failOnError`` is ``false`` so
         an empty or missing upload index degrades gracefully to the shared corpus
         instead of failing the whole retrieve.
         """
@@ -1232,17 +1251,26 @@ class FoundryIQClient:
                 f"{DEFAULT_FOUNDRY_IQ_API_VERSION}; current "
                 f"FOUNDRY_IQ_API_VERSION={self.api_version}."
             )
+        filter_add_on = build_conversation_upload_filter_add_on(
+            cid, resolve_conversation_owner_id(user_context)
+        )
+        if not filter_add_on:
+            logging.warning(
+                "[FoundryIQClient] FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED=true but "
+                "the caller principal is unknown; skipping the file-upload sidecar source."
+            )
+            return None
         params: Dict[str, Any] = {
             "knowledgeSourceName": self.conversation_knowledge_source_name,
             "kind": "searchIndex",
             "includeReferences": True,
             "includeReferenceSourceData": True,
             "failOnError": False,
-            "filterAddOn": build_conversation_upload_filter_add_on(cid),
+            "filterAddOn": filter_add_on,
         }
         logging.info(
             "[FoundryIQClient][Upload] Adding conversation-upload source %s "
-            "(conversation_scoped filterAddOn)",
+            "(conversation_owner_scoped filterAddOn)",
             self.conversation_knowledge_source_name,
         )
         return params

@@ -180,17 +180,57 @@ def test_pattern_b_filter_add_on_uses_security_fields_and_conversation_scope():
     assert "conversationId eq 'NaN'" in filter_add_on
 
 
-def test_conversation_upload_filter_add_on_uses_simple_conversation_filter():
+def test_conversation_upload_filter_add_on_is_owner_scoped():
     from connectors.foundry_iq import build_conversation_upload_filter_add_on
 
     assert (
-        build_conversation_upload_filter_add_on("conv-1")
-        == "conversationId eq 'conv-1'"
+        build_conversation_upload_filter_add_on("conv-1", "user-1")
+        == "conversationId eq 'conv-1' and metadata_security_user_ids/any(u: u eq 'user-1')"
     )
     assert (
-        build_conversation_upload_filter_add_on("o'brien")
-        == "conversationId eq 'o''brien'"
+        build_conversation_upload_filter_add_on("o'brien", "o'oid")
+        == "conversationId eq 'o''brien' and metadata_security_user_ids/any(u: u eq 'o''oid')"
     )
+
+
+def test_conversation_upload_filter_add_on_anonymous_only_matches_aclless_chunks():
+    from connectors.foundry_iq import build_conversation_upload_filter_add_on
+
+    assert (
+        build_conversation_upload_filter_add_on("conv-1", "anonymous")
+        == "conversationId eq 'conv-1' and not metadata_security_user_ids/any()"
+    )
+
+
+@pytest.mark.parametrize("conversation_id,owner_id", [("conv-1", None), ("conv-1", ""), (None, "user-1"), ("", "user-1")])
+def test_conversation_upload_filter_add_on_returns_none_without_scope(conversation_id, owner_id):
+    from connectors.foundry_iq import build_conversation_upload_filter_add_on
+
+    assert build_conversation_upload_filter_add_on(conversation_id, owner_id) is None
+
+
+def test_pattern_b_filter_add_on_excludes_other_users_uploads():
+    from connectors.foundry_iq import build_pattern_b_filter_add_on
+
+    filter_add_on = build_pattern_b_filter_add_on(
+        conversation_id="conv-1",
+        user_context={"principal_id": "user-b"},
+    )
+
+    assert "metadata_security_user_ids/any(u: u eq 'user-b')" in filter_add_on
+    assert "user-a" not in filter_add_on
+
+
+def test_pattern_b_filter_add_on_without_owner_keeps_only_shared_scope():
+    from connectors.foundry_iq import build_pattern_b_filter_add_on
+
+    filter_add_on = build_pattern_b_filter_add_on(
+        conversation_id="conv-1",
+        user_context={},
+    )
+
+    assert "conv-1" not in filter_add_on
+    assert "conversationId eq 'NaN' or conversationId eq null" in filter_add_on
 
 
 @pytest.mark.asyncio
@@ -241,7 +281,8 @@ async def test_retrieve_adds_pattern_b_filter_add_on_when_enabled():
             "filterAddOn": (
                 "((metadata_security_id/any(g:search.in(g, 'user-1')) "
                 "or not metadata_security_id/any())) and "
-                "(conversationId eq 'conv-1' or (conversationId eq 'NaN' or conversationId eq null))"
+                "((conversationId eq 'conv-1' and metadata_security_user_ids/any(u: u eq 'user-1')) "
+                "or (conversationId eq 'NaN' or conversationId eq null))"
             ),
         }
     ]
@@ -339,11 +380,13 @@ async def test_conversation_upload_adds_second_source_in_pattern_a():
         "includeReferenceSourceData": True,
     }
     # Sidecar is a searchIndex source, degrades gracefully, and is scoped with
-    # the simple filter format Foundry IQ accepts for the conversation upload KS.
+    # the conversation id and the server-derived uploader identity.
     assert sidecar["knowledgeSourceName"] == "ragindex-conv-ks"
     assert sidecar["kind"] == "searchIndex"
     assert sidecar["failOnError"] is False
-    assert sidecar["filterAddOn"] == "conversationId eq 'conv-1'"
+    assert sidecar["filterAddOn"] == (
+        "conversationId eq 'conv-1' and metadata_security_user_ids/any(u: u eq 'user-1')"
+    )
     assert "metadata_security_id" not in sidecar["filterAddOn"]
 
 
@@ -357,6 +400,22 @@ async def test_conversation_upload_sidecar_skipped_without_conversation_id():
     )
 
     await client.retrieve("hello")
+
+    sources = session.captured["json"]["knowledgeSourceParams"]
+    assert len(sources) == 1
+    assert sources[0]["knowledgeSourceName"] == "documents-blob-ks"
+
+
+@pytest.mark.asyncio
+async def test_conversation_upload_sidecar_skipped_without_owner():
+    """SECURITY: without a server-derived owner the sidecar must not be queried,
+    so a known conversationId alone never exposes another user's uploads."""
+    client, session = _build_client(
+        _SAMPLE_PAYLOAD,
+        config_overrides=_conv_upload_overrides(),
+    )
+
+    await client.retrieve("hello", conversation_id="conv-1")
 
     sources = session.captured["json"]["knowledgeSourceParams"]
     assert len(sources) == 1

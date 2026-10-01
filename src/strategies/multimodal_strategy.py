@@ -46,6 +46,7 @@ from connectors.multimodal_chat_client import MultimodalChatClient
 from connectors.search import acquire_obo_search_token
 from connectors.obo import resolve_retrieval_authorization
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
+from util.conversation_scope import resolve_conversation_owner_id
 from dependencies import get_config
 from openai import BadRequestError
 
@@ -323,6 +324,7 @@ class MultimodalStrategy(BaseAgentStrategy):
                 authorization_mode=authorization_mode,
                 classify_images_fn=self._classify_image_relevance if self.classify_images else None,
                 classify_images_concurrency=self.image_classification_concurrency,
+                owner_id=resolve_conversation_owner_id(self.user_context),
             )
             logging.info(
                 "[MultimodalStrategy] MultimodalSearchContextProvider created "
