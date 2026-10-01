@@ -195,7 +195,6 @@ async def validate_auth(
         candidates = [
             _normalize_token(os.getenv("APP_API_TOKEN")),
             _normalize_token(os.getenv("DAPR_API_TOKEN")),
-            "dev-token",
         ]
         candidates = [c for c in candidates if c]
 
@@ -205,8 +204,6 @@ async def validate_auth(
                 matched_source = "APP_API_TOKEN"
             elif os.getenv("DAPR_API_TOKEN") and hmac.compare_digest(provided_dapr, _normalize_token(os.getenv("DAPR_API_TOKEN")) or ""):
                 matched_source = "DAPR_API_TOKEN"
-            elif hmac.compare_digest(provided_dapr, "dev-token"):
-                matched_source = "dev-token"
 
         logging.debug(
             "[Auth] Dapr token provided (len=%d) -> %s",
