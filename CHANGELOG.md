@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v4.1.2] - 2026-10-01
 
 ### Added
 
@@ -11,6 +11,11 @@
 
 ### Fixed
 
+- **User identity and conversation ownership are derived on the server.** The
+  orchestrator no longer trusts a client-supplied principal or a development
+  token; the caller's identity comes from the validated access token, and a
+  conversation id is bound to its owner, including ids first created by an
+  upload, so it cannot be read or reused by another user.
 - **Shared OBO exchange no longer creates an import cycle.** Search and
   Foundry IQ use one connector-owned exchange/cache while preserving Search's
   public wrappers, delegated scopes and strict/anonymous behavior.
