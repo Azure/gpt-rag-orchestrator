@@ -61,7 +61,7 @@ def enabled_emitter(*, source_limit=25, sensitive_fields=frozenset()):
             hmac_key=b"k" * 32,
             additional_redacted_keys=frozenset(),
         ),
-        service_name="gpt-rag-orchestrator",
+        service_name="agent-app-orchestrator",
         service_version="3.7.0",
         environment="test",
     )
@@ -106,7 +106,7 @@ def test_fixed_body_custom_event_name_and_metadata_only_default():
     assert record.getMessage() == AUDIT_LOG_BODY
     assert (
         getattr(record, "microsoft.custom_event.name")
-        == "gptrag.audit.request.started"
+        == "agentlz.audit.request.started"
     )
     assert not hasattr(record, "prompt")
     assert "prompt" in record.omitted_fields
@@ -372,7 +372,7 @@ def test_audit_environment_lookup_failure_is_metadata_only(monkeypatch):
     config = MagicMock()
     config.get.side_effect = RuntimeError("synthetic-private-config")
     emitter = AuditEmitter.configure(
-        config, service_name="gpt-rag-orchestrator", service_version="test",
+        config, service_name="agent-app-orchestrator", service_version="test",
     )
     assert emitter.environment == "unknown"
     assert emitter.enabled
@@ -442,7 +442,7 @@ def test_failure_event_uses_only_constant_safe_metadata(monkeypatch):
         capture.records[0].__dict__, default=str, sort_keys=True
     )
     assert secret not in exporter_input
-    assert capture.records[0].service_name == "gpt-rag-orchestrator"
+    assert capture.records[0].service_name == "agent-app-orchestrator"
     assert capture.records[0].environment == "unknown"
     assert capture.records[0].correlation_id == context.correlation_id
 
@@ -504,7 +504,7 @@ def test_in_memory_otel_log_has_current_trace_and_span_context():
         (
             Path(__file__).resolve().parents[1]
             / "contracts"
-            / "audit-event-v1.application-insights.schema.json"
+            / "audit-event-v2.application-insights.schema.json"
         ).read_text()
     )
     jsonschema.Draft202012Validator(wire_schema).validate(
