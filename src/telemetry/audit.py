@@ -297,7 +297,15 @@ class AuditEmitter:
         sensitive: dict[str, Any] | None = None,
         _reserved_tool_event: bool = False,
         _omission_kind: str | None = None,
+        _preserve_primary: bool = False,
     ) -> str | None:
+        """Emit best-effort metadata; process-control exceptions normally propagate.
+
+        Internal-only ``_preserve_primary`` is for this module's tool exception
+        boundaries that immediately re-raise the primary failure/cancellation.
+        It is passed per call (including fallback), never inferred from ambient
+        exception state or stored in task/global state.
+        """
         if not self.enabled:
             return None
 
@@ -308,6 +316,7 @@ class AuditEmitter:
             omission_kind=_omission_kind,
         ):
             return None
+        preserve_primary = _preserve_primary
         try:
             event_id = new_event_id()
             observed_at = utc_now()
@@ -397,16 +406,20 @@ class AuditEmitter:
                 reason = ReasonCode.ATTRIBUTE_LIMIT_EXCEEDED
             else:
                 reason = ReasonCode.REDACTION_FAILURE
-            self._emit_failure(reason)
+            self._emit_failure(reason, preserve_primary=preserve_primary)
             return None
-        except BaseException:
+        except BaseException as exc:
+            if not isinstance(exc, Exception) and not preserve_primary:
+                raise
             if context is not None:
                 context.audit_events_omitted += 1
-            self._emit_failure(ReasonCode.EXPORT_FAILURE)
+            self._emit_failure(
+                ReasonCode.EXPORT_FAILURE, preserve_primary=preserve_primary,
+            )
             return None
         return event_id
 
-    def _emit_failure(self, reason: ReasonCode) -> None:
+    def _emit_failure(self, reason: ReasonCode, *, preserve_primary: bool) -> None:
         """Emit a payload-free failure event, then degrade to a fixed warning."""
         if _failure_emission_active.get():
             return
@@ -466,20 +479,23 @@ class AuditEmitter:
                     **attributes,
                 },
             )
-        except BaseException:
+        except BaseException as exc:
+            if not isinstance(exc, Exception) and not preserve_primary:
+                raise
             try:
                 _warning_logger.warning(
                     "GPT-RAG audit event emission failed; request processing continues."
                 )
-            except BaseException:
-                pass
+            except BaseException as exc:
+                if not isinstance(exc, Exception) and not preserve_primary:
+                    raise
         finally:
             _failure_emission_active.reset(guard_token)
 
     def emit_failure(self, reason: ReasonCode) -> None:
-        """Attempt one constant-safe failure event for the current request."""
+        """Attempt a safe failure event; process-control exceptions propagate."""
         if self.enabled:
-            self._emit_failure(reason)
+            self._emit_failure(reason, preserve_primary=False)
 
     def emit_source(
         self,
@@ -599,6 +615,7 @@ async def invoke_audited_tool(
             },
             _reserved_tool_event=True,
             _omission_kind="tool",
+            _preserve_primary=True,
         )
         raise
     except TimeoutError:
@@ -618,6 +635,7 @@ async def invoke_audited_tool(
             },
             _reserved_tool_event=True,
             _omission_kind="tool",
+            _preserve_primary=True,
         )
         raise
     except Exception:
@@ -637,6 +655,7 @@ async def invoke_audited_tool(
             },
             _reserved_tool_event=True,
             _omission_kind="tool",
+            _preserve_primary=True,
         )
         raise
 

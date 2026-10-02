@@ -1,0 +1,18 @@
+[importlinter]
+root_packages =
+    api
+    connectors
+    orchestration
+    strategies
+    telemetry
+    util
+exclude_type_checking_imports = False
+
+[importlinter:contract:lower-no-api]
+name = Connectors and telemetry cannot import HTTP boundaries
+type = forbidden
+source_modules =
+    connectors
+    telemetry
+forbidden_modules =
+    api

@@ -34,7 +34,7 @@ class AsyncGeneratorContextDetachFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             message = record.getMessage()
-        except Exception:  # pragma: no cover - defensive: never break logging
+        except Exception:
             return True
         return _DETACH_FAILURE_MESSAGE not in message.lower()
 

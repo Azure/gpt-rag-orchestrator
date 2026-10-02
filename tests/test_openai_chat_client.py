@@ -1,9 +1,13 @@
 """Tests for the OpenAIChatClient adapter (src/connectors/openai_chat_client.py)."""
 
 import pytest
+import asyncio
+import logging
+from collections.abc import Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent_framework import ChatMessage, ChatResponse, ChatResponseUpdate
+from pydantic import BaseModel, TypeAdapter
 
 
 class TestOpenAIChatClient:
@@ -95,3 +99,80 @@ class TestOpenAIChatClient:
     def test_has_additional_properties(self, client):
         assert hasattr(client, "additional_properties")
         assert isinstance(client.additional_properties, dict)
+
+    @pytest.mark.parametrize("stream", [False, True], ids=["response", "stream"])
+    @pytest.mark.parametrize("format_kind", [
+        "model", "mapping", "unsupported", "unsupported-class", "adapter",
+        "invalid-schema", "invalid-ref", "unexpected", "cancelled",
+    ])
+    async def test_public_response_format_boundary_uses_real_schema_conversion(self, client, stream, format_kind, caplog):
+        marker = "synthetic-private-schema-detail"
+        failure = asyncio.CancelledError(marker) if format_kind == "cancelled" else RuntimeError(marker)
+
+        class Answer(BaseModel):
+            value: str
+
+        class InvalidSchema(BaseModel):
+            callback: Callable[[], None]
+
+        class InvalidReference(BaseModel):
+            @classmethod
+            def model_json_schema(cls, **kwargs):
+                return {"$ref": marker, "description": "invalid reference"}
+
+        class UnsupportedClass:
+            pass
+
+        class BrokenSchema(BaseModel):
+            @classmethod
+            def model_json_schema(cls, **kwargs):
+                raise failure
+
+        response_format = {
+            "model": Answer,
+            "mapping": {"type": "json_object"},
+            "unsupported": marker,
+            "unsupported-class": UnsupportedClass,
+            "adapter": TypeAdapter(str),
+            "invalid-schema": InvalidSchema,
+            "invalid-ref": InvalidReference,
+            "unexpected": BrokenSchema,
+            "cancelled": BrokenSchema,
+        }[format_kind]
+        completion = MagicMock()
+        completion.choices[0].message.content = "answer"
+        completion.model = "synthetic-model"
+        completion.id = "synthetic-response"
+
+        async def chunks():
+            chunk = MagicMock()
+            chunk.choices[0].delta.content = "answer"
+            chunk.id = "synthetic-response"
+            chunk.model = "synthetic-model"
+            yield chunk
+
+        self._mock_oai.chat.completions.create = AsyncMock(return_value=chunks() if stream else completion)
+
+        async def run():
+            options = {"response_format": response_format}
+            if stream:
+                return "".join([part.text async for part in client.get_streaming_response("question", options=options)])
+            return (await client.get_response("question", options=options)).text
+
+        if format_kind in {"unexpected", "cancelled"}:
+            with pytest.raises(type(failure)) as raised:
+                await run()
+            assert raised.value is failure
+            self._mock_oai.chat.completions.create.assert_not_awaited()
+        else:
+            assert await run() == "answer"
+            params = self._mock_oai.chat.completions.create.await_args.kwargs
+            if format_kind == "model":
+                assert params["response_format"]["json_schema"]["name"] == "Answer"
+                assert params["response_format"]["json_schema"]["schema"]["additionalProperties"] is False
+            elif format_kind == "mapping":
+                assert params["response_format"] == {"type": "json_object"}
+            else:
+                assert "response_format" not in params
+                assert any(record.levelno == logging.WARNING for record in caplog.records)
+        assert marker not in caplog.text

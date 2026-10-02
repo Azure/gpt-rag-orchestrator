@@ -4,6 +4,7 @@ import logging
 import pyodbc
 import struct
 from azure.identity import ManagedIdentityCredential, AzureCliCredential, ChainedTokenCredential
+from azure.core.exceptions import AzureError
 from connectors.keyvault import get_secret, generate_valid_secret_name
 from connectors.types import SQLDatabaseConfig
 
@@ -42,8 +43,8 @@ class SQLDBClient:
             try:
                 connection = await asyncio.to_thread(pyodbc.connect, connection_string)
                 return connection
-            except Exception as e:
-                logging.error(f"Failed to connect to SQL Database with SQL Server authentication: {e}")
+            except pyodbc.Error as e:
+                logging.error("Failed to connect to SQL Database with SQL Server authentication: %s", type(e).__name__)
                 raise
         else:
             client_id = os.environ.get("AZURE_CLIENT_ID")
@@ -65,6 +66,6 @@ class SQLDBClient:
                 )
                 logging.info("Using Azure AD token authentication for SQL Database.")
                 return connection
-            except Exception as e:
-                logging.error(f"Failed to connect to SQL Database with Azure AD token authentication: {e}")
+            except (AzureError, pyodbc.Error) as e:
+                logging.error("Failed to connect to SQL Database with Azure AD token authentication: %s", type(e).__name__)
                 raise

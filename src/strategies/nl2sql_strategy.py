@@ -226,7 +226,8 @@ class NL2SQLStrategy(BaseAgentStrategy):
         return {
             "table_candidates": table_candidates,
             "all_tables": all_tables,
-            "schemas": list(schemas),
+            "schemas": [schema for schema in schemas if not self._get_field(schema, "error")],
+            "unavailable_schemas": [schema for schema in schemas if self._get_field(schema, "error")],
             "similar_queries": similar_queries,
         }
 
@@ -260,117 +261,112 @@ class NL2SQLStrategy(BaseAgentStrategy):
         await self._load_prompts()
         full_response = ""
 
-        try:
-            datasources_info, broad_table_candidates = await asyncio.gather(
-                self._invoke_plugin("get_all_datasources_info"),
-                self._invoke_plugin("tables_retrieval", user_message),
-            )
-            triage_context = (
-                f"Conversation history:\n{self._build_history_context()}\n\n"
-                f"User question:\n{user_message}\n\n"
-                f"Available datasources:\n{self._to_json(datasources_info)}\n\n"
-                f"Potentially relevant tables:\n{self._to_json(broad_table_candidates)}"
-            )
-            triage_response = await self._run_agent(
-                self._triage_instructions(),
-                triage_context,
-                max_tokens=1000,
-            )
-            selection = self._parse_triage_response(triage_response)
+        datasources_info, broad_table_candidates = await asyncio.gather(
+            self._invoke_plugin("get_all_datasources_info"),
+            self._invoke_plugin("tables_retrieval", user_message),
+        )
+        triage_context = (
+            f"Conversation history:\n{self._build_history_context()}\n\n"
+            f"User question:\n{user_message}\n\n"
+            f"Available datasources:\n{self._to_json(datasources_info)}\n\n"
+            f"Potentially relevant tables:\n{self._to_json(broad_table_candidates)}"
+        )
+        triage_response = await self._run_agent(
+            self._triage_instructions(),
+            triage_context,
+            max_tokens=1000,
+        )
+        selection = self._parse_triage_response(triage_response)
 
-            if selection.get("answered"):
-                full_response = str(selection.get("answer") or "").strip()
-                yield full_response
-                self._append_conversation_turn(user_message, full_response)
-                return
-
-            datasource_name = selection.get("datasource_name")
-            datasource_type = selection.get("datasource_type")
-            if not datasource_name:
-                AuditEmitter.default().emit_source(
-                    selected=False,
-                    source_type="nl2sql_datasource",
-                    reason_code=ReasonCode.SOURCE_REJECTED,
-                )
-                full_response = "I could not identify a configured SQL datasource that matches this question."
-                yield full_response
-                self._append_conversation_turn(user_message, full_response)
-                return
-            AuditEmitter.default().emit_source(
-                selected=True,
-                source_type="nl2sql_datasource",
-                source_reference=str(datasource_name),
-            )
-
-            if datasource_type not in {"sql_endpoint", "sql_database", None}:
-                full_response = (
-                    f"The selected datasource '{datasource_name}' is type '{datasource_type}', "
-                    "which is not currently supported by the SQL execution path."
-                )
-                yield full_response
-                self._append_conversation_turn(user_message, full_response)
-                return
-
-            schema_context = await self._collect_schema_context(datasource_name, user_message)
-            sql_context = (
-                f"Conversation history:\n{self._build_history_context()}\n\n"
-                f"User question:\n{user_message}\n\n"
-                f"Selected datasource:\n{json.dumps({'name': datasource_name, 'type': datasource_type}, indent=2)}\n\n"
-                f"All tables:\n{self._to_json(schema_context['all_tables'])}\n\n"
-                f"Relevant tables:\n{self._to_json(schema_context['table_candidates'])}\n\n"
-                f"Schemas:\n{self._to_json(schema_context['schemas'])}\n\n"
-                f"Similar historical queries:\n{self._to_json(schema_context['similar_queries'])}"
-            )
-            sql_response = await self._run_agent(
-                self._sql_generation_instructions(),
-                sql_context,
-                max_tokens=1800,
-            )
-            sql_query = self._extract_sql_query(sql_response)
-            if not sql_query:
-                full_response = "I could not generate a valid SQL query for this question."
-                yield full_response
-                self._append_conversation_turn(user_message, full_response)
-                return
-
-            validation = await self._invoke_plugin(
-                "validate_sql_query", sql_query
-            )
-            if not self._get_field(validation, "is_valid", False):
-                error = self._get_field(validation, "error", "unknown validation error")
-                full_response = f"I generated a SQL query, but it did not pass validation: {error}"
-                yield full_response
-                self._append_conversation_turn(user_message, full_response)
-                return
-
-            query_result = await self._invoke_plugin(
-                "execute_sql_query", datasource_name, sql_query
-            )
-            result_error = self._get_field(query_result, "error")
-            if result_error:
-                full_response = f"The SQL query could not be executed: {result_error}"
-                yield full_response
-                self._append_conversation_turn(user_message, full_response)
-                return
-
-            synthesis_context = (
-                f"User question:\n{user_message}\n\n"
-                f"Datasource:\n{datasource_name}\n\n"
-                f"SQL query:\n{sql_query}\n\n"
-                f"SQL result:\n{self._to_json(query_result)}"
-            )
-            async for chunk in self._stream_agent(
-                self._synthesis_instructions(),
-                synthesis_context,
-                max_tokens=self.max_completion_tokens,
-            ):
-                full_response += chunk
-                yield chunk
-
-            self._append_conversation_turn(user_message, full_response)
-            logging.info("[NL2SQLStrategy] Flow completed in %.2fs", time.time() - flow_start)
-        except Exception as exc:
-            logging.error("[NL2SQLStrategy] Flow failed: %s", exc, exc_info=True)
-            full_response = f"I encountered an error processing your NL2SQL request: {exc}"
+        if selection.get("answered"):
+            full_response = str(selection.get("answer") or "").strip()
             yield full_response
             self._append_conversation_turn(user_message, full_response)
+            return
+
+        datasource_name = selection.get("datasource_name")
+        datasource_type = selection.get("datasource_type")
+        if not datasource_name:
+            AuditEmitter.default().emit_source(
+                selected=False,
+                source_type="nl2sql_datasource",
+                reason_code=ReasonCode.SOURCE_REJECTED,
+            )
+            full_response = "I could not identify a configured SQL datasource that matches this question."
+            yield full_response
+            self._append_conversation_turn(user_message, full_response)
+            return
+        AuditEmitter.default().emit_source(
+            selected=True,
+            source_type="nl2sql_datasource",
+            source_reference=str(datasource_name),
+        )
+
+        if datasource_type not in {"sql_endpoint", "sql_database", None}:
+            full_response = (
+                f"The selected datasource '{datasource_name}' is type '{datasource_type}', "
+                "which is not currently supported by the SQL execution path."
+            )
+            yield full_response
+            self._append_conversation_turn(user_message, full_response)
+            return
+
+        schema_context = await self._collect_schema_context(datasource_name, user_message)
+        sql_context = (
+            f"Conversation history:\n{self._build_history_context()}\n\n"
+            f"User question:\n{user_message}\n\n"
+            f"Selected datasource:\n{json.dumps({'name': datasource_name, 'type': datasource_type}, indent=2)}\n\n"
+            f"All tables:\n{self._to_json(schema_context['all_tables'])}\n\n"
+            f"Relevant tables:\n{self._to_json(schema_context['table_candidates'])}\n\n"
+            f"Schemas:\n{self._to_json(schema_context['schemas'])}\n\n"
+            f"Unavailable schemas:\n{self._to_json(schema_context['unavailable_schemas'])}\n\n"
+            f"Similar historical queries:\n{self._to_json(schema_context['similar_queries'])}"
+        )
+        sql_response = await self._run_agent(
+            self._sql_generation_instructions(),
+            sql_context,
+            max_tokens=1800,
+        )
+        sql_query = self._extract_sql_query(sql_response)
+        if not sql_query:
+            full_response = "I could not generate a valid SQL query for this question."
+            yield full_response
+            self._append_conversation_turn(user_message, full_response)
+            return
+
+        validation = await self._invoke_plugin(
+            "validate_sql_query", sql_query
+        )
+        if not self._get_field(validation, "is_valid", False):
+            error = self._get_field(validation, "error", "unknown validation error")
+            full_response = f"I generated a SQL query, but it did not pass validation: {error}"
+            yield full_response
+            self._append_conversation_turn(user_message, full_response)
+            return
+
+        query_result = await self._invoke_plugin(
+            "execute_sql_query", datasource_name, sql_query
+        )
+        result_error = self._get_field(query_result, "error")
+        if result_error:
+            full_response = f"The SQL query could not be executed: {result_error}"
+            yield full_response
+            self._append_conversation_turn(user_message, full_response)
+            return
+
+        synthesis_context = (
+            f"User question:\n{user_message}\n\n"
+            f"Datasource:\n{datasource_name}\n\n"
+            f"SQL query:\n{sql_query}\n\n"
+            f"SQL result:\n{self._to_json(query_result)}"
+        )
+        async for chunk in self._stream_agent(
+            self._synthesis_instructions(),
+            synthesis_context,
+            max_tokens=self.max_completion_tokens,
+        ):
+            full_response += chunk
+            yield chunk
+
+        self._append_conversation_turn(user_message, full_response)
+        logging.info("[NL2SQLStrategy] Flow completed in %.2fs", time.time() - flow_start)

@@ -4,6 +4,7 @@ import asyncio
 import aiohttp
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from azure.identity.aio import ClientSecretCredential
+from azure.core.exceptions import AzureError
 
 from connectors.keyvault import get_secret, generate_valid_secret_name
 from connectors.types import SQLEndpointConfig, SemanticModelConfig
@@ -45,8 +46,8 @@ class SQLEndpointClient:
         try:
             connection = await asyncio.to_thread(pyodbc.connect, connection_string)
             return connection
-        except Exception as e:
-            logging.error(f"[fabric] Failed to connect to the SQL endpoint with service principal: {e}")
+        except pyodbc.Error as e:
+            logging.error("[fabric] Failed to connect to the SQL endpoint with service principal: %s", type(e).__name__)
             raise
 
 
@@ -75,8 +76,8 @@ class SemanticModelClient:
             token = await credential.get_token("https://analysis.windows.net/powerbi/api/.default")
             logging.info("[fabric] Access token acquired successfully for Semantic Model.")
             return token.token
-        except Exception as e:
-            logging.error(f"[fabric] Failed to obtain access token for Semantic Model: {e}")
+        except AzureError as e:
+            logging.error("[fabric] Failed to obtain access token for Semantic Model: %s", type(e).__name__)
             raise
         finally:
             await credential.close()

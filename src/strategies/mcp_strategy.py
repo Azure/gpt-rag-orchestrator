@@ -228,7 +228,7 @@ class McpStrategy(BaseAgentStrategy):
                         await chat_client.client.close()
                     except BaseException:
                         if primary_exception is not None:
-                            logging.exception(
+                            logging.error(
                                 "[McpStrategy] Failed to close chat client while "
                                 "preserving the primary exception."
                             )

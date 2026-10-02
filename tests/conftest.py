@@ -55,9 +55,11 @@ def mock_config():
         "BING_RETRIEVAL_ENABLED": "false",
         "BING_CONNECTION_ID": "",
         "LOG_LEVEL": "INFO",
-        "ALLOW_ANONYMOUS": "true",
+        "ALLOW_ANONYMOUS": True if type is bool else "true",
     }.get(key, default)
-    cfg.get_value = lambda key, allow_none=False: cfg.get(key)
+    cfg.get_value = lambda key, default=None, allow_none=False, type=str: cfg.get(
+        key, default, type=type
+    )
     cfg.credential = MagicMock()
     cfg.aiocredential = MagicMock()
     cfg.auth_failed = False
@@ -69,6 +71,7 @@ def mock_cosmos():
     """Return a fake CosmosDBClient with async helpers."""
     cosmos = MagicMock()
     cosmos.get_document = AsyncMock(return_value=None)
+    cosmos.document_id_exists = AsyncMock(return_value=False)
     cosmos.upsert_document = AsyncMock()
     cosmos.create_document = AsyncMock()
     return cosmos

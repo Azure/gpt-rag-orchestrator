@@ -1,0 +1,10 @@
+# Verified repository administrators. Required/latest-head reviews must be
+# activated separately; this file is not a repository-settings change.
+/.quality/ @placerda @gxjorge
+/.importlinter @placerda @gxjorge
+/pyproject.toml @placerda @gxjorge
+/requirements-quality.txt @placerda @gxjorge
+/.github/scripts/ @placerda @gxjorge
+/.github/workflows/ @placerda @gxjorge
+/.github/CODEOWNERS @placerda @gxjorge
+/tests/test_quality_policy.py @placerda @gxjorge

@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from azure.cosmos.aio import CosmosClient
 from azure.cosmos.exceptions import CosmosHttpResponseError
+from azure.core.exceptions import AzureError
 from dependencies import get_config
 
 class CosmosDBClient:
@@ -58,10 +59,24 @@ class CosmosDBClient:
         try:
             document = await container_client.read_item(item=key, partition_key=pk_value)
             logging.info(f"[cosmosdb] document {key} retrieved.")
-        except Exception as e:
+        except AzureError as e:
             document = None
-            logging.debug(f"[cosmosdb] document {key} does not exist: {e}")
+            logging.debug("[cosmosdb] document %s unavailable (%s)", key, type(e).__name__)
         return document
+
+    async def document_id_exists(self, container, key) -> bool:
+        """Return True if any partition holds a document with this id.
+
+        Raises AzureError on failure so callers can fail closed.
+        """
+        container_client = self._get_container(container)
+        items = container_client.query_items(
+            query="SELECT VALUE c.id FROM c WHERE c.id = @id",
+            parameters=[{"name": "@id", "value": key}],
+        )
+        async for _ in items:
+            return True
+        return False
 
     async def create_document(self, container, key, body=None, partition_key=None) -> dict:
         """Create a new document with optional partition key.
@@ -79,9 +94,9 @@ class CosmosDBClient:
                 body["principal_id"] = partition_key
             document = await container_client.create_item(body=body)
             logging.info(f"[cosmosdb] document {key} created.")
-        except Exception as e:
+        except AzureError as e:
             document = None
-            logging.error(f"[cosmosdb] error creating document {key}. Error: {e}")
+            logging.error("[cosmosdb] error creating document %s (%s)", key, type(e).__name__)
         return document
 
     async def update_document(self, container, document) -> dict:
@@ -110,8 +125,7 @@ class CosmosDBClient:
                     status,
                     e.__class__.__name__,
                 )
-            logging.debug("[cosmosdb] update exception detail: %s", e)
-        except Exception as e:
+        except AzureError as e:
             document = None
             logging.warning(
                 "[cosmosdb] could not update document (container=%s, id=%s): %s",
@@ -119,7 +133,6 @@ class CosmosDBClient:
                 doc_id,
                 e.__class__.__name__,
             )
-            logging.debug("[cosmosdb] unexpected update exception detail", exc_info=True)
         return document
 
 
@@ -197,10 +210,10 @@ async def read_user_conversation(conversation_id: str, principal_id: str) -> Opt
             logging.debug("[CosmosDB] Conversation %s is marked as deleted", conversation_id)
             return None
         return doc
-    except Exception as exc:
+    except AzureError as exc:
         logging.debug(
-            "[CosmosDB] Conversation %s not found or invalid partition for %s: %s",
-            conversation_id, principal_id, exc,
+            "[CosmosDB] Conversation %s unavailable for %s (%s)",
+            conversation_id, principal_id, type(exc).__name__,
         )
         return None
 
@@ -221,8 +234,11 @@ async def update_conversation_name(conversation_id: str, principal_id: str, new_
         updated_doc = await container.replace_item(item=conversation_id, body=doc)
         logging.info("[CosmosDB] Conversation %s name updated", conversation_id)
         return updated_doc
-    except Exception as exc:
-        logging.error("[CosmosDB] Error updating conversation %s: %s", conversation_id, exc)
+    except AzureError as exc:
+        logging.error(
+            "[CosmosDB] Error updating conversation %s (%s)",
+            conversation_id, type(exc).__name__,
+        )
         return None
 
 
@@ -240,6 +256,9 @@ async def soft_delete_conversation(conversation_id: str, principal_id: str) -> O
         updated_doc = await container.replace_item(item=conversation_id, body=doc)
         logging.info("[CosmosDB] Conversation %s soft deleted", conversation_id)
         return updated_doc
-    except Exception as exc:
-        logging.error("[CosmosDB] Error soft deleting conversation %s: %s", conversation_id, exc)
+    except AzureError as exc:
+        logging.error(
+            "[CosmosDB] Error soft deleting conversation %s (%s)",
+            conversation_id, type(exc).__name__,
+        )
         return None

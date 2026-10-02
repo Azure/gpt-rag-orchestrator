@@ -163,12 +163,8 @@ class _Sanitizer:
             try:
                 if isinstance(value, Mapping):
                     output: dict[str, Any] = {}
-                    try:
-                        items = iter(value.items())
-                        bounded_items = islice(items, MAX_COLLECTION_ITEMS + 1)
-                    except Exception:
-                        self._record(self.omitted, path)
-                        return None
+                    items = iter(value.items())
+                    bounded_items = islice(items, MAX_COLLECTION_ITEMS + 1)
                     for index, item in enumerate(bounded_items):
                         if index == MAX_COLLECTION_ITEMS:
                             self._record(self.truncated, path)
@@ -203,11 +199,7 @@ class _Sanitizer:
                             output[bounded_key] = sanitized
                     return output
 
-                try:
-                    values = islice(iter(value), MAX_EMITTED_ARRAY_ITEMS + 1)
-                except Exception:
-                    self._record(self.omitted, path)
-                    return None
+                values = islice(iter(value), MAX_EMITTED_ARRAY_ITEMS + 1)
                 emitted: list[Any] = []
                 for index, child in enumerate(values):
                     if index == MAX_EMITTED_ARRAY_ITEMS:

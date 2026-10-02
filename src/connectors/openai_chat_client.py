@@ -13,6 +13,7 @@ from typing import Any
 
 from azure.identity import get_bearer_token_provider
 from openai import AsyncAzureOpenAI, BadRequestError
+from pydantic.errors import PydanticInvalidForJsonSchema
 
 from agent_framework import (
     ChatClientProtocol,
@@ -100,6 +101,8 @@ class OpenAIChatClient:
                 # Pydantic model → OpenAI json_schema format
                 try:
                     from openai.lib._pydantic import to_strict_json_schema
+                    if not isinstance(response_format, type):
+                        raise TypeError("response_format must be a model class or mapping")
                     schema = to_strict_json_schema(response_format)
                     params["response_format"] = {
                         "type": "json_schema",
@@ -109,8 +112,11 @@ class OpenAIChatClient:
                             "schema": schema,
                         },
                     }
-                except Exception:
-                    logger.debug("[OpenAIChatClient] Could not convert response_format, ignoring")
+                except (TypeError, ValueError, PydanticInvalidForJsonSchema) as exc:
+                    logger.warning(
+                        "[OpenAIChatClient] Unsupported response_format, ignoring (%s)",
+                        type(exc).__name__,
+                    )
 
         return params
 

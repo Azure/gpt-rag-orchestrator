@@ -11,9 +11,9 @@ Covers the 5th Foundry IQ knowledge source kind, ``remoteSharePoint``:
   and omitted when empty.
 - ``remoteSharePoint`` params never carry a ``filterAddOn``. ACL is
   enforced natively by SharePoint via the forwarded per-user token.
-- The MI fallback controlled by ``FOUNDRY_IQ_FORWARD_SOURCE_AUTH`` still
-  applies to local ``azureBlob`` / ``searchIndex`` sources and never
-  substitutes for OBO on SharePoint remote.
+- The service managed identity is never forwarded as
+  ``x-ms-query-source-authorization`` (``FOUNDRY_IQ_FORWARD_SOURCE_AUTH`` is
+  deprecated and ignored); only a per-user OBO token is forwarded.
 - ``_normalize_references`` maps the ``webUrl`` + ``resourceMetadata``
   shape (and tolerant content fallbacks) into the shared
   ``{title, link, content}`` contract.
@@ -292,11 +292,11 @@ async def test_normalize_sharepoint_remote_reference_shape():
 
 
 @pytest.mark.asyncio
-async def test_mi_fallback_still_works_when_sharepoint_remote_off():
+async def test_no_mi_source_auth_when_sharepoint_remote_off():
     client, session = _build_client(
         _SAMPLE_PAYLOAD,
         config_overrides={"FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME": "documents-blob-ks"},
     )
     await client.retrieve("hello")
     headers = session.captured["headers"]
-    assert headers["x-ms-query-source-authorization"] == "svc-token"
+    assert "x-ms-query-source-authorization" not in headers

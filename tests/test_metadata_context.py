@@ -13,6 +13,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from connectors.obo import RetrievalAuthorizationMode
 
 from util.metadata import format_custom_metadata, parse_allowed_keys, METADATA_HEADER
 
@@ -225,6 +226,7 @@ async def test_provider_flag_on_prepends_block(mock_config):
     }.get(key, default)
 
     provider = SearchContextProvider(
+        authorization_mode=RetrievalAuthorizationMode.SERVICE_ONLY,
         endpoint="https://fake.search.windows.net",
         index_name="ragindex",
         credential=AsyncMock(),

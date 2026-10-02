@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "module_ids": [
+    "schemas",
+    "connectors.types",
+    "plugins.retrieval.retrieval_types",
+    "plugins.nl2sql.nl2sql_types",
+    "connectors.obo"
+  ],
+  "coverage_stage": "typed-contracts-and-new-modules",
+  "planned_expansion": ["audit contracts and sanitizers", "orchestration", "strategies", "connector boundaries"],
+  "move_map": [],
+  "review": "Azure/GPT-RAG#689; scope additions are monotonic; unambiguous identical-source moves preserve identity automatically."
+}

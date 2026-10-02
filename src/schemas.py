@@ -17,7 +17,7 @@ class OrchestratorRequest(BaseModel):
     type: Optional[str] = Field(
         None,
         description="Operation type. When set to 'feedback', the request is treated as a feedback submission.",
-        example="feedback",
+        json_schema_extra={"example": "feedback"},
     )
 
     question_id: Optional[str] = Field(
@@ -41,27 +41,27 @@ class OrchestratorRequest(BaseModel):
     conversation_id: Optional[str] = Field(
         None,
         description="Conversation identifier for keeping context between requests. (Optional)",
-        example="8db90ba1-aa03-494e-a46e-efddf7cb4277"
+        json_schema_extra={"example": "8db90ba1-aa03-494e-a46e-efddf7cb4277"}
     )
     client_principal_id: Optional[str] = Field(
         None,
         description="[DEPRECATED] Unique ID of the authenticated user.",
-        example="3d18e02b-d957-4cc5-85e6-e595cd53eec6"
+        json_schema_extra={"example": "3d18e02b-d957-4cc5-85e6-e595cd53eec6"}
     )
     client_principal_name: Optional[str] = Field(
         None,
         description="[DEPRECATED] Display name of the authenticated user.",
-        example="jdoe@microsoft.com"
+        json_schema_extra={"example": "jdoe@microsoft.com"}
     )
     client_group_names: Optional[List[str]] = Field(
         default_factory=list,
         description="[DEPRECATED] List of groups the user belongs to.",
-        example=['project-a', 'admins']
+        json_schema_extra={"example": ['project-a', 'admins']}
     )
     user_context: Optional[Dict[str, Any]] = Field(
         default_factory=dict,
         description="Custom user context to pass along to orchestrator. (Optional)",
-        example={}
+        json_schema_extra={"example": {}}
     )
 
     class Config:

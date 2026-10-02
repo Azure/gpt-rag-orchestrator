@@ -81,8 +81,9 @@ FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY = "FOUNDRY_IQ_FORWARD_SOURCE_AUTH"
 # primary knowledge source is the native azureBlob corpus, the retrieve action
 # also queries a second searchIndex knowledge source built over the existing
 # GPT-RAG index (SEARCH_RAG_INDEX_NAME). That second source carries the runtime
-# uploads and is trimmed by a conversationId filterAddOn so uploaded files are
-# only visible inside the conversation that created them. Off by default.
+# uploads and is trimmed by a conversationId plus caller-ownership filterAddOn
+# so uploaded files are only visible to their uploader inside the conversation
+# that created them. Off by default.
 FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED_KEY = "FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED"
 FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME_KEY = (
     "FOUNDRY_IQ_CONVERSATION_KNOWLEDGE_SOURCE_NAME"
@@ -160,9 +161,8 @@ SHAREPOINT_REMOTE_FILTER_EXPRESSION_ADD_ON_KEY = (
 # IQ managed identity on the target Fabric workspace) and by the operator
 # docs. Because content is stored in AI Search, ``indexedOneLake`` is a
 # native (not remote) kind: no OBO requirement and no maxRuntimeInSeconds
-# bump. If the service MI token is forwarded
-# (``FOUNDRY_IQ_FORWARD_SOURCE_AUTH=true``), Foundry IQ evaluates any
-# permission filters against the bound source using that identity.
+# bump. Permission filters are evaluated only with a per-user OBO token;
+# the service identity is never forwarded as query source authorization.
 ONELAKE_KS_ENABLED_KEY = "ONELAKE_KS_ENABLED"
 ONELAKE_KNOWLEDGE_SOURCE_NAME_KEY = "ONELAKE_KNOWLEDGE_SOURCE_NAME"
 ONELAKE_WORKSPACE_ID_KEY = "ONELAKE_WORKSPACE_ID"
@@ -226,6 +226,49 @@ class McpSourceError(RuntimeError):
 def _odata_escape_string(value: Optional[str]) -> str:
     """Escape a string for embedding in a single-quoted OData literal."""
     return (value or "").replace("'", "''")
+
+
+_ANONYMOUS_PRINCIPAL_ID = "anonymous"
+_CONVERSATION_OWNER_FIELD = "metadata_security_user_ids"
+
+
+def _resolve_conversation_owner_id(user_context: Any) -> Optional[str]:
+    """Return the server-derived principal that owns conversation uploads."""
+    if not isinstance(user_context, Mapping):
+        return None
+    for key in ("principal_id", "oid"):
+        value = str(user_context.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _build_conversation_owner_clause(
+    conversation_id: Optional[str], owner_id: Optional[str]
+) -> Optional[str]:
+    """Build the clause matching conversation uploads stamped for ``owner_id``."""
+    cid = (conversation_id or "").strip()
+    owner = (owner_id or "").strip()
+    if not cid or not owner:
+        return None
+    if owner == _ANONYMOUS_PRINCIPAL_ID:
+        owner_clause = f"not {_CONVERSATION_OWNER_FIELD}/any()"
+    else:
+        owner_clause = (
+            f"{_CONVERSATION_OWNER_FIELD}/any(u: u eq '{_odata_escape_string(owner)}')"
+        )
+    return f"(conversationId eq '{_odata_escape_string(cid)}' and {owner_clause})"
+
+
+def _build_conversation_filter(
+    conversation_id: Optional[str], owner_id: Optional[str]
+) -> str:
+    """Owner-scoped conversation uploads plus the shared corpus."""
+    shared_clause = "(conversationId eq 'NaN' or conversationId eq null)"
+    owned_clause = _build_conversation_owner_clause(conversation_id, owner_id)
+    if owned_clause:
+        return f"{owned_clause} or {shared_clause}"
+    return shared_clause
 
 
 def _normalize_security_ids(values: Iterable[Any]) -> List[str]:
@@ -334,13 +377,18 @@ def build_pattern_b_filter_add_on(
         escaped_ids = ",".join(_odata_escape_string(value) for value in security_ids)
         security_clause = f"({safe_field}/any(g:search.in(g, '{escaped_ids}')) or {public_clause})"
 
-    # Keep runtime uploads conversation-scoped while allowing the shared corpus.
+    # Keep runtime uploads conversation- and owner-scoped while allowing the
+    # shared corpus. The conversation id is client-chosen, so it must be paired
+    # with the server-derived uploader identity.
     conversation_clause = None
     cid = (conversation_id or "").strip() or None
     if cid:
         conversation_clause = (
-            f"(conversationId eq '{_odata_escape_string(cid)}' "
-            "or (conversationId eq 'NaN' or conversationId eq null))"
+            "("
+            + _build_conversation_filter(
+                cid, _resolve_conversation_owner_id(context)
+            )
+            + ")"
         )
 
     if conversation_clause:
@@ -348,9 +396,20 @@ def build_pattern_b_filter_add_on(
     return security_clause
 
 
-def build_conversation_upload_filter_add_on(conversation_id: str) -> str:
-    """Build the Foundry IQ sidecar filter for runtime conversation uploads."""
-    return f"conversationId eq '{_odata_escape_string(conversation_id)}'"
+def build_conversation_upload_filter_add_on(
+    conversation_id: Optional[str], owner_id: Optional[str]
+) -> Optional[str]:
+    """Build the Foundry IQ sidecar filter for runtime conversation uploads.
+
+    Returns ``None`` when the conversation id or the server-derived owner is
+    missing; callers must then skip the sidecar instead of widening it. The
+    clause is emitted without outer parentheses to stay as close as possible to
+    the simple ``conversationId eq`` form Foundry IQ accepts for this source.
+    """
+    clause = _build_conversation_owner_clause(conversation_id, owner_id)
+    if clause is None:
+        return None
+    return clause[1:-1]
 
 
 class FoundryIQClient:
@@ -390,17 +449,17 @@ class FoundryIQClient:
         self.max_output_documents = _as_optional_int(
             self.cfg.get(FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS_KEY, None)
         )
-        # When true (default), and no per-user OBO token is available, the
-        # service managed-identity Search-audience token is forwarded as
-        # ``x-ms-query-source-authorization`` so Foundry IQ can evaluate
-        # RBAC-scoped permission filters on the bound knowledge source. This
-        # is required by knowledge bases whose index has
-        # ``permissionFilterOption=enabled`` and whose knowledge source uses
-        # ``ingestionPermissionOptions=["rbacScope"]`` - without it the
-        # retrieve action returns 502 ("Failed to query search index").
-        self.forward_source_auth = _as_bool(
-            self.cfg.get(FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY, True, type=bool)
-        )
+        # Deprecated and ignored: the service managed-identity token is never
+        # forwarded as ``x-ms-query-source-authorization``. Only a per-user OBO
+        # token is forwarded, so permission-trimmed sources fail closed for
+        # anonymous requests instead of returning service-identity results.
+        self.forward_source_auth = False
+        if _as_bool(self.cfg.get(FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY, False, type=bool)):
+            logging.warning(
+                "[FoundryIQClient] %s is deprecated and ignored; the service "
+                "identity is never forwarded as query source authorization",
+                FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY,
+            )
         # Hybrid file-upload sidecar. Only meaningful for Pattern A (azureBlob
         # primary); Pattern B already carries a conversationId filterAddOn on its
         # single searchIndex source, so it needs no second source.
@@ -1202,8 +1261,9 @@ class FoundryIQClient:
         - no conversation knowledge source name was provisioned.
 
         When it does apply, the source is a ``searchIndex`` knowledge source over
-        the existing GPT-RAG index, always trimmed by a simple conversationId
-        ``filterAddOn`` accepted by Foundry IQ. ``failOnError`` is ``false`` so
+        the existing GPT-RAG index, always trimmed by a conversationId plus
+        caller-ownership ``filterAddOn``; it is skipped when the caller
+        principal is unknown. ``failOnError`` is ``false`` so
         an empty or missing upload index degrades gracefully to the shared corpus
         instead of failing the whole retrieve.
         """
@@ -1233,17 +1293,26 @@ class FoundryIQClient:
                 f"{DEFAULT_FOUNDRY_IQ_API_VERSION}; current "
                 f"FOUNDRY_IQ_API_VERSION={self.api_version}."
             )
+        filter_add_on = build_conversation_upload_filter_add_on(
+            cid, _resolve_conversation_owner_id(user_context)
+        )
+        if not filter_add_on:
+            logging.warning(
+                "[FoundryIQClient] FOUNDRY_IQ_CONVERSATION_UPLOAD_ENABLED=true but "
+                "the caller principal is unknown; skipping the file-upload sidecar source."
+            )
+            return None
         params: Dict[str, Any] = {
             "knowledgeSourceName": self.conversation_knowledge_source_name,
             "kind": "searchIndex",
             "includeReferences": True,
             "includeReferenceSourceData": True,
             "failOnError": False,
-            "filterAddOn": build_conversation_upload_filter_add_on(cid),
+            "filterAddOn": filter_add_on,
         }
         logging.info(
             "[FoundryIQClient][Upload] Adding conversation-upload source %s "
-            "(conversation_scoped filterAddOn)",
+            "(conversation_owner_scoped filterAddOn)",
             self.conversation_knowledge_source_name,
         )
         return params
@@ -1801,8 +1870,8 @@ class FoundryIQClient:
         # Service bearer token (the same search audience used by SearchClient).
         try:
             token = (await self.credential.get_token(_SEARCH_SCOPE)).token
-        except Exception:
-            logging.exception("[FoundryIQClient] failed to acquire service token")
+        except Exception as exc:
+            logging.error("[FoundryIQClient] failed to acquire service token (%s)", type(exc).__name__)
             if self.mcp_config.enabled:
                 raise McpCredentialError(
                     "Failed to acquire the Foundry IQ service token"
@@ -1822,29 +1891,20 @@ class FoundryIQClient:
                 "token_audience=%s source=obo",
                 _SEARCH_SCOPE,
             )
-        elif self.forward_source_auth:
-            # Anonymous/unauth chat path: forward the service MI Search-audience
-            # token so Foundry IQ can evaluate RBAC-scope permission filters on
-            # the bound knowledge source. The MI itself must hold the relevant
-            # data-plane role on the storage container (or other source) for
-            # the filter to admit documents.
-            headers["x-ms-query-source-authorization"] = token
-            logging.info(
-                "[FoundryIQClient][Trimming] x-ms-query-source-authorization=present "
-                "token_audience=%s source=managed_identity",
-                _SEARCH_SCOPE,
-            )
         else:
+            # Never substitute the service managed identity for the caller's
+            # identity: permission-trimmed sources must fail closed without a
+            # user token. Callers gate anonymous retrieval via ALLOW_ANONYMOUS.
             logging.info(
                 "[FoundryIQClient][Trimming] x-ms-query-source-authorization=absent "
-                "reason=FOUNDRY_IQ_FORWARD_SOURCE_AUTH=false and no OBO token"
+                "reason=no OBO token"
             )
 
         if self.mcp_config.enabled:
             # Local imports avoid the existing search -> foundry_iq dependency
             # becoming a module-import cycle.
             from connectors.keyvault import get_secret
-            from connectors.search import acquire_obo_token
+            from connectors.obo import acquire_obo_token
 
             try:
                 mcp_headers, credential_modes = await build_mcp_control_headers(
@@ -1989,7 +2049,7 @@ class FoundryIQClient:
         try:
             async with session.post(url, headers=headers, json=body) as resp:
                 response_status = resp.status
-                text = await resp.text()
+                await resp.text()
                 if resp.status >= 400:
                     if self.mcp_config.enabled:
                         logging.error(
@@ -2000,9 +2060,9 @@ class FoundryIQClient:
                             "Foundry IQ MCP retrieve failed: "
                             f"status={resp.status}"
                         )
-                    logging.error("[FoundryIQClient] %s %s", resp.status, text)
+                    logging.error("[FoundryIQClient] retrieve failed status=%s", resp.status)
                     raise RuntimeError(
-                        f"Foundry IQ retrieve failed: {resp.status} {text}"
+                        f"Foundry IQ retrieve failed: {resp.status}"
                     )
                 payload = await resp.json()
         except McpSourceError:
