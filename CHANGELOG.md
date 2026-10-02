@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Agent Landing Zone dual-read (Azure/GPT-RAG#695).** For one release, App
+  Configuration loads the shared `agent-lz` label ahead of the legacy
+  `gpt-rag` label, and `AGENTLZ_*` keys (environment and App Configuration)
+  take precedence over their `GPT_RAG_*` equivalents, which remain fallbacks.
+  The OpenTelemetry `service.name` is now `agentlz.orchestrator`; audit event
+  `service_name` is unchanged because it is a versioned contract.
+
 ## [v4.1.2] - 2026-10-01
 
 ### Added

@@ -39,7 +39,7 @@ from schemas import (
     ConversationUpdateRequest,
     ConversationUpdateResponse,
 )
-from constants import APPLICATION_INSIGHTS_CONNECTION_STRING, APP_NAME
+from constants import APPLICATION_INSIGHTS_CONNECTION_STRING, APP_NAME, TELEMETRY_SERVICE_NAME
 from util.tools import is_azure_environment
 from util.jwt_utils import extract_bearer_token
 
@@ -243,7 +243,7 @@ async def lifespan(app: FastAPI):
     Telemetry.configure_monitoring(
         cfg,
         APPLICATION_INSIGHTS_CONNECTION_STRING,
-        APP_NAME,
+        TELEMETRY_SERVICE_NAME,
         APP_VERSION,
     )
     
