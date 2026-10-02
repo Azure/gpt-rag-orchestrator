@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Agent Landing Zone dual-read (Azure/GPT-RAG#695).** For one release, App
+  Configuration loads the shared `agent-lz` label ahead of the legacy
+  `gpt-rag` label, and `AGENTLZ_*` keys (environment and App Configuration)
+  take precedence over their `GPT_RAG_*` equivalents, which remain fallbacks.
+  The OpenTelemetry `service.name` is now `agentlz.orchestrator`.
+- **Audit events move to the `audit-event-v2` contract (breaking for audit
+  queries).** Orchestrator audit records now use `customEvents.name` values
+  under `agentlz.audit.*` (was `gptrag.audit.*`), `schema_version` 2, and
+  `service_name` `agent-app-orchestrator` (was `gpt-rag-orchestrator`). Field
+  names and semantics are unchanged. The vendored v2 schemas are pinned at
+  `884dfa2441d3313c8ec46a099f60ce86e7abb6cdf88bb5b5da720463edbf5e97` (logical)
+  and `48416073768c0710b9a1f58640d4e822745f28b3a17b3712a2fe4cd9326c9c07`
+  (Application Insights wire); the v1 files remain in `contracts/` as history.
+  Internal logger names (`gptrag.audit`) are unchanged. Update dashboards and
+  alerts that filter on `gptrag.audit.`.
+
 ## [v4.1.2] - 2026-10-01
 
 ### Added

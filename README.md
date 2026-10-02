@@ -181,7 +181,7 @@ disabled by default and use the `gptrag.audit` logger namespace. If regular log
 export is disabled with `AZURE_MONITOR_DISABLE_LOGGING=true`, enabling audit
 events exports only that namespace.
 
-When `AUDIT_EVENTS_ENABLED=false`, no `gptrag.audit.*` events are emitted, no
+When `AUDIT_EVENTS_ENABLED=false`, no `agentlz.audit.*` events are emitted, no
 audit-only log exporter is enabled, no HMAC key is required, and other
 `AUDIT_*` settings are ignored. Existing response bodies, SSE streams,
 retrieval results, cache behavior, application logs, traces, and metrics remain
@@ -193,7 +193,7 @@ Key Vault reference and keep it out of the admin dashboard:
 
 | Key | Default | Purpose |
 | --- | --- | --- |
-| `AUDIT_EVENTS_ENABLED` | `false` | Enables v1 audit custom events. Enabling without a valid 256-bit HMAC key fails startup. |
+| `AUDIT_EVENTS_ENABLED` | `false` | Enables audit-event-v2 custom events (`agentlz.audit.<event_type>`, `service_name` `agent-app-orchestrator`). Enabling without a valid 256-bit HMAC key fails startup. |
 | `AUDIT_HMAC_KEY` | Unset | Base64, Base64URL, or hexadecimal encoding of exactly 32 random bytes. Used only to pseudonymize source, conversation, question, thread, tool, and optional actor identifiers. |
 | `AUDIT_HMAC_KEY_ID` | `v1` | Non-secret key version recorded with events to support rotation. Change it together with the key. |
 | `AUDIT_SENSITIVE_CONTENT_ENABLED` | `false` | Allows approved sensitive fields to be considered for capture. The allowlist must also be non-empty. |
@@ -277,8 +277,13 @@ If a bounded logical event still cannot be serialized safely, the original
 event is discarded and one payload-free, constant-safe
 `audit.emission.failed` event is attempted for the request.
 
-The reusable v1 JSON Schema for orchestrator and ingestion producers is
-[`contracts/audit-event-v1.schema.json`](contracts/audit-event-v1.schema.json).
+The reusable v2 JSON Schema for orchestrator and ingestion producers is
+[`contracts/audit-event-v2.schema.json`](contracts/audit-event-v2.schema.json).
+Version 2 renames the Application Insights event prefix from `gptrag.audit.`
+to `agentlz.audit.` and the producer `service_name` to
+`agent-app-orchestrator`; field names and semantics are unchanged. The
+`audit-event-v1` files remain in [`contracts/`](contracts/) as hash-pinned
+history for reading events exported before this change.
 The ingestion component reserves exactly these event names, with no aliases:
 
 | Scope | Events |
@@ -301,15 +306,31 @@ failing retrieval.
 
 Application Insights stores custom-event property values as strings. The
 corresponding exported shape is documented and tested in
-[`contracts/audit-event-v1.application-insights.schema.json`](contracts/audit-event-v1.application-insights.schema.json).
-Consumers should parse those properties into the logical v1 types before
+[`contracts/audit-event-v2.application-insights.schema.json`](contracts/audit-event-v2.application-insights.schema.json).
+Consumers should parse those properties into the logical v2 types before
 validating them against the reusable contract. Logical root events use
 `parent_event_id=null`. Because the pinned Azure Monitor exporter drops null
 custom properties, the wire adapter encodes logical null as
 `evt_00000000000000000000000000000000`; consumers must decode that reserved
 sentinel to null and must never join it as an event. Contract artifact SHA-256
 digests are recorded in
-[`contracts/audit-event-v1.sha256`](contracts/audit-event-v1.sha256).
+[`contracts/audit-event-v2.sha256`](contracts/audit-event-v2.sha256).
+
+Query orchestrator audit events in Application Insights:
+
+```kusto
+customEvents
+| where name startswith "agentlz.audit."
+| where tostring(customDimensions.service_name) == "agent-app-orchestrator"
+| project timestamp, name, tostring(customDimensions.event_id),
+    tostring(customDimensions.correlation_id),
+    tostring(customDimensions.parent_event_id),
+    tostring(customDimensions.status), tostring(customDimensions.reason_code)
+| order by timestamp asc
+```
+
+During the transition, include history exported under v1 with
+`name startswith "agentlz.audit." or name startswith "gptrag.audit."`.
 
 ### NL2SQL datasource security
 

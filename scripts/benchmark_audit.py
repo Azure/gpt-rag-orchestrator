@@ -33,7 +33,7 @@ def main(iterations: int = 10_000) -> None:
             hmac_key=b"k" * 32,
             additional_redacted_keys=frozenset(),
         ),
-        service_name="gpt-rag-orchestrator",
+        service_name="agent-app-orchestrator",
         service_version="benchmark",
         environment="benchmark",
     )
