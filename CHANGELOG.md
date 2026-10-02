@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Deprecated source-authorization setting warning uses a fixed message.**
+  The Foundry IQ deprecation warning no longer interpolates configuration
+  names or values into logs.
+
 ## [v4.1.2] - 2026-10-01
 
 ### Added

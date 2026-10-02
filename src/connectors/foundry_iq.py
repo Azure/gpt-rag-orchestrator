@@ -456,9 +456,9 @@ class FoundryIQClient:
         self.forward_source_auth = False
         if _as_bool(self.cfg.get(FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY, False, type=bool)):
             logging.warning(
-                "[FoundryIQClient] %s is deprecated and ignored; the service "
-                "identity is never forwarded as query source authorization",
-                FOUNDRY_IQ_FORWARD_SOURCE_AUTH_KEY,
+                "[FoundryIQClient] FOUNDRY_IQ_FORWARD_SOURCE_AUTH is deprecated "
+                "and ignored; the service identity is never forwarded as query "
+                "source authorization"
             )
         # Hybrid file-upload sidecar. Only meaningful for Pattern A (azureBlob
         # primary); Pattern B already carries a conversationId filterAddOn on its
