@@ -2,6 +2,9 @@
 
 from unittest.mock import patch
 
+import ast
+from pathlib import Path
+
 import pytest
 
 import constants
@@ -19,7 +22,12 @@ def _client(monkeypatch, mock_identity_manager, values, env_enabled=False):
 
 
 def test_label_selectors_prefer_agent_lz_before_gpt_rag(monkeypatch, mock_identity_manager):
-    _, load = _client(monkeypatch, mock_identity_manager, {})
+    monkeypatch.setenv("APP_CONFIG_ENDPOINT", "https://config.example.invalid")
+    with (
+        patch("connectors.appconfig.get_identity_manager", return_value=mock_identity_manager),
+        patch("connectors.appconfig._provider_load", return_value={}) as load,
+    ):
+        AppConfigClient()
     labels = [s.label_filter for s in load.call_args.kwargs["selects"]]
     assert labels == ["orchestrator", "gpt-rag-orchestrator", "agent-lz", "gpt-rag", None]
     assert labels.index("agent-lz") < labels.index("gpt-rag")
@@ -65,5 +73,13 @@ def test_missing_in_both_prefixes_still_raises(monkeypatch, mock_identity_manage
 
 
 def test_telemetry_service_name_uses_agentlz_prefix():
-    assert constants.TELEMETRY_SERVICE_NAME.startswith("agentlz.")
+    main_src = Path(__file__).resolve().parents[1] / "src" / "main.py"
+    tree = ast.parse(main_src.read_text(encoding="utf-8"))
+    calls = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "configure_monitoring"
+    ]
+    assert len(calls) == 1
+    service_name = calls[0].args[2]
+    assert isinstance(service_name, ast.Constant) and service_name.value == "agentlz.orchestrator"
     assert constants.APP_NAME == "gpt-rag-orchestrator"

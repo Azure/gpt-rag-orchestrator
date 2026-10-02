@@ -8,30 +8,12 @@ from azure.appconfiguration import (
 )
 from azure.appconfiguration.provider import (
     AzureAppConfigurationKeyVaultOptions,
-    load,
+    load as _provider_load,
     SettingSelector,
 )
 from connectors.identity_manager import get_identity_manager
 
 from tenacity import retry, wait_random_exponential, stop_after_attempt, RetryError
-
-# Agent Landing Zone rebrand (Azure/GPT-RAG#695): dual-read for one release.
-# The 'agent-lz' label and AGENTLZ_ key prefix win; 'gpt-rag' and GPT_RAG_ remain fallbacks.
-AGENTLZ_LABEL = "agent-lz"
-LEGACY_BASE_LABEL = "gpt-rag"
-LOADED_LABELS = ("orchestrator", "gpt-rag-orchestrator", AGENTLZ_LABEL, LEGACY_BASE_LABEL, "<no-label>")
-AGENTLZ_KEY_PREFIX = "AGENTLZ_"
-LEGACY_KEY_PREFIX = "GPT_RAG_"
-
-
-def candidate_keys(key: str) -> list[str]:
-    """Return lookup keys in precedence order (AGENTLZ_ before GPT_RAG_)."""
-    if key.startswith(AGENTLZ_KEY_PREFIX):
-        return [key, LEGACY_KEY_PREFIX + key[len(AGENTLZ_KEY_PREFIX):]]
-    if key.startswith(LEGACY_KEY_PREFIX):
-        return [AGENTLZ_KEY_PREFIX + key[len(LEGACY_KEY_PREFIX):], key]
-    return [key]
-
 
 class AppConfigClient:
 
@@ -43,8 +25,7 @@ class AppConfigClient:
         Bulk-loads all keys into an in-memory dict from the most common labels used by GPT-RAG:
         - 'orchestrator' (legacy / shared deployments)
         - 'gpt-rag-orchestrator' (service-specific)
-        - 'agent-lz' (Agent Landing Zone base / shared, preferred)
-        - 'gpt-rag' (legacy base / shared, read as a fallback for one release)
+        - 'agent-lz' then legacy 'gpt-rag' (base / shared; see load() below)
 
         Precedence is determined by the order of selectors (earlier wins for duplicate keys).
         """
@@ -84,8 +65,7 @@ class AppConfigClient:
         loaded_labels = list(LOADED_LABELS)
         legacy_orchestrator_label_selector = SettingSelector(label_filter='orchestrator', key_filter='*')
         orchestrator_label_selector = SettingSelector(label_filter='gpt-rag-orchestrator', key_filter='*')
-        agentlz_label_selector = SettingSelector(label_filter=AGENTLZ_LABEL, key_filter='*')
-        base_label_selector = SettingSelector(label_filter=LEGACY_BASE_LABEL, key_filter='*')
+        base_label_selector = SettingSelector(label_filter='gpt-rag', key_filter='*')
         no_label_selector = SettingSelector(label_filter=None, key_filter='*')
 
         logging.info(
@@ -99,13 +79,7 @@ class AppConfigClient:
         # Try to load from Azure App Configuration. If auth fails, don't spam stack traces.
         try:
             self.client = load(
-                selects=[
-                    legacy_orchestrator_label_selector,
-                    orchestrator_label_selector,
-                    agentlz_label_selector,
-                    base_label_selector,
-                    no_label_selector,
-                ],
+                selects=[legacy_orchestrator_label_selector, orchestrator_label_selector, base_label_selector, no_label_selector],
                 endpoint=endpoint,
                 credential=self.credential,
                 key_vault_options=AzureAppConfigurationKeyVaultOptions(credential=self.credential)
@@ -147,16 +121,14 @@ class AppConfigClient:
         if "allow_environment_variables" in os.environ:
             allow_env_vars = str(os.environ["allow_environment_variables"]).lower() in ("1", "true", "yes")
 
-        keys = candidate_keys(key)
-
         if allow_env_vars is True:
-            for candidate in keys:
+            for candidate in candidate_keys(key):
                 value = os.environ.get(candidate)
                 if value is not None:
                     break
 
         if value is None and not self.disabled:
-            for candidate in keys:
+            for candidate in candidate_keys(key):
                 try:
                     value = self.get_config_with_retry(name=candidate)
                 except RetryError:
@@ -262,3 +234,38 @@ class AppConfigClient:
         )
         setting = ConfigurationSetting(key=key, label=label, value=str_value)
         write_client.set_configuration_setting(setting)
+
+
+# Agent Landing Zone rebrand (Azure/GPT-RAG#695): dual-read for one release.
+# The 'agent-lz' label and AGENTLZ_ key prefix win; 'gpt-rag' and GPT_RAG_ remain fallbacks.
+# These helpers live after the class so AppConfigClient.__init__ (including its
+# governed provider-load try/except) stays unchanged; names resolve at call time.
+AGENTLZ_LABEL = "agent-lz"
+LEGACY_BASE_LABEL = "gpt-rag"
+LOADED_LABELS = ("orchestrator", "gpt-rag-orchestrator", AGENTLZ_LABEL, LEGACY_BASE_LABEL, "<no-label>")
+AGENTLZ_KEY_PREFIX = "AGENTLZ_"
+LEGACY_KEY_PREFIX = "GPT_RAG_"
+
+
+def candidate_keys(key: str) -> list[str]:
+    """Return lookup keys in precedence order (AGENTLZ_ before GPT_RAG_)."""
+    if key.startswith(AGENTLZ_KEY_PREFIX):
+        return [key, LEGACY_KEY_PREFIX + key[len(AGENTLZ_KEY_PREFIX):]]
+    if key.startswith(LEGACY_KEY_PREFIX):
+        return [AGENTLZ_KEY_PREFIX + key[len(LEGACY_KEY_PREFIX):], key]
+    return [key]
+
+
+def with_agentlz_selector(selects: list) -> list:
+    """Insert an 'agent-lz' selector immediately before the legacy 'gpt-rag' selector."""
+    result = []
+    for selector in selects:
+        if getattr(selector, "label_filter", None) == LEGACY_BASE_LABEL:
+            result.append(SettingSelector(label_filter=AGENTLZ_LABEL, key_filter=selector.key_filter))
+        result.append(selector)
+    return result
+
+
+def load(*, selects: list, **kwargs: Any):
+    """Provider ``load`` with the agent-lz label read ahead of the legacy gpt-rag label."""
+    return _provider_load(selects=with_agentlz_selector(selects), **kwargs)
