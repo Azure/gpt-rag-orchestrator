@@ -358,10 +358,7 @@ async def test_disabled_preserves_exact_legacy_request_and_headers():
     assert session.captured["headers"]["Authorization"].endswith(
         "search-service-token"
     )
-    assert (
-        session.captured["headers"]["x-ms-query-source-authorization"]
-        == "search-service-token"
-    )
+    assert "x-ms-query-source-authorization" not in session.captured["headers"]
 
 
 @pytest.mark.asyncio

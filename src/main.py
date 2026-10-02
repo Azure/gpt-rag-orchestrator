@@ -77,6 +77,22 @@ except FileNotFoundError:
     APP_VERSION = "0.0.0"
 
 
+# Identity and authorization keys that only the server may populate in user_context.
+_SERVER_TRUSTED_USER_CONTEXT_KEYS = frozenset(
+    {
+        "principal_id",
+        "principal_name",
+        "user_name",
+        "oid",
+        "user_id",
+        "security_ids",
+        "groups",
+        "group_ids",
+        "client_group_names",
+    }
+)
+
+
 def _startup_banner() -> None:
     name = "GPT-RAG Orchestrator"
     version = None
@@ -346,7 +362,15 @@ async def orchestrator_endpoint(
 
     # If Authorization header is provided, validate the access token and apply authorization checks.
     # If Authorization header is missing, treat the request as anonymous only when ALLOW_ANONYMOUS=true.
-    user_context = body.user_context or {}
+    user_context = dict(body.user_context or {})
+    ignored_identity_keys = sorted(k for k in user_context if k in _SERVER_TRUSTED_USER_CONTEXT_KEYS)
+    for key in ignored_identity_keys:
+        user_context.pop(key, None)
+    if ignored_identity_keys:
+        logging.debug(
+            "[Orchestrator] Ignoring client-supplied identity keys in user_context: %s",
+            ",".join(ignored_identity_keys),
+        )
     access_token: Optional[str] = None
     if authorization:
         # If auth isn't configured, decide whether to proceed based on ALLOW_ANONYMOUS.
@@ -356,8 +380,8 @@ async def orchestrator_endpoint(
                 logging.warning(
                     "[Orchestrator] Authorization header provided but Entra auth is not configured; proceeding as anonymous (ALLOW_ANONYMOUS=true)"
                 )
-                user_context.setdefault("principal_id", "anonymous")
-                user_context.setdefault("principal_name", "anonymous")
+                user_context["principal_id"] = "anonymous"
+                user_context["principal_name"] = "anonymous"
             else:
                 auth_decision = "reject_auth_not_configured"
                 logging.warning(
@@ -445,8 +469,8 @@ async def orchestrator_endpoint(
         if allow_anonymous:
             auth_decision = "allow_anonymous_missing_auth_header"
             logging.debug("[Orchestrator] No Authorization header; treating as anonymous (ALLOW_ANONYMOUS=true)")
-            user_context.setdefault("principal_id", "anonymous")
-            user_context.setdefault("principal_name", "anonymous")
+            user_context["principal_id"] = "anonymous"
+            user_context["principal_name"] = "anonymous"
         else:
             auth_decision = "reject_missing_auth_header"
             # Mirror token-invalid behavior: 401 when auth is required.

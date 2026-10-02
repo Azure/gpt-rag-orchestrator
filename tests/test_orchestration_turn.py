@@ -274,7 +274,8 @@ class TestFromTurnRequest:
         assert orchestrator.user_context == {"principal_id": "user-1"}
         assert orchestrator.request_access_token == "token"
         assert orchestrator.correlation_id == "req_abc123"
-        strategy.set_context.assert_called_once_with("conv-abc")
+        # Conversation scope is applied only after stream_response verifies ownership.
+        strategy.set_context.assert_called_once_with(None)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

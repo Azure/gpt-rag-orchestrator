@@ -12,8 +12,10 @@ Hosted mode consumes Foundry-managed conversation history and disables profile
 memory until an authenticated Foundry identity contract is available.
 """
 
+import functools
 import logging
 import time
+from collections.abc import Mapping
 from typing import Optional
 
 # Suppress Azure SDK HTTP logging BEFORE importing azure packages
@@ -50,6 +52,22 @@ from orchestration.agent_events import AgentEventTranslator
 from util.retrieval_backend import get_retrieval_backend, RETRIEVAL_BACKEND_FOUNDRY_IQ
 from dependencies import get_config
 from openai import BadRequestError
+
+
+def _resolve_conversation_owner_id(user_context) -> Optional[str]:
+    """Return the server-derived principal that owns conversation-scoped chunks."""
+    if not isinstance(user_context, Mapping):
+        return None
+    for key in ("principal_id", "oid"):
+        value = user_context.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _scoped_search_provider_factory(owner_id: Optional[str]):
+    """Bind the conversation owner to the search provider constructor."""
+    return functools.partial(SearchContextProvider, owner_id=owner_id)
 
 
 class MafLiteStrategy(BaseAgentStrategy):
@@ -214,6 +232,10 @@ class MafLiteStrategy(BaseAgentStrategy):
         if not self.search_index_name:
             logging.warning("[MafLiteStrategy] No search index name configured, skipping search")
             return None
+
+        SearchContextProvider = _scoped_search_provider_factory(
+            _resolve_conversation_owner_id(self.user_context)
+        )
         try:
             allow_anonymous = self.cfg.get(
                 "ALLOW_ANONYMOUS", default=True, type=bool

@@ -105,6 +105,73 @@ async def test_search_provider_keeps_legacy_service_identity_recovery(
     assert not any(record.exc_info for record in caplog.records)
 
 
+async def _provider_filter(mock_config, provider_kind, owner_id, conversation_id="conv-1"):
+    sdk = _sdk_search([{"id": "one", "title": "Document", "filepath": "file.pdf", "content": "ctx"}], lambda _: None)
+    module = text if provider_kind == "text" else vision
+    kwargs = dict(
+        endpoint="https://search.invalid", index_name="documents", credential=MagicMock(),
+        conversation_id=conversation_id, get_obo_token=AsyncMock(return_value="synthetic-delegated"),
+        owner_id=owner_id,
+    )
+    if provider_kind == "vision":
+        kwargs["blob_credential"] = MagicMock()
+        provider = vision.MultimodalSearchContextProvider(**kwargs)
+    else:
+        provider = text.SearchContextProvider(**kwargs)
+    with (
+        patch.object(module, "get_config", return_value=mock_config),
+        patch.object(module, "SearchClient", return_value=sdk),
+    ):
+        await provider.invoking(ChatMessage(role=Role.USER, text="question"))
+    return sdk.search.await_args_list[0].kwargs["filter"]
+
+
+@pytest.mark.parametrize("provider_kind", ["text", "vision"])
+async def test_search_provider_scopes_conversation_uploads_to_owner(mock_config, provider_kind):
+    owner_filter = await _provider_filter(mock_config, provider_kind, "oid-a")
+    assert owner_filter == build_conversation_filter("conv-1", owner_id="oid-a")
+    assert "conversationId eq 'conv-1' and metadata_security_user_ids/any(u: u eq 'oid-a')" in owner_filter
+
+    other_filter = await _provider_filter(mock_config, provider_kind, "oid-b")
+    assert "oid-a" not in other_filter
+    assert "metadata_security_user_ids/any(u: u eq 'oid-b')" in other_filter
+
+
+@pytest.mark.parametrize("provider_kind", ["text", "vision"])
+async def test_search_provider_without_owner_returns_shared_documents_only(mock_config, provider_kind):
+    shared_only = await _provider_filter(mock_config, provider_kind, None)
+    assert shared_only == build_conversation_filter("conv-1")
+    assert "conv-1" not in shared_only
+
+
+@pytest.mark.parametrize("module,strategy_type", [
+    (lite, lite.MafLiteStrategy), (service, service.MafAgentServiceStrategy),
+    (multimodal, multimodal.MultimodalStrategy),
+], ids=["lite", "service", "vision"])
+@pytest.mark.parametrize("user_context,expected_owner", [
+    ({"principal_id": "oid-a", "oid": "ignored"}, "oid-a"),
+    ({"oid": "oid-b"}, "oid-b"),
+    ({}, None),
+], ids=["principal", "oid", "none"])
+async def test_strategy_passes_server_derived_owner_to_search_provider(
+    patch_dependencies, mock_config, module, strategy_type, user_context, expected_owner,
+):
+    with (
+        patch.object(module, "get_config", return_value=mock_config),
+        patch.object(module, "get_retrieval_backend", return_value="ai_search"),
+        patch.object(text, "get_config", return_value=mock_config),
+        patch.object(vision, "get_config", return_value=mock_config),
+    ):
+        strategy = strategy_type()
+        strategy.search_endpoint = "https://search.invalid"
+        strategy.search_index_name = "documents"
+        strategy.embedding_deployment = None
+        strategy.user_context = user_context
+        provider = await strategy._create_search_provider()
+    assert provider is not None
+    assert provider._owner_id == expected_owner
+
+
 @pytest.mark.parametrize("module,strategy_type", [
     (lite, lite.MafLiteStrategy), (service, service.MafAgentServiceStrategy),
     (multimodal, multimodal.MultimodalStrategy),

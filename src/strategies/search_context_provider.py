@@ -45,11 +45,13 @@ class SearchContextProvider(ContextProvider):
         max_content_chars: int = 1500,
         get_obo_token: Callable[[], Awaitable[Optional[str]]] | None = None,
         authorization_mode: RetrievalAuthorizationMode = RetrievalAuthorizationMode.USER_REQUIRED,
+        owner_id: Optional[str] = None,
     ) -> None:
         self._endpoint = endpoint
         self._index_name = index_name
         self._credential = credential
         self._conversation_id = (conversation_id or "").strip() or None
+        self._owner_id = (owner_id or "").strip() or None
         self._top_k = top_k
         self._semantic_config = semantic_configuration_name
         self._embed_fn = embed_fn
@@ -99,8 +101,11 @@ class SearchContextProvider(ContextProvider):
             "select": select_fields,
         }
 
-        # Conversation scoping: only this conversation + shared/global chunks.
-        search_params["filter"] = build_conversation_filter(self._conversation_id, field_name="conversationId")
+        # Conversation scoping: only this caller's chunks in this conversation
+        # plus shared/global chunks.
+        search_params["filter"] = build_conversation_filter(
+            self._conversation_id, owner_id=self._owner_id, field_name="conversationId"
+        )
 
         # Hybrid search: add vector query when embedding function is available
         if self._embed_fn:

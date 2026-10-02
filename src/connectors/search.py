@@ -3,6 +3,8 @@ import logging
 import json
 import time
 import hashlib
+import functools
+from collections.abc import Mapping
 from typing import Optional, Any, Dict
 from pydantic import BaseModel, Field
 from azure.core.exceptions import AzureError
@@ -73,16 +75,62 @@ class SearchResult(BaseModel):
     custom_metadata: Optional[Any] = Field(default=None, exclude=True)
 
 
+ANONYMOUS_PRINCIPAL_ID = "anonymous"
+CONVERSATION_OWNER_FIELD = "metadata_security_user_ids"
+
+
 def _odata_escape_string(value: Optional[str]) -> str:
     """Escape a string for embedding in single-quoted OData literals."""
     return (value or "").replace("'", "''")
 
 
-def build_conversation_filter(conversation_id: Optional[str], *, field_name: str = "conversationId") -> str:
+def resolve_conversation_owner_id(user_context: Any) -> Optional[str]:
+    """Return the server-derived principal that owns conversation uploads."""
+    if not isinstance(user_context, Mapping):
+        return None
+    for key in ("principal_id", "oid"):
+        value = str(user_context.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def build_conversation_owner_clause(
+    conversation_id: Optional[str],
+    owner_id: Optional[str],
+    *,
+    field_name: str = "conversationId",
+    owner_field: str = CONVERSATION_OWNER_FIELD,
+) -> Optional[str]:
+    """Build the clause matching conversation uploads stamped for ``owner_id``."""
+    cid = (conversation_id or "").strip()
+    owner = (owner_id or "").strip()
+    if not cid or not owner:
+        return None
+    safe_field = (field_name or "").strip() or "conversationId"
+    safe_owner_field = (owner_field or "").strip() or CONVERSATION_OWNER_FIELD
+    if owner == ANONYMOUS_PRINCIPAL_ID:
+        owner_clause = f"not {safe_owner_field}/any()"
+    else:
+        owner_clause = (
+            f"{safe_owner_field}/any(u: u eq '{_odata_escape_string(owner)}')"
+        )
+    return f"({safe_field} eq '{_odata_escape_string(cid)}' and {owner_clause})"
+
+
+def build_conversation_filter(
+    conversation_id: Optional[str],
+    *,
+    field_name: str = "conversationId",
+    owner_id: Optional[str] = None,
+    owner_field: str = CONVERSATION_OWNER_FIELD,
+) -> str:
     """Build OData filter for conversation-scoped retrieval.
 
     Includes:
-    - conversation-specific chunks (conversationId == <cid>) when cid is set
+    - conversation-specific chunks (conversationId == <cid>) only when they
+      are stamped for ``owner_id``; without an owner they are excluded so a
+      reused conversation id cannot expose another principal's uploads
     - shared/global chunks always. A chunk is treated as shared when its
       conversationId is the 'NaN' sentinel OR null/unset. Ingestion has used
       both representations for global corpora, so both must match here,
@@ -90,10 +138,19 @@ def build_conversation_filter(conversation_id: Optional[str], *, field_name: str
     """
     safe_field = (field_name or "").strip() or "conversationId"
     shared_clause = f"({safe_field} eq 'NaN' or {safe_field} eq null)"
-    cid = (conversation_id or "").strip() or None
-    if cid:
-        return f"{safe_field} eq '{_odata_escape_string(cid)}' or {shared_clause}"
+    owned_clause = build_conversation_owner_clause(
+        conversation_id,
+        owner_id,
+        field_name=safe_field,
+        owner_field=owner_field,
+    )
+    if owned_clause:
+        return f"{owned_clause} or {shared_clause}"
     return shared_clause
+
+
+_module_build_conversation_filter = build_conversation_filter
+
 
 class SearchClient:
     """
@@ -542,6 +599,11 @@ class SearchClient:
         logging.info(f"[Retrieval] Search approach: {self.search_approach}")
         logging.info(f"[Retrieval] Executing search for query: {query}")
 
+        # Bind the server-derived owner so conversation uploads stay principal-scoped.
+        build_conversation_filter = functools.partial(
+            _module_build_conversation_filter,
+            owner_id=resolve_conversation_owner_id(getattr(self, "_user_context", None)),
+        )
         search_user_token = None
         try:
             logging.info("[Retrieval] Using Azure AI Search for document retrieval")

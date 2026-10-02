@@ -9,9 +9,9 @@ Covers Azure/GPT-RAG#543 Phase 0 plumbing + Phase 1 Work IQ kind:
   ``WORK_IQ_ENABLED`` is true and ``WORK_IQ_KNOWLEDGE_SOURCE_NAME`` is set.
 - ``workIQ`` params never carry a ``filterAddOn`` — ACL is enforced natively
   by Microsoft 365 via the forwarded user token.
-- The MI fallback controlled by ``FOUNDRY_IQ_FORWARD_SOURCE_AUTH`` still
-  applies to local ``azureBlob`` / ``searchIndex`` sources and never
-  substitutes for OBO on remote kinds.
+- The service managed identity is never forwarded as
+  ``x-ms-query-source-authorization`` (``FOUNDRY_IQ_FORWARD_SOURCE_AUTH`` is
+  deprecated and ignored); only a per-user OBO token is forwarded.
 - ``_normalize_references`` maps the Work IQ ``attributions[].seeMoreWebUrl`` +
   ``extracts[].text`` shape to the shared ``{title, link, content}`` contract.
 """
@@ -238,25 +238,25 @@ async def test_work_iq_skipped_when_obo_missing():
 
 
 # ---------------------------------------------------------------------------
-# Regression guard: MI fallback still works for local kinds.
+# Regression guard: the service identity is never forwarded as source auth.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_mi_fallback_still_works_for_azure_blob():
-    """Baseline behavior for Pattern A must be preserved when Work IQ is off."""
+async def test_no_mi_source_auth_for_azure_blob():
+    """Without an OBO token, no source-authorization header is sent."""
     client, session = _build_client(
         _SAMPLE_PAYLOAD,
         config_overrides={"FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME": "documents-blob-ks"},
     )
     await client.retrieve("hello")
     headers = session.captured["headers"]
-    assert headers["x-ms-query-source-authorization"] == "svc-token"
+    assert "x-ms-query-source-authorization" not in headers
 
 
 @pytest.mark.asyncio
-async def test_mi_fallback_still_works_for_search_index():
-    """Pattern B still uses the MI-forwarded header when no OBO token is
-    supplied and forwarding is enabled."""
+async def test_no_mi_source_auth_for_search_index():
+    """Pattern B never substitutes the service identity for the user, even
+    with the deprecated forwarding flag enabled."""
     client, session = _build_client(
         _SAMPLE_PAYLOAD,
         config_overrides={
@@ -266,7 +266,7 @@ async def test_mi_fallback_still_works_for_search_index():
     )
     await client.retrieve("hello")
     headers = session.captured["headers"]
-    assert headers["x-ms-query-source-authorization"] == "svc-token"
+    assert "x-ms-query-source-authorization" not in headers
 
 
 # ---------------------------------------------------------------------------

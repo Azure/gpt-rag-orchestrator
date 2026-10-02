@@ -71,6 +71,7 @@ def mock_cosmos():
     """Return a fake CosmosDBClient with async helpers."""
     cosmos = MagicMock()
     cosmos.get_document = AsyncMock(return_value=None)
+    cosmos.document_id_exists = AsyncMock(return_value=False)
     cosmos.upsert_document = AsyncMock()
     cosmos.create_document = AsyncMock()
     return cosmos

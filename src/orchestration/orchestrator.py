@@ -96,9 +96,10 @@ class Orchestrator:
         if not instance.agentic_strategy:
             raise EnvironmentError("AGENT_STRATEGY must be set")
 
-        # Best-effort: propagate incoming conversation_id (may be None here).
+        # The client-supplied conversation_id is unverified here; the retrieval
+        # scope is set only after ownership is checked in stream_response.
         if instance.agentic_strategy and hasattr(instance.agentic_strategy, "set_context"):
-            instance.agentic_strategy.set_context(conversation_id)
+            instance.agentic_strategy.set_context(None)
 
         instance.agentic_strategy.user_context = user_context
 
@@ -235,6 +236,26 @@ class Orchestrator:
                         "decision_value": strategy_name,
                     },
                 )
+
+            # Never adopt an id owned by another partition: the id also
+            # scopes conversation-level retrieval filters.
+            if self.conversation_id:
+                owner_partition_key = (
+                    f"anonymous-{self.conversation_id}"
+                    if self.principal_id == "anonymous"
+                    else self.principal_id
+                )
+                existing_conversation = await self.database_client.get_document(
+                    self.database_container, self.conversation_id, partition_key=owner_partition_key
+                )
+                if existing_conversation is None and await self._conversation_id_owned_elsewhere(
+                    self.conversation_id
+                ):
+                    logging.warning(
+                        "Supplied conversation_id belongs to another principal; "
+                        "starting a new conversation instead"
+                    )
+                    self.conversation_id = str(uuid.uuid4())
 
             try:
                 # 1) Load or create our conversation document in Cosmos
@@ -447,6 +468,15 @@ class Orchestrator:
                 finally:
                     if audit_token is not None:
                         end_audit_request(audit_token)
+
+    async def _conversation_id_owned_elsewhere(self, conversation_id: str) -> bool:
+        """Return True when the id already belongs to another principal's partition.
+
+        Lookup failures propagate so an unverifiable id fails the request closed.
+        """
+        return await self.database_client.document_id_exists(
+            self.database_container, conversation_id
+        )
 
     def _start_conversation_persistence(
         self,

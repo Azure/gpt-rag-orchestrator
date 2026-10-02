@@ -220,12 +220,14 @@ class MultimodalSearchContextProvider(ContextProvider):
         authorization_mode: RetrievalAuthorizationMode = RetrievalAuthorizationMode.USER_REQUIRED,
         classify_images_fn: Callable[[dict[str, Any]], Awaitable[bool]] | None = None,
         classify_images_concurrency: int = 2,
+        owner_id: Optional[str] = None,
     ) -> None:
         self._endpoint = endpoint
         self._index_name = index_name
         self._credential = credential
         self._blob_credential = blob_credential
         self._conversation_id = (conversation_id or "").strip() or None
+        self._owner_id = (owner_id or "").strip() or None
         self._top_k = top_k
         self._max_images = max_images
         self._max_images_per_doc = max_images_per_doc
@@ -287,8 +289,11 @@ class MultimodalSearchContextProvider(ContextProvider):
             "select": select_fields,
         }
 
-        # Conversation scoping: only this conversation + shared/global chunks.
-        search_params["filter"] = build_conversation_filter(self._conversation_id, field_name="conversationId")
+        # Conversation scoping: only this caller's chunks in this conversation
+        # plus shared/global chunks.
+        search_params["filter"] = build_conversation_filter(
+            self._conversation_id, owner_id=self._owner_id, field_name="conversationId"
+        )
 
         # Dual vector queries: contentVector + captionVector
         if self._embed_fn:
