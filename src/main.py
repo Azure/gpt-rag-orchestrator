@@ -39,7 +39,7 @@ from schemas import (
     ConversationUpdateRequest,
     ConversationUpdateResponse,
 )
-from constants import APPLICATION_INSIGHTS_CONNECTION_STRING, APP_NAME
+from constants import APPLICATION_INSIGHTS_CONNECTION_STRING
 from util.tools import is_azure_environment
 from util.jwt_utils import extract_bearer_token
 
@@ -237,13 +237,13 @@ async def lifespan(app: FastAPI):
     _startup_banner()
     AuditEmitter.configure(
         cfg,
-        service_name=APP_NAME,
+        service_name="agent-app-orchestrator",  # audit-event-v2 producer name
         service_version=APP_VERSION,
     )
     Telemetry.configure_monitoring(
         cfg,
         APPLICATION_INSIGHTS_CONNECTION_STRING,
-        APP_NAME,
+        "agentlz.orchestrator",  # OTel service.name (Azure/GPT-RAG#695)
         APP_VERSION,
     )
     

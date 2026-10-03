@@ -1,3 +1,4 @@
+import ast
 import base64
 import hashlib
 import json
@@ -10,9 +11,12 @@ import jsonschema
 import pytest
 
 from telemetry.audit_contract import (
+    AUDIT_EVENT_PREFIX,
     INGESTION_EVENT_TYPES,
     MAX_EVENT_BYTES,
     ROOT_PARENT_EVENT_ID,
+    SCHEMA_VERSION,
+    SERVICE_NAME,
     AuditConfigurationError,
     AuditSettings,
     EventType,
@@ -38,6 +42,24 @@ EXPECTED_INGESTION_EVENT_TYPES = frozenset(
         "ingestion.document.deleted",
     }
 )
+CURRENT_LOGICAL = "audit-event-v2.schema.json"
+CURRENT_WIRE = "audit-event-v2.application-insights.schema.json"
+PINNED_CONTRACTS = {
+    # Current contract: Agent Landing Zone audit-event-v2 (agentlz.audit.*).
+    "audit-event-v2": {
+        "audit-event-v2.schema.json": "884dfa2441d3313c8ec46a099f60ce86e7abb6cdf88bb5b5da720463edbf5e97",
+        "audit-event-v2.application-insights.schema.json": "48416073768c0710b9a1f58640d4e822745f28b3a17b3712a2fe4cd9326c9c07",
+    },
+    # Historical contract kept hash-pinned for readers of older events.
+    "audit-event-v1": {
+        "audit-event-v1.schema.json": "825db8ef40a81e2c19e5d80d37c565b6b47fc9a6540e9881d35cc12b8fde5aab",
+        "audit-event-v1.application-insights.schema.json": "066c8f5408610ab839d5121d06ca5bc59e8797e551d5c47c875c5ba52f7e0588",
+    },
+}
+
+
+def _schema(name):
+    return json.loads((ROOT / "contracts" / name).read_text())
 
 
 class Config:
@@ -50,7 +72,7 @@ class Config:
 
 def _base_event():
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "event_id": new_event_id(),
         "event_type": "request.started",
         "event_time_utc": format_utc(utc_now()),
@@ -58,7 +80,7 @@ def _base_event():
         "trace_id": "0" * 32,
         "span_id": "0" * 16,
         "parent_event_id": None,
-        "service_name": "gpt-rag-orchestrator",
+        "service_name": "agent-app-orchestrator",
         "service_version": "3.7.0",
         "environment": "test",
         "operation": "test",
@@ -71,7 +93,7 @@ def _base_event():
     }
 
 
-def _as_application_insights_event(event):
+def _as_application_insights_event(event, prefix=AUDIT_EVENT_PREFIX):
     def stringify(value):
         if value is None:
             return ROOT_PARENT_EVENT_ID
@@ -82,29 +104,56 @@ def _as_application_insights_event(event):
         return str(value)
 
     return {
-        "name": f"gptrag.audit.{event['event_type']}",
+        "name": f"{prefix}{event['event_type']}",
         "properties": {key: stringify(value) for key, value in event.items()},
     }
 
 
-def test_golden_event_validates_against_shared_schema():
-    schema = json.loads(
-        (ROOT / "contracts" / "audit-event-v1.schema.json").read_text()
-    )
-    golden = json.loads(
-        (ROOT / "tests" / "golden" / "audit_event_v1.json").read_text()
-    )
+def test_producer_constants_match_current_contract():
+    logical_schema = _schema(CURRENT_LOGICAL)
+    assert SCHEMA_VERSION == logical_schema["properties"]["schema_version"]["const"] == 2
+    assert AUDIT_EVENT_PREFIX == "agentlz.audit."
+    assert SERVICE_NAME == "agent-app-orchestrator"
+
+
+def test_runtime_audit_service_name_matches_contract_producer():
+    tree = ast.parse((ROOT / "src" / "main.py").read_text(encoding="utf-8"))
+    calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "configure"
+        and getattr(node.func.value, "id", None) == "AuditEmitter"
+    ]
+    assert len(calls) == 1
+    (service_name,) = [kw.value for kw in calls[0].keywords if kw.arg == "service_name"]
+    assert isinstance(service_name, ast.Constant) and service_name.value == SERVICE_NAME
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "fixture_name"),
+    [
+        (CURRENT_LOGICAL, "audit_event_v2.json"),
+        ("audit-event-v1.schema.json", "audit_event_v1.json"),
+    ],
+)
+def test_golden_event_validates_against_shared_schema(schema_name, fixture_name):
+    schema = _schema(schema_name)
+    golden = json.loads((ROOT / "tests" / "golden" / fixture_name).read_text())
 
     jsonschema.Draft202012Validator(schema).validate(golden)
 
 
-def test_root_golden_validates_and_translates_only_at_wire_boundary():
-    schema = json.loads(
-        (ROOT / "contracts" / "audit-event-v1.schema.json").read_text()
-    )
-    golden = json.loads(
-        (ROOT / "tests" / "golden" / "audit_event_v1_root.json").read_text()
-    )
+@pytest.mark.parametrize(
+    ("schema_name", "fixture_name"),
+    [
+        (CURRENT_LOGICAL, "audit_event_v2_root.json"),
+        ("audit-event-v1.schema.json", "audit_event_v1_root.json"),
+    ],
+)
+def test_root_golden_validates_and_translates_only_at_wire_boundary(
+    schema_name, fixture_name
+):
+    schema = _schema(schema_name)
+    golden = json.loads((ROOT / "tests" / "golden" / fixture_name).read_text())
 
     jsonschema.Draft202012Validator(schema).validate(golden)
     assert golden["parent_event_id"] is None
@@ -112,42 +161,41 @@ def test_root_golden_validates_and_translates_only_at_wire_boundary():
 
 
 @pytest.mark.parametrize(
-    "fixture_name",
+    ("version", "prefix", "fixture_name"),
     [
-        "audit_event_v1_ingestion_run.json",
-        "audit_event_v1_ingestion_document.json",
+        ("v2", "agentlz.audit.", "audit_event_v2_ingestion_run.json"),
+        ("v2", "agentlz.audit.", "audit_event_v2_ingestion_document.json"),
+        ("v1", "gptrag.audit.", "audit_event_v1_ingestion_run.json"),
+        ("v1", "gptrag.audit.", "audit_event_v1_ingestion_document.json"),
     ],
 )
-def test_ingestion_goldens_validate_against_logical_and_wire_schemas(fixture_name):
-    logical_schema = json.loads(
-        (ROOT / "contracts" / "audit-event-v1.schema.json").read_text()
-    )
-    wire_schema = json.loads(
-        (
-            ROOT
-            / "contracts"
-            / "audit-event-v1.application-insights.schema.json"
-        ).read_text()
-    )
+def test_ingestion_goldens_validate_against_logical_and_wire_schemas(
+    version, prefix, fixture_name
+):
+    logical_schema = _schema(f"audit-event-{version}.schema.json")
+    wire_schema = _schema(f"audit-event-{version}.application-insights.schema.json")
     golden = json.loads((ROOT / "tests" / "golden" / fixture_name).read_text())
 
     jsonschema.Draft202012Validator(logical_schema).validate(golden)
     jsonschema.Draft202012Validator(wire_schema).validate(
-        _as_application_insights_event(golden)
+        _as_application_insights_event(golden, prefix)
     )
+
+
+def test_v2_wire_schema_rejects_retired_event_prefix():
+    wire_schema = _schema(CURRENT_WIRE)
+    golden = json.loads(
+        (ROOT / "tests" / "golden" / "audit_event_v2.json").read_text()
+    )
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.Draft202012Validator(wire_schema).validate(
+            _as_application_insights_event(golden, "gptrag.audit.")
+        )
 
 
 def test_ingestion_taxonomy_is_exact_across_python_and_both_schemas():
-    logical_schema = json.loads(
-        (ROOT / "contracts" / "audit-event-v1.schema.json").read_text()
-    )
-    wire_schema = json.loads(
-        (
-            ROOT
-            / "contracts"
-            / "audit-event-v1.application-insights.schema.json"
-        ).read_text()
-    )
+    logical_schema = _schema(CURRENT_LOGICAL)
+    wire_schema = _schema(CURRENT_WIRE)
     orchestrator_event_types = {event_type.value for event_type in EventType}
     expected_event_types = orchestrator_event_types | EXPECTED_INGESTION_EVENT_TYPES
 
@@ -158,22 +206,19 @@ def test_ingestion_taxonomy_is_exact_across_python_and_both_schemas():
         == expected_event_types
     )
     assert {
-        name.removeprefix("gptrag.audit.")
+        name.removeprefix("agentlz.audit.")
         for name in wire_schema["properties"]["name"]["enum"]
+        if name.startswith("agentlz.audit.")
     } == expected_event_types
+    assert all(
+        name.startswith("agentlz.audit.")
+        for name in wire_schema["properties"]["name"]["enum"]
+    )
 
 
 def test_legacy_ingestion_aliases_are_rejected_by_both_schemas():
-    logical_schema = json.loads(
-        (ROOT / "contracts" / "audit-event-v1.schema.json").read_text()
-    )
-    wire_schema = json.loads(
-        (
-            ROOT
-            / "contracts"
-            / "audit-event-v1.application-insights.schema.json"
-        ).read_text()
-    )
+    logical_schema = _schema(CURRENT_LOGICAL)
+    wire_schema = _schema(CURRENT_WIRE)
     legacy_aliases = {
         f"ingestion.{scope}.{action}"
         for scope, action in (
@@ -198,14 +243,19 @@ def test_legacy_ingestion_aliases_are_rejected_by_both_schemas():
             )
 
 
-def test_published_contract_hashes_match_artifacts():
+@pytest.mark.parametrize("contract", sorted(PINNED_CONTRACTS))
+def test_published_contract_hashes_match_artifacts(contract):
     expected = {}
-    for line in (ROOT / "contracts" / "audit-event-v1.sha256").read_text().splitlines():
+    for line in (ROOT / "contracts" / f"{contract}.sha256").read_text().splitlines():
         digest, name = line.split(maxsplit=1)
         expected[name] = digest
 
+    assert expected == PINNED_CONTRACTS[contract]
     for name, digest in expected.items():
-        content = (ROOT / "contracts" / name).read_bytes().replace(b"\r\n", b"\n")
+        content = (ROOT / "contracts" / name).read_bytes()
+        if contract == "audit-event-v1":
+            # v1 predates the -text attribute; tolerate CRLF checkouts.
+            content = content.replace(b"\r\n", b"\n")
         assert hashlib.sha256(content).hexdigest() == digest
 
 

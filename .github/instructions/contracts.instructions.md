@@ -9,8 +9,9 @@ applyTo: "contracts/**,src/schemas.py"
   when semantics remain compatible.
 - Update schema versions when interpretation changes.
 - Keep logical and Application Insights wire schemas aligned.
-- Regenerate `contracts/audit-event-v1.sha256` from the exact committed schema
-  bytes whenever the protected schemas change.
+- Regenerate the matching `contracts/audit-event-v<N>.sha256` from the exact
+  committed schema bytes whenever the protected schemas change. `audit-event-v2`
+  is current; `audit-event-v1` is kept unchanged as history.
 - Consumers must ignore unknown optional fields unless the contract states
   otherwise.
 - Coordinate orchestrator, ingestion, and platform changes when a shared

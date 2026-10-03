@@ -1,4 +1,4 @@
-"""Versioned contract and configuration for GPT-RAG audit events."""
+"""Versioned audit-event-v2 contract (contracts/audit-event-v2*.json) and configuration."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
-
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+SERVICE_NAME = "agent-app-orchestrator"
 AUDIT_LOGGER_NAME = "gptrag.audit"
-AUDIT_EVENT_PREFIX = "gptrag.audit."
+AUDIT_EVENT_PREFIX = "agentlz.audit."
 AUDIT_LOG_BODY = "GPT-RAG audit event"
 ROOT_PARENT_EVENT_ID = f"evt_{'0' * 32}"
 
